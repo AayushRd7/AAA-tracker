@@ -1,0 +1,406 @@
+{% raw %}
+<script type="text/x-template" id="landings-template">
+    <v-container fluid>
+        <v-row align="center" class="mb-4">
+            <v-col>
+                <div class="page-title">Landing Pages</div>
+                <div class="page-subtitle">Manage your landing pages</div>
+            </v-col>
+            <v-col class="d-flex justify-end" cols="auto">
+                <v-btn color="primary" elevation="0" @click="openCreate">
+                    <v-icon small class="mr-1">mdi-plus</v-icon>
+                    Create Landing
+                </v-btn>
+            </v-col>
+        </v-row>
+
+        <v-dialog v-model="dialog" max-width="500px">
+            <v-card>
+                <v-card-title>
+                    <span class="text-h6">{{ isEdit ? 'Edit Landing' : 'Create Landing' }}</span>
+                </v-card-title>
+
+                <v-card-text>
+                    <v-text-field
+                            label="Folder name (english and allowed only a-z0-9_ 250 max)"
+                            v-model="form.folder"
+                            :disabled="isEdit"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                    <v-text-field
+                            label="Name (For internal dashboard 250 max)"
+                            v-model="form.name"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                    <v-text-field
+                            label="Tags (comma separated like #main, #test 250 max)"
+                            v-model="form.tags"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                    <v-text-field
+                            label="Link (landing URL if redirect or mirroring 250 max)"
+                            v-model="form.link"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                    <v-select
+                            label="Landing Type"
+                            :items="['link', 'mirror', 'file']"
+                            v-model="form.type"
+                            outlined
+                            dense
+                    ></v-select>
+
+                    <v-file-input
+                            label="Landing File (.zip, .php, .html)"
+                            v-model="form.file"
+                            accept=".zip,.php,.html"
+                            outlined
+                            dense
+                            :rules="[fileRequiredRule]"
+                            :show-size="true"
+                            truncate-length="25"
+                            prepend-icon="mdi-upload"
+                    ></v-file-input>
+                </v-card-text>
+
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="close">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" @click="save">Save</v-btn>
+                </v-card-actions>
+
+            </v-card>
+        </v-dialog>
+
+        <v-row dense class="mt-4">
+            <v-col>
+                <v-card>
+                    <v-data-table
+                            :headers="headers"
+                            :items="landings"
+                            dense
+                            :items-per-page="10"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            loading-text="Loading... Please wait"
+                            :loading=loadingLandings
+                    >
+
+                        <template v-slot:item.created_at="{ item }">
+                            {{ $formatDate(item.created_at) }}
+                        </template>
+                        <template v-slot:item.folder="{ item }">
+                            <a v-if="item.folder" :href="'/l/' + item.folder" target="_blank">
+                                {{ item.folder }}
+                            </a>
+                        </template>
+                        <template v-slot:item.link="{ item }">
+
+                            <a v-if="item.link" :href="item.link" target="_blank">
+                                {{ item.link }}
+                            </a>
+                        </template>
+                        <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                        <v-icon small>mdi-pencil-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Edit</span>
+                            </v-tooltip>
+                            <v-tooltip bottom v-if="item.type === 'local_file'">
+                                <template v-slot:activator="{ on, attrs }">
+                                    <a :href="'/backend/editor?landing='+item.id" target="_blank">
+                                        <v-btn icon small color="info" v-bind="attrs" v-on="on">
+                                            <v-icon small>mdi-code-tags</v-icon>
+                                        </v-btn>
+                                    </a>
+                                </template>
+                                <span>Code Editor</span>
+                            </v-tooltip>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="confirmDeleteLanding(item)">
+                                        <v-icon small>mdi-trash-can-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Delete</span>
+                            </v-tooltip>
+                        </template>
+
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-inbox-outline</v-icon>
+                                <div class="mt-2">No data yet</div>
+                            </div>
+                        </template>
+
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <confirm-dialog-component ref="confirm" />
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('landings-component', {
+        template: '#landings-template',
+        data() {
+            return {
+                loadingLandings: false,
+                headers: [
+                    {text: 'Name', value: 'name'},
+                    {text: 'Folder', value: 'folder'},
+                    {text: 'Type', value: 'type'},
+                    {text: 'Link', value: 'link'},
+                    {text: 'Date Created', value: 'created_at'},
+                    {text: 'Clicks', value: 'clicks'},
+                    {text: 'Conversions', value: 'conversions'},
+                    {text: 'Cost', value: 'cost'},
+                    {text: 'Revenue', value: 'revenue'},
+                    {text: 'ROI', value: 'roi'},
+                    {text: 'Actions', value: 'actions', sortable: false}
+                ],
+                landings: [],
+
+                dialog: false,
+                isEdit: false,
+                form: {
+                    folder: '',
+                    name: '',
+                    tags: '',
+                },
+                // Mock up the existing landing for editing
+                mockLanding: {
+                    folder: 'example_folder',
+                    name: 'Example Landing',
+                    tags: 'test,example',
+                    link: '',
+                    type: 0,
+                    file: null,
+                }
+            }
+        },
+        computed: {
+            dateRangeText() {
+                return this.date_range.join(' ~ ')
+            },
+        },
+        methods: {
+            loadLandings() {
+                this.loadingLandings = true;
+                fetch('/landings', {
+                    method: 'GET',
+                    credentials: 'include'
+                })
+                    .then(async (response) => {
+                        const text = await response.text();
+                        if (!response.ok) {
+                            let message = 'Unknown error loading landings';
+                            try {
+                                const errorData = JSON.parse(text);
+                                if (Array.isArray(errorData.detail)) {
+                                    message = errorData.detail.map(d => d.msg).join('; ');
+                                } else if (typeof errorData.detail === 'string') {
+                                    message = errorData.detail;
+                                }
+                            } catch (e) {
+                                message = text;
+                            }
+                            throw new Error(message);
+                        }
+
+                        let data = [];
+                        try {
+                            data = JSON.parse(text);
+                        } catch (e) {
+                            console.warn('Response is not valid JSON:', text);
+                        }
+
+                        // Put the fetched landings into the table
+                        this.landings = data.map(l => ({
+                            ...l,
+                            clicks: l.clicks || 0,
+                            conversions: l.conversions || 0,
+                            cost: l.cost || 0,
+                            revenue: l.revenue || 0,
+                            roi: l.roi || 0
+                        }));
+
+                    })
+                    .catch((error) => {
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: error.message
+                        });
+                    })
+                    .finally(() => {
+                        this.loadingLandings = false;
+                    });
+            },
+            openCreate() {
+                this.isEdit = false;
+                this.form = {folder: '', name: '', tags: '', link: '', type: 0, file: null};
+                this.dialog = true;
+            },
+            openEdit(item) {
+                this.isEdit = true;
+                this.form = {
+                    id: item.id,
+                    folder: item.folder,
+                    name: item.name,
+                    tags: Array.isArray(item.tags) ? item.tags.join(',') : item.tags || '',
+                    link: item.link || '',
+                    type: (item.type === 0 || item.type === 'link') ? 'link' :
+                        (item.type === 1 || item.type === 'mirror') ? 'mirror' : 'file',
+                    file: null // no new file selected yet
+                };
+                this.dialog = true; // open the dialog
+            },
+
+            save() {
+                if (!this.form.folder || !this.form.name) {
+                    this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: 'Folder and Name are required.'
+                    });
+                    return;
+                }
+
+                let typeInt = 2;
+                if (this.form.type === 'link') typeInt = 0;
+                if (this.form.type === 'mirror') typeInt = 1;
+                if (this.form.type === 'file' || this.form.type === 'local_file') typeInt = 2;
+
+                if (!this.isEdit && !this.form.file && typeInt === 2) {
+                    this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: 'File is required for local_file landings.'
+                    });
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('site_folder', this.form.folder);
+                formData.append('name', this.form.name);
+                formData.append('tags', this.form.tags || '');
+                formData.append('link', this.form.link || '');
+                formData.append('type', typeInt);
+
+                if (this.form.file) {
+                    formData.append('file', this.form.file);
+                }
+
+                const url = this.isEdit
+                    ? `/landing/${this.form.id}`  // PUT request
+                    : `/landing`;                 // POST request
+
+                fetch(url, {
+                    method: this.isEdit ? 'PUT' : 'POST',
+                    body: formData,
+                    credentials: 'include'
+                })
+                    .then(async (response) => {
+                        const text = await response.text();
+                        if (!response.ok) {
+                            let message = 'Unknown error';
+                            try {
+                                const errorData = JSON.parse(text);
+                                if (Array.isArray(errorData.detail)) {
+                                    message = errorData.detail.map(d => d.msg).join('; ');
+                                } else if (typeof errorData.detail === 'string') {
+                                    message = errorData.detail;
+                                }
+                            } catch (e) {
+                                message = text;
+                            }
+                            throw new Error(message);
+                        }
+
+                        console.log(this.isEdit ? 'Landing updated' : 'Landing created');
+                        this.dialog = false;
+
+                        this.$root.$emit('show-message', {
+                            type: 'success',
+                            text: this.isEdit ? 'Landing updated successfully!' : 'Landing created successfully!'
+                        });
+                        this.loadLandings(); // Reload the landings list
+                    })
+                    .catch((error) => {
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: error.message
+                        });
+                    });
+            },
+
+
+            close() {
+                this.dialog = false;
+            },
+            fileRequiredRule(value) {
+                if (!this.isEdit && !value) {
+                    return 'File is required.';
+                }
+                return true;
+            },
+
+            async confirmDeleteLanding(item) {
+                const ok = await this.$refs.confirm.open('Delete Landing', 'Are you sure you want to delete this landing? This cannot be undone.');
+                if (!ok) return;
+                this.deleteLanding(item);
+            },
+            deleteLanding(item) {
+                fetch(`/landing/${item.id}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                })
+                    .then(async (response) => {
+                        const text = await response.text();
+                        if (!response.ok) {
+                            let message = 'Unknown error deleting landing';
+                            try {
+                                const errorData = JSON.parse(text);
+                                if (Array.isArray(errorData.detail)) {
+                                    message = errorData.detail.map(d => d.msg).join('; ');
+                                } else if (typeof errorData.detail === 'string') {
+                                    message = errorData.detail;
+                                }
+                            } catch (e) {
+                                message = text;
+                            }
+                            throw new Error(message);
+                        }
+
+                        this.$root.$emit('show-message', {
+                            type: 'success',
+                            text: 'Landing deleted successfully!'
+                        });
+                        this.loadLandings(); // Reload the list
+                    })
+                    .catch((error) => {
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: error.message
+                        });
+                    });
+            },
+
+        },
+        mounted() {
+            this.loadLandings();
+            this.$root.$on('load-landings', this.loadLandings);
+        },
+    });
+</script>
+{% endraw %}

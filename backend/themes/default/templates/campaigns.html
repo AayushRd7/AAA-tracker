@@ -1,0 +1,1837 @@
+{% raw %}
+<script type="text/x-template" id="campaigns-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4">
+            <div>
+                <div class="page-title">Campaigns</div>
+                <div class="page-subtitle">Manage traffic campaigns and their flows</div>
+            </div>
+            <v-col class="d-flex justify-end">
+                <v-btn color="primary" elevation="0" @click="openCreate">
+                    <v-icon small class="mr-1">mdi-plus</v-icon>Create Campaign
+                </v-btn>
+            </v-col>
+        </div>
+
+        <v-dialog v-model="dialog" fullscreen persistent scrollable>
+            <v-card class="pa-4">
+                <v-row>
+                    <v-col cols="12" class="ma-4">
+
+                        <v-row dense class="mt-2">
+                            <v-col cols="12" md="6">
+                                <h3>{{ isEdit ? 'Edit Campaign' : 'New Campaign' }}</h3>
+                            </v-col>
+                            <v-col cols="12" md="6" class="align-end">
+                                <v-card-actions>
+                                    <v-spacer></v-spacer>
+                                    <v-btn text color="grey" @click="confirmCancel">Cancel</v-btn>
+                                    <v-btn text color="primary" @click="update">Update</v-btn>
+                                    <v-btn color="primary" elevation="0" @click="save" class="mr-5">Save</v-btn>
+                                </v-card-actions>
+                            </v-col>
+                        </v-row>
+                        <v-row dense class="mt-2">
+                            <v-col cols="12" md="4">
+                                <v-text-field label="Name" v-model="form.name" outlined
+                                              dense></v-text-field>
+                            </v-col>
+
+
+                            <v-col cols="12" md="2">
+                                <v-select label="Type" v-model="form.type" :items="types"
+                                          outlined
+                                          dense></v-select>
+                            </v-col>
+                        </v-row>
+                        <v-row class="mt-0">
+                            <v-col cols="12" md="6">
+                                <v-tabs v-model="tab">
+                                    <v-tab>General</v-tab>
+                                    <v-tab>Cost</v-tab>
+                                    <v-tab>Tracking</v-tab>
+                                    <v-tab>Parameters</v-tab>
+                                    <v-tab>S2S Postbacks</v-tab>
+                                    <v-tab>Notes</v-tab>
+                                </v-tabs>
+
+                                <v-tabs-items v-model="tab">
+                                    <!-- GENERAL -->
+                                    <v-tab-item>
+                                        <v-card flat>
+                                            <v-container>
+                                                <v-row dense>
+
+                                                    <v-col cols="12" class="mt-2">
+                                                        <v-switch
+                                                                label="Status"
+                                                                v-model="form.status"
+                                                                :value="form.status === 'active'"
+                                                                :false-value="'paused'"
+                                                                :true-value="'active'"
+                                                                inset
+                                                                dense
+                                                        ></v-switch>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-select
+                                                                v-model="form.domain_id"
+                                                                :items="domains"
+                                                                item-text="domain"
+                                                                item-value="id"
+                                                                label="Domain"
+                                                                outlined
+                                                                dense></v-select>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-text-field label="Alias" v-model="form.alias" outlined
+                                                                      dense></v-text-field>
+                                                    </v-col>
+
+                                                    <v-col cols="12">
+                                                        <v-text-field label="Group" v-model="form.group_id"
+                                                                      outlined
+                                                                      dense></v-text-field>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-select label="Traffic Source"
+                                                                  v-model="form.traffic_source_id"
+                                                                  :items="sources" item-text="name" item-value="id"
+                                                                  outlined
+                                                                  dense></v-select>
+                                                    </v-col>
+
+                                                    <v-col cols="12">
+                                                        <v-text-field
+                                                                label="Uniqueness Bind TTL (hours)"
+                                                                v-model="form.bind_ttl_hours"
+                                                                type="number"
+                                                                outlined
+                                                                dense
+                                                        ></v-text-field>
+                                                    </v-col>
+
+                                                </v-row>
+                                            </v-container>
+                                        </v-card>
+                                    </v-tab-item>
+
+                                    <!-- COST -->
+                                    <v-tab-item>
+                                        <v-card flat>
+                                            <v-container>
+                                                <v-row dense>
+                                                    <v-col cols="12">
+                                                        <v-select label="Cost Model" v-model="form.cost_model"
+                                                                  :items="costModels"
+                                                                  outlined dense></v-select>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-text-field label="Traffic Loss (%)"
+                                                                      v-model="form.traffic_loss_percent"
+                                                                      type="number" outlined dense></v-text-field>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-text-field label="Cost"
+                                                                      v-model="form.cost"
+                                                                      type="number" outlined dense></v-text-field>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-autocomplete label="Cost Currency"
+                                                                        v-model="form.cost_currency"
+                                                                        :items="currencies"
+                                                                        outlined dense></v-autocomplete>
+                                                        <v-col cols="12">
+                                                            <v-switch label="Cost from Cost Parameter"
+                                                                      v-model="form.cost_from_cost_parameter"
+                                                                      inset
+                                                                      dense></v-switch>
+                                                        </v-col>
+                                                    </v-col>
+                                                </v-row>
+                                            </v-container>
+                                        </v-card>
+                                    </v-tab-item>
+
+                                    <!-- TRACKING -->
+                                    <v-tab-item>
+                                        <v-card flat>
+                                            <v-container>
+                                                <v-row dense>
+                                                    <v-col cols="12">
+                                                        <v-text-field
+                                                                label="Campaign URL"
+                                                                :value="campaignUrl"
+                                                                readonly
+                                                                outlined
+                                                                dense
+                                                                append-icon="mdi-content-copy"
+                                                                @click:append="copyCampaignUrl"></v-text-field>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-switch label="Send se_referrer"
+                                                                  v-model="form.send_se_referrer"
+                                                                  inset
+                                                                  dense></v-switch>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-switch label="Use <title> as keyword"
+                                                                  v-model="form.use_title_as_keyword"
+                                                                  inset
+                                                                  dense></v-switch>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-switch label="Send query params"
+                                                                  v-model="form.send_query_params"
+                                                                  inset
+                                                                  dense></v-switch>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-select
+                                                                label="Tracking Script Method"
+                                                                v-model="form.integration_method"
+                                                                :items="Object.entries(integrationMethods).map(([key, value]) => ({ key, value }))"
+                                                                item-text="value"
+                                                                item-value="key"
+                                                                outlined
+                                                                dense
+                                                        ></v-select>
+                                                    </v-col>
+                                                    <v-col cols="12" v-if="form.integration_method">
+                                                        <v-textarea
+                                                                label="Tracking Script"
+                                                                readonly
+                                                                outlined
+                                                                dense
+                                                                v-model="trackingScript"
+                                                        >
+                                                        </v-textarea>
+                                                    </v-col>
+                                                </v-row>
+                                            </v-container>
+                                        </v-card>
+                                    </v-tab-item>
+
+                                    <!-- PARAMETERS -->
+                                    <v-tab-item>
+                                        <v-card flat>
+                                            <v-container>
+                                                <v-row class="mb-4">
+                                                    <v-col cols="12" class="text-right">
+                                                        <v-btn small color="primary" @click="addParameter">Add</v-btn>
+                                                    </v-col>
+                                                </v-row>
+
+                                                <v-row align="center">
+                                                    <v-col cols="3">
+                                                        Name
+                                                    </v-col>
+                                                    <v-col cols="3">
+                                                        Parameter In System
+                                                    </v-col>
+                                                    <v-col cols="5">
+                                                        Variable Input (empty if same name)
+                                                    </v-col>
+                                                    <v-col cols="1">
+                                                    </v-col>
+                                                </v-row>
+                                                <v-row dense v-for="(mapping, index) in form.paramsIdMapping"
+                                                       :key="index" align="center">
+                                                    <v-col cols="3">
+                                                        <template v-if="!mapping.editable_name">
+                                                            {{ mapping.name }}
+                                                        </template>
+                                                        <template v-else>
+                                                            <v-text-field
+                                                                    :label="mapping.name"
+                                                                    v-model="mapping.name"
+                                                                    outlined
+                                                                    dense
+                                                            ></v-text-field>
+                                                        </template>
+                                                    </v-col>
+                                                    <v-col cols="3">
+                                                        <v-text-field
+                                                                :label="mapping.parameter"
+                                                                v-model="mapping.parameter"
+                                                                outlined
+                                                                dense
+                                                        ></v-text-field>
+                                                    </v-col>
+                                                    <v-col cols="5">
+                                                        <v-text-field
+                                                                label="Variable Name"
+                                                                v-model="mapping.token"
+                                                                outlined
+                                                                dense
+                                                        ></v-text-field>
+                                                    </v-col>
+                                                    <v-col cols="1">
+                                                        <v-btn icon small color="red" @click="removeParameter(index)">
+                                                            <v-icon>mdi-delete</v-icon>
+                                                        </v-btn>
+                                                    </v-col>
+                                                </v-row>
+                                            </v-container>
+                                        </v-card>
+                                    </v-tab-item>
+
+
+                                    <!-- POSTBACKS -->
+                                    <v-tab-item>
+                                        <v-card flat>
+                                            <v-container>
+                                                <!-- Existing postbacks -->
+                                                <v-row
+                                                        dense
+                                                        v-for="(pb, i) in form.postbacks"
+                                                        :key="'pb_' + i"
+                                                        class="mb-2"
+                                                >
+                                                    <v-col cols="12">
+                                                        <v-select
+                                                                v-model="pb.method"
+                                                                :items="['GET', 'POST']"
+                                                                label="Request Method"
+                                                                dense
+                                                                outlined
+                                                                class="mt-3"></v-select>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-textarea v-model="pb.url" label="Postback URL" dense
+
+                                                                    rows="3"
+                                                                    outlined></v-textarea>
+                                                        <v-btn small text color="primary" @click="openPostbackEditor(i)">Edit
+                                                            Postback URL
+                                                        </v-btn>
+                                                    </v-col>
+                                                    <v-col cols="10">
+                                                        <v-checkbox
+                                                                v-for="key in postbackStatusKeys"
+                                                                :key="key"
+                                                                v-model="pb.status[key]"
+                                                                :label="key.charAt(0).toUpperCase() + key.slice(1)"
+                                                                dense hide-details
+                                                                class="mr-2 d-inline-block"></v-checkbox>
+                                                    </v-col>
+                                                    <v-col cols="2" class="text-right">
+                                                        <v-btn icon @click="form.postbacks.splice(i, 1)">
+                                                            <v-icon color="red">mdi-delete</v-icon>
+                                                        </v-btn>
+                                                    </v-col>
+                                                </v-row>
+
+                                                <v-divider class="my-4"></v-divider>
+                                                <v-divider class="my-4"></v-divider>
+                                                <h3>Add New</h3>
+
+                                                <!-- Adding a new one -->
+                                                <v-row dense>
+                                                    <v-col cols="12">
+                                                        <v-select
+                                                                v-model="newPostback.method"
+                                                                :items="['GET', 'POST']"
+                                                                label="Request Method"
+                                                                dense
+                                                                outlined
+                                                                class="mt-3"></v-select>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-textarea
+                                                                v-model="newPostback.url"
+                                                                label="New Postback URL"
+                                                                rows="3"
+                                                                dense
+                                                                outlined></v-textarea>
+                                                        <v-btn small text color="primary" @click="openPostbackEditor()">Edit
+                                                            Postback URL
+                                                        </v-btn>
+                                                    </v-col>
+                                                    <v-col cols="10">
+                                                        <v-checkbox
+                                                                v-for="key in postbackStatusKeys"
+                                                                :key="'new_' + key"
+                                                                v-model="newPostback.status[key]"
+                                                                :label="key.charAt(0).toUpperCase() + key.slice(1)"
+                                                                dense hide-details
+                                                                class="mr-2 d-inline-block"></v-checkbox>
+                                                    </v-col>
+                                                    <v-col cols="2" class="text-right">
+                                                        <v-btn color="primary" @click="addPostback"
+                                                               :disabled="!newPostback.url">
+                                                            Add
+                                                        </v-btn>
+                                                    </v-col>
+                                                </v-row>
+                                            </v-container>
+
+                                        </v-card>
+                                    </v-tab-item>
+
+                                    <!-- NOTES -->
+                                    <v-tab-item>
+                                        <v-card flat>
+                                            <v-container>
+                                                <v-textarea v-model="form.notes" label="Internal Notes" outlined dense
+                                                            rows="5"
+                                                            auto-grow></v-textarea>
+                                            </v-container>
+                                        </v-card>
+                                    </v-tab-item>
+                                </v-tabs-items>
+
+                            </v-col>
+
+
+                            <!-- RIGHT: Flow Configuration -->
+                            <v-col cols="12" md="6" v-if="form.type=='campaign'">
+                                <h3 class="mb-2 mt-2">Flow Configuration</h3>
+
+                                <v-row>
+                                    <v-col cols="12" md="4">
+                                        <v-select
+                                                v-model="form.flowScheme"
+                                                :items="flowSchemes"
+                                                label="Flow Scheme"
+                                                outlined
+                                                dense></v-select>
+                                    </v-col>
+                                </v-row>
+
+                                <v-row dense v-for="(flow, index) in form.flows" :key="index" class="mb-2 mr-5">
+                                    <v-col cols="12">
+                                        <v-card
+                                                :class="
+                                                flow.type === 'forced'
+                                                    ? 'flow-card flow-card--forced'
+                                                    : flow.type === 'default'
+                                                    ? 'flow-card flow-card--default'
+                                                    : 'flow-card'"
+                                                flat
+                                        >
+                                            <v-card-title class="d-flex justify-space-between align-center">
+                                                <v-col cols="2">
+                                                    <v-btn icon small @click="moveFlowUp(index)"
+                                                           :disabled="index === 0">
+                                                        <v-icon>mdi-arrow-up</v-icon>
+                                                    </v-btn>
+                                                    <v-btn icon small @click="moveFlowDown(index)"
+                                                           :disabled="index === form.flows.length - 1">
+                                                        <v-icon>mdi-arrow-down</v-icon>
+                                                    </v-btn>
+                                                    {{ flow.enabled==true ? 'ON' : 'OFF' }}
+                                                </v-col>
+                                                <v-col cols="7">
+                                                    <strong>{{ flow.name }}</strong>
+                                                    <span class="ml-2 grey--text">({{ flow.type }})</span>
+                                                </v-col>
+                                                <v-col cols="3" class="text-right">
+                                                    <v-btn text color="primary" @click="openFlowEdit(flow, index)">
+                                                        Edit
+                                                    </v-btn>
+                                                    <v-btn text color="red" @click="removeFlow(index)">Delete</v-btn>
+                                                </v-col>
+                                            </v-card-title>
+
+                                            <v-card-text>
+                                                <div>
+                                                    <span class="mr-3">Position: <b>{{ flow.position }}</b></span>
+                                                    <span class="mr-3">Weight: <b>{{ flow.weight }}%</b></span>
+                                                    <span class="mr-3">Schema: <b>{{ flow.schema }}</b></span>
+                                                    <span>Status: <b>{{ flow.enabled ? 'On' : 'Off' }}</b></span>
+                                                </div>
+                                                <div>
+                                                  <span class="mr-3">
+                                                    Landing:
+                                                    <b>{{ landingMap[flow.landing] || '—' }}</b>
+                                                  </span>
+                                                    <span class="mr-3">
+                                                        Offer:
+                                                        <b>{{ offerMap[flow.offer] || '—' }}</b>
+                                                      </span>
+                                                </div>
+                                                <div>
+                                                  <span v-if="Array.isArray(flow.filters) && flow.filters.length" class="d-block mt-2">
+                                                    Filters:
+                                                    <ul class="pl-4 mb-0">
+                                                      <li v-for="(f, i) in flow.filters" :key="i">
+                                                        <b>{{ f.condition ? f.condition.toUpperCase() : '' }}</b>
+                                                        <span>{{ f.key }} {{ f.operator }} <b>{{ f.value }}</b></span>
+                                                      </li>
+                                                    </ul>
+                                                  </span>
+                                                </div>
+                                                <div v-if="flow.notes">
+                                                  <span class="mr-3">
+                                                    Notes:
+                                                    <b>{{ flow.notes || '—' }}</b>
+                                                  </span>
+                                                </div>
+                                            </v-card-text>
+                                        </v-card>
+                                    </v-col>
+                                </v-row>
+
+                                <v-btn small color="primary" @click="openFlowEdit()">Add Flow</v-btn>
+                            </v-col>
+
+                        </v-row>
+                    </v-col>
+                </v-row>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text color="grey" @click="confirmCancel">Cancel</v-btn>
+                    <v-btn text color="primary" @click="update">Update</v-btn>
+                    <v-btn color="primary" elevation="0" @click="save">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <v-dialog v-if="form.type=='campaign'" v-model="flowDialog" max-width="1200px" persistent>
+            <v-card>
+                <v-card-title>
+                    <span class="text-h6">{{ isEditingFlow ? 'Edit Flow' : 'New Flow' }}</span>
+                </v-card-title>
+
+                <v-card-text>
+                    <v-tabs v-model="activeFlowTab">
+                        <v-tab>Flow Settings</v-tab>
+                        <v-tab  v-if="flowForm.type !== 'default'">Filters</v-tab>
+                        <v-tab>Schema</v-tab>
+                        <v-tab>Notes</v-tab>
+                    </v-tabs>
+
+                    <v-tabs-items v-model="activeFlowTab">
+                        <!-- MAIN TAB -->
+                        <v-tab-item>
+                      <v-container>
+                        <v-row dense>
+                          <!-- Flow name -->
+                          <v-col cols="12">
+                            <v-text-field
+                              v-model="flowForm.name"
+                              label="Flow Name"
+                              outlined
+                              dense
+                              required
+                            ></v-text-field>
+                          </v-col>
+
+                          <!-- Flow type -->
+                          <v-col cols="12">
+                            <v-select
+                              v-model="flowForm.type"
+                              :items="['regular', 'forced', 'default']"
+                              label="Flow Type"
+                              outlined
+                              dense
+                            ></v-select>
+                          </v-col>
+
+                          <!-- Position and Weight (only when not default) -->
+                          <v-col cols="6" v-if="flowForm.type !== 'default'">
+                            <v-text-field
+                              v-model.number="flowForm.position"
+                              label="Position"
+                              type="number"
+                              outlined
+                              dense
+                            ></v-text-field>
+                          </v-col>
+
+                          <v-col cols="6" v-if="flowForm.type !== 'default'">
+                            <v-text-field
+                              v-model.number="flowForm.weight"
+                              label="Weight (%)"
+                              type="number"
+                              outlined
+                              dense
+                            ></v-text-field>
+                          </v-col>
+
+                          <!-- Enabled and click collection -->
+                          <v-col cols="6">
+                            <v-switch
+                              v-model="flowForm.enabled"
+                              label="Enabled"
+                              inset
+                              dense
+                            ></v-switch>
+                          </v-col>
+                        </v-row>
+                      </v-container>
+                    </v-tab-item>
+
+                        <!-- FILTERS TAB -->
+                        <v-tab-item v-if="flowForm.type !== 'default'">
+                            <v-container>
+                                <v-row v-for="(filter, index) in flowForm.filters" :key="index" dense align="center">
+                                    <v-col cols="2">
+                                        <v-select
+                                                :items="filterFields"
+                                                v-model="filter.key"
+                                                label="Field"
+                                                dense outlined
+                                        ></v-select>
+                                    </v-col>
+
+                                    <v-col cols="2">
+                                        <v-select
+                                                :items="operators"
+                                                v-model="filter.operator"
+                                                label="Operator"
+                                                dense outlined
+                                        ></v-select>
+                                    </v-col>
+
+                                    <v-col cols="3">
+                                        <v-text-field
+                                                v-model="filter.value"
+                                                label="Value"
+                                                dense outlined
+                                        ></v-text-field>
+                                    </v-col>
+
+                                    <v-col cols="2">
+                                        <v-select
+                                                :items="conditions"
+                                                v-model="filter.condition"
+                                                label="Condition"
+                                                dense outlined
+                                                :disabled="index === 0"
+                                        ></v-select>
+                                    </v-col>
+
+                                    <v-col cols="1">
+                                        <v-btn icon color="red" @click="removeFilter(index)">
+                                            <v-icon>mdi-delete</v-icon>
+                                        </v-btn>
+                                    </v-col>
+                                </v-row>
+
+                                <v-btn color="primary" @click="addFilter">+ Add Filter</v-btn>
+                            </v-container>
+                        </v-tab-item>
+
+
+                        <!-- SCHEMA TAB -->
+                        <v-tab-item>
+                            <v-container>
+                                <v-row dense>
+                                    <v-col cols="12">
+                                        <v-select
+                                                v-model="flowForm.schema"
+                                                :items="[
+                                                    { text: 'Direct redirect to Offer', value: 'direct' },
+                                                    { text: 'Landing → Offer', value: 'landing_offer' },
+                                                    { text: 'Landing Only', value: 'landing_only' },
+                                                    { text: 'Multi Landing/Offer', value: 'multi' },
+                                                    { text: 'Redirect to URL', value: 'redirect' },
+                                                    { text: 'Return 404 (Not Found)', value: 'return_404' },
+                                                    { text: 'Redirect to Another Campaign', value: 'redirect_campaign' }
+                                                  ]"
+                                                label="Flow Schema"
+                                                outlined
+                                                dense
+                                        ></v-select>
+                                    </v-col>
+
+                                    <!-- Direct to Offer -->
+                                    <v-col cols="12" v-if="flowForm.schema === 'direct'">
+                                        <v-select
+                                                v-model="flowForm.offer"
+                                                :items="offers"
+                                                item-text="name"
+                                                item-value="id"
+                                                label="Offer"
+                                                outlined
+                                                dense
+                                        ></v-select>
+                                    </v-col>
+
+                                    <!-- Landing → Offer -->
+                                    <template v-if="flowForm.schema === 'landing_offer'">
+                                        <v-col cols="12">
+                                            <v-select
+                                                    v-model="flowForm.landing"
+                                                    :items="landings"
+                                                    item-text="name"
+                                                    item-value="id"
+                                                    label="Landing Page"
+                                                    outlined
+                                                    dense
+                                            ></v-select>
+                                        </v-col>
+                                        <v-col cols="12">
+                                            <v-select
+                                                    v-model="flowForm.offer"
+                                                    :items="offers"
+                                                    item-text="name"
+                                                    item-value="id"
+                                                    label="Offer"
+                                                    outlined
+                                                    dense
+                                            ></v-select>
+                                        </v-col>
+                                    </template>
+
+                                    <!-- Landing Only -->
+                                    <v-col cols="12" v-if="flowForm.schema === 'landing_only'">
+                                        <v-select
+                                                v-model="flowForm.landing"
+                                                :items="landings"
+                                                item-text="name"
+                                                item-value="id"
+                                                label="Landing Page"
+                                                outlined
+                                                dense
+                                        ></v-select>
+                                    </v-col>
+
+                                    <!-- Multi landing/offer -->
+                                    <template v-if="flowForm.schema === 'multi'">
+                                        <v-col cols="12">
+                                            <v-select
+                                                    v-model="flowForm.landings"
+                                                    :items="landings"
+                                                    item-text="name"
+                                                    item-value="id"
+                                                    label="Landing Pages (multi)"
+                                                    multiple
+                                                    chips
+                                                    outlined
+                                                    dense
+                                            ></v-select>
+                                        </v-col>
+                                        <v-col cols="12">
+                                            <v-select
+                                                    v-model="flowForm.offers"
+                                                    :items="offers"
+                                                    item-text="name"
+                                                    item-value="id"
+                                                    label="Offers (multi)"
+                                                    multiple
+                                                    chips
+                                                    outlined
+                                                    dense
+                                            ></v-select>
+                                        </v-col>
+                                    </template>
+
+                                    <v-col cols="12" v-if="flowForm.schema === 'redirect'">
+                                        <v-text-field
+                                          v-model="flowForm.redirect_url"
+                                          label="Redirect URL"
+                                          placeholder="https://your-redirect-target.com/?param=value"
+                                          outlined
+                                          dense
+                                          required
+                                        ></v-text-field>
+                                      </v-col>
+
+                                    <v-col cols="12" v-if="flowForm.schema === 'return_404'">
+                                      <v-alert type="info" text dense>
+                                        This flow will return HTTP 404 Not Found when triggered. No redirects or offers.
+                                      </v-alert>
+                                    </v-col>
+
+                                    <v-col cols="12" v-if="flowForm.schema === 'redirect_campaign'">
+                                        <v-select
+                                                v-model="flowForm.redirect_campaign"
+                                                :items="campaigns"
+                                                item-text="name"
+                                                item-value="id"
+                                                label="Target Campaign"
+                                                outlined
+                                                dense
+                                                required
+                                        ></v-select>
+
+                                        <v-alert type="info" text dense>
+                                            This flow will redirect the visitor to another campaign. Make sure tracking
+                                            parameters are preserved.
+                                        </v-alert>
+                                    </v-col>
+
+                                </v-row>
+                            </v-container>
+                        </v-tab-item>
+
+                        <!-- NOTES TAB -->
+                        <v-tab-item>
+                            <v-container>
+                                <v-row dense>
+                                    <v-col cols="12">
+                                        <v-textarea label="Notes" v-model="flowForm.notes" outlined auto-grow
+                                                    dense></v-textarea>
+                                    </v-col>
+                                </v-row>
+                            </v-container>
+                        </v-tab-item>
+                    </v-tabs-items>
+                </v-card-text>
+
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text color="grey" @click="confirmCancelFlow">Cancel</v-btn>
+                    <v-btn text color="primary" @click="saveFlow">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="postbackEditorDialog" max-width="800px" persistent>
+            <v-card>
+                <v-card-title>
+                    <span class="text-h6">Edit Postback URL</span>
+                </v-card-title>
+                <v-card-text>
+                    <v-textarea
+                            v-model="postbackUrlDraft"
+                            label="Postback URL"
+                            auto-grow
+                            outlined
+                            dense
+                            append-icon="mdi-content-copy"
+                            @click:append="copyText(postbackUrlDraft)"
+                    ></v-textarea>
+
+                    <v-divider class="my-3"></v-divider>
+
+                    <div>Click to insert variable:</div>
+                    <v-chip-group column>
+                        <v-chip
+                                v-for="macro in postbackMacros"
+                                :key="macro"
+                                class="ma-1"
+                                small
+                                outlined
+                                :text-color="isMacroInUrl(macro) ? 'purple' : ''"
+                                @click="insertMacro(macro)"
+                        >
+                            {{"{"}}{{macro}}{{"}"}}
+                        </v-chip>
+                    </v-chip-group>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="postbackEditorDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" @click="applyPostbackUrl">Apply</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+
+        <v-row dense class="mt-4">
+            <v-col>
+                <v-card>
+                    <!-- Bulk actions bar -->
+                    <div v-if="selected.length" class="d-flex align-center pa-2 pl-4" style="background: #f0fdf4; border-bottom: 1px solid #e3e8ef; border-radius: 12px 12px 0 0;">
+                        <span class="text-body-2 font-weight-medium mr-4">{{ selected.length }} selected</span>
+                        <v-btn small color="primary" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkSetStatus('active')">
+                            <v-icon small class="mr-1">mdi-play</v-icon>Activate
+                        </v-btn>
+                        <v-btn small color="warning" elevation="0" :loading="bulkLoading" @click="bulkSetStatus('paused')">
+                            <v-icon small class="mr-1">mdi-pause</v-icon>Pause
+                        </v-btn>
+                        <v-spacer></v-spacer>
+                        <v-btn small text @click="selected = []">Clear selection</v-btn>
+                    </div>
+                    <v-data-table
+                            v-model="selected"
+                            :headers="headers"
+                            :items="campaigns"
+                            show-select
+                            item-key="id"
+                            :items-per-page="10"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            dense
+                    >
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-sitemap</v-icon>
+                                <div class="mt-2">No campaigns yet — create your first one</div>
+                            </div>
+                        </template>
+
+                    >
+                        <template v-slot:item.type="{ item }">
+                            <v-chip small>{{ item.type }}</v-chip>
+                        </template>
+
+                        <template v-slot:item.domain="{ item }">
+                            {{ domainsMap[item.domain_id] || 'N/A' }}
+                        </template>
+
+                        <template v-slot:item.link="{ item }">
+                            <a :href="'https://' + domainsMap[item.domain_id] + '/' + item.alias" target="_blank">https://{{ domainsMap[item.domain_id] }}/{{ item.alias }}</a>
+                        </template>
+
+                        <template v-slot:item.status="{ item }">
+                            <v-chip x-small label color="success" text-color="white" v-if="item.status === 'active'">{{ item.status }}</v-chip>
+                            <v-chip x-small label color="warning" text-color="white" v-else-if="item.status === 'paused'">{{ item.status }}</v-chip>
+                            <v-chip x-small label color="grey" text-color="white" v-else>{{ item.status }}</v-chip>
+                        </template>
+
+                        <template v-slot:item.redirect_mode="{ item }">
+                            <v-chip small outlined>{{ item.redirect_mode }}</v-chip>
+                        </template>
+
+                        <template v-slot:item.created_at="{ item }">
+                            {{ $formatDate(item.created_at) }}
+                        </template>
+
+                        <template v-slot:item.updated_at="{ item }">
+                            {{ $formatDate(item.updated_at) }}
+                        </template>
+                        <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                        <v-icon small>mdi-pencil-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Edit</span>
+                            </v-tooltip>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="info" v-bind="attrs" v-on="on" @click="duplicateCampaign(item)">
+                                        <v-icon small>mdi-content-copy</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Duplicate</span>
+                            </v-tooltip>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteCampaign(item)">
+                                        <v-icon small>mdi-trash-can-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Delete</span>
+                            </v-tooltip>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <confirm-dialog-component ref="confirm" />
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('campaigns-component', {
+        template: '#campaigns-template',
+        data() {
+            return {
+                trackingScript: '',
+                selected: [],
+                bulkLoading: false,
+                headers: [
+                    {text: 'Name', value: 'name'},
+                    {text: 'Domain', value: 'domain'},
+                    {text: 'Alias', value: 'alias'},
+                    {text: 'Link', value: 'link'}, // value 'link' is domain+'/'+alias
+                    {text: 'Type', value: 'type'},
+                    {text: 'Flow Mode', value: 'redirect_mode'},
+                    {text: 'Status', value: 'status'},
+                    {text: 'Notes', value: 'notes'},
+                    {text: 'Created', value: 'created_at'},
+                    {text: 'Updated', value: 'updated_at'},
+                    {text: 'Actions', value: 'actions', sortable: false}
+                ],
+
+                filterFields: ["country", "city", "device", "os", "browser", "ip", 'ad_campaign_id', 'browser',
+                    'campaign_id', 'connection_type', 'currency',
+                    'cost', 'utm_creative', 'utm_campaign', 'utm_source', 'device_type', 'external_id',
+                    'is_bot', 'is_using_proxy', 'isp', 'keyword', 'landing_id', 'language', 'offer_id',
+                    'profit', 'referrer', 'region', 'revenue', 'status', 'sub_id_1', 'sub_id_2', 'sub_id_3',
+                    'sub_id_4', 'sub_id_5', 'sub_id_6', 'sub_id_7', 'sub_id_8', 'sub_id_9', 'sub_id_10',
+                    'traffic_source_name', 'url', 'visitor_id'],
+                operators: ["equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with"],
+                conditions: ["and", "or"],
+                campaigns: [],
+                dialog: false,
+                isEdit: false,
+                groups: [],
+                sources: [],
+                offers: [],
+                landings: [],
+                tab: 0,
+                currencies: ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'AED', 'AFN', 'ALL', 'AMD', 'ANG', 'AOA', 'ARS', 'AWG', 'AZN',
+                    'BAM', 'BBD', 'BDT', 'BGN', 'BHD', 'BIF', 'BMD', 'BND', 'BOB', 'BRL',
+                    'BSD', 'BTN', 'BWP', 'BYN', 'BZD', 'CDF', 'CHF', 'CLP', 'CNY',
+                    'COP', 'CRC', 'CUP', 'CVE', 'CZK', 'DJF', 'DKK', 'DOP', 'DZD', 'EGP',
+                    'ERN', 'ETB', 'FJD', 'FKP', 'FOK', 'GEL', 'GGP', 'GHS',
+                    'GIP', 'GMD', 'GNF', 'GTQ', 'GYD', 'HKD', 'HNL', 'HRK', 'HTG', 'HUF',
+                    'IDR', 'ILS', 'IMP', 'INR', 'IQD', 'IRR', 'ISK', 'JEP', 'JMD', 'JOD',
+                    'KES', 'KGS', 'KHR', 'KID', 'KMF', 'KRW', 'KWD', 'KYD', 'KZT',
+                    'LAK', 'LBP', 'LKR', 'LRD', 'LSL', 'LYD', 'MAD', 'MDL', 'MGA', 'MKD',
+                    'MMK', 'MNT', 'MOP', 'MRU', 'MUR', 'MVR', 'MWK', 'MXN', 'MYR', 'MZN',
+                    'NAD', 'NGN', 'NIO', 'NOK', 'NPR', 'NZD', 'OMR', 'PAB', 'PEN', 'PGK',
+                    'PHP', 'PKR', 'PLN', 'PYG', 'QAR', 'RON', 'RSD', 'RUB', 'RWF', 'SAR',
+                    'SBD', 'SCR', 'SDG', 'SEK', 'SGD', 'SHP', 'SLE', 'SOS', 'SRD', 'SSP',
+                    'STN', 'SYP', 'SZL', 'THB', 'TJS', 'TMT', 'TND', 'TOP', 'TRY', 'TTD',
+                    'TVD', 'TWD', 'TZS', 'UAH', 'UGX', 'UYU', 'UZS', 'VES', 'VND',
+                    'VUV', 'WST', 'XAF', 'XCD', 'XDR', 'XOF', 'XPF', 'YER', 'ZAR', 'ZMW'
+                ],
+                form: {
+                    integration_method: null,
+                    send_se_referrer: true,
+                    use_title_as_keyword:
+                        true,
+                    send_query_params:
+                        true,
+                    id:
+                        null,
+                    name:
+                        '',
+                    alias:
+                        '',
+                    group_id:
+                        null,
+                    domain_id:
+                        null,
+                    traffic_source_id:
+                        null,
+                    flowScheme:
+                        'position',
+                    type:
+                        'campaign',                  // 'campaign' | 'tracking_only'
+                    status:
+                        'active',                 // 'active' | 'paused' | 'archived'
+                    bind_ttl_hours:
+                        24,
+
+                    cost_model:
+                        'cpc',               // 'cpc' | 'cpuc' | 'cpm' | 'cpa' | 'cps' | 'revshare' | 'auto'
+                    traffic_loss_percent:
+                        0,
+                    cost:
+                        0,
+                    cost_currency:
+                        0,
+                    cost_from_cost_parameter:
+                        false,
+
+
+                    paramsIdMapping:[
+                        ],
+
+                    // S2S Postback
+                    postbacks:
+                        [],  // array of objects {url: '', status: 'approved' | 'rejected' | ...}
+
+                    notes:
+                        '',
+                    flows:
+                        []
+                }
+                ,
+                baseParamsIdMapping:[],
+                flowSchemes: ['position', 'weight'],
+                statuses:
+                    ['active', 'paused'],
+                types:
+                    ['campaign', 'tracking_only'],
+                costModels:
+                    ['cpc', 'cpuc', 'cpm', 'cpa', 'cps', 'revshare', 'auto'],
+                uniquenessMethods:
+                    ['ip', 'ip_ua', 'cookie'],
+                integrationMethods: {
+                    js: 'JS generated async script',
+                    php: 'php',
+                    forced_php: 'Forced PHP redirect',
+                    qr: 'QR Code',
+                    pixel_email: 'Pixel for Email'
+                },
+                utmParams:
+                    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'],
+                flowRules: [],
+                trafficSources: [],
+                domains: [],
+                flowDialog: false,
+                isEditingFlow: false,
+                activeFlowTab: 0,
+                flowForm:
+                    {
+                        name: '',
+                        type: 'regular',
+                        position: 0,
+                        weight: 100,
+                        schema: 'landing_offer',
+                        enabled: true,
+                        landing: null,
+                        offer: null,
+                        offers: [],
+                        filters: [],
+                        notes: '',
+                        redirect_url: '',
+                        redirect_campaign_url: ''
+                    }
+                ,
+                editedFlowIndex: null,
+                postbackStatusKeys: ['lead', 'sale', 'rejected', 'upsale', 'pending'],
+                newPostback:
+                    {
+                        url: '',
+                        method: 'GET',
+                        status:
+                            {
+                                lead: true,
+                                sale: true,
+                                rejected: false,
+                                upsale: false,
+                                pending: false
+                            }
+                    }
+                ,
+                postbackEditorDialog: false,
+                postbackEditorIndex: null,
+                postbackUrlDraft: '',
+                postbackMacros:
+                    [
+                        'ad_campaign_id', 'affiliate_network_name', 'browser', 'browser_version', 'connection_type',
+                        'city', 'campaign_name', 'campaign_id', 'campaign_alias', 'conversion_cost', 'conversion_profit',
+                        'conversion_revenue', 'conversion_sale_time', 'conversion_time', 'cost', 'country', 'utm_creative',
+                        'device_model', 'visitor_id', 'token', 'tid', 'subid', 'sub_id_1', 'sub_id_2', 'sub_id_3',
+                        'sub_id_4', 'sub_id_5', 'sub_id_6', 'sub_id_7', 'sub_id_8', 'sub_id_9', 'sub_id_10', 'visitor_code',
+                        'user_agent', 'ts_id', 'traffic_source_name', 'x_requested_with', 'stream_id', 'status', 'source',
+                        'search_engine', 'sample', 'revenue', 'parent_campaign_id', 'previous_status', 'profit',
+                        'referrer', 'region', 'os_version', 'os', 'original_status', 'operator', 'offer_value', 'keyword',
+                        'landing_id', 'language', 'offer', 'offer_id', 'offer_name', 'isp', 'is_using_proxy', 'ip',
+                        'is_bot', 'from_file', 'external_id', 'device_type', 'current_domain', 'date', 'debug', 'destination'
+                    ]
+            }
+        },
+        computed: {
+            dateRangeText() {
+                return this.date_range.join(' ~ ')
+            },
+            landingMap() {
+                const map = {};
+                this.landings.forEach(l => (map[l.id] = l.name));
+                return map;
+            },
+            domainsMap() {
+                const map = {};
+                this.domains.forEach(l => (map[l.id] = l.domain));
+                return map;
+            },
+            offerMap() {
+                const map = {};
+                this.offers.forEach(o => (map[o.id] = o.name));
+                return map;
+            },
+            sourceMap() {
+                const map = {};
+                this.sources.forEach(o => (map[o.id] = o.name));
+                return map;
+            },
+
+            campaignUrl() {
+                if (this.form.domain_id) {
+                    const domain = this.domains.find(d => d.id === this.form.domain_id);
+                    return domain ? `https://${domain.domain}/${this.form.alias}` : 'domain error';
+                } else {
+                    if (!this.form.alias) return 'please setup alias';
+                    // read server ip from browser
+                    const serverIp = window.location.hostname;
+                    return `https://${serverIp}/${this.form.alias}`;
+                }
+            }
+        },
+        watch: {
+            form: {
+                handler: 'generateTrackingScript',
+                deep: true,
+            }
+        },
+        mounted() {
+            this.loadCampaigns();
+            this.$root.$on('load-campaigns', this.loadCampaigns);
+            this.generateTrackingScript();
+            this.loadSettings();
+        },
+        methods: {
+            loadSettings() { // todo: make it global
+                fetch("/backend/api/settings/", {
+                    credentials: "include"
+                })
+                    .then((r) => r.json())
+                    .then((data) => {
+                        if (data.subIdMapping) {
+                            this.baseParamsIdMapping = JSON.parse(JSON.stringify(data.subIdMapping));
+                            this.form.paramsIdMapping = JSON.parse(JSON.stringify(this.baseParamsIdMapping));
+                        }
+                    });
+            },
+            addFilter() {
+                if(!Array.isArray(this.flowForm.filters)) {
+                    this.flowForm.filters = [];
+                }
+                this.flowForm.filters.push({
+                    key: "",
+                    operator: "equals",
+                    value: "",
+                    condition: this.flowForm.filters.length > 0 ? "or" : ""
+                });
+            },
+            removeFilter(index) {
+                this.flowForm.filters.splice(index, 1);
+            },
+            addParameter() {
+                this.form.paramsIdMapping.push({
+                    name: '',
+                    parameter: '',
+                    token: '',
+                    editable_name: true
+                });
+            },
+            removeParameter(index) {
+                this.form.paramsIdMapping.splice(index, 1);
+            },
+            async generateTrackingScript() {
+                if (this.form.integration_method === null) {
+                    this.trackingScript = 'none';
+                    return;
+                }
+                switch (this.form.integration_method.toString()) {
+                    case 'js':
+                        const url = this.campaignUrl || '';
+                        const safeUrl = url.replace(/"/g, '\\"');
+
+                        let raw_script_result = `
+                            (async () => {
+                              const TRACKING_URL = "${safeUrl}";
+                              const COOKIE_EXP_DAYS = 365;
+
+                              function setCookie(name, value, days) {
+                                const date = new Date();
+                                date.setTime(date.getTime() + days * 86400000);
+                                document.cookie = \`\${name}=\${encodeURIComponent(value)}; expires=\${date.toUTCString()}; path=/\`;
+                              }
+
+                              function getCookie(name) {
+                                const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+                                return match ? decodeURIComponent(match[2]) : null;
+                              }
+
+                              function generateShortID() {
+                                return Math.random().toString(16).slice(2, 12);
+                              }
+
+                              function getAllUrlParams() {
+                                const params = {};
+                                new URLSearchParams(window.location.search).forEach((value, key) => {
+                                  params[key] = value;
+                                });
+                                return params;
+                              }
+
+                              // 1. Collect all GET parameters and store them in cookies
+                              const urlParams = getAllUrlParams();
+                              for (const [key, value] of Object.entries(urlParams)) {
+                                if (value) setCookie(key, value, COOKIE_EXP_DAYS);
+                              }
+
+                              // 2. Collect all known parameters from the cookies
+                              const allKeys = new Set([...Object.keys(urlParams), ...document.cookie.split('; ').map(c => c.split('=')[0])]);
+                              const collectedParams = {};
+                              allKeys.forEach(key => {
+                                const val = getCookie(key);
+                                if (val) collectedParams[key] = val;
+                              });
+
+                              // 3. visitor_id
+                              let visitorId = getCookie('visitor_id');
+                              if (!visitorId) {
+                                visitorId = generateShortID();
+                                setCookie('visitor_id', visitorId, COOKIE_EXP_DAYS);
+                              }
+
+                              collectedParams['visitor_id'] = visitorId;
+                              collectedParams['user_agent'] = navigator.userAgent;
+                              collectedParams['timestamp'] = new Date().toISOString();
+                              collectedParams['referrer'] = document.referrer;
+                              collectedParams['url'] = location.href;
+
+                              // 4. Sending the visit
+                              try {
+                                await fetch(TRACKING_URL, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify(collectedParams)
+                                });
+                              } catch (e) {
+                                console.warn('Tracking failed', e);
+                              }
+
+                              // 5. Method for conversions
+                              window.trackConversion = async (eventType, cost = 0) => {
+                                if (!['lead', 'sale', 'reject', 'upsale', 'pending'].includes(eventType)) return;
+                                try {
+                                  await fetch(TRACKING_URL, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      event: eventType,
+                                      cost: parseFloat(cost),
+                                      visitor_id,
+                                      timestamp: new Date().toISOString()
+                                    })
+                                  });
+                                } catch (e) {
+                                  console.warn('Conversion tracking failed', e);
+                                }
+                              };
+                            })();`
+                        let result_script = await minifyScript(raw_script_result);
+                        this.trackingScript = `<script async>` + result_script + `<\/script>`;
+                        break;
+                    case 'php':
+                        this.trackingScript = `<?php include('https://cdn.example.com/tracking.php'); ?>`;
+                        break;
+                    case 'forced_php':
+                        this.trackingScript = `<?php header('Location: https://example.com/redirect.php'); ?>`;
+                        break;
+                    case 'qr':
+                        this.trackingScript = `<img src="https://api.qrserver.com/v1/create-qr-code/?data=${this.campaignUrl}" alt="QR Code">`;
+                        break;
+                    case 'pixel_email':
+                        this.trackingScript = `<img src="${this.campaignUrl}" alt="Tracking Pixel" style="display:none;">`;
+                        break;
+                    default:
+                        this.trackingScript = 'none';
+                        break;
+                }
+            },
+            copyCampaignUrl() {
+                const text = this.campaignUrl;
+                if (!text) return;
+
+                navigator.clipboard.writeText(text).then(() => {
+                    this.$root.$emit('show-message', {
+                        type: 'success',
+                        text: 'Campaign URL copied!'
+                    });
+                });
+            },
+            loadLandings() {
+                return fetch('/landings', {credentials: 'include'})
+                    .then(res => res.json())
+                    .then(data => {
+                        this.landings = data;
+                    });
+            },
+            loadOffers() {
+                return fetch('/backend/api/offers/', {credentials: 'include'})
+                    .then(res => res.json())
+                    .then(data => {
+                        this.offers = data;
+                    });
+            },
+
+            loadDomains() {
+                return fetch('/backend/api/domains/', {credentials: 'include'})
+                    .then(res => res.json())
+                    .then(data => {
+                        this.domains = data;
+                    });
+            },
+
+            loadSources() {
+                return fetch("/backend/api/sources/", {credentials: "include"})
+                    .then(res => res.json())
+                    .then(data => {
+                        this.sources = data;
+                    });
+            },
+            async preloadData() {
+                await Promise.all([
+                    this.loadLandings(),
+                    this.loadOffers(),
+                    this.loadDomains(),
+                    this.loadSources()
+                ]);
+            },
+            moveFlowUp(index) {
+                if (index > 0) {
+                    const temp = this.form.flows[index];
+                    this.form.flows.splice(index, 1);
+                    this.form.flows.splice(index - 1, 0, temp);
+                    this.updateFlowPositions();
+                }
+            },
+            moveFlowDown(index) {
+                if (index < this.form.flows.length - 1) {
+                    const temp = this.form.flows[index];
+                    this.form.flows.splice(index, 1);
+                    this.form.flows.splice(index + 1, 0, temp);
+                    this.updateFlowPositions();
+                }
+            },
+            updateFlowPositions() {
+                this.form.flows.forEach((flow, idx) => {
+                    flow.position = 1 + idx * 2;
+                });
+            },
+            openFlowEdit(flow = null, index = null) {
+                this.isEditingFlow = !!flow;
+                this.flowDialog = true;
+
+                if (flow) {
+                    this.flowForm = {...flow};         // create a copy
+                    this.editedFlowIndex = index;        // remember the index
+                } else {
+                    const nextPosition = this.form.flows.length === 0 ? 1 : Math.max(...this.form.flows.map(f => f.position || 0)) + 2;
+
+                    this.flowForm = {
+                        name: '',
+                        type: 'regular',
+                        position: nextPosition,
+                        weight: 100,
+                        schema: 'split',
+                        enabled: true,
+                        collect_clicks: true,
+                        landing: null,
+                        landings: [],
+                        offers: [],
+                        filters: []
+                    };
+                    this.editedFlowIndex = null;
+                }
+            },
+
+
+            async removeFlow(index) {
+                const ok = await this.$refs.confirm.open('Delete Flow', 'Delete this flow?', 'Delete');
+                if (ok) {
+                    this.form.flows.splice(index, 1);
+                }
+            },
+
+            saveFlow() {
+                if (!this.flowForm.name) {
+                    this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: 'Flow must have a name.'
+                    });
+                    return;
+                }
+
+                if(this.flowForm.type == 'default') {
+                    this.flowForm.filters = [];
+                }
+
+                if (this.isEditingFlow && this.editedFlowIndex !== null) {
+                    // Update the flow by index
+                    this.form.flows.splice(this.editedFlowIndex, 1, {...this.flowForm});
+                } else {
+                    this.form.flows.push({...this.flowForm});
+                }
+
+                this.flowDialog = false;
+                this.editedFlowIndex = null;
+                // this.form.flows.sort((a, b) => a.position - b.position);
+                this.form.flows.sort((a, b) => {
+                    const getPriority = (flow) => {
+                        if (flow.type === 'forced') return 0;   // above everything
+                        if (flow.type === 'regular') return 1;  // by position
+                        if (flow.type === 'default') return 2;  // at the end
+                        return 3; // unknown type — even lower
+                    };
+
+                    const priorityA = getPriority(a);
+                    const priorityB = getPriority(b);
+
+                    if (priorityA !== priorityB) {
+                        return priorityA - priorityB;
+                    }
+
+                    // if the type is the same (e.g. both regular) — sort by position
+                    return (a.position || 9999) - (b.position || 9999);
+                });
+                this.updateFlowPositions();
+
+            },
+
+            async confirmCancelFlow() {
+                const ok = await this.$refs.confirm.open('Discard Changes', 'Discard changes to flow?', 'Discard');
+                if (ok) {
+                    this.flowDialog = false;
+                }
+            },
+            copyText(text) {
+                navigator.clipboard.writeText(text).then(() => {
+                    this.$root.$emit('show-message', {type: 'success', text: 'Copied to clipboard'});
+                });
+            },
+            update() {
+                this.save(false);
+            },
+            save(closeDialog = true) {
+                const payload = {
+                    name: this.form.name,
+                    alias: this.form.alias,
+                    type: this.form.type,
+                    status: this.form.status,
+                    redirect_mode: this.form.flowScheme,
+                    domain_id: this.form.domain_id,
+                    traffic_source_id: this.form.traffic_source_id,
+                    notes: this.form.notes,
+                    config: {
+                        integration_method: this.form.integration_method,
+                        send_se_referrer: this.form.send_se_referrer,
+                        use_title_as_keyword: this.form.use_title_as_keyword,
+                        send_query_params: this.form.send_query_params,
+                        bind_ttl_hours: this.form.bind_ttl_hours,
+                        cost_model: this.form.cost_model,
+                        traffic_loss_percent: this.form.traffic_loss_percent,
+                        cost: this.form.cost,
+                        cost_currency: this.form.cost_currency,
+                        cost_from_cost_parameter: this.form.cost_from_cost_parameter,
+                        paramsIdMapping: this.form.paramsIdMapping,
+                        postbacks: this.form.postbacks,
+                        flows: this.form.flows
+                    }
+                };
+
+                const url = this.isEdit
+                    ? `/backend/api/campaigns/${this.form.id}`
+                    : '/backend/api/campaigns/';
+
+                const method = this.isEdit ? 'PUT' : 'POST';
+
+                fetch(url, {
+                    method,
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                })
+                    .then(async res => {
+                        const text = await res.text();
+                        if (!res.ok) {
+                            let msg = text;
+                            try {
+                                const err = JSON.parse(text);
+                                msg = err.detail || msg;
+                            } catch {
+                            }
+                            throw new Error(msg);
+                        }
+
+                        this.$root.$emit('show-message', {
+                            type: 'success',
+                            text: `Campaign ${this.isEdit ? 'updated' : 'created'} successfully!`
+                        });
+
+                        if (closeDialog) {
+                            this.dialog = false;
+                            this.resetForm();
+                        }
+                        this.loadCampaigns();
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: `Save failed: ${err.message}`
+                        });
+                    });
+            },
+            async confirmCancel() {
+                const ok = await this.$refs.confirm.open('Discard Changes', 'Are you sure you want to discard changes?', 'Discard');
+                if (ok) {
+                    this.dialog = false;
+                    this.resetForm();
+                }
+            },
+            openCreate() {
+                this.preloadData();
+                this.dialog = true;
+                this.form.alias = this.generateAlias()
+            },
+            async openEdit(item) {
+                await this.preloadData();
+                await this.loadCampaigns();
+                this.dialog = true;
+                this.isEdit = true;
+
+                this.form = {
+                    id: item.id,
+                    name: item.name,
+                    alias: item.alias,
+                    type: item.type,
+                    status: item.status,
+                    flowScheme: item.redirect_mode,
+                    domain_id: item.domain_id,
+                    traffic_source_id: item.traffic_source_id,
+                    notes: item.notes || '',
+                    integration_method: item.config?.integration_method || null,
+                    send_se_referrer: item.config?.send_se_referrer ?? true,
+                    use_title_as_keyword: item.config?.use_title_as_keyword ?? true,
+                    send_query_params: item.config?.send_query_params ?? true,
+                    bind_ttl_hours: item.config?.bind_ttl_hours ?? 24,
+                    cost_model: item.config?.cost_model || 'cpc',
+                    traffic_loss_percent: item.config?.traffic_loss_percent ?? 0,
+                    cost: item.config?.cost ?? 0,
+                    cost_currency: item.config?.cost_currency || 'USD',
+                    cost_from_cost_parameter: item.config?.cost_from_cost_parameter ?? false,
+                    paramsIdMapping: item.config?.paramsIdMapping || [],
+                    postbacks: item.config?.postbacks || [],
+                    flows: item.config?.flows || []
+                };
+
+            },
+            loadCampaigns() {
+                this.preloadData();
+                fetch("/backend/api/campaigns/", {
+                    credentials: "include"
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        this.campaigns = data;
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        this.$root.$emit("show-message", {
+                            type: "error",
+                            text: err.message
+                        });
+                    });
+            },
+            async deleteCampaign(item) {
+                const ok = await this.$refs.confirm.open(
+                    'Delete Campaign',
+                    `Are you sure you want to delete campaign "${item.name}"? This cannot be undone.`,
+                    'Delete'
+                );
+                if (!ok) return;
+
+                fetch(`/backend/api/campaigns/${item.id}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                })
+                    .then(async res => {
+                        const text = await res.text();
+                        if (!res.ok) {
+                            let msg = text;
+                            try {
+                                const err = JSON.parse(text);
+                                msg = err.detail || msg;
+                            } catch {
+                            }
+                            throw new Error(msg);
+                        }
+
+                        this.$root.$emit('show-message', {
+                            type: 'success',
+                            text: `Campaign "${item.name}" deleted successfully`
+                        });
+
+                        this.loadCampaigns(); // Refresh the list
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: `Failed to delete campaign: ${err.message}`
+                        });
+                    });
+            },
+            async duplicateCampaign(item) {
+                const ok = await this.$refs.confirm.open(
+                    'Duplicate Campaign',
+                    `Create a copy of "${item.name}"?`,
+                    'Duplicate'
+                );
+                if (!ok) return;
+
+                const payload = {
+                    name: `${item.name} (copy)`,
+                    alias: this.generateAlias(),
+                    type: item.type,
+                    status: item.status,
+                    redirect_mode: item.redirect_mode,
+                    traffic_source_id: item.traffic_source_id,
+                    domain_id: item.domain_id,
+                    notes: item.notes,
+                    config: item.config || {}
+                };
+
+                fetch('/backend/api/campaigns/', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                })
+                    .then(async res => {
+                        const text = await res.text();
+                        if (!res.ok) {
+                            let msg = text;
+                            try { msg = JSON.parse(text).detail || msg; } catch {}
+                            throw new Error(msg);
+                        }
+                        this.$root.$emit('show-message', {
+                            type: 'success',
+                            text: `Campaign duplicated as "${payload.name}"`
+                        });
+                        this.loadCampaigns();
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: `Failed to duplicate campaign: ${err.message}`
+                        });
+                    });
+            },
+            async bulkSetStatus(status) {
+                this.bulkLoading = true;
+                const targets = this.selected.slice();
+                let done = 0, failed = 0;
+                for (const item of targets) {
+                    try {
+                        const res = await fetch(`/backend/api/campaigns/${item.id}`, {
+                            method: 'PUT',
+                            credentials: 'include',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                name: item.name,
+                                alias: item.alias,
+                                type: item.type,
+                                status: status,
+                                redirect_mode: item.redirect_mode,
+                                traffic_source_id: item.traffic_source_id,
+                                domain_id: item.domain_id,
+                                notes: item.notes,
+                                config: item.config || {}
+                            })
+                        });
+                        if (!res.ok) throw new Error(await res.text());
+                        done++;
+                    } catch (e) {
+                        failed++;
+                    }
+                }
+                this.bulkLoading = false;
+                this.selected = [];
+                this.loadCampaigns();
+                this.$root.$emit('show-message', {
+                    type: failed ? 'warning' : 'success',
+                    text: `${done} campaign(s) ${status === 'active' ? 'activated' : 'paused'}` + (failed ? `, ${failed} failed` : '')
+                });
+            },
+            generateAlias(length = 8) {
+                const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                let result = '';
+                for (let i = 0; i < length; i++) {
+                    result += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return result;
+            },
+            addPostback() {
+                const copy = {
+                    url: this.newPostback.url,
+                    method: this.newPostback.method,
+                    status: {...this.newPostback.status}
+                };
+                this.form.postbacks.push(copy);
+
+                // reset
+                this.newPostback = {
+                    url: '',
+                    method: 'GET',
+                    status: {
+                        lead: true,
+                        sale: true,
+                        rejected: false,
+                        upsale: false,
+                        pending: false
+                    }
+                };
+            },
+            openPostbackEditor(i = null) {
+                this.postbackEditorIndex = i;
+
+                if (i !== null) {
+                    this.postbackUrlDraft = this.form.postbacks[i]?.url || '';
+                } else {
+                    this.postbackUrlDraft = this.newPostback.url || '';
+                }
+
+                this.postbackEditorDialog = true;
+            },
+            insertMacro(macro) {
+                const baseUrl = this.postbackUrlDraft.split('?')[0];
+                const rawQuery = this.postbackUrlDraft.split('?')[1] || '';
+                const queryParams = new URLSearchParams(rawQuery);
+
+                const key = `${macro}`;
+                const value = `{${macro}}`;
+
+                // Remove if it already exists
+                if (queryParams.has(key)) {
+                    queryParams.delete(key);
+                } else {
+                    queryParams.append(key, value);
+                }
+
+                // Assemble back
+                const queryString = queryParams.toString()
+                    .replace(/%7B/g, '{')
+                    .replace(/%7D/g, '}');
+                this.postbackUrlDraft = queryString ? `${baseUrl}?${queryString}` : baseUrl;
+            },
+            isMacroInUrl(macro) {
+                const query = this.postbackUrlDraft.split('?')[1] || '';
+                const params = new URLSearchParams(query);
+                return params.get(macro) === `{${macro}}`;
+            },
+            applyPostbackUrl() {
+                if (this.postbackEditorIndex !== null) {
+                    this.form.postbacks[this.postbackEditorIndex].url = this.postbackUrlDraft;
+                } else {
+                    this.newPostback.url = this.postbackUrlDraft;
+                }
+                this.postbackEditorDialog = false;
+            },
+            editNewPostback() {
+                this.postbackEditorIndex = null; // means we are editing a new one
+                this.postbackUrlDraft = this.newPostback.url;
+                this.postbackEditorDialog = true;
+            },
+            resetForm() {
+                this.isEdit = false;
+                this.form = {
+                    id: null,
+                    name: '',
+                    alias: this.generateAlias(),
+                    type: 'campaign',
+                    status: 'active',
+                    redirect_mode: 'position',
+                    domain_id: null,
+                    traffic_source_id: null,
+                    notes: '',
+                    flowScheme: 'position',
+                    integration_method: null,
+                    send_se_referrer: true,
+                    use_title_as_keyword: true,
+                    send_query_params: true,
+                    bind_ttl_hours: 24,
+                    cost_model: 'cpc',
+                    traffic_loss_percent: 0,
+                    cost: 0,
+                    cost_currency: 'USD',
+                    cost_from_cost_parameter: false,
+                    paramsIdMapping: JSON.parse(JSON.stringify(this.baseParamsIdMapping)),
+                    postbacks: [],
+                    flows: []
+                };
+            },
+
+
+        }
+    });
+</script>
+{% endraw %}

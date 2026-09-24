@@ -1,0 +1,236 @@
+{% raw %}
+<!-- CodeMirror Light Theme (Base) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/htmlmixed/htmlmixed.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/xml/xml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/css/css.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/clike/clike.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/php/php.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/edit/closebrackets.min.js"></script>
+<style>
+    .CodeMirror {
+        height: 70vh;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+        background: #ffffff;
+        color: #000000;
+        border: 1px solid #e3e8ef;
+        border-radius: 8px;
+    }
+
+    .CodeMirror-gutters {
+        background: #f5f5f5;
+        border-right: 1px solid #ccc;
+        color: #999;
+    }
+
+    /* Scoped overrides — must not leak into the dashboard theme */
+    .editor-page .v-card-title {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        background-color: #f8fafc;
+        border-bottom: 1px solid #e3e8ef;
+    }
+
+    .editor-page h2 {
+        font-family: inherit;
+    }
+</style>
+
+<script type="text/x-template" id="editor-page-template">
+    <v-container fluid class="editor-page">
+        <div class="editor-topbar">
+            <a href="/backend/dashboard" class="editor-back">
+                <v-icon small>mdi-arrow-left</v-icon> Back to Dashboard
+            </a>
+            <span class="editor-title">Landing Editor</span>
+            <span v-if="landingId" class="page-subtitle">Landing #{{ landingId }}</span>
+        </div>
+
+        <v-row>
+            <v-col cols="3">
+                <v-btn block small color="primary" elevation="0" class="mb-2" @click="promptCreateFile">
+                    <v-icon small class="mr-1">mdi-file-plus-outline</v-icon>Create File
+                </v-btn>
+                <v-btn block small color="secondary" elevation="0" class="mb-2" @click="triggerUpload">
+                    <v-icon small class="mr-1">mdi-upload</v-icon>Upload File
+                </v-btn>
+                <input ref="upload" type="file" style="display: none" @change="uploadFile">
+
+                <v-card flat class="pa-2">
+                    <v-treeview
+                            dense
+                            :items="fileTree"
+                            item-key="path"
+                            item-text="name"
+                            item-children="children"
+                            activatable
+                            @update:active="onSelectFile"
+                            :open.sync="openFolders"
+                    >
+                        <template v-slot:prepend="{ item }">
+                            <v-icon v-if="item.type === 'folder'">mdi-folder-outline</v-icon>
+                            <v-icon v-else>mdi-file-code-outline</v-icon>
+                        </template>
+                    </v-treeview>
+                </v-card>
+            </v-col>
+
+            <v-col cols="9">
+                <v-card elevation="2">
+                    <v-card-title>
+                        {{ selectedFile || 'No file selected' }}
+                    </v-card-title>
+                    <v-card-text>
+                        <textarea id="code-editor" v-show="selectedFile"></textarea>
+                    </v-card-text>
+                    <v-card-actions>
+                        <v-spacer></v-spacer>
+                        <v-btn color="primary" elevation="0" :disabled="!selectedFile" @click="saveFile">Save</v-btn>
+                    </v-card-actions>
+                </v-card>
+            </v-col>
+        </v-row>
+    </v-container>
+</script>
+{% endraw %}
+
+<script>
+    Vue.component('editor-page-component', {
+        template: '#editor-page-template',
+        data() {
+            return {
+                landingId: null,
+                fileTree: [],
+                openFolders: [],
+                selectedFile: null,
+                content: '',
+                editorInstance: null,
+            };
+        },
+        methods: {
+            loadTree() {
+                fetch(`/landings_editor/${this.landingId}/files`)
+                    .then(res => res.json())
+                    .then(data => {
+                        this.fileTree = data.children || [];
+                    });
+            },
+            onSelectFile(paths) {
+                const path = paths[0];
+                const node = this.findFileByPath(this.fileTree, path);
+                if (node && node.type === 'file') {
+                    this.selectFile(node.path);
+                }
+            },
+            findFileByPath(nodes, path) {
+                for (const node of nodes) {
+                    if (node.path === path) return node;
+                    if (node.children) {
+                        const found = this.findFileByPath(node.children, path);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            },
+            selectFile(path) {
+                this.selectedFile = path;
+                fetch(`/landings_editor/${this.landingId}/file?filename=${encodeURIComponent(path)}`)
+                    .then((res) => res.json())
+                    .then((data) => {
+                        setTimeout(() => {
+                            const textarea = document.getElementById('code-editor');
+                            if (!textarea) return;
+                            if (this.editorInstance) this.editorInstance.toTextArea();
+                            textarea.value = data.content;
+                            this.editorInstance = CodeMirror.fromTextArea(textarea, {
+                                mode: 'application/x-httpd-php',
+                                lineNumbers: true,
+                                theme: 'default',
+                                indentUnit: 4,
+                                tabSize: 4,
+                                matchBrackets: true,
+                                autoCloseBrackets: true
+                            });
+                        }, 100);
+                    });
+            },
+            saveFile() {
+                if (this.editorInstance) {
+                    this.content = this.editorInstance.getValue();
+                }
+
+                const payload = new URLSearchParams();
+                payload.set("filename", this.selectedFile);
+                payload.set("content", this.content);
+
+                fetch(`/landings_editor/${this.landingId}/file-plain`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: payload.toString()
+                })
+                    .then((res) => res.ok ? res.json() : res.text().then(t => {
+                        throw new Error(t);
+                    }))
+                    .then(() => {
+                        this.$root.$emit('show-message', {type: 'success', text: 'File saved!'});
+                    })
+                    .catch((err) => {
+                        this.$root.$emit('show-message', {type: 'error', text: `Error: ${err.message}`});
+                    });
+            },
+
+            promptCreateFile() {
+                const name = prompt("Enter new file path (e.g., subdir/newfile.php):");
+                if (!name) return;
+                fetch(`/landings_editor/${this.landingId}/file`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({filename: name, content: ''})
+                })
+                    .then(res => res.json())
+                    .then(() => {
+                        this.loadTree();
+                        this.selectFile(name);
+                    })
+                    .catch(err => this.$root.$emit('show-message', {type: 'error', text: `Error: ${err.message}`}));
+            },
+            triggerUpload() {
+                this.$refs.upload.click();
+            },
+            uploadFile(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const formData = new FormData();
+                formData.append("file", file);
+
+                fetch(`/landings_editor/${this.landingId}/upload?path=${encodeURIComponent(file.name)}`, {
+                    method: "POST",
+                    body: formData
+                })
+                    .then(res => res.json())
+                    .then(() => {
+                        this.loadTree();
+                        this.selectFile(file.name);
+                    })
+                    .catch(err => this.$root.$emit('show-message', {type: 'error', text: `Upload error: ${err.message}`}));
+            }
+        },
+        mounted() {
+            const params = new URLSearchParams(window.location.search);
+            const id = parseInt(params.get('landing'));
+            if (!id) {
+                this.$root.$emit('show-message', {type: 'error', text: 'Landing ID missing'});
+                return;
+            }
+            this.landingId = id;
+            this.loadTree();
+        },
+    });
+</script>

@@ -1,0 +1,401 @@
+{% raw %}
+<script type="text/x-template" id="sources-template">
+    <v-container fluid>
+        <v-row align="center" class="mb-4">
+            <v-col>
+                <div class="page-title">Sources</div>
+                <div class="page-subtitle">Manage your traffic sources</div>
+            </v-col>
+            <v-col class="d-flex justify-end" cols="auto">
+                <v-btn color="primary" elevation="0" @click="openCreate">
+                    <v-icon small class="mr-1">mdi-plus</v-icon>
+                    Add Source
+                </v-btn>
+            </v-col>
+        </v-row>
+
+        <v-dialog v-model="dialog" max-width="800px">
+            <v-card>
+                <v-card-title>
+                    <span class="text-h6">{{ isEdit ? 'Edit Source' : 'Add Source' }}</span>
+                </v-card-title>
+
+                <v-card-text>
+
+                    <v-text-field
+                            label="Source Name"
+                            v-model="form.name"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                    <v-text-field
+                            label="Traffic Loss (%)"
+                            v-model="form.traffic_loss"
+                            type="number"
+                            step="0.01"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                    <v-text-field
+                            label="S2S Postback URL"
+                            v-model="form.s2s_postback"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                    <v-subheader class="pl-0">S2S Postback Statuses</v-subheader>
+                    <v-row dense>
+                        <v-col cols="3" v-for="status in ['sale', 'lead', 'reject', 'upsell']" :key="status">
+                            <v-checkbox
+                                    :label="status"
+                                    v-model="form.s2s_postback_statuses[status]"
+                                    dense
+                            ></v-checkbox>
+                        </v-col>
+                    </v-row>
+
+                    <v-text-field
+                            label="Taboola API Key"
+                            v-model="form.additional_settings.taboola_api_key"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                    <v-btn
+                            small
+                            color="primary"
+                            elevation="0"
+                            class="mt-2"
+                            @click="addSetting"
+                    >
+                        Add Parameter
+                    </v-btn>
+
+                    <v-subheader class="pl-0">Settings Mapping</v-subheader>
+                    <v-row
+                            v-for="(setting, index) in form.settings"
+                            :key="index"
+                            dense
+                            class="mb-2"
+                    >
+                        <v-col cols="3">
+                            <v-text-field
+                                    label="Name"
+                                    v-model="setting.name"
+                                    :readonly="!setting.editable_name"
+                                    outlined
+                                    dense
+                            ></v-text-field>
+                        </v-col>
+                        <v-col cols="3">
+                            <v-text-field
+                                    label="Parameter"
+                                    v-model="setting.parameter"
+                                    :readonly="!setting.editable_name"
+                                    outlined
+                                    dense
+                            ></v-text-field>
+                        </v-col>
+                        <v-col cols="4">
+                            <v-text-field
+                                    label="Token"
+                                    v-model="setting.token"
+                                    outlined
+                                    dense
+                            ></v-text-field>
+                        </v-col>
+                        <v-col cols="2" class="d-flex align-center justify-center">
+                            <v-icon v-if="setting.editable_name" @click="removeSetting(index)" color="red">mdi-delete
+                            </v-icon>
+                        </v-col>
+                    </v-row>
+
+                </v-card-text>
+
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="close">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" @click="save">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+
+        <v-row dense class="mt-4">
+            <v-col>
+                <v-card>
+                    <v-data-table
+                            :headers="headers"
+                            :items="sources"
+                            dense
+                            :items-per-page="10"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                    >
+                        <template v-slot:item.s2s_postback_statuses="{ item }">
+                            {{ Object.keys(item.s2s_postback_statuses).filter(k =>
+                            item.s2s_postback_statuses[k]).join(', ') }}
+                        </template>
+                        <template v-slot:item.created_at="{ item }">
+                            {{ $formatDate(item.created_at) }}
+                        </template>
+                        <template v-slot:item.updated_at="{ item }">
+                            {{ $formatDate(item.updated_at) }}
+                        </template>
+                        <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                        <v-icon small>mdi-pencil-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Edit</span>
+                            </v-tooltip>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteSource(item)">
+                                        <v-icon small>mdi-trash-can-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Delete</span>
+                            </v-tooltip>
+                        </template>
+
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-inbox-outline</v-icon>
+                                <div class="mt-2">No data yet</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <confirm-dialog-component ref="confirm" />
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('sources-component', {
+        template: '#sources-template',
+        data() {
+            return {
+                isEdit: false,
+                dialog: false,
+                loadingSources: false,
+                headers: [
+                    {text: 'Name', value: 'name'},
+                    {text: 'Traffic Loss', value: 'traffic_loss'},
+                    {text: 'Postback', value: 's2s_postback'},
+                    {text: 'Statuses', value: 's2s_postback_statuses'},
+                    {text: 'Created', value: 'created_at'},
+                    {text: 'Updated', value: 'updated_at'},
+                    {text: 'Actions', value: 'actions', sortable: false}
+                ],
+                sources: [],
+                form: {
+                    id: null,
+                    name: '',
+                    traffic_loss: 0,
+                    s2s_postback: '',
+                    s2s_postback_statuses: {
+                        sale: true,
+                        lead: false,
+                        reject: false,
+                        upsell: false
+                    },
+                    additional_settings: {
+                        taboola_api_key: ''
+                    },
+                    settings: []
+                }
+
+
+            }
+        },
+        mounted() {
+            this.loadSources();
+            this.$root.$on('load-sources', this.loadSources);
+        },
+        methods: {
+            getDefaultSettings() {
+                return [
+                    {name: 'Keyword', parameter: 'keyword', token: '', editable_name: false},
+                    {name: 'Cost', parameter: 'cost', token: '', editable_name: false},
+                    {name: 'Currency', parameter: 'currency', token: '', editable_name: false},
+                    {name: 'External ID', parameter: 'external_id', token: '', editable_name: false},
+                    {name: 'Creative ID', parameter: 'utm_creative', token: '{{ad.name}}', editable_name: false},
+                    {
+                        name: 'AD Campaign ID',
+                        parameter: 'utm_campaign',
+                        token: '{{campaign.name}}',
+                        editable_name: false
+                    },
+                    {name: 'Keyword', parameter: 'keyword', token: '', editable_name: false},
+                    {name: 'Site', parameter: 'utm_source', token: '{{site_source_name}}', editable_name: false},
+                    {name: 'Sub id 1', parameter: 'sub_id_1', token: '', editable_name: true},
+                    {name: 'Sub id 2', parameter: 'sub_id_2', token: '', editable_name: true},
+                    {name: 'Sub id 3', parameter: 'sub_id_3', token: '', editable_name: true},
+                    {name: 'Sub id 4', parameter: 'sub_id_4', token: '', editable_name: true},
+                    {name: 'Sub id 5', parameter: 'sub_id_5', token: '', editable_name: true},
+                    {name: 'Sub id 6', parameter: 'sub_id_6', token: '', editable_name: true},
+                    {name: 'Sub id 7', parameter: 'sub_id_7', token: '', editable_name: true},
+                    {name: 'Sub id 8', parameter: 'sub_id_8', token: '', editable_name: true},
+                    {name: 'Sub id 9', parameter: 'sub_id_9', token: '', editable_name: true},
+                    {name: 'Sub id 10', parameter: 'sub_id_10', token: '', editable_name: true}
+                ];
+            },
+            addSetting() {
+                this.form.settings.push({
+                    name: '',
+                    parameter: '',
+                    token: '',
+                    editable_name: true
+                });
+            },
+
+            removeSetting(index) {
+                this.form.settings.splice(index, 1);
+            },
+            loadSources() {
+                this.loadingSources = true;
+                fetch("/backend/api/sources/", {
+                    credentials: "include"
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        this.sources = data;
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                    })
+                    .finally(() => {
+                        this.loadingSources = false;
+                    });
+            },
+
+            openCreate() {
+                this.isEdit = false;
+                this.dialog = true;
+                this.form = {
+                    id: null,
+                    name: '',
+                    traffic_loss: 0,
+                    s2s_postback: '',
+                    s2s_postback_statuses: {
+                        sale: true,
+                        lead: false,
+                        reject: false,
+                        upsell: false
+                    },
+                    additional_settings: {
+                        taboola_api_key: ''
+                    },
+                    settings: this.getDefaultSettings()
+                };
+            },
+
+            openEdit(source) {
+                this.isEdit = true;
+                this.dialog = true;
+                this.form = {
+                    id: source.id,
+                    name: source.name,
+                    traffic_loss: source.traffic_loss,
+                    s2s_postback: source.s2s_postback,
+                    s2s_postback_statuses: source.s2s_postback_statuses || {},
+                    additional_settings: source.additional_settings || {},
+                    settings: source.settings || []
+                };
+            },
+
+            save() {
+                if (!this.form.name) {
+                    this.$root.$emit("show-message", {type: "error", text: "Name is required."});
+                    return;
+                }
+
+                const payload = {
+                    name: this.form.name,
+                    traffic_loss: this.form.traffic_loss,
+                    s2s_postback: this.form.s2s_postback,
+                    s2s_postback_statuses: this.form.s2s_postback_statuses,
+                    additional_settings: this.form.additional_settings,
+                    settings: this.form.settings
+                };
+
+                const method = this.isEdit ? "PATCH" : "POST";
+                const url = this.isEdit
+                    ? `/backend/api/sources/${this.form.id}`
+                    : `/backend/api/sources/`;
+
+                fetch(url, {
+                    method,
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(payload),
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const text = await res.text();
+                        if (!res.ok) {
+                            let msg = text;
+                            try {
+                                const err = JSON.parse(text);
+                                msg = err.detail || msg;
+                            } catch {
+                            }
+                            throw new Error(msg);
+                        }
+                        this.dialog = false;
+                        this.$root.$emit("show-message", {
+                            type: "success",
+                            text: this.isEdit ? "Source updated" : "Source created"
+                        });
+                        this.loadSources();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                    });
+            },
+
+            async deleteSource(source) {
+                const ok = await this.$refs.confirm.open('Delete Source', 'Are you sure you want to delete this source? This cannot be undone.');
+                if (!ok) return;
+
+                fetch(`/backend/api/sources/${source.id}`, {
+                    method: "DELETE",
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const text = await res.text();
+                        if (!res.ok) {
+                            let msg = text;
+                            try {
+                                const err = JSON.parse(text);
+                                msg = err.detail || msg;
+                            } catch {
+                            }
+                            throw new Error(msg);
+                        }
+                        this.$root.$emit("show-message", {
+                            type: "success",
+                            text: "Source deleted"
+                        });
+                        this.loadSources();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                    });
+            },
+
+            close() {
+                this.dialog = false;
+            }
+        }
+
+    });
+</script>
+{% endraw %}

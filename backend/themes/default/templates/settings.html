@@ -1,0 +1,516 @@
+{% raw %}
+<script type="text/x-template" id="settings-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4">
+            <div>
+                <div class="page-title">Settings</div>
+                <div class="page-subtitle">Tracker configuration and postback URLs</div>
+            </div>
+        </div>
+        <v-container fluid class="px-0">
+
+            <v-row class="mt-2 mb-2">
+                <v-btn
+                        color="primary"
+                        elevation="0"
+                        @click="saveSettings"
+                >
+                    <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save Settings
+                </v-btn>
+            </v-row>
+            <v-row>
+                <v-col cols="12" md="6">
+                    <v-card flat class="pa-2">
+                        <v-card-title class="d-flex align-center flex-wrap">
+                            App postback URL - GET REQUEST to:&nbsp;<code>{{ postbackUrl }}</code>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="primary" class="ml-1" v-bind="attrs" v-on="on" @click="copyText(postbackUrl)">
+                                        <v-icon small>mdi-content-copy</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Copy postback URL</span>
+                            </v-tooltip>
+                        </v-card-title>
+                        <v-card-title>Demo:&nbsp;<code>{{ postbackUrlDemo }}</code>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="primary" class="ml-1" v-bind="attrs" v-on="on" @click="copyText(postbackUrlDemo)">
+                                        <v-icon small>mdi-content-copy</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Copy demo URL</span>
+                            </v-tooltip>
+                        </v-card-title>
+                        <v-card-text>
+                        <b>Statuses can be only: 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'</b>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+            </v-row>
+            <v-row>
+                <v-col cols="12" md="6">
+                    <v-card flat class="pa-2">
+                        <v-card-title>General Settings</v-card-title>
+                        <v-card-text>
+                            <v-text-field
+                                    label="Tracker Domain"
+                                    v-model="settings.domain"
+                                    outlined
+                                    dense
+                            ></v-text-field>
+
+                            <v-select
+                                    label="Currency"
+                                    :items="currencies"
+                                    v-model="settings.currency"
+                                    outlined
+                                    dense
+                            ></v-select>
+
+                            <v-select
+                                    label="Timezone"
+                                    :items="timezones"
+                                    v-model="settings.timezone"
+                                    outlined
+                                    dense
+                            ></v-select>
+
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
+                <v-col cols="12" md="6">
+                    <v-card flat class="pa-2">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-telegram</v-icon>
+                            Telegram Notifications
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.telegram.enabled"
+                                    label="Notify about conversions in Telegram"
+                                    inset
+                                    dense
+                                    hide-details
+                            ></v-switch>
+
+                            <v-text-field
+                                    label="Bot Token"
+                                    v-model="settings.telegram.bot_token"
+                                    outlined
+                                    dense
+                                    hint="Create a bot with @BotFather → /newbot → copy its token (looks like 1234567890:AAExampleTokenFormat-DoNotUse)"
+                                    persistent-hint
+                            ></v-text-field>
+
+                            <v-text-field
+                                    label="Chat ID"
+                                    v-model="settings.telegram.chat_id"
+                                    outlined
+                                    dense
+                                    hint="Message your bot once, then open api.telegram.org/bot<TOKEN>/getUpdates in a browser and copy chat.id (groups use a negative id)"
+                                    persistent-hint
+                            ></v-text-field>
+
+                            <div class="caption grey--text mt-2 mb-1">Notify for statuses</div>
+                            <v-row dense no-gutters>
+                                <v-col v-for="s in telegramStatusList" :key="s" cols="6" sm="4">
+                                    <v-checkbox
+                                            v-model="settings.telegram.statuses[s]"
+                                            :label="s"
+                                            dense
+                                            hide-details
+                                            class="mt-0"
+                                    ></v-checkbox>
+                                </v-col>
+                            </v-row>
+
+                            <div class="d-flex align-center mt-3">
+                                <v-btn small outlined color="primary" :loading="tgTesting" @click="testTelegram">
+                                    <v-icon small class="mr-1">mdi-send-outline</v-icon>Send Test Message
+                                </v-btn>
+                                <div class="caption grey--text ml-2">Saves settings first, then sends a test to your chat</div>
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
+                <v-col cols="12" md="6">
+                    <v-card flat class="pa-2">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-email-outline</v-icon>
+                            Daily Email Reports
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.email_reports.enabled"
+                                    label="Send a daily report at the scheduled time"
+                                    inset
+                                    dense
+                                    hide-details
+                            ></v-switch>
+
+                            <v-row dense>
+                                <v-col cols="8">
+                                    <v-text-field
+                                            label="SMTP Host"
+                                            v-model="settings.email_reports.smtp_host"
+                                            outlined
+                                            dense
+                                            hint="e.g. smtp-relay.brevo.com (Brevo) or smtp.gmail.com (Gmail)"
+                                            persistent-hint
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="4">
+                                    <v-text-field
+                                            label="Port"
+                                            v-model="settings.email_reports.smtp_port"
+                                            type="number"
+                                            outlined
+                                            dense
+                                            hint="587 (STARTTLS)"
+                                            persistent-hint
+                                    ></v-text-field>
+                                </v-col>
+                            </v-row>
+
+                            <v-text-field
+                                    label="SMTP Login"
+                                    v-model="settings.email_reports.smtp_login"
+                                    outlined
+                                    dense
+                            ></v-text-field>
+
+                            <v-text-field
+                                    label="SMTP Password"
+                                    v-model="settings.email_reports.smtp_password"
+                                    :append-icon="showSmtpPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                                    :type="showSmtpPassword ? 'text' : 'password'"
+                                    @click:append="showSmtpPassword = !showSmtpPassword"
+                                    outlined
+                                    dense
+                                    hint="Brevo SMTP key, Gmail App Password, or SendGrid API key"
+                                    persistent-hint
+                            ></v-text-field>
+
+                            <v-row dense>
+                                <v-col cols="6">
+                                    <v-text-field
+                                            label="From Name"
+                                            v-model="settings.email_reports.from_name"
+                                            outlined
+                                            dense
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="6">
+                                    <v-text-field
+                                            label="From Email"
+                                            v-model="settings.email_reports.from_email"
+                                            outlined
+                                            dense
+                                    ></v-text-field>
+                                </v-col>
+                            </v-row>
+
+                            <v-text-field
+                                    label="Brevo API Key (optional)"
+                                    v-model="settings.email_reports.api_key"
+                                    :append-icon="showBrevoApiKey ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                                    :type="showBrevoApiKey ? 'text' : 'password'"
+                                    @click:append="showBrevoApiKey = !showBrevoApiKey"
+                                    outlined
+                                    dense
+                                    hint="Optional — paste your Brevo API key (xkeysib-…) to send via the API instead of SMTP. The API has no IP restriction, so it works even when the relay returns 'Unauthorized IP address'"
+                                    persistent-hint
+                            ></v-text-field>
+
+                            <v-text-field
+                                    label="Recipients"
+                                    v-model="settings.email_reports.recipients"
+                                    outlined
+                                    dense
+                                    hint="Comma-separated list, e.g. you@gmail.com, partner@company.com"
+                                    persistent-hint
+                            ></v-text-field>
+
+                            <v-text-field
+                                    label="Send hour (UTC)"
+                                    v-model="settings.email_reports.hour"
+                                    type="number"
+                                    min="0" max="23"
+                                    outlined
+                                    dense
+                                    hint="Report covers the previous day, sent at this UTC hour"
+                                    persistent-hint
+                            ></v-text-field>
+
+                            <div class="d-flex align-center mt-2">
+                                <v-btn small outlined color="primary" :loading="emailTesting" @click="testEmailReport">
+                                    <v-icon small class="mr-1">mdi-send-outline</v-icon>Send Test Report Now
+                                </v-btn>
+                                <div class="caption grey--text ml-2">Saves settings first, then emails yesterday's report</div>
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
+                <!--                <v-col cols="12" md="6">-->
+                <!--                    <v-card dark flat class="pa-4">-->
+                <!--                        <v-card-title>Advanced Settings</v-card-title>-->
+                <!--                        <v-card-text>-->
+
+                <!--                            <v-text-field-->
+                <!--                                    label="API Access Token"-->
+                <!--                                    v-model="settings.apiToken"-->
+                <!--                                    outlined-->
+                <!--                                    dense-->
+                <!--                                    append-icon="mdi-refresh"-->
+                <!--                                    @click:append="generateToken"-->
+                <!--                            ></v-text-field>-->
+
+                <!--                            <v-switch-->
+                <!--                                    label="Enable Request Logging"-->
+                <!--                                    v-model="settings.enableLogging"-->
+                <!--                                    inset-->
+                <!--                                    dense-->
+                <!--                            ></v-switch>-->
+
+                <!--                        </v-card-text>-->
+                <!--                    </v-card>-->
+                <!--                </v-col>-->
+                <!-- Variable mapping block -->
+                <v-col cols="12">
+                    <v-card flat class="pa-2">
+                        <v-card-title>Matching Variables (Sub IDs)</v-card-title>
+                        <v-card-text>
+                            <v-row dense v-for="(mapping, index) in subIdMapping" :key="index" align="center">
+                                <v-col cols="3">
+                                    <v-text-field
+                                            :label="mapping.name"
+                                            v-model="mapping.name"
+                                            :readonly="!mapping.editable_name"
+                                            outlined
+                                            dense
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="3">
+                                    <v-text-field
+                                            :label="mapping.parameter"
+                                            v-model="mapping.parameter"
+                                            :readonly="!mapping.editable_name"
+                                            outlined
+                                            dense
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="6">
+                                    <v-text-field
+                                            label="Variable Name"
+                                            v-model="mapping.token"
+                                            outlined
+                                            dense
+                                    ></v-text-field>
+                                </v-col>
+                            </v-row>
+
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+            </v-row>
+
+            <v-row class="mt-4 mb-2">
+                &nbsp;
+                <v-btn
+                        color="red"
+                        @click="clearData"
+                        outlined
+                >
+                    <v-icon small class="mr-1">mdi-delete-alert-outline</v-icon>Delete Clicks & Conversion History Data
+                </v-btn>
+            </v-row>
+
+        </v-container>
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('settings-component', {
+        template: '#settings-template',
+        data() {
+            return {
+                settings: {
+                    domain: '',
+                    currency: 'USD',
+                    timezone: 'UTC',
+                    autoUpdateReports: true,
+                    apiToken: 'a1b2c3d4e5f6',
+                    enableLogging: false,
+                    telegram: {
+                        enabled: false,
+                        bot_token: '',
+                        chat_id: '',
+                        statuses: {
+                            lead: true, sale: true, upsale: true,
+                            rejected: true, hold: true, trash: true,
+                        },
+                    },
+                    email_reports: {
+                        enabled: false,
+                        smtp_host: '',
+                        smtp_port: 587,
+                        smtp_login: '',
+                        smtp_password: '',
+                        api_key: '',
+                        from_name: 'AAA Tracker',
+                        from_email: '',
+                        recipients: '',
+                        hour: 9,
+                    },
+                },
+                subIdMapping: [
+                ],
+                currencies: ['USD', 'EUR', 'GBP', 'JPY'],
+                timezones: ['UTC', 'America/New_York', 'Europe/Berlin', 'Asia/Tokyo'],
+                telegramStatusList: ['lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'],
+                tgTesting: false,
+                emailTesting: false,
+                showSmtpPassword: false,
+                showBrevoApiKey: false,
+            };
+        },
+        mounted() {
+            this.loadSettings();
+            this.$root.$on('load-settings', this.loadSettings);
+        },
+        computed:{
+              postbackUrl() {
+                return `${window.location.origin}/pb/{click_id}/{status}/{payout}`;
+              },
+              postbackUrlDemo() {
+                return `${window.location.origin}/pb/d8f8d388-356b-4063-90ef-6137258b59c1/sale/202.15`;
+              }
+        },
+        methods: {
+            copyText(text) {
+                navigator.clipboard.writeText(text).then(() => {
+                    this.$root.$emit("show-message", {type: "success", text: "Copied to clipboard"});
+                });
+            },
+            async clearData() {
+                if (!confirm("Are you sure you want to delete all tracking data?")) return;
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                if (!confirm("Are you REALLY sure you want to DELETE ALL TRACKING  HISTORY DATA?")) return;
+
+                fetch("/backend/api/settings/clear-tracking-data", {
+                    method: "POST"
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        this.$root.$emit("show-message", {type: "success", text: "Tracking data cleared successfully"});
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: "Error clearing data."});
+                    });
+            },
+            loadSettings() {
+                fetch("/backend/api/settings/", {
+                    credentials: "include"
+                })
+                    .then((r) => r.json())
+                    .then((data) => {
+                        // merge so freshly saved keys never lose their defaults
+                        const tgDefaults = {
+                            enabled: false,
+                            bot_token: '',
+                            chat_id: '',
+                            statuses: {
+                                lead: true, sale: true, upsale: true,
+                                rejected: true, hold: true, trash: true,
+                            },
+                        };
+                        const erDefaults = {
+                            enabled: false, smtp_host: '', smtp_port: 587,
+                            smtp_login: '', smtp_password: '', api_key: '',
+                            from_name: 'AAA Tracker', from_email: '',
+                            recipients: '', hour: 9,
+                        };
+                        this.settings = Object.assign({}, this.settings, data.settings || {});
+                        this.settings.telegram = Object.assign({}, tgDefaults, this.settings.telegram || {});
+                        this.settings.telegram.statuses = Object.assign(
+                            {}, tgDefaults.statuses, this.settings.telegram.statuses || {});
+                        this.settings.email_reports = Object.assign(
+                            {}, erDefaults, this.settings.email_reports || {});
+                        if (data.subIdMapping) this.subIdMapping = data.subIdMapping;
+                    });
+            },
+            saveSettings(silent) {
+                const payload = {
+                    settings: this.settings,
+                    subIdMapping: this.subIdMapping
+                };
+                return fetch("/backend/api/settings/", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    credentials: "include",
+                    body: JSON.stringify(payload)
+                })
+                    .then((r) => r.json())
+                    .then((data) => {
+                        if (!silent) {
+                            this.$root.$emit("show-message", {type: "success", text: "Settings saved"});
+                        }
+                        return data;
+                    })
+                    .catch((err) => {
+                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        throw err;
+                    });
+            },
+            async testTelegram() {
+                this.tgTesting = true;
+                try {
+                    await this.saveSettings(true);
+                    const res = await fetch("/backend/api/settings/telegram-test", {
+                        method: "POST",
+                        credentials: "include"
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.status === "ok") {
+                        this.$root.$emit("show-message", {type: "success", text: data.message || "Test message sent"});
+                    } else {
+                        this.$root.$emit("show-message", {type: "error", text: data.detail || "Test failed"});
+                    }
+                } catch (e) {
+                    /* error toast already shown by saveSettings or above */
+                } finally {
+                    this.tgTesting = false;
+                }
+            },
+
+            async testEmailReport() {
+                this.emailTesting = true;
+                try {
+                    await this.saveSettings(true);
+                    const res = await fetch("/backend/api/settings/email-test", {
+                        method: "POST",
+                        credentials: "include"
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.status === "ok") {
+                        this.$root.$emit("show-message", {type: "success", text: data.message || "Test report sent"});
+                    } else {
+                        this.$root.$emit("show-message", {type: "error", text: data.detail || "Test report failed"});
+                    }
+                } catch (e) {
+                    /* error toast already shown by saveSettings or above */
+                } finally {
+                    this.emailTesting = false;
+                }
+            },
+            generateToken() {
+                this.settings.apiToken = Math.random().toString(36).substring(2, 12);
+            }
+        }
+    });
+</script>
+{% endraw %}

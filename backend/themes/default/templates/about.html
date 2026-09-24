@@ -1,0 +1,142 @@
+<script type="text/x-template" id="about-template">
+    <v-container fluid>
+        <div class="page-title">Documentation</div>
+        <div class="page-subtitle mb-4">About AAA Tracker and its sections</div>
+
+        <v-row class="mt-2">
+            <v-col cols="3">
+                <v-card flat class="py-2">
+                <v-tabs vertical
+                v-model="tabAbout">
+                    <v-tab>Logs</v-tab>
+                    <v-tab>Overview</v-tab>
+                    <v-tab>Dashboard</v-tab>
+                    <v-tab>Campaigns</v-tab>
+                    <v-tab>Landing Pages</v-tab>
+                    <v-tab>Affiliate Networks</v-tab>
+                    <v-tab>Offers</v-tab>
+                    <v-tab>Sources</v-tab>
+                    <v-tab>Reports</v-tab>
+                    {% if is_authenticated_user_type == 'admin' %}
+                    <v-tab>Domains</v-tab>
+                    <v-tab>Settings</v-tab>
+                    <v-tab>Users</v-tab>
+                    {% endif %}
+                </v-tabs>
+                </v-card>
+            </v-col>
+
+            <v-col cols="9">
+                <v-card flat class="pa-4">
+                <v-tabs-items v-model="tabAbout">
+                    <v-tab-item>
+                        <p>
+                            AAA Tracker Logs links
+                            <a href="/_aaa_tracker_debug" target="_blank">View Logs</a>
+                        </p>
+                    </v-tab-item>
+                    <v-tab-item>
+                        <p>
+                            AAA Tracker is a web application designed to help you manage and track your affiliate marketing campaigns.
+                            It provides a user-friendly interface for managing offers, sources, reports, and domains.
+                            The application is built using modern web technologies, including Vue.js and Vuetify, to ensure a smooth
+                            and responsive user experience.
+
+                            The application is designed to be easy to use, with a clean and intuitive interface that allows you to
+                            quickly navigate through different sections. You can easily add, edit, and delete offers, sources, and
+                            domains, as well as view detailed reports on your campaigns' performance.
+                        </p>
+                    </v-tab-item>
+
+                    <v-tab-item>
+                        <p>
+                            <b>Dashboard</b> — the main overview of your advertising performance. It displays real-time metrics like
+                            clicks, unique clicks, conversions, cost, revenue, and ROI. You can filter by date range and quickly spot
+                            trends, spikes, or drops in your campaigns. This is your central command center for quick insights.
+                        </p>
+                    </v-tab-item>
+
+                    <v-tab-item>
+                        <p>
+                            <b>Campaigns</b> — these are traffic entry points that connect your sources with landing pages and offers.
+                            Each campaign defines the flow rules, country targeting, devices, rotation logic, and how tokens are passed.
+                            You control how traffic is routed and optimized using advanced rules and flow logic.
+                        </p>
+                    </v-tab-item>
+
+                    <v-tab-item>
+                        <p>
+                            <b>Landing Pages</b> — these are pre-offer pages used to warm up visitors or capture data before redirecting
+                            them to the offer. In this section, you can upload landing files (ZIP, HTML, PHP), assign tags, and
+                            configure how landers behave inside campaign flows. You can also A/B test landers.
+                        </p>
+                    </v-tab-item>
+
+                    <v-tab-item>
+                        <p>
+                            <b>Affiliate Networks</b> — this is where you manage your partnerships with external affiliate networks. You
+                            define the S2S postback structure, tokens, and offer tracking parameters.
+                        </p>
+                    </v-tab-item>
+
+                    <v-tab-item>
+                        <p>
+                            <b>Offers</b> — the final destinations where your traffic is sent. Each offer includes a payout, targeting
+                            (countries), currency, tokens, and is linked to an affiliate network.
+                        </p>
+                    </v-tab-item>
+
+                    <v-tab-item>
+                        <p>
+                            <b>Sources</b> — defines your traffic source configurations. You can predefine UTM
+                            parameters, postback URLs, and token structures.
+                        </p>
+                    </v-tab-item>
+
+                    <v-tab-item>
+                        <p>
+                            <b>Reports</b> — your performance breakdown hub. Get detailed analytics on campaigns, landers, offers,
+                            countries, devices, conversions, and more.
+                        </p>
+                    </v-tab-item>
+
+                    {% if is_authenticated_user_type == 'admin' %}
+                    <v-tab-item>
+                        <p>
+                            <b>Domains</b> — manage your tracking and redirect domains. You can add custom domains, group them,
+                            configure HTTPS redirects, and assign specific domains to campaigns or flows.
+                        </p>
+                    </v-tab-item>
+
+                    <v-tab-item>
+                        <p>
+                            <b>Settings</b> — the system-wide configuration panel. Adjust timezone, currency, logging behavior,
+                            auto-refresh reports, token behavior, default parameters, and more.
+                        </p>
+                    </v-tab-item>
+
+                    <v-tab-item>
+                        <p>
+                            <b>Users</b> — manage access to your tracker. Create users, assign roles, and control login access.
+                        </p>
+                    </v-tab-item>
+                    {% endif %}
+
+                </v-tabs-items>
+                </v-card>
+            </v-col>
+        </v-row>
+    </v-container>
+</script>
+
+
+<script type="application/javascript">
+    Vue.component('about-component', {
+        template: '#about-template',
+        data() {
+            return {
+                tabAbout: 0
+            }
+        }
+    });
+</script>

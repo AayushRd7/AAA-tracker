@@ -1,0 +1,476 @@
+{% raw %}
+<script type="text/x-template" id="reports-template">
+    <v-container fluid>
+        <v-row align="center" class="mb-4">
+            <v-col>
+                <div class="page-title">Reports</div>
+                <div class="page-subtitle">Break down performance by any dimension</div>
+            </v-col>
+            <v-col class="d-flex justify-end" cols="auto">
+                <v-btn
+                        outlined
+                        elevation="0"
+                        class="mr-2"
+                        :disabled="!reportRows.length"
+                        @click="exportReportCsv"
+                >
+                    <v-icon small class="mr-1">mdi-download</v-icon>
+                    Export CSV
+                </v-btn>
+                <v-btn color="primary" elevation="0" :loading="loading" @click="runReport">
+                    <v-icon small class="mr-1">mdi-play</v-icon>
+                    Run Report
+                </v-btn>
+            </v-col>
+        </v-row>
+
+        <!-- Report builder controls -->
+        <v-card class="pa-4 mb-4">
+            <div class="d-flex flex-wrap align-center">
+                <v-select
+                        v-model="dimension"
+                        :items="dimensionItems"
+                        item-text="label"
+                        item-value="key"
+                        label="Break down by"
+                        outlined
+                        dense
+                        hide-details
+                        style="max-width: 220px;"
+                        class="mr-2"
+                ></v-select>
+                <v-menu v-model="dateMenu" :close-on-content-click="false" transition="scale-transition" offset-y min-width="auto">
+                    <template v-slot:activator="{ on, attrs }">
+                        <v-text-field
+                                v-model="dateRangeText"
+                                label="Date range"
+                                prepend-icon="mdi-calendar"
+                                readonly
+                                v-bind="attrs"
+                                v-on="on"
+                                outlined
+                                dense
+                                hide-details
+                                style="max-width: 240px;"
+                                class="mr-2"
+                        ></v-text-field>
+                    </template>
+                    <v-date-picker v-model="dateRange" range @input="dateMenu = false"></v-date-picker>
+                </v-menu>
+                <v-select
+                        :items="campaigns"
+                        v-model="selectedCampaigns"
+                        label="Campaigns"
+                        item-text="name"
+                        item-value="id"
+                        outlined
+                        dense
+                        hide-details
+                        multiple
+                        chips
+                        small-chips
+                        style="max-width: 240px;"
+                ></v-select>
+            </div>
+            <div class="mt-2">
+                <v-chip v-for="preset in datePresets" :key="preset.label"
+                        small label outlined
+                        :color="activePreset === preset.label ? 'primary' : 'grey'"
+                        :class="activePreset === preset.label ? 'primary--text' : 'grey--text text--darken-2'"
+                        class="mr-1"
+                        @click="applyPreset(preset)">
+                    {{ preset.label }}
+                </v-chip>
+            </div>
+        </v-card>
+
+        <!-- Breakdown table -->
+        <v-card>
+            <v-data-table
+                    :headers="reportHeaders"
+                    :items="reportRows"
+                    dense
+                    :items-per-page="15"
+                    :footer-props="{ 'items-per-page-options': [15, 25, 50, 100] }"
+                    :loading="loading"
+            >
+                <template v-slot:item.roi="{ item }">
+                    <span :class="roiClass(item.roi)" class="font-weight-medium">{{ item.roi }}%</span>
+                </template>
+                <template v-slot:no-data>
+                    <div class="empty-state">
+                        <v-icon>mdi-chart-box-outline</v-icon>
+                        <div class="mt-2">Run a report to see the breakdown</div>
+                    </div>
+                </template>
+            </v-data-table>
+        </v-card>
+
+        <!-- Click log drill-down -->
+        <div class="d-flex align-center justify-space-between mt-6 mb-2">
+            <div>
+                <div class="font-weight-medium">Click Log</div>
+                <div class="page-subtitle">Raw click records with drill-down filters</div>
+            </div>
+            <v-btn text small color="primary" :disabled="!clickLog.length" @click="exportClickLogCsv">
+                <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
+            </v-btn>
+        </div>
+        <v-card class="pa-4 mb-4">
+            <div class="d-flex flex-wrap align-center">
+                <v-text-field
+                        v-model="logFilters.country"
+                        label="Country"
+                        outlined dense hide-details clearable
+                        style="max-width: 110px;"
+                        class="mr-2"
+                ></v-text-field>
+                <v-text-field
+                        v-model="logFilters.device_type"
+                        label="Device"
+                        outlined dense hide-details clearable
+                        style="max-width: 110px;"
+                        class="mr-2"
+                ></v-text-field>
+                <v-text-field
+                        v-model="logFilters.os"
+                        label="OS"
+                        outlined dense hide-details clearable
+                        style="max-width: 110px;"
+                        class="mr-2"
+                ></v-text-field>
+                <v-select
+                        v-model="logFilters.status"
+                        :items="['', 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash']"
+                        label="Status"
+                        outlined dense hide-details clearable
+                        style="max-width: 130px;"
+                        class="mr-2"
+                ></v-select>
+                <v-text-field
+                        v-model="logFilters.search"
+                        label="Search (url, referrer, ip, visitor id)"
+                        prepend-inner-icon="mdi-magnify"
+                        outlined dense hide-details clearable
+                        style="max-width: 280px;"
+                        class="mr-2"
+                        @keyup.enter="loadClickLog"
+                ></v-text-field>
+                <v-btn color="primary" elevation="0" :loading="logLoading" @click="loadClickLog">
+                    <v-icon small class="mr-1">mdi-magnify</v-icon>Search
+                </v-btn>
+            </div>
+        </v-card>
+        <v-card>
+            <v-data-table
+                    :headers="clickLogHeaders"
+                    :items="clickLog"
+                    dense
+                    :items-per-page="15"
+                    :footer-props="{ 'items-per-page-options': [15, 25, 50, 100] }"
+                    :loading="logLoading"
+            >
+                <template v-slot:item.is_bot="{ item }">
+                    <v-chip v-if="item.is_bot" x-small label color="error" text-color="white">bot</v-chip>
+                    <span v-else class="grey--text">—</span>
+                </template>
+                <template v-slot:item.status="{ item }">
+                    <span v-if="item.status" class="font-weight-medium">{{ item.status }}</span>
+                    <span v-else class="grey--text">—</span>
+                </template>
+                <template v-slot:no-data>
+                    <div class="empty-state">
+                        <v-icon>mdi-inbox-outline</v-icon>
+                        <div class="mt-2">No clicks match the filters</div>
+                    </div>
+                </template>
+            </v-data-table>
+        </v-card>
+
+        <!-- Raw conversions -->
+        <div class="d-flex align-center justify-space-between mt-6 mb-2">
+            <div class="font-weight-medium">Conversions (raw)</div>
+            <div>
+                <v-btn text small color="primary" class="mr-2" :disabled="!conversions || !conversions.length" @click="exportCsv">
+                    <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
+                </v-btn>
+                <v-btn text small color="primary" @click="reloadReports">
+                    <v-icon small class="mr-1">mdi-refresh</v-icon>Reload
+                </v-btn>
+            </div>
+        </div>
+        <v-row dense>
+            <v-col>
+                <v-card>
+                    <v-data-table
+                            :headers="headers"
+                            :items="conversions"
+                            dense
+                            :items-per-page="10"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                    >
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-inbox-outline</v-icon>
+                                <div class="mt-2">No data yet</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <confirm-dialog-component ref="confirm" />
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('reports-component', {
+        template: '#reports-template',
+        data() {
+            return {
+                loading: false,
+                dateMenu: false,
+                activePreset: 'Last 30 days',
+                datePresets: [
+                    { label: 'Today', days: 0 },
+                    { label: 'Yesterday', days: 1 },
+                    { label: 'Last 7 days', days: 6 },
+                    { label: 'Last 30 days', days: 29 },
+                ],
+                dateRange: [
+                    new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().split('T')[0],
+                    new Date().toISOString().split('T')[0]
+                ],
+                dimension: 'country',
+                dimensionItems: [
+                    { key: 'date', label: 'Date' },
+                    { key: 'hour', label: 'Hour' },
+                    { key: 'campaign_id', label: 'Campaign' },
+                    { key: 'offer_id', label: 'Offer' },
+                    { key: 'landing_id', label: 'Landing Page' },
+                    { key: 'country', label: 'Country' },
+                    { key: 'region', label: 'Region' },
+                    { key: 'city', label: 'City' },
+                    { key: 'device_type', label: 'Device Type' },
+                    { key: 'os', label: 'OS' },
+                    { key: 'browser', label: 'Browser' },
+                    { key: 'language', label: 'Language' },
+                    { key: 'traffic_source_name', label: 'Traffic Source' },
+                    { key: 'utm_source', label: 'UTM Source' },
+                    { key: 'utm_campaign', label: 'UTM Campaign' },
+                    { key: 'utm_creative', label: 'UTM Creative' },
+                    { key: 'keyword', label: 'Keyword' },
+                    { key: 'isp', label: 'ISP' },
+                    { key: 'connection_type', label: 'Connection Type' },
+                    { key: 'status', label: 'Conversion Status' },
+                    { key: 'is_bot', label: 'Bot Flag' },
+                    { key: 'is_using_proxy', label: 'Proxy Flag' },
+                ],
+                campaigns: [],
+                selectedCampaigns: [],
+                reportHeadersBase: [
+                    {text: 'Visits', value: 'visits'},
+                    {text: 'Unique Visits', value: 'unique_visits'},
+                    {text: 'Clicks', value: 'clicks'},
+                    {text: 'Unique Clicks', value: 'unique_clicks'},
+                    {text: 'Leads', value: 'leads'},
+                    {text: 'Conversions', value: 'conversions'},
+                    {text: 'Rejected', value: 'rejected'},
+                    {text: 'Cost', value: 'cost'},
+                    {text: 'Revenue', value: 'revenue'},
+                    {text: 'Profit', value: 'profit'},
+                    {text: 'CR %', value: 'cr'},
+                    {text: 'EPC', value: 'epc'},
+                    {text: 'ROI %', value: 'roi'},
+                ],
+                reportRows: [],
+                headers: [
+                    {text: 'Received At', value: 'received_at'},
+                    {text: 'Click ID', value: 'click_id'},
+                    {text: 'Campaign ID', value: 'campaign_id'},
+                    {text: 'Offer ID', value: 'offer_id'},
+                    {text: 'Status', value: 'status'},
+                    {text: 'Sub ID 1', value: 'sub_id_1'},
+                    {text: 'IP', value: 'ip'},
+                    {text: 'Payout', value: 'payout'},
+                    {text: 'Profit', value: 'profit'},
+                    {text: 'Revenue', value: 'revenue'},
+                ],
+                conversions: [],
+                logLoading: false,
+                clickLog: [],
+                logFilters: {
+                    country: '',
+                    device_type: '',
+                    os: '',
+                    status: '',
+                    search: '',
+                },
+                clickLogHeaders: [
+                    {text: 'Time', value: 'received_at'},
+                    {text: 'IP', value: 'ip'},
+                    {text: 'Country', value: 'country'},
+                    {text: 'Device', value: 'device_type'},
+                    {text: 'OS', value: 'os'},
+                    {text: 'Browser', value: 'browser'},
+                    {text: 'URL', value: 'url'},
+                    {text: 'Referrer', value: 'referrer'},
+                    {text: 'Keyword', value: 'keyword'},
+                    {text: 'Source', value: 'traffic_source_name'},
+                    {text: 'Campaign', value: 'campaign_id'},
+                    {text: 'Status', value: 'status'},
+                    {text: 'Bot', value: 'is_bot'},
+                    {text: 'Visitor ID', value: 'visitor_id'},
+                ],
+            }
+        },
+        computed: {
+            dateRangeText() {
+                return this.dateRange.join(' ~ ');
+            },
+            reportHeaders() {
+                const dimLabel = (this.dimensionItems.find(d => d.key === this.dimension) || {}).label || 'Dimension';
+                return [{text: dimLabel, value: 'dimension'}, ...this.reportHeadersBase];
+            },
+        },
+        mounted() {
+            this.loadCampaigns();
+            this.loadReports();
+            this.loadClickLog();
+            this.$root.$on('load-reports', () => { this.loadCampaigns(); this.loadReports(); this.loadClickLog(); });
+        },
+        methods: {
+            roiClass(roi) {
+                const v = parseFloat(roi);
+                if (isNaN(v) || v === 0) return 'grey--text';
+                return v > 0 ? 'success--text' : 'error--text';
+            },
+            applyPreset(preset) {
+                this.activePreset = preset.label;
+                const to = new Date();
+                let from = new Date();
+                if (preset.label === 'Yesterday') {
+                    from = new Date(to);
+                    from.setDate(from.getDate() - 1);
+                    to.setDate(to.getDate() - 1);
+                } else if (preset.days > 0) {
+                    from.setDate(from.getDate() - preset.days);
+                }
+                this.dateRange = [from.toISOString().split('T')[0], to.toISOString().split('T')[0]];
+                this.runReport();
+            },
+            loadCampaigns() {
+                fetch('/backend/api/campaigns/')
+                    .then(res => res.json())
+                    .then(data => { this.campaigns = data; });
+            },
+            runReport() {
+                this.loading = true;
+                const payload = {
+                    dimension: this.dimension,
+                    filters: {
+                        date_from: this.dateRange[0],
+                        date_to: this.dateRange[1],
+                        campaigns: this.selectedCampaigns,
+                    },
+                };
+                fetch('/backend/api/dashboard/breakdown', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        this.reportRows = data.rows || [];
+                        this.loading = false;
+                    })
+                    .catch(err => {
+                        this.loading = false;
+                        this.$root.$emit('show-message', {type: 'error', text: 'Report failed: ' + err.message});
+                    });
+            },
+            exportReportCsv() {
+                const headers = this.reportHeaders.map(h => h.text);
+                const rows = this.reportRows.map(it => this.reportHeaders.map(h => it[h.value]));
+                const csv = [headers, ...rows].map(r => r.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(',')).join('\n');
+                const blob = new Blob([csv], {type: 'text/csv'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'report_' + this.dimension + '.csv';
+                a.click();
+                URL.revokeObjectURL(a.href);
+            },
+            exportCsv() {
+                const headers = this.headers.map(h => h.text);
+                const rows = this.conversions.map(it => this.headers.map(h => {
+                    const v = it[h.value];
+                    return v == null ? '' : String(v);
+                }));
+                const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+                const blob = new Blob([csv], {type: 'text/csv'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'conversions.csv';
+                a.click();
+                URL.revokeObjectURL(a.href);
+            },
+            loadClickLog() {
+                this.logLoading = true;
+                const payload = {
+                    date_from: this.dateRange[0],
+                    date_to: this.dateRange[1],
+                    campaigns: this.selectedCampaigns,
+                    country: this.logFilters.country || null,
+                    device_type: this.logFilters.device_type || null,
+                    os: this.logFilters.os || null,
+                    status: this.logFilters.status || null,
+                    search: this.logFilters.search || null,
+                    limit: 500,
+                };
+                Object.keys(payload).forEach(k => payload[k] === null && delete payload[k]);
+                fetch('/backend/api/dashboard/click-log', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        this.clickLog = data || [];
+                        this.logLoading = false;
+                    })
+                    .catch(err => {
+                        this.logLoading = false;
+                        this.$root.$emit('show-message', {type: 'error', text: 'Click log failed: ' + err.message});
+                    });
+            },
+            exportClickLogCsv() {
+                const headers = this.clickLogHeaders.map(h => h.text);
+                const rows = this.clickLog.map(it => this.clickLogHeaders.map(h => it[h.value]));
+                const csv = [headers, ...rows].map(r => r.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(',')).join('\n');
+                const blob = new Blob([csv], {type: 'text/csv'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'click_log.csv';
+                a.click();
+                URL.revokeObjectURL(a.href);
+            },
+            reloadReports() {
+                this.loadReports();
+                this.$root.$emit("show-message", {type: "success", text: 'Conversions reloaded successfully!'});
+            },
+            loadReports() {
+                fetch('/backend/api/reports/')
+                    .then(response => response.json())
+                    .then(data => {
+                        this.conversions = data;
+                    })
+                    .catch(err => {
+                        console.error("Failed to load conversions:", err)
+                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                    });
+            }
+        },
+    });
+</script>
+{% endraw %}

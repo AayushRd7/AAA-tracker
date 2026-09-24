@@ -1,0 +1,495 @@
+/* ============================================================
+   AAA Tracker — modern analytics design system
+   Dark navy sidebar · light content · green accent · Inter
+   ============================================================ */
+
+:root {
+  --font-stack: 'Inter', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --sidebar-bg: #1a2332;
+  --sidebar-bg-2: #141b27;
+  --sidebar-text: #b6c2d4;
+  --sidebar-active: rgba(22, 163, 74, 0.16);
+  --content-bg: #f5f6f8;
+  --accent: #16a34a;
+  --accent-hover: #15803d;
+  --accent-soft: rgba(22, 163, 74, 0.12);
+  --border: #e4e7ec;
+  --border-soft: #eef1f5;
+  --text-primary: #101828;
+  --text-secondary: #667085;
+  --card-radius: 14px;
+  --card-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --card-shadow-hover: 0 4px 14px rgba(16, 24, 40, 0.1);
+  --danger: #dc2626;
+  --info: #2563eb;
+  --warning: #f59e0b;
+}
+
+/* ---------- Base & typography ---------- */
+
+body,
+.v-application {
+  background: var(--content-bg) !important;
+  color: var(--text-primary);
+  font-family: var(--font-stack) !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.theme--light.v-application {
+  background: var(--content-bg) !important;
+}
+
+/* Vuetify pins Roboto on its typography classes — pin them to Inter too */
+.v-application .headline,
+.v-application .title,
+.v-application .subtitle-1,
+.v-application .subtitle-2,
+.v-application .body-1,
+.v-application .body-2,
+.v-application .caption,
+.v-application .overline,
+.v-application .text-h1, .v-application .text-h2, .v-application .text-h3,
+.v-application .text-h4, .v-application .text-h5, .v-application .text-h6,
+.v-application .text-subtitle-1, .v-application .text-subtitle-2,
+.v-application .text-body-1, .v-application .text-body-2,
+.v-application .text-caption, .v-application .text-overline,
+.v-application .v-btn, .v-application .v-card__title,
+.v-application .v-card__subtitle, .v-application .v-card__text,
+.v-application .v-list-item__title, .v-application .v-list-item__subtitle,
+.v-application .v-toolbar__title, .v-application .v-input,
+.v-application .v-label, .v-application .v-messages,
+.v-application .v-select__selection, .v-application .v-tabs__div {
+  font-family: var(--font-stack) !important;
+}
+
+::selection {
+  background: rgba(22, 163, 74, 0.18);
+}
+
+/* ---------- Cards ---------- */
+
+.v-card {
+  border-radius: var(--card-radius) !important;
+  border: 1px solid var(--border-soft);
+  transition: box-shadow 0.2s ease;
+}
+
+.v-card:not(.v-sheet--outlined):not(.v-dialog__content .v-card) {
+  box-shadow: var(--card-shadow) !important;
+}
+
+.v-dialog__content .v-card {
+  border-radius: var(--card-radius) !important;
+  box-shadow: 0 16px 48px rgba(16, 24, 40, 0.16), 0 4px 12px rgba(16, 24, 40, 0.08) !important;
+}
+
+.v-card__title {
+  font-weight: 600;
+  font-size: 15px !important;
+  color: var(--text-primary);
+}
+
+/* ---------- Buttons ---------- */
+
+.v-btn {
+  text-transform: none !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.1px;
+  border-radius: 10px !important;
+}
+
+.v-application .primary {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+.v-application .primary--text {
+  color: var(--accent) !important;
+}
+
+.v-btn--is-elevated:not(.v-btn--outlined):not(.v-btn--text) {
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1);
+}
+
+.v-btn--is-elevated.primary {
+  box-shadow: 0 1px 2px rgba(22, 163, 74, 0.4), 0 1px 3px rgba(22, 163, 74, 0.25);
+}
+
+.v-btn--is-elevated.primary:hover {
+  box-shadow: 0 3px 8px rgba(22, 163, 74, 0.35);
+}
+
+.v-btn--text:hover,
+.v-btn--outlined:hover {
+  background: rgba(16, 24, 40, 0.04) !important;
+}
+
+.v-btn--text.primary--text:hover,
+.v-btn--outlined.primary--text:hover {
+  background: var(--accent-soft) !important;
+}
+
+/* ---------- Data tables ---------- */
+
+.v-data-table {
+  border-radius: var(--card-radius) !important;
+}
+
+.v-data-table > .v-data-table__wrapper > table > thead > tr > th {
+  font-size: 10.5px !important;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary) !important;
+  font-weight: 600 !important;
+  white-space: nowrap;
+  background: #f9fafb;
+  border-bottom: 1px solid var(--border-soft) !important;
+}
+
+.v-data-table > .v-data-table__wrapper > table > tbody > tr {
+  transition: background 0.15s ease;
+}
+
+.v-data-table > .v-data-table__wrapper > table > tbody > tr:hover {
+  background: #f8fafc !important;
+}
+
+.v-data-table > .v-data-table__wrapper > table > tbody > tr > td {
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.theme--light.v-data-table > .v-data-table__wrapper > table > tbody > tr:not(:last-child) > td,
+.theme--light.v-data-table > .v-data-table__wrapper > table > tbody > tr:not(:last-child) > th {
+  border-color: var(--border-soft) !important;
+}
+
+/* ---------- Sidebar ---------- */
+
+.v-navigation-drawer {
+  border-right: none !important;
+}
+
+.v-navigation-drawer .v-list {
+  padding: 6px 10px !important;
+}
+
+.v-navigation-drawer .v-list-item {
+  color: var(--sidebar-text);
+  border-radius: 9px;
+  margin: 2px 0;
+  min-height: 40px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.v-navigation-drawer .v-list-item:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #fff;
+}
+
+.nav-item--active {
+  background: linear-gradient(90deg, rgba(22, 163, 74, 0.28), rgba(22, 163, 74, 0.1)) !important;
+  box-shadow: inset 3px 0 0 var(--accent);
+  color: #fff !important;
+}
+
+.nav-item--active .v-list-item__title,
+.nav-item--active .v-icon {
+  color: #fff !important;
+  font-weight: 600;
+}
+
+.brand-block {
+  padding: 18px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.brand-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: block;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.35);
+  flex-shrink: 0;
+}
+
+.brand-logo--lg {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 8px 20px rgba(22, 163, 74, 0.28);
+}
+
+/* ---------- App bar ---------- */
+
+.v-app-bar {
+  border-bottom: 1px solid var(--border) !important;
+}
+
+.v-app-bar-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 15.5px;
+}
+
+/* ---------- Page headers ---------- */
+
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+
+.page-subtitle {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ---------- Stat cards ---------- */
+
+.stat-card {
+  height: 100%;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.stat-card:hover {
+  box-shadow: var(--card-shadow-hover) !important;
+  transform: translateY(-1px);
+}
+
+/* ---------- Flow builder cards (campaigns) ---------- */
+
+.flow-card {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  transition: box-shadow 0.2s ease;
+}
+
+.flow-card:hover {
+  box-shadow: var(--card-shadow-hover);
+}
+
+.flow-card--forced {
+  border-left: 4px solid var(--warning);
+  background: #fffbeb;
+}
+
+.flow-card--default {
+  border-left: 4px solid var(--accent);
+  background: #f0fdf4;
+}
+
+/* ---------- Chips ---------- */
+
+.v-chip.v-chip--label {
+  border-radius: 7px;
+  font-weight: 500;
+}
+
+/* ---------- Inputs ---------- */
+
+.v-application .v-text-field--outlined fieldset {
+  border-radius: 10px;
+  border-color: #d0d5dd;
+}
+
+.v-application .v-text-field--outlined:not(.v-input--is-focused):not(.v-input--has-state):hover > .v-input__control > .v-input__slot fieldset {
+  border-color: #98a2b3;
+}
+
+.v-application .v-text-field--outlined > .v-input__control > .v-input__slot fieldset {
+  transition: border-color 0.15s ease;
+}
+
+.v-application .primary--text {
+  caret-color: var(--accent) !important;
+}
+
+.v-application .v-input--is-focused > .v-input__control > .v-input__slot fieldset,
+.v-application .v-text-field--outlined > .v-input__control > .v-input__slot.v-input__slot--focused fieldset {
+  border-color: var(--accent) !important;
+}
+
+/* ---------- Code blocks ---------- */
+
+code {
+  background: #f1f5f9;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: #0f172a;
+  box-shadow: none;
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+pre {
+  background: #f1f5f9;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* ---------- Toasts ---------- */
+
+.toastify {
+  border-radius: 10px !important;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.18) !important;
+  font-weight: 500;
+  font-family: var(--font-stack);
+}
+
+.toastify.success {
+  background: var(--accent) !important;
+}
+
+.toastify.error {
+  background: var(--danger) !important;
+}
+
+.toastify.info {
+  background: var(--info) !important;
+}
+
+.toastify.warning {
+  background: var(--warning) !important;
+}
+
+/* ---------- Overlay spinner ---------- */
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  backdrop-filter: blur(4px);
+  background: rgba(20, 27, 39, 0.45);
+  z-index: 99999;
+  display: none;
+}
+
+#overlay .spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border: 5px solid rgba(255, 255, 255, 0.25);
+  border-top: 5px solid var(--accent);
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  animation: spin 0.9s cubic-bezier(0.5, 0.15, 0.5, 0.85) infinite;
+}
+
+.overlay_message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, 40px);
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+
+@keyframes spin {
+  0% { transform: translate(-50%, -50%) rotate(0deg); }
+  100% { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+/* ---------- Skeletons ---------- */
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #e9edf2;
+  border-radius: 6px;
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
+/* ---------- Empty states ---------- */
+
+.empty-state {
+  text-align: center;
+  padding: 44px 16px;
+  color: var(--text-secondary);
+}
+
+.empty-state .v-icon {
+  font-size: 44px;
+  color: #d0d5dd;
+  margin-bottom: 10px;
+}
+
+/* ---------- Color helpers (legacy) ---------- */
+
+.red { color: #f44336; }
+.green { color: var(--accent); }
+.blue { color: var(--info); }
+
+/* ---------- Editor page ---------- */
+
+.editor-topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 24px;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  margin-bottom: 16px;
+}
+
+.editor-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.editor-back:hover {
+  text-decoration: underline;
+}
+
+.editor-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ---------- Scrollbars ---------- */
+
+.v-data-table__wrapper::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.v-data-table__wrapper::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+}
+
+.v-data-table__wrapper::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover {
+  background: #98a2b3;
+}

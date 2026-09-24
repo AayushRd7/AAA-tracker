@@ -1,0 +1,409 @@
+{% raw %}
+<script type="text/x-template" id="dashboard-template">
+    <div>
+        <div class="d-flex align-center justify-space-between mb-4">
+            <div>
+                <div class="page-title">Dashboard</div>
+                <div class="page-subtitle">Performance overview across all campaigns</div>
+            </div>
+            <v-btn color="primary" elevation="0" :loading="loading" @click="loadData()">
+                <v-icon small class="mr-1">mdi-refresh</v-icon>Refresh
+            </v-btn>
+        </div>
+
+        <!-- Stat cards -->
+        <v-row dense>
+            <v-col v-for="metric in metrics" :key="metric.title" cols="12" sm="6" md="2">
+                <v-card class="pa-4 stat-card">
+                    <template v-if="loading">
+                        <v-skeleton-loader type="text, heading" class="mt-1"></v-skeleton-loader>
+                    </template>
+                    <template v-else>
+                        <div class="d-flex align-center">
+                            <v-avatar :color="metric.color + '1f'" size="40" class="mr-3">
+                                <v-icon small :color="metric.color">{{ metric.icon }}</v-icon>
+                            </v-avatar>
+                            <div class="text-caption grey--text text--darken-1">{{ metric.title }}</div>
+                        </div>
+                        <div class="text-h5 font-weight-bold mt-3">{{ metric.value }}</div>
+                    </template>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <!-- Filters -->
+        <v-card class="mt-4 pa-4">
+            <div class="d-flex flex-wrap align-center">
+                <div class="mr-2 mb-2">
+                    <v-chip v-for="preset in datePresets" :key="preset.label"
+                            small label outlined
+                            :color="activePreset === preset.label ? 'primary' : 'grey'"
+                            :class="activePreset === preset.label ? 'primary--text' : 'grey--text text--darken-2'"
+                            class="mr-1 mb-1"
+                            @click="applyPreset(preset)">
+                        {{ preset.label }}
+                    </v-chip>
+                </div>
+                <v-spacer></v-spacer>
+                <v-menu v-model="date_menu2" :close-on-content-click="false" transition="scale-transition" offset-y min-width="auto">
+                    <template v-slot:activator="{ on, attrs }">
+                        <v-text-field
+                                v-model="dateRangeText"
+                                label="Custom range"
+                                prepend-icon="mdi-calendar"
+                                readonly
+                                v-bind="attrs"
+                                v-on="on"
+                                outlined
+                                dense
+                                hide-details
+                                style="max-width: 240px;"
+                                class="mr-2"
+                        ></v-text-field>
+                    </template>
+                    <v-date-picker v-model="filters.date_range" range @input="date_menu2 = false"></v-date-picker>
+                </v-menu>
+                <v-select
+                        :items="['Hours', 'Days', 'Weeks', 'Months']"
+                        label="Detalization"
+                        v-model="filters.detailLevel"
+                        outlined
+                        dense
+                        hide-details
+                        style="max-width: 140px;"
+                        class="mr-2"
+                ></v-select>
+                <v-select
+                        :items="campaigns"
+                        v-model="filters.campaigns"
+                        label="Campaigns"
+                        item-text="name"
+                        item-value="id"
+                        outlined
+                        dense
+                        hide-details
+                        multiple
+                        chips
+                        small-chips
+                        style="max-width: 240px;"
+                ></v-select>
+            </div>
+        </v-card>
+
+        <!-- Main chart -->
+        <v-row class="mt-4">
+            <v-col cols="12">
+                <v-card class="pa-4">
+                    <div class="d-flex align-center justify-space-between mb-2">
+                        <div class="font-weight-medium">Performance over time</div>
+                        <v-btn text small color="primary" :disabled="!chartHasData" @click="exportChartCsv">
+                            <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
+                        </v-btn>
+                    </div>
+                    <apexchart
+                            height="400"
+                            type="area"
+                            :options="mainChart.chartOptions"
+                            :series="mainChart.series"
+                    ></apexchart>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <!-- Tables -->
+        <v-row>
+            <v-col cols="8">
+                <v-card>
+                    <div class="d-flex align-center justify-space-between pa-4 pb-0">
+                        <div class="font-weight-medium">Recent Visits</div>
+                        <v-btn text small color="primary" :disabled="!visits.length" @click="exportVisitsCsv">
+                            <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
+                        </v-btn>
+                    </div>
+                    <v-data-table
+                            :headers="headers"
+                            :items="visits"
+                            :items-per-page="10"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            dense
+                    >
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-inbox-outline</v-icon>
+                                <div class="mt-2">No data yet</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+            <v-col cols="4">
+                <v-card>
+                    <div class="d-flex align-center justify-space-between pa-4 pb-0">
+                        <div class="font-weight-medium">Latest Hits</div>
+                        <v-btn text small color="primary" :disabled="!visits.length" @click="exportVisitsCsv2">
+                            <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
+                        </v-btn>
+                    </div>
+                    <v-data-table
+                            :headers="headers2"
+                            :items="visits"
+                            :items-per-page="10"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            dense
+                    >
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-inbox-outline</v-icon>
+                                <div class="mt-2">No data yet</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+    </div>
+</script>
+
+<script type="application/javascript">
+    Vue.component('dashboard-component', {
+        template: '#dashboard-template',
+        data() {
+            return {
+                loading: false,
+                date_menu2: false,
+                activePreset: 'Last 30 days',
+                datePresets: [
+                    { label: 'Today', days: 0 },
+                    { label: 'Yesterday', days: 1 },
+                    { label: 'Last 7 days', days: 6 },
+                    { label: 'Last 30 days', days: 29 },
+                ],
+                filters: {
+                    campaigns: [],
+                    date_range: [
+                        new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().split('T')[0],
+                        new Date().toISOString().split('T')[0]
+                    ],
+                    detailLevel: 'Days',
+                },
+                campaigns: [],
+                metrics: [
+                    {title: 'Clicks', value: 0, color: '#2196f3', icon: 'mdi-cursor-default-click-outline'},
+                    {title: 'Unique Clicks', value: 0, color: '#3f51b5', icon: 'mdi-account-switch-outline'},
+                    {title: 'Conversions', value: 0, color: '#673ab7', icon: 'mdi-check-decagram-outline'},
+                    {title: 'Cost', value: '$0', color: '#ef4444', icon: 'mdi-cash-minus'},
+                    {title: 'Revenue', value: '$0', color: '#16a34a', icon: 'mdi-cash-plus'},
+                    {title: 'ROI', value: '0%', color: '#009688', icon: 'mdi-trending-up'},
+                ],
+                mainChart: {
+                    series: [
+                        { name: 'Visits', data: [] },
+                        { name: 'Unique Visits', data: [] },
+                        { name: 'Clicks', data: [] },
+                        { name: 'Conversions', data: [] },
+                        { name: 'Unique Clicks', data: [] },
+                    ],
+                    chartOptions: {
+                        chart: {
+                            background: 'None',
+                            id: 'basic-line',
+                            stacked: false,
+                            toolbar: { show: true },
+                            zoom: { enabled: false }
+                        },
+                        dataLabels: { enabled: false },
+                        stroke: {
+                            curve: 'monotoneCubic'
+                        },
+                        theme: { mode: 'light' },
+                        colors: ['#2563eb', '#7c3aed', '#16a34a', '#f59e0b', '#0ea5e9'],
+                        xaxis: {
+                            type: 'category',
+                            labels: {
+                                rotate: -45,
+                                style: {
+                                    colors: '#667085'
+                                }
+                            }
+                        },
+                        yaxis: {
+                            labels: {
+                                style: {
+                                    colors: '#667085'
+                                }
+                            }
+                        },
+                        legend: {
+                            position: 'top',
+                            horizontalAlign: 'left'
+                        },
+                    }
+                },
+                headers: [
+                    {text: 'IP', value: 'ip'},
+                    {text: 'Country', value: 'country'},
+                    {text: 'Url', value: 'url'},
+                    {text: 'Referrer', value: 'referrer'},
+                    {text: 'Time', value: 'received_at'},
+                ],
+                headers2: [
+                    {text: 'IP', value: 'ip'},
+                    {text: 'Country', value: 'country'},
+                    {text: 'Referrer', value: 'referrer'},
+                    {text: 'Time', value: 'received_at'},
+                ],
+                visits: [],
+            }
+        },
+        computed: {
+            dateRangeText() {
+                return this.filters.date_range.join(' ~ ')
+            },
+            chartHasData() {
+                return (this.mainChart.series[0] && this.mainChart.series[0].data.length > 0);
+            },
+        },
+        mounted() {
+            this.loadData();
+            this.$root.$on('load-dashboard', this.loadData);
+        },
+        methods: {
+            applyPreset(preset) {
+                this.activePreset = preset.label;
+                const to = new Date();
+                let from = new Date();
+                if (preset.label === 'Today') {
+                    // from = today
+                } else if (preset.label === 'Yesterday') {
+                    from = new Date(to);
+                    from.setDate(from.getDate() - 1);
+                    to.setDate(to.getDate() - 1);
+                } else {
+                    from.setDate(from.getDate() - preset.days);
+                }
+                this.filters.date_range = [from.toISOString().split('T')[0], to.toISOString().split('T')[0]];
+                this.loadData();
+            },
+            downloadCsv(headers, rows, filename) {
+                const csv = [headers, ...rows].map(r => r.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(',')).join('\n');
+                const blob = new Blob([csv], {type: 'text/csv'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                this.$root.$emit('show-message', {type: 'success', text: 'CSV exported'});
+            },
+            exportVisitsCsv() {
+                this.downloadCsv(
+                    this.headers.map(h => h.text),
+                    this.visits.map(it => this.headers.map(h => it[h.value])),
+                    'recent_visits.csv'
+                );
+            },
+            exportVisitsCsv2() {
+                this.downloadCsv(
+                    this.headers2.map(h => h.text),
+                    this.visits.map(it => this.headers2.map(h => it[h.value])),
+                    'latest_hits.csv'
+                );
+            },
+            exportChartCsv() {
+                const names = this.mainChart.series.map(s => s.name);
+                const rows = this.mainChart.series[0].data.map((point, i) =>
+                    names.map(name => {
+                        const p = this.mainChart.series.find(s => s.name === name).data[i];
+                        return p ? p.y : 0;
+                    })
+                );
+                this.downloadCsv(['Date', ...names], rows, 'performance.csv');
+            },
+            loadFiltersData() {
+                fetch('/backend/api/campaigns/')
+                    .then(res => res.json())
+                    .then(data => {
+                        this.campaigns = data;
+                    });
+            },
+            loadData(date) {
+                this.loading = true;
+                this.$root.$emit('show-overlay', 'Can take a while, 1+ minute');
+                this.loadFiltersData();
+
+                const payload = {
+                    campaigns: this.filters.campaigns,
+                    date_from: this.filters.date_range[0],
+                    date_to: this.filters.date_range[1],
+                    detail_level: this.filters.detailLevel
+                };
+
+                fetch('/backend/api/dashboard/visits', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        this.visits = data;
+                    });
+
+                fetch('/backend/api/dashboard/metrics', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        this.metrics = [
+                            {title: 'Clicks', value: data.metrics.clicks, color: '#2196f3', icon: 'mdi-cursor-default-click-outline'},
+                            {title: 'Unique Clicks', value: data.metrics.unique_clicks, color: '#3f51b5', icon: 'mdi-account-switch-outline'},
+                            {title: 'Conversions', value: data.metrics.conversions, color: '#673ab7', icon: 'mdi-check-decagram-outline'},
+                            {title: 'Cost', value: `$${data.metrics.cost}`, color: '#ef4444', icon: 'mdi-cash-minus'},
+                            {title: 'Revenue', value: `$${data.metrics.revenue}`, color: '#16a34a', icon: 'mdi-cash-plus'},
+                            {title: 'ROI', value: data.metrics.roi, color: '#009688', icon: 'mdi-trending-up'},
+                        ];
+
+                        const categories = data.chart.labels;
+
+                        this.mainChart.series = [
+                            {
+                                name: 'Visits',
+                                data: categories.map((label, i) => ({x: label, y: data.chart.visits[i] || 0}))
+                            },
+                            {
+                                name: 'Unique Visits',
+                                data: categories.map((label, i) => ({x: label, y: data.chart.unique_visits[i] || 0}))
+                            },
+                            {
+                                name: 'Clicks',
+                                data: categories.map((label, i) => ({x: label, y: data.chart.clicks[i] || 0}))
+                            },
+                            {
+                                name: 'Conversions',
+                                data: categories.map((label, i) => ({x: label, y: data.chart.conversions[i] || 0}))
+                            },
+                            {
+                                name: 'Unique Clicks',
+                                data: categories.map((label, i) => ({
+                                    x: label,
+                                    y: data.chart.unique_clicks[i] || 0
+                                }))
+                            }
+                        ];
+
+                        this.mainChart.chartOptions.xaxis.type = 'category';
+                        delete this.mainChart.chartOptions.xaxis.categories;
+
+                        this.loading = false;
+                        this.$root.$emit('hide-overlay');
+                    }).catch(() => {
+                        this.loading = false;
+                        this.$root.$emit('hide-overlay');
+                    });
+
+            },
+
+        }
+    });
+</script>
+{% endraw %}

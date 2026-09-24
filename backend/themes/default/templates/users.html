@@ -1,0 +1,316 @@
+{% raw %}
+<script type="text/x-template" id="users-template">
+    <v-container fluid>
+        <v-row align="center" class="mb-4">
+            <v-col>
+                <div class="page-title">Users</div>
+                <div class="page-subtitle">Manage dashboard users</div>
+            </v-col>
+            <v-col class="d-flex justify-end" cols="auto">
+                <v-btn color="primary" elevation="0" @click="openCreate">
+                    <v-icon small class="mr-1">mdi-plus</v-icon>
+                    Add User
+                </v-btn>
+            </v-col>
+        </v-row>
+
+        <v-dialog v-model="dialog" max-width="500px">
+            <v-card>
+                <v-card-title>
+                    <span class="text-h6">{{ isEdit ? 'Edit User' : 'Add User' }}</span>
+                </v-card-title>
+
+                <v-card-text>
+
+                    <v-text-field
+                            label="Username"
+                            v-model="form.username"
+                            outlined
+                            dense
+                            :disabled="isEdit"
+                    ></v-text-field>
+
+                    <v-text-field
+                            label="Email"
+                            v-model="form.email"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                    <v-text-field
+                            label="Password"
+                            v-model="form.password"
+                            type="password"
+                            outlined
+                            dense
+                            :rules="[v => !isEdit || v.length > 0 || 'Password is required']"
+                            :hint="isEdit ? 'Leave blank to keep existing password' : ''"
+                    ></v-text-field>
+
+                    <v-text-field
+                            v-if="!isEdit || form.password"
+                            label="Confirm Password"
+                            v-model="form.confirmPassword"
+                            type="password"
+                            outlined
+                            dense
+                            :rules="[v => v === form.password || 'Passwords do not match']"
+                    ></v-text-field>
+
+                    <v-switch
+                            label="Active"
+                            v-model="form.active"
+                            inset
+                            dense
+                    ></v-switch>
+
+                </v-card-text>
+
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="close">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" @click="save">Save</v-btn>
+                </v-card-actions>
+
+            </v-card>
+        </v-dialog>
+
+
+        <v-row dense class="mt-4">
+            <v-col>
+                <v-card>
+                    <v-data-table
+                            :headers="headers"
+                            :items="users"
+                            dense
+                            :items-per-page="10"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                    >
+
+                        <template v-slot:item.created_at="{ item }">
+                            {{ $formatDate(item.created_at) }}
+                        </template>
+                        <template v-slot:item.updated_at="{ item }">
+                            {{ $formatDate(item.updated_at) }}
+                        </template>
+
+                        <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                        <v-icon small>mdi-pencil-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Edit</span>
+                            </v-tooltip>
+                            <v-tooltip bottom v-if="item.username !== 'tracker_admin'">
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteUser(item)">
+                                        <v-icon small>mdi-trash-can-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Delete</span>
+                            </v-tooltip>
+                        </template>
+
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-inbox-outline</v-icon>
+                                <div class="mt-2">No data yet</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <confirm-dialog-component ref="confirm" />
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('users-component', {
+        template: '#users-template',
+        data() {
+            return {
+                isEdit: false,
+                dialog: false,
+                headers: [
+                    {text: 'Username', value: 'username'},
+                    {text: 'Email', value: 'email'},
+                    {text: 'Created', value: 'created_at'},
+                    {text: 'Updated', value: 'updated_at'},
+                    {text: 'Is Active', value: 'active'},
+                    {text: 'Is Admin', value: 'is_admin'},
+                    {text: 'Actions', value: 'actions', sortable: false},
+                ],
+                users: [],
+                form: {
+                    id: null,
+                    username: '',
+                    email: '',
+                    password: '',
+                    confirmPassword: '',
+                    active: true
+                }
+
+            }
+        },
+        computed: {
+            dateRangeText() {
+                return this.date_range.join(' ~ ')
+            },
+        },
+        mounted() {
+            this.loadUsers();
+            this.$root.$on('load-users', this.loadUsers);
+        },
+        methods: {
+            loadUsers() {
+                this.loadingUsers = true;
+                fetch("/backend/api/users/", {
+                    method: "GET",
+                    credentials: "include"
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        this.users = data;
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                    })
+                    .finally(() => {
+                        this.loadingUsers = false;
+                    });
+            },
+
+            openCreate() {
+                this.isEdit = false;
+                this.dialog = true;
+                this.form = {
+                    id: null,
+                    username: '',
+                    email: '',
+                    password: '',
+                    active: true
+                };
+            },
+
+            openEdit(user) {
+                this.isEdit = true;
+                this.dialog = true;
+                this.form = {
+                    id: user.id,
+                    username: user.username,
+                    email: user.email,
+                    password: '',
+                    active: user.active
+                };
+            },
+
+            save() {
+                if (!this.form.username || (!this.isEdit && !this.form.password)) {
+                    this.$root.$emit("show-message", {type: "error", text: "Username and password are required."});
+                    return;
+                }
+                if (!this.form.username || (!this.isEdit && !this.form.password)) {
+                    this.$root.$emit("show-message", {
+                        type: "error",
+                        text: "Username and password are required."
+                    });
+                    return;
+                }
+
+                if (this.form.password && this.form.password !== this.form.confirmPassword) {
+                    this.$root.$emit("show-message", {
+                        type: "error",
+                        text: "Passwords do not match."
+                    });
+                    return;
+                }
+
+                const payload = {
+                    username: this.form.username,
+                    email: this.form.email,
+                    active: this.form.active
+                };
+
+                if (this.form.password) {
+                    payload.password = this.form.password;
+                }
+
+                const method = this.isEdit ? "PATCH" : "POST";
+                const url = this.isEdit
+                    ? `/backend/api/users/${this.form.id}`
+                    : "/backend/api/users/";
+
+                fetch(url, {
+                    method,
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(payload),
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const text = await res.text();
+                        if (!res.ok) {
+                            let msg = "Unknown error";
+                            try {
+                                const err = JSON.parse(text);
+                                msg = err.detail || msg;
+                            } catch (e) {
+                                msg = text;
+                            }
+                            throw new Error(msg);
+                        }
+                        this.dialog = false;
+                        this.$root.$emit("show-message", {
+                            type: "success",
+                            text: this.isEdit ? "User updated" : "User created"
+                        });
+                        this.loadUsers();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                    });
+            },
+
+            async deleteUser(user) {
+                const ok = await this.$refs.confirm.open('Delete User', 'Are you sure you want to delete this user? This cannot be undone.');
+                if (!ok) return;
+
+                fetch(`/backend/api/users/${user.id}`, {
+                    method: "DELETE",
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        if (!res.ok) {
+                            const text = await res.text();
+                            let msg = text;
+                            try {
+                                const data = JSON.parse(text);
+                                msg = data.detail || msg;
+                            } catch {
+                            }
+                            throw new Error(msg);
+                        }
+
+                        this.$root.$emit("show-message", {
+                            type: "success",
+                            text: "User deleted"
+                        });
+                        this.loadUsers();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                    });
+            },
+
+            close() {
+                this.dialog = false;
+            }
+        }
+
+    });
+</script>
+{% endraw %}

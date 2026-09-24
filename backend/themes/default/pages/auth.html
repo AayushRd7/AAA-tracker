@@ -1,0 +1,88 @@
+<script type="text/x-template" id="auth-page-template">
+  <v-row align="center" justify="center" style="min-height: 100vh;">
+    <v-col cols="12" sm="8" md="4">
+      <div class="text-center mb-4">
+        <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo brand-logo--lg mx-auto">
+        <div class="text-h5 font-weight-bold mt-3" style="letter-spacing: 0.4px;">AAA TRACKER</div>
+        <div class="page-subtitle">Sign in to your account</div>
+      </div>
+      <v-card class="pa-6" elevation="2">
+        <v-form @submit.prevent="login">
+          <v-text-field
+            label="Username"
+            v-model="username"
+            prepend-inner-icon="mdi-account-outline"
+            outlined
+            dense
+            required
+          ></v-text-field>
+
+          <v-text-field
+            label="Password"
+            v-model="password"
+            :type="showPassword ? 'text' : 'password'"
+            prepend-inner-icon="mdi-lock-outline"
+            :append-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
+            @click:append="showPassword = !showPassword"
+            outlined
+            dense
+            required
+          ></v-text-field>
+
+          <v-btn color="primary" class="mt-2" block elevation="0" large type="submit" :loading="loading">
+            Login
+          </v-btn>
+        </v-form>
+      </v-card>
+    </v-col>
+  </v-row>
+</script>
+
+<!-- ================== -->
+<!-- Component registration -->
+<!-- ================== -->
+<script type="application/javascript">
+Vue.component('auth-page-component', {
+  template: '#auth-page-template',
+  data() {
+    return {
+      username: '',
+      password: '',
+      showPassword: false,
+      loading: false,
+    };
+  },
+  methods: {
+    async login() {
+      this.loading = true;
+      try {
+        const response = await fetch('/backend/api/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            username: this.username,
+            password: this.password
+          }),
+          credentials: 'include'
+        });
+
+        if (!response.ok) {
+          throw new Error('Login failed');
+        }
+
+        window.location.href = '/backend/dashboard';
+
+      } catch (error) {
+        this.$root.$emit('show-message', {
+          type: 'error',
+          text: 'Wrong username or password!'
+        });
+      } finally {
+        this.loading = false;
+      }
+    }
+  }
+});
+</script>

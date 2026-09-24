@@ -1,0 +1,55 @@
+<script type="text/x-template" id="dashboard-page-template">
+    <div>
+        <div v-show="$root.activeSection === 'dashboard'">
+            <dashboard-component></dashboard-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'campaigns'">
+            <campaigns-component></campaigns-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'landings'">
+            <landings-component></landings-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'affiliates'">
+            <affiliates-component></affiliates-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'offers'">
+            <offers-component></offers-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'sources'">
+            <sources-component></sources-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'reports'">
+            <reports-component></reports-component>
+        </div>
+
+        {% if is_authenticated_user_type == 'admin' %}
+        <div v-show="$root.activeSection === 'domains'">
+            <domains-component></domains-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'settings'">
+            <settings-component></settings-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'users'">
+            <users-component></users-component>
+        </div>
+        {% endif %}
+
+        <div v-show="$root.activeSection === 'about'">
+            <about-component></about-component>
+        </div>
+    </div>
+</script>
+
+<script type="application/javascript">
+    Vue.component('dashboard-page-component', {
+        template: '#dashboard-page-template',
+    });
+</script>

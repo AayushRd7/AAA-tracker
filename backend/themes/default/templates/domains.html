@@ -1,0 +1,496 @@
+{% raw %}
+<script type="text/x-template" id="domains-template">
+    <v-container fluid>
+        <v-row align="center" class="mb-4">
+            <v-col>
+                <div class="page-title">Domains</div>
+                <div class="page-subtitle">Manage your domains</div>
+            </v-col>
+            <v-col class="d-flex justify-end" cols="auto">
+                <v-btn color="primary" elevation="0" class="mr-2" @click="checkDomains">
+                    <v-icon small class="mr-1">mdi-check-circle-outline</v-icon>
+                    Check Domains Statuses
+                </v-btn>
+                <v-btn color="primary" elevation="0" @click="openCreate">
+                    <v-icon small class="mr-1">mdi-plus</v-icon>
+                    Add Domain
+                </v-btn>
+            </v-col>
+        </v-row>
+
+
+        <v-dialog v-model="dialog" max-width="500px">
+            <v-card>
+                <v-card-title>
+                    <span class="text-h6">{{ isEdit ? 'Edit Domain' : 'Add Domain' }}</span>
+                </v-card-title>
+
+                <v-card-text>
+
+                    <v-text-field
+                            label="Domain (e.g. example.com)"
+                            v-model="form.domain"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                    <v-switch
+                            label="Redirect to HTTPS"
+                            v-model="form.redirect_https"
+                            inset
+                            dense
+                    ></v-switch>
+
+                    <v-select
+                            label="404 Handling"
+                            :items="[
+                                { text: 'Handle 404 errors', value: 'handle' },
+                                { text: 'Error', value: 'error' }
+                              ]"
+                            v-model="form.handle_404"
+                            outlined
+                            dense
+                    ></v-select>
+
+                    <v-select
+                            label="Default Campaign"
+                            :items="campaigns"
+                            item-text="name"
+                            item-value="id"
+                            v-model="form.default_campaign_id"
+                            outlined
+                            dense
+                    ></v-select>
+
+                    <v-text-field
+                            label="Group Name (optional)"
+                            v-model="form.group_name"
+                            outlined
+                            dense
+                    ></v-text-field>
+
+                </v-card-text>
+
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="close">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" @click="save">Save</v-btn>
+                </v-card-actions>
+
+            </v-card>
+        </v-dialog>
+
+
+        <v-row dense class="mt-4">
+            <v-col>
+                <v-card>
+                    <v-data-table
+                            :headers="headers"
+                            :items="domains"
+                            :loading="loadingDomains"
+                            dense
+                            :items-per-page="10"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                    >
+                        <template v-slot:item.domain="{ item }">
+                            <a v-if="item.domain" :href="'https://'+item.domain" target="_blank">
+                                https://{{ item.domain }}
+                            </a>
+                        </template>
+                        <template v-slot:item.status="{ item }">
+                            <v-chip
+                                    :color="statusColor(item.status)"
+                                    dark
+                                    small
+                            >
+                                {{ item.status }}
+                            </v-chip>
+                        </template>
+                        <template v-slot:item.ssl_status="{ item }">
+                            <v-chip
+                                    :color="statusColor(item.ssl_status)"
+                                    dark
+                                    small
+                            >
+                                {{ item.ssl_status }}
+                            </v-chip>
+                        </template>
+                        <template v-slot:item.default_campaign_id="{ item }">
+                            {{ campaignName(item.default_campaign_id) }}
+                        </template>
+                        <template v-slot:item.created_at="{ item }">
+                            {{ $formatDate(item.created_at) }}
+                        </template>
+                        <template v-slot:item.updated_at="{ item }">
+                            {{ $formatDate(item.updated_at) }}
+                        </template>
+                        <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                        <v-icon small>mdi-pencil-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Edit</span>
+                            </v-tooltip>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="info" v-bind="attrs" v-on="on" @click="setupSSL(item)">
+                                        <v-icon small>mdi-certificate-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Update SSL for 90 days</span>
+                            </v-tooltip>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteDomain(item)">
+                                        <v-icon small>mdi-trash-can-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Delete</span>
+                            </v-tooltip>
+                        </template>
+
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-inbox-outline</v-icon>
+                                <div class="mt-2">No data yet</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <confirm-dialog-component ref="confirm" />
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('domains-component', {
+        template: '#domains-template',
+        data() {
+            return {
+                dialog: false,
+                isEdit: false,
+                form: {
+                    id: null,
+                    domain: '',
+                    redirect_https: true,
+                    handle_404: 'error',
+                    default_campaign_id: '',
+                    group_name: '',
+                    status: 'pending'
+                },
+                newDomain: '',
+                loadingDomains: false,
+                domains: [],
+                campaigns: [],
+                headers: [
+                    {text: 'ID', value: 'id'},
+                    {text: 'Domain', value: 'domain'},
+                    {text: 'Redirect HTTPS', value: 'redirect_https'},
+                    {text: 'Handle 404', value: 'handle_404'},
+                    {text: 'Default Campaign', value: 'default_campaign_id'},
+                    {text: 'Group Name', value: 'group_name'},
+                    {text: 'SSL Status', value: 'ssl_status'},
+                    {text: 'Status', value: 'status'},
+                    {text: 'Created At', value: 'created_at'},
+                    {text: 'Updated At', value: 'updated_at'},
+                    {text: 'Actions', value: 'actions'},
+                ],
+            };
+        },
+        mounted() {
+            this.loadDomains();
+            this.$root.$on('load-domains', this.loadDomains);
+        },
+        methods: {
+            statusColor(status) {
+                switch (status) {
+                    case 'not_started':
+                        return 'grey';
+                    case 'success':
+                        return 'green';
+                    case 'pending':
+                        return 'grey';
+                    case 'error':
+                        return 'red';
+                    default:
+                        return 'blue';
+                }
+            },
+            async setupSSL(item) {
+                const ok = await this.$refs.confirm.open('Update SSL', `Are you sure you want to update domain ssl for "${item.domain}"? You can use domain without SSL with cloudflare SSL. DONT RELOAD PAGE. Can take up to 10 minute per domain... And restart nginx...`, 'Update SSL');
+                if (!ok) {
+                    return;
+                }
+
+                this.$root.$emit('show-overlay', 'DONT RELOAD PAGE. Updating domains SSL... Can take up to 10 minute per domain... And restart nginx...');
+
+                fetch(`/domain_update_nginx_and_ssl?domain_id=`+item.id, {
+                    method: 'GET',
+                    credentials: 'include'
+                })
+                    .then(async (response) => {
+                        const text = await response.text();
+                        if (!response.ok) {
+                            let message = 'Unknown error setting up SSL';
+                            try {
+                                const errorData = JSON.parse(text);
+                                if (Array.isArray(errorData.detail)) {
+                                    message = errorData.detail.map(d => d.msg).join('; ');
+                                } else if (typeof errorData.detail === 'string') {
+                                    message = errorData.detail;
+                                }
+                            } catch (e) {
+                                message = text;
+                            }
+                            throw new Error(message);
+                        }
+
+                        await this.loadDomains();
+                        this.$root.$emit('hide-overlay');
+
+                        this.$root.$emit('show-message', {
+                            type: 'success',
+                            text: 'SSL setup successfully!'
+                        });
+                    })
+                    .catch((error) => {
+                        console.error('Error setting up SSL:', error);
+                        this.$root.$emit('hide-overlay');
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: error.message
+                        });
+                    });
+            },
+            campaignName(id) {
+                const campaign = this.campaigns.find(c => String(c.id) === String(id));
+                return campaign ? campaign.name : '-';
+            },
+            async checkDomains() {
+                this.$root.$emit('show-overlay', 'Checking domains statuses... Can take up to 20 seconds per domain...');
+                await fetch("/backend/api/domains/check-domains");
+                await this.loadDomains();
+                this.$root.$emit('hide-overlay');
+                this.$root.$emit('show-message', {
+                    type: 'success',
+                    text: 'Domains statuses checked successfully!'
+                });
+            },
+            async loadCampaigns() {
+                try {
+                    const response = await fetch('/backend/api/campaigns/', {
+                        method: 'GET',
+                        credentials: 'include'
+                    });
+                    const text = await response.text();
+                    if (!response.ok) {
+                        let message = 'Error loading campaigns';
+                        try {
+                            const errorData = JSON.parse(text);
+                            message = errorData.detail || message;
+                        } catch (e) {
+                            message = text;
+                        }
+                        throw new Error(message);
+                    }
+                    this.campaigns = JSON.parse(text);
+                    this.campaigns.unshift({id: '', name: '— No Campaign —'});
+                } catch (error) {
+                    this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: error.message
+                    });
+                }
+            },
+            async openCreate() {
+                await this.loadCampaigns();
+                this.isEdit = false;
+                this.form = {
+                    id: null,
+                    domain: '',
+                    redirect_https: true,
+                    handle_404: 'error',
+                    default_campaign_id: '',
+                    group_name: '',
+                    status: 'pending'
+                };
+                this.dialog = true;
+            },
+
+            async openEdit(item) {
+                await this.loadCampaigns();
+                this.isEdit = true;
+                this.form = {
+                    id: item.id,
+                    domain: item.domain,
+                    redirect_https: item.redirect_https,
+                    handle_404: item.handle_404,
+                    default_campaign_id: item.default_campaign_id,
+                    group_name: item.group_name
+                };
+                this.dialog = true;
+            },
+
+            close() {
+                this.dialog = false;
+            },
+
+            save() {
+                if (!this.form.domain) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Domain is required.'});
+                    return;
+                }
+
+                const data = {
+                    domain: this.form.domain,
+                    redirect_https: this.form.redirect_https,
+                    handle_404: this.form.handle_404,
+                    default_campaign_id: this.form.default_campaign_id || null,
+                    group_name: this.form.group_name || ''
+                };
+
+                const url = this.isEdit
+                    ? `/backend/api/domains/${this.form.id}`
+                    : `/backend/api/domains/`;
+
+                const method = this.isEdit ? 'PUT' : 'POST';
+
+                fetch(url, {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data),
+                    credentials: 'include'
+                })
+                    .then(async (response) => {
+                        const text = await response.text();
+                        if (!response.ok) {
+                            let message = 'Unknown error';
+                            try {
+                                const errorData = JSON.parse(text);
+                                if (Array.isArray(errorData.detail)) {
+                                    message = errorData.detail.map(d => d.msg).join('; ');
+                                } else if (typeof errorData.detail === 'string') {
+                                    message = errorData.detail;
+                                }
+                            } catch (e) {
+                                message = text;
+                            }
+                            throw new Error(message);
+                        }
+
+                        this.dialog = false;
+                        this.$root.$emit('show-message', {
+                            type: 'success',
+                            text: this.isEdit ? 'Domain updated successfully!' : 'Domain created successfully!'
+                        });
+                        this.loadDomains();
+                    })
+                    .catch((error) => {
+                        console.error('Error saving domain:', error);
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: error.message
+                        });
+                    });
+            },
+
+
+            async loadDomains() {
+                await this.loadCampaigns();
+                this.loadingDomains = true;
+                fetch('/backend/api/domains/', {
+                    method: 'GET',
+                    credentials: 'include'
+                })
+                    .then(async (response) => {
+                        const text = await response.text();
+                        if (!response.ok) {
+                            let message = 'Unknown error loading domains';
+                            try {
+                                const errorData = JSON.parse(text);
+                                if (Array.isArray(errorData.detail)) {
+                                    message = errorData.detail.map(d => d.msg).join('; ');
+                                } else if (typeof errorData.detail === 'string') {
+                                    message = errorData.detail;
+                                }
+                            } catch (e) {
+                                message = text;
+                            }
+                            throw new Error(message);
+                        }
+
+                        let data = [];
+                        try {
+                            data = JSON.parse(text);
+                        } catch (e) {
+                            console.warn('Response is not valid JSON:', text);
+                        }
+
+                        this.domains = data;
+
+                    })
+                    .catch((error) => {
+                        console.error('Error fetching domains:', error);
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: error.message
+                        });
+                    })
+                    .finally(() => {
+                        this.loadingDomains = false;
+                    });
+            },
+
+            async deleteDomain(item) {
+                const ok = await this.$refs.confirm.open('Delete Domain', 'Are you sure you want to delete this domain? This cannot be undone.');
+                if (!ok) {
+                    return;
+                }
+
+                fetch(`/backend/api/domains/${item.id}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                })
+                    .then(async (response) => {
+                        const text = await response.text();
+                        if (!response.ok) {
+                            let message = 'Unknown error deleting domain';
+                            try {
+                                const errorData = JSON.parse(text);
+                                if (Array.isArray(errorData.detail)) {
+                                    message = errorData.detail.map(d => d.msg).join('; ');
+                                } else if (typeof errorData.detail === 'string') {
+                                    message = errorData.detail;
+                                }
+                            } catch (e) {
+                                message = text;
+                            }
+                            throw new Error(message);
+                        }
+
+                        this.$root.$emit('show-message', {
+                            type: 'success',
+                            text: 'Domain deleted successfully!'
+                        });
+                        this.loadDomains();
+                    })
+                    .catch((error) => {
+                        console.error('Error deleting domain:', error);
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: error.message
+                        });
+                    });
+            }
+        }
+
+    });
+
+</script>
+{% endraw %}

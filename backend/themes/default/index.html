@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AAA TRACKER</title>
+
+    <link rel="icon" type="image/svg+xml" href="/backend/backend/img/logo.svg">
+    <link rel="alternate icon" type="image/x-icon" href="favicon.ico">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet">
+
+    <!-- Vuetify CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@2.7.2/dist/vuetify.min.css" rel="stylesheet">
+
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+
+    <!-- Vue 2 -->
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.7.16/dist/vue.js"></script>
+
+    <!-- Vuetify JS -->
+    <script src="https://cdn.jsdelivr.net/npm/vuetify@2.7.2/dist/vuetify.js"></script>
+
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+    <!-- ApexCharts -->
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue-apexcharts"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/terser@5.30.2/dist/bundle.min.js"></script>
+
+    <link href="/backend/backend/css/style.css" rel="stylesheet">
+</head>
+<body>
+{% raw %}
+    <script type="application/javascript">
+        async function minifyScript(code) {
+              const result = await Terser.minify(code, {
+                compress: true,
+                mangle: true,
+              });
+              return result.code;
+            }
+    </script>
+
+<div id="overlay">
+  <div class="spinner"></div>
+    <div class="overlay_message" id="overlay_message">Loading...</div>
+</div>
+<script type="application/javascript">
+    Vue.prototype.$formatDate = function(dateStr, locale = 'en-US') {
+      if (!dateStr) return '';
+      const options = {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'America/New_York' // or leave empty to use local time
+      };
+      return new Date(dateStr).toLocaleString(locale, options);
+    };
+</script>
+<script type="application/javascript">
+    Vue.component('toast-list-component', {
+        template: `<div></div>`,
+        data() {
+            return {
+                toasts: []
+            };
+        },
+        mounted() {
+            this.$root.$on('show-message', (payload) => {
+                Toastify({
+                    text: payload.text || 'Something happened',
+                    className: payload.type || 'info',
+                    gravity: "top",
+                    position: "right",
+                    stopOnFocus: true,
+                    duration: 3000,
+                }).showToast();
+            });
+
+            this.$root.$on('show-overlay', (message) => { this.showOverlay(message)});
+            this.$root.$on('hide-overlay', this.hideOverlay);
+        },
+        methods: {
+            showOverlay(message) {
+              document.getElementById('overlay').style.display = 'block';
+              document.getElementById('overlay_message').innerText = message || 'Loading...';
+            },
+            hideOverlay() {
+              document.getElementById('overlay').style.display = 'none';
+            }
+        }
+    });
+
+    Vue.component('confirm-dialog-component', {
+        template: `
+            <v-dialog v-model="visible" max-width="420px" persistent>
+                <v-card>
+                    <v-card-title class="text-h6">{{ title }}</v-card-title>
+                    <v-card-text class="body-2 grey--text text--darken-2">{{ text }}</v-card-text>
+                    <v-card-actions>
+                        <v-spacer></v-spacer>
+                        <v-btn text @click="resolve(false)">Cancel</v-btn>
+                        <v-btn color="primary" elevation="0" @click="resolve(true)">{{ confirmText }}</v-btn>
+                    </v-card-actions>
+                </v-card>
+            </v-dialog>
+        `,
+        data() {
+            return {
+                visible: false,
+                title: '',
+                text: '',
+                confirmText: 'Confirm',
+                _resolve: null,
+            };
+        },
+        methods: {
+            open(title, text, confirmText = 'Confirm') {
+                this.title = title;
+                this.text = text;
+                this.confirmText = confirmText;
+                this.visible = true;
+                return new Promise((resolve) => { this._resolve = resolve; });
+            },
+            resolve(result) {
+                this.visible = false;
+                if (this._resolve) { this._resolve(result); this._resolve = null; }
+            },
+        },
+    });
+</script>
+
+{% endraw %}
+
+{% if is_authenticated_user_type %}
+    {% include "templates/about.html" %}
+    {% include "templates/dashboard.html" %}
+    {% include "templates/campaigns.html" %}
+    {% include "templates/landings.html" %}
+    {% include "templates/affiliates.html" %}
+    {% include "templates/offers.html" %}
+    {% include "templates/reports.html" %}
+    {% include "templates/sources.html" %}
+    {% if is_authenticated_user_type == 'admin' %}
+        {% include "templates/users.html" %}
+        {% include "templates/settings.html" %}
+        {% include "templates/domains.html" %}
+    {% endif %}
+{% endif %}
+
+{% include page_to_include %}
+<div id="app">
+    <v-app>
+        {% if page == 'dashboard' and is_authenticated_user_type %}
+        {% raw %}
+        <v-navigation-drawer v-model="drawer" app color="#1a2332" dark permanent>
+            <div class="brand-block d-flex align-center px-4">
+                <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo mr-3">
+                <div>
+                    <div class="white--text font-weight-bold" style="font-size: 16px; letter-spacing: 0.4px;">AAA TRACKER</div>
+                    <div style="font-size: 11px; color: #64748b;">Campaign Analytics</div>
+                </div>
+            </div>
+            <v-list dense nav class="mt-2">
+                <v-list-item link :input-value="activeSection === 'dashboard'" active-class="nav-item--active" @click="activeSection = 'dashboard'">
+                    <v-list-item-icon><v-icon>mdi-view-dashboard-outline</v-icon></v-list-item-icon>
+                    <v-list-item-title>Dashboard</v-list-item-title>
+                </v-list-item>
+                <v-list-item link :input-value="activeSection === 'campaigns'" active-class="nav-item--active" @click="activeSection = 'campaigns'">
+                    <v-list-item-icon><v-icon>mdi-sitemap</v-icon></v-list-item-icon>
+                    <v-list-item-title>Campaigns</v-list-item-title>
+                </v-list-item>
+                <v-list-item link :input-value="activeSection === 'landings'" active-class="nav-item--active" @click="activeSection = 'landings'">
+                    <v-list-item-icon><v-icon>mdi-lan</v-icon></v-list-item-icon>
+                    <v-list-item-title>Landing Pages</v-list-item-title>
+                </v-list-item>
+                <v-list-item link :input-value="activeSection === 'affiliates'" active-class="nav-item--active" @click="activeSection = 'affiliates'">
+                    <v-list-item-icon><v-icon>mdi-cash-multiple</v-icon></v-list-item-icon>
+                    <v-list-item-title>Affiliate Networks</v-list-item-title>
+                </v-list-item>
+                <v-list-item link :input-value="activeSection === 'offers'" active-class="nav-item--active" @click="activeSection = 'offers'">
+                    <v-list-item-icon><v-icon>mdi-tag-outline</v-icon></v-list-item-icon>
+                    <v-list-item-title>Offers</v-list-item-title>
+                </v-list-item>
+                <v-list-item link :input-value="activeSection === 'sources'" active-class="nav-item--active" @click="activeSection = 'sources'">
+                    <v-list-item-icon><v-icon>mdi-database-outline</v-icon></v-list-item-icon>
+                    <v-list-item-title>Sources</v-list-item-title>
+                </v-list-item>
+                <v-list-item link :input-value="activeSection === 'reports'" active-class="nav-item--active" @click="activeSection = 'reports'">
+                    <v-list-item-icon><v-icon>mdi-chart-line</v-icon></v-list-item-icon>
+                    <v-list-item-title>Reports</v-list-item-title>
+                </v-list-item>
+                {% endraw %}{% if is_authenticated_user_type == 'admin' %}{% raw %}
+                <v-list-item link :input-value="activeSection === 'domains'" active-class="nav-item--active" @click="activeSection = 'domains'">
+                    <v-list-item-icon><v-icon>mdi-domain</v-icon></v-list-item-icon>
+                    <v-list-item-title>Domains</v-list-item-title>
+                </v-list-item>
+                <v-list-item link :input-value="activeSection === 'settings'" active-class="nav-item--active" @click="activeSection = 'settings'">
+                    <v-list-item-icon><v-icon>mdi-cog-outline</v-icon></v-list-item-icon>
+                    <v-list-item-title>Settings</v-list-item-title>
+                </v-list-item>
+                <v-list-item link :input-value="activeSection === 'users'" active-class="nav-item--active" @click="activeSection = 'users'">
+                    <v-list-item-icon><v-icon>mdi-account-group</v-icon></v-list-item-icon>
+                    <v-list-item-title>Users</v-list-item-title>
+                </v-list-item>
+                {% endraw %}{% endif %}{% raw %}
+                <v-list-item link :input-value="activeSection === 'about'" active-class="nav-item--active" @click="activeSection = 'about'">
+                    <v-list-item-icon><v-icon>mdi-book-open-variant</v-icon></v-list-item-icon>
+                    <v-list-item-title>Documentation</v-list-item-title>
+                </v-list-item>
+            </v-list>
+            <template v-slot:append>
+                <div class="pa-4" style="font-size: 11px; color: #4b5a6e;">
+                    AAA Tracker · v1.0
+                </div>
+            </template>
+        </v-navigation-drawer>
+
+        <v-app-bar app clipped-left color="white" elevation="0" height="60">
+            <v-app-bar-nav-icon class="d-lg-none" @click="drawer = !drawer"></v-app-bar-nav-icon>
+            <v-app-bar-title>{{ pageTitle }}</v-app-bar-title>
+            <v-spacer></v-spacer>
+            <v-menu offset-y left>
+                <template v-slot:activator="{ on, attrs }">
+                    <v-btn icon v-bind="attrs" v-on="on">
+                        <v-icon>mdi-account-circle-outline</v-icon>
+                    </v-btn>
+                </template>
+                <v-list dense>
+                    <v-list-item>
+                        <v-list-item-icon class="mr-2"><v-icon small>mdi-shield-account-outline</v-icon></v-list-item-icon>
+                        <v-list-item-title class="text-capitalize">{{ roleLabel }}</v-list-item-title>
+                    </v-list-item>
+                    <v-divider></v-divider>
+                    <v-list-item link @click="logout">
+                        <v-list-item-icon class="mr-2"><v-icon small>mdi-logout</v-icon></v-list-item-icon>
+                        <v-list-item-title>Logout</v-list-item-title>
+                    </v-list-item>
+                </v-list>
+            </v-menu>
+        </v-app-bar>
+        {% endraw %}
+        {% endif %}
+
+        <v-main>
+            <v-container fluid class="pa-6">
+                {{ page_component | safe }}
+            </v-container>
+        </v-main>
+        <toast-list-component></toast-list-component>
+    </v-app>
+</div>
+<script type="application/javascript">
+    Vue.component('apexchart', VueApexCharts);
+    new Vue({
+        el: '#app',
+        vuetify: new Vuetify({
+            theme: {
+                options: { customProperties: true },
+                themes: {
+                    light: {
+                        primary: '#16a34a',
+                        secondary: '#1a2332',
+                        background: '#f4f6f8',
+                    }
+                }
+            }
+        }),
+        data() {
+            return {
+                activeSection: 'dashboard',
+                drawer: null,
+                dashboardShell: {{ 'true' if page == 'dashboard' and is_authenticated_user_type else 'false' }},
+                roleLabel: '{{ is_authenticated_user_type if is_authenticated_user_type else "" }}',
+            };
+        },
+        computed: {
+            pageTitle() {
+                const titles = {
+                    dashboard: 'Dashboard',
+                    campaigns: 'Campaigns',
+                    landings: 'Landing Pages',
+                    affiliates: 'Affiliate Networks',
+                    offers: 'Offers',
+                    sources: 'Traffic Sources',
+                    reports: 'Reports',
+                    domains: 'Domains',
+                    settings: 'Settings',
+                    users: 'Users',
+                    about: 'Documentation',
+                };
+                return titles[this.activeSection] || 'AAA Tracker';
+            },
+        },
+        watch: {
+            activeSection(key) {
+                if (!this.dashboardShell) return;
+                this.$emit('load-' + key);
+                localStorage.setItem('dashboard_tab', key);
+            },
+        },
+        mounted() {
+            if (!this.dashboardShell) return;
+            const saved = localStorage.getItem('dashboard_tab');
+            if (saved != null && saved !== '') {
+                if (/^\d+$/.test(saved)) {
+                    // Legacy numeric tab index from the old tabs UI
+                    const legacyOrder = ['dashboard','campaigns','landings','affiliates','offers','sources','reports','domains','settings','users','about'];
+                    this.activeSection = legacyOrder[parseInt(saved, 10)] || 'dashboard';
+                } else {
+                    this.activeSection = saved;
+                }
+            }
+        },
+        methods: {
+            async logout() {
+                document.cookie = "session_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=" + window.location.hostname + ";";
+                await fetch('/backend/api/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                window.location.href = '/backend/auth';
+            },
+        },
+    });
+
+</script>
+
+</body>
+</html>
