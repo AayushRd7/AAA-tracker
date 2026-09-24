@@ -7,4 +7,4 @@ sqlalchemy
 python-multipart
 pydantic[email]
 clickhouse_connect
-httpx
+httpxbcrypt

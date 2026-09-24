@@ -1,5 +1,5 @@
 # app_pages/auth.py
-from fastapi import APIRouter, Request, Response, HTTPException, status, Depends
+from fastapi import APIRouter, Request, Response, HTTPException, status, Depends, Header
 from pydantic import BaseModel
 
 from sqlalchemy.orm import Session
@@ -10,25 +10,101 @@ from hashlib import md5
 from db import get_db, get_user, SessionLocal
 from hashlib import md5
 from datetime import datetime, timedelta
+import secrets
+import json
+
+import bcrypt
+from sqlalchemy import text
 
 from models.user import UserORM
 
 router = APIRouter()
 
-# JWT configuration
+# JWT configuration (kept for compatibility; sessions are now DB-backed)
 SECRET_KEY = "your-super-secret-key-for-jwt"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 2400
 pass_salt = 'akm_'
 
+SESSION_TTL_DAYS = 30
 
-# Token generation
-def create_access_token(data: dict, expires_delta: timedelta = None):
-    to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS))
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+
+# ====== Password hashing (bcrypt, with legacy md5 auto-upgrade) ======
+def hash_password(plain: str) -> str:
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
+
+
+def is_bcrypt_hash(stored: str) -> bool:
+    return (stored or "").startswith(("$2a$", "$2b$", "$2y$"))
+
+
+def verify_password(plain: str, stored: str) -> bool:
+    stored = stored or ""
+    if is_bcrypt_hash(stored):
+        try:
+            return bcrypt.checkpw(plain.encode(), stored.encode())
+        except ValueError:
+            return False
+    # Legacy md5(akm_ + password) — verified, then upgraded on login
+    return md5((pass_salt + plain).encode()).hexdigest() == stored
+
+
+# ====== DB-backed sessions (revocable, survive restarts) ======
+_sessions_table_ready = False
+
+
+def ensure_sessions_table():
+    global _sessions_table_ready
+    if _sessions_table_ready:
+        return
+    db = SessionLocal()
+    db.execute(text("""
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            token TEXT PRIMARY KEY,
+            username VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            expires_at TIMESTAMP NOT NULL,
+            revoked BOOLEAN NOT NULL DEFAULT false
+        )
+    """))
+    db.commit()
+    db.close()
+    _sessions_table_ready = True
+
+
+def create_session(username: str) -> str:
+    ensure_sessions_table()
+    token = secrets.token_urlsafe(32)
+    db = SessionLocal()
+    db.execute(text(
+        "INSERT INTO auth_sessions (token, username, expires_at) "
+        "VALUES (:t, :u, :e)"),
+        {"t": token, "u": username,
+         "e": datetime.utcnow() + timedelta(days=SESSION_TTL_DAYS)})
+    db.commit()
+    db.close()
+    return token
+
+
+def revoke_session(token: str):
+    ensure_sessions_table()
+    db = SessionLocal()
+    db.execute(text("DELETE FROM auth_sessions WHERE token = :t"), {"t": token})
+    db.commit()
+    db.close()
+
+
+def load_api_token() -> str:
+    """The API token from the settings row (used for Bearer auth by external tools)."""
+    try:
+        db = SessionLocal()
+        row = db.execute(text("SELECT value FROM settings WHERE name = 'settings'")).fetchone()
+        db.close()
+        if row and row[0]:
+            return (json.loads(row[0]).get("apiToken") or "").strip()
+    except Exception:
+        pass
+    return ""
 
 
 # Model for passing the login and password
@@ -37,58 +113,69 @@ class LoginRequest(BaseModel):
     password: str
 
 
-# Secret key used to sign tokens
-SECRET_KEY = "your-super-secret-key"
-ALGORITHM = "HS256"
-
-# Fake user store
-fake_users_db = {
-    "admin": {
-        "username": "admin",
-        "password_hash": md5("akm_admin".encode()).hexdigest()
-    },
-    "user1": {
-        "username": "user1",
-        "password_hash": md5("akm_user".encode()).hexdigest()
-    }
-}
-
-
 # ====== Authorization check ======
 def is_authenticated(request: Request) -> any:
+    """Resolve the session cookie to 'admin' | 'user' | False (DB-backed)."""
     token = request.cookies.get("session_token")
     if not token:
         return False
 
     try:
-        # Decode the JWT token
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-
-        if not username:
-            return False
-
+        ensure_sessions_table()
         db: Session = SessionLocal()
-        user = get_user(db, username)
-        db.close()
-        if user:
-            if not user.active:
-                return False
-            else:
-                # Check that the token is not expired
-                if datetime.fromtimestamp(payload["exp"]) < datetime.utcnow():
-                    return False
-                else:
-                    if user.username == "tracker_admin":
-                        return "admin"
-                    else:
-                        return "user"
-        else:
+        row = db.execute(text(
+            "SELECT username, expires_at, revoked FROM auth_sessions WHERE token = :t"),
+            {"t": token}).fetchone()
+        if not row or row.revoked:
+            db.close()
+            return False
+        if row.expires_at and row.expires_at < datetime.utcnow():
+            db.close()
             return False
 
-
-    except JWTError:
+        user = get_user(db, row.username)
+        db.close()
+        if not user or not user.active:
+            return False
+        return "admin" if user.is_admin else "user"
+    except Exception:
         return False
+
+
+def get_session_username(request: Request) -> Optional[str]:
+    """Username for the current session cookie, or None."""
+    token = request.cookies.get("session_token")
+    if not token:
+        return None
+    try:
+        ensure_sessions_table()
+        db: Session = SessionLocal()
+        row = db.execute(text(
+            "SELECT username, expires_at, revoked FROM auth_sessions WHERE token = :t"),
+            {"t": token}).fetchone()
+        db.close()
+        if not row or row.revoked:
+            return None
+        if row.expires_at and row.expires_at < datetime.utcnow():
+            return None
+        return row.username
+    except Exception:
+        return None
+
+
+def require_api_auth(request: Request, authorization: Optional[str] = Header(None)):
+    """Dependency for API routers: accepts a session cookie or a Bearer API token."""
+    if authorization and authorization.lower().startswith("bearer "):
+        provided = authorization.split(" ", 1)[1].strip()
+        api_token = load_api_token()
+        if api_token and provided == api_token:
+            return "api_token"
+        raise HTTPException(status_code=401, detail="Invalid API token")
+
+    user_type = is_authenticated(request)
+    if not user_type:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user_type
 
 
 # ====== POST /login ======
@@ -98,25 +185,31 @@ async def login(request: Request, response: Response, login_data: LoginRequest, 
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    # Hash the password as "akm" + password
-    hashed_password = md5((pass_salt + login_data.password).encode()).hexdigest()
-
-    if user.password_hash != hashed_password:
+    if not verify_password(login_data.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials 2")
 
-    # Generate the token
-    token_data = {"sub": user.username}
-    token = create_access_token(data=token_data)
+    # Transparent upgrade from the legacy md5 hash to bcrypt
+    if not is_bcrypt_hash(user.password_hash or ""):
+        user.password_hash = hash_password(login_data.password)
+        db.commit()
+
+    token = create_session(user.username)
 
     # Store the token in cookies
-    response.set_cookie(key="session_token", value=token, httponly=True)
+    response.set_cookie(key="session_token", value=token, httponly=True, samesite="lax")
 
     return {"message": "Login successful"}
 
 
 # ====== POST /logout ======
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
+    token = request.cookies.get("session_token")
+    if token:
+        try:
+            revoke_session(token)
+        except Exception:
+            pass
     response.delete_cookie(key="session_token")
     return {"message": "Logged out"}
 
@@ -124,7 +217,6 @@ async def logout(response: Response):
 # ====== GET /status ======
 @router.get("/status")
 async def auth_status(request: Request):
-    token = request.cookies.get("session_token")
-    if token == "valid_token":
+    if is_authenticated(request):
         return {"authenticated": True}
     return {"authenticated": False}

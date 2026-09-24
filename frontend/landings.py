@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Query
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import Optional
@@ -136,9 +136,51 @@ async def upload_landing(
     }
 
 
+def get_landing_metrics(ch) -> dict:
+    """Real per-landing metrics from ClickHouse, keyed by landing id (str)."""
+    metrics = {}
+    try:
+        result = ch.query("""
+            SELECT
+                toString(coalesce(landing_id, '')) AS landing_key,
+                countIf(click = true) AS clicks,
+                countIf(status IN ('sale', 'upsale')) AS conversions,
+                sumOrNull(toFloat64(cost)) AS cost,
+                sumOrNull(toFloat64(revenue)) AS revenue
+            FROM clicks_data
+            GROUP BY landing_key
+        """)
+        for key, clicks, conversions, cost, revenue in result.result_rows:
+            cost = float(cost or 0)
+            revenue = float(revenue or 0)
+            metrics[str(key)] = {
+                "clicks": int(clicks),
+                "conversions": int(conversions),
+                "cost": round(cost, 2),
+                "revenue": round(revenue, 2),
+                "roi": round((revenue - cost) / cost * 100, 2) if cost else 0.0,
+            }
+    except Exception as e:
+        print("Landing metrics ClickHouse error:", str(e))
+    return metrics
+
+
 @router.get("/landings")
 def list_landings(db: Session = Depends(get_db)):
     landings = db.query(Landing).all()
+    metrics = {}
+    try:
+        from clickhouse_connect import get_client  # same container as the tracking plane
+        ch = get_client(
+            host='tracker_clickhouse',
+            port=8123,
+            username='user',
+            password='password_password_password',
+            database='default'
+        )
+        metrics = get_landing_metrics(ch)
+    except Exception as e:
+        print("Landing metrics unavailable:", str(e))
     return [
         {
             "id": landing.id,
@@ -148,11 +190,7 @@ def list_landings(db: Session = Depends(get_db)):
             "type": landing.type.value if hasattr(landing.type, "value") else landing.type,  # ENUM support
             "tags": landing.tags.split(",") if landing.tags else [],
             "created_at": landing.created_at,
-            "clicks": 0,  # mocked for now
-            "conversions": 0,  # mocked for now
-            "cost": 0,  # mocked for now
-            "revenue": 0,  # mocked for now
-            "roi": 0  # mocked for now
+            **metrics.get(str(landing.id), {"clicks": 0, "conversions": 0, "cost": 0, "revenue": 0, "roi": 0})
         }
         for landing in landings
     ]

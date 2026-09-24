@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compile:
+    name: Python compile check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile all backend + frontend sources
+        run: |
+          python -m compileall -q backend/app.py backend/auth.py backend/clickHouse.py backend/db.py backend/schemas.py backend/email_reports.py backend/app_pages backend/models backend/tests frontend
+      - name: YAML sanity (compose + workflow)
+        run: |
+          python - <<'EOF'
+          import glob, sys
+          try:
+              import yaml
+          except ImportError:
+              sys.exit(0)
+          for f in glob.glob('*.yml') + glob.glob('*.yaml') + glob.glob('.github/workflows/*.yml'):
+              with open(f) as fh:
+                  yaml.safe_load(fh)
+              print(f'ok: {f}')
+          EOF
+      # Live smoke tests need the full stack running — run them locally or
+      # against your dev server:
+      #   TEST_BASE_URL=https://localhost TEST_INSECURE=1 TEST_USER=... TEST_PASS=... \
+      #   python backend/tests/api_smoke.py

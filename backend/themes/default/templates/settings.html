@@ -325,6 +325,96 @@
                     </v-card>
                 </v-col>
 
+                <v-col cols="12" md="6">
+                    <v-card flat class="pa-2">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-database-refresh-outline</v-icon>
+                            Data Retention
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.data_retention.enabled"
+                                    label="Auto-delete tracking data older than a set window"
+                                    inset
+                                    dense
+                                    hide-details
+                            ></v-switch>
+                            <v-text-field
+                                    label="Keep data for (days)"
+                                    v-model.number="settings.data_retention.days"
+                                    :disabled="!settings.data_retention.enabled"
+                                    type="number"
+                                    min="1"
+                                    outlined
+                                    dense
+                                    hint="A daily job prunes clicks_data older than this. Example: 180."
+                                    persistent-hint
+                            ></v-text-field>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
+                <v-col cols="12" md="6">
+                    <v-card flat class="pa-2">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-robot-outline</v-icon>
+                            Bot &amp; Filter Rules
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.bot_rules.enabled"
+                                    label="Enable click-level bot filtering"
+                                    inset
+                                    dense
+                                    hide-details
+                            ></v-switch>
+
+                            <div v-for="(rule, i) in settings.bot_rules.rules" :key="i"
+                                 class="d-flex align-center" style="gap: 8px;">
+                                <v-select
+                                        v-model="rule.type"
+                                        :items="botRuleTypes"
+                                        outlined
+                                        dense
+                                        hide-details
+                                        style="max-width: 170px;"
+                                        @change="rule.value = ['empty_referer','duplicate_visitor'].includes(rule.type) ? '' : rule.value"
+                                ></v-select>
+                                <v-text-field
+                                        v-if="!['empty_referer','duplicate_visitor'].includes(rule.type)"
+                                        v-model="rule.value"
+                                        :label="rule.type === 'ua_regex' ? 'User-Agent regex' : (rule.type === 'ip_range' ? 'CIDR ranges' : 'IPs (comma-separated)')"
+                                        outlined
+                                        dense
+                                        hide-details
+                                ></v-text-field>
+                                <span v-else class="caption grey--text" style="flex: 1;">no value needed</span>
+                                <v-select
+                                        v-model="rule.action"
+                                        :items="[{text: 'Block (404)', value: 'block'}, {text: 'Mark as bot', value: 'mark'}]"
+                                        outlined
+                                        dense
+                                        hide-details
+                                        style="max-width: 150px;"
+                                ></v-select>
+                                <v-btn icon small @click="settings.bot_rules.rules.splice(i, 1)">
+                                    <v-icon small color="red">mdi-close</v-icon>
+                                </v-btn>
+                            </div>
+
+                            <div class="mt-2">
+                                <v-btn small text color="primary" @click="addBotRule">
+                                    <v-icon small class="mr-1">mdi-plus</v-icon>Add rule
+                                </v-btn>
+                            </div>
+
+                            <div class="caption grey--text mt-2">
+                                "Block" returns a 404 page without tracking the visit. "Mark as bot" keeps tracking but flags the click (is_bot) so you can filter it in reports.
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
                 <!-- Variable mapping block -->
                 <v-col cols="12">
                     <v-card flat class="pa-2">
@@ -417,12 +507,27 @@
                         secret_key: '',
                         allowed_ips: '',
                     },
+                    bot_rules: {
+                        enabled: false,
+                        rules: [],
+                    },
+                    data_retention: {
+                        enabled: false,
+                        days: 180,
+                    },
                 },
                 subIdMapping: [
                 ],
                 currencies: ['USD', 'EUR', 'GBP', 'JPY'],
                 timezones: ['UTC', 'America/New_York', 'Europe/Berlin', 'Asia/Tokyo'],
                 telegramStatusList: ['lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'],
+                botRuleTypes: [
+                    {text: 'IP address', value: 'ip'},
+                    {text: 'IP range (CIDR)', value: 'ip_range'},
+                    {text: 'User-Agent regex', value: 'ua_regex'},
+                    {text: 'Empty referer', value: 'empty_referer'},
+                    {text: 'Duplicate visitor', value: 'duplicate_visitor'},
+                ],
                 tgTesting: false,
                 emailTesting: false,
                 showSmtpPassword: false,
@@ -497,6 +602,11 @@
                             {}, erDefaults, this.settings.email_reports || {});
                         this.settings.postback_security = Object.assign(
                             {}, pbDefaults, this.settings.postback_security || {});
+                        this.settings.bot_rules = Object.assign(
+                            {}, {enabled: false, rules: []}, this.settings.bot_rules || {});
+                        if (!Array.isArray(this.settings.bot_rules.rules)) this.settings.bot_rules.rules = [];
+                        this.settings.data_retention = Object.assign(
+                            {}, {enabled: false, days: 180}, this.settings.data_retention || {});
                         if (data.subIdMapping) this.subIdMapping = data.subIdMapping;
                     });
             },
@@ -566,6 +676,10 @@
             },
             generateToken() {
                 this.settings.apiToken = Math.random().toString(36).substring(2, 12);
+            },
+            addBotRule() {
+                if (!Array.isArray(this.settings.bot_rules.rules)) this.settings.bot_rules.rules = [];
+                this.settings.bot_rules.rules.push({type: 'ip', value: '', action: 'block', enabled: true});
             }
         }
     });

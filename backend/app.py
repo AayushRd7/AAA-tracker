@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
+from auth import require_api_auth
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -72,22 +73,31 @@ from app_pages.campaigns import router as campaign_router
 from app_pages.dashboard import router as dashboard_router
 from app_pages.reports import router as reports_router  # Import the router
 
-app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
-app.include_router(offers_router, prefix="/api/offers", tags=["Offers"])
+app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"],
+                   dependencies=[Depends(require_api_auth)])
+app.include_router(offers_router, prefix="/api/offers", tags=["Offers"],
+                   dependencies=[Depends(require_api_auth)])
 
 
 # Include the router
 app.include_router(auth_router, prefix="/api", tags=["Auth"])
-app.include_router(domains_router, prefix="/api/domains", tags=["Domains"])
-app.include_router(settings_router, prefix="/api/settings", tags=["Settings"])
-app.include_router(users_router, prefix="/api/users", tags=["Users"])
-app.include_router(sources_router, prefix="/api/sources", tags=["Sources"])
+app.include_router(domains_router, prefix="/api/domains", tags=["Domains"],
+                   dependencies=[Depends(require_api_auth)])
+app.include_router(settings_router, prefix="/api/settings", tags=["Settings"],
+                   dependencies=[Depends(require_api_auth)])
+app.include_router(users_router, prefix="/api/users", tags=["Users"],
+                   dependencies=[Depends(require_api_auth)])
+app.include_router(sources_router, prefix="/api/sources", tags=["Sources"],
+                   dependencies=[Depends(require_api_auth)])
 
-app.include_router(affiliate_router, prefix="/api/affiliate-networks", tags=["Affiliate Networks"])
+app.include_router(affiliate_router, prefix="/api/affiliate-networks", tags=["Affiliate Networks"],
+                   dependencies=[Depends(require_api_auth)])
 
-app.include_router(campaign_router, prefix="/api/campaigns", tags=["Campaigns"])
+app.include_router(campaign_router, prefix="/api/campaigns", tags=["Campaigns"],
+                   dependencies=[Depends(require_api_auth)])
 
-app.include_router(reports_router, prefix="/api/reports", tags=["Reports"])
+app.include_router(reports_router, prefix="/api/reports", tags=["Reports"],
+                   dependencies=[Depends(require_api_auth)])
 
 
 # Router

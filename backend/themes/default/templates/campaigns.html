@@ -6,7 +6,18 @@
                 <div class="page-title">Campaigns</div>
                 <div class="page-subtitle">Manage traffic campaigns and their flows</div>
             </div>
-            <v-col class="d-flex justify-end">
+            <v-col class="d-flex justify-end align-center">
+                <v-select
+                        v-model="metricsPeriod"
+                        :items="metricsPeriodItems"
+                        label="Stats period"
+                        outlined
+                        dense
+                        hide-details
+                        style="max-width: 170px;"
+                        class="mr-3"
+                        @change="loadCampaignMetrics"
+                ></v-select>
                 <v-btn color="primary" elevation="0" @click="openCreate">
                     <v-icon small class="mr-1">mdi-plus</v-icon>Create Campaign
                 </v-btn>
@@ -862,10 +873,32 @@
                             :items="campaigns"
                             show-select
                             item-key="id"
+                            :item-class="perfRowClass"
                             :items-per-page="10"
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
                             dense
                     >
+                        <template v-slot:item.clicks="{ item }">
+                            {{ (metricsMap[item.id] || {}).clicks != null ? Number(metricsMap[item.id].clicks).toLocaleString() : '—' }}
+                        </template>
+                        <template v-slot:item.conversions="{ item }">
+                            {{ (metricsMap[item.id] || {}).conversions != null ? Number(metricsMap[item.id].conversions).toLocaleString() : '—' }}
+                        </template>
+                        <template v-slot:item.cr="{ item }">
+                            {{ (metricsMap[item.id] || {}).cr != null ? metricsMap[item.id].cr + '%' : '—' }}
+                        </template>
+                        <template v-slot:item.cost="{ item }">
+                            <span :class="signClass(-(metricsMap[item.id]?.cost || 0))">{{ formatMoney((metricsMap[item.id] || {}).cost) }}</span>
+                        </template>
+                        <template v-slot:item.revenue="{ item }">
+                            <span :class="signClass(metricsMap[item.id]?.revenue || 0)">{{ formatMoney((metricsMap[item.id] || {}).revenue) }}</span>
+                        </template>
+                        <template v-slot:item.profit="{ item }">
+                            <span class="font-weight-bold" :class="signClass(metricsMap[item.id]?.profit || 0)">{{ formatMoney((metricsMap[item.id] || {}).profit) }}</span>
+                        </template>
+                        <template v-slot:item.roi="{ item }">
+                            <span class="font-weight-bold" :class="signClass(metricsMap[item.id]?.roi || 0)">{{ formatPct((metricsMap[item.id] || {}).roi) }}</span>
+                        </template>
                         <template v-slot:no-data>
                             <div class="empty-state">
                                 <v-icon>mdi-sitemap</v-icon>
@@ -953,11 +986,26 @@
                     {text: 'Link', value: 'link'}, // value 'link' is domain+'/'+alias
                     {text: 'Type', value: 'type'},
                     {text: 'Flow Mode', value: 'redirect_mode'},
+                    {text: 'Clicks', value: 'clicks', align: 'end'},
+                    {text: 'Conversions', value: 'conversions', align: 'end'},
+                    {text: 'CR %', value: 'cr', align: 'end'},
+                    {text: 'Cost', value: 'cost', align: 'end'},
+                    {text: 'Revenue', value: 'revenue', align: 'end'},
+                    {text: 'Profit', value: 'profit', align: 'end'},
+                    {text: 'ROI %', value: 'roi', align: 'end'},
                     {text: 'Status', value: 'status'},
                     {text: 'Notes', value: 'notes'},
                     {text: 'Created', value: 'created_at'},
                     {text: 'Updated', value: 'updated_at'},
                     {text: 'Actions', value: 'actions', sortable: false}
+                ],
+                metricsMap: {},
+                metricsPeriod: '30d',
+                metricsPeriodItems: [
+                    {text: 'Today', value: 'today'},
+                    {text: 'Last 7 days', value: '7d'},
+                    {text: 'Last 30 days', value: '30d'},
+                    {text: 'All time', value: 'all'},
                 ],
 
                 filterFields: ["country", "city", "device", "os", "browser", "ip", 'ad_campaign_id', 'browser',
@@ -1628,6 +1676,60 @@
                             text: err.message
                         });
                     });
+                this.loadCampaignMetrics();
+            },
+            loadCampaignMetrics() {
+                // Live per-campaign stats (Binom-style columns) from ClickHouse
+                const to = new Date();
+                let from = null;
+                if (this.metricsPeriod === 'today') {
+                    from = new Date(to);
+                } else if (this.metricsPeriod === '7d') {
+                    from = new Date(to.getTime() - 6 * 86400000);
+                } else if (this.metricsPeriod === '30d') {
+                    from = new Date(to.getTime() - 29 * 86400000);
+                }
+                const qs = [];
+                if (from) qs.push('date_from=' + from.toISOString().split('T')[0]);
+                qs.push('date_to=' + to.toISOString().split('T')[0]);
+                fetch('/backend/api/campaigns/metrics?' + qs.join('&'), {
+                    credentials: 'include'
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        const map = {};
+                        Object.keys(data || {}).forEach(id => { map[parseInt(id, 10)] = data[id]; });
+                        this.metricsMap = map;
+                    })
+                    .catch(err => console.error('metrics', err));
+            },
+            perfRowClass(item) {
+                const m = this.metricsMap[item.id];
+                if (!m) return '';
+                const profit = parseFloat(m.profit) || 0;
+                const cost = parseFloat(m.cost) || 0;
+                const roi = parseFloat(m.roi) || 0;
+                // ROI first; fall back to profit/cost when cost is 0
+                const score = roi !== 0 ? roi : (cost > 0 ? profit / cost * 100 : (profit > 0 ? 1000 : (profit < 0 ? -1000 : 0)));
+                if (score >= 50) return 'perf-win-2';
+                if (score > 0) return 'perf-win-1';
+                if (score <= -50) return 'perf-loss-2';
+                if (score < 0) return 'perf-loss-1';
+                return '';
+            },
+            signClass(v) {
+                const n = parseFloat(v) || 0;
+                if (n > 0) return 'num-pos';
+                if (n < 0) return 'num-neg';
+                return 'num-neutral';
+            },
+            formatMoney(v) {
+                const n = parseFloat(v) || 0;
+                return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            },
+            formatPct(v) {
+                const n = parseFloat(v) || 0;
+                return (n > 0 ? '+' : '') + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%';
             },
             async deleteCampaign(item) {
                 const ok = await this.$refs.confirm.open(

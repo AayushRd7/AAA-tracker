@@ -87,6 +87,14 @@
                         small-chips
                         style="max-width: 240px;"
                 ></v-select>
+                <v-switch
+                        v-model="liveMode"
+                        label="Live"
+                        class="ml-2 mt-0"
+                        hide-details
+                        dense
+                        color="primary"
+                ></v-switch>
             </div>
         </v-card>
 
@@ -170,6 +178,8 @@
         data() {
             return {
                 loading: false,
+                liveMode: false,
+                liveTimer: null,
                 date_menu2: false,
                 activePreset: 'Last 30 days',
                 datePresets: [
@@ -259,6 +269,14 @@
             dateRangeText() {
                 return this.filters.date_range.join(' ~ ')
             },
+            livePayload() {
+                return {
+                    campaigns: this.filters.campaigns,
+                    date_from: this.filters.date_range[0],
+                    date_to: this.filters.date_range[1],
+                    detail_level: this.filters.detailLevel
+                };
+            },
             chartHasData() {
                 return (this.mainChart.series[0] && this.mainChart.series[0].data.length > 0);
             },
@@ -267,7 +285,38 @@
             this.loadData();
             this.$root.$on('load-dashboard', this.loadData);
         },
+        beforeDestroy() {
+            this.stopLiveFeed();
+        },
+        watch: {
+            liveMode(on) {
+                if (on) {
+                    this.loadVisits();
+                    this.liveTimer = setInterval(this.loadVisits, 10000);
+                } else {
+                    this.stopLiveFeed();
+                }
+            },
+        },
         methods: {
+            loadVisits() {
+                fetch('/backend/api/dashboard/visits', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(this.livePayload)
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        this.visits = data;
+                    })
+                    .catch(err => console.error('visits', err));
+            },
+            stopLiveFeed() {
+                if (this.liveTimer) {
+                    clearInterval(this.liveTimer);
+                    this.liveTimer = null;
+                }
+            },
             applyPreset(preset) {
                 this.activePreset = preset.label;
                 const to = new Date();
@@ -337,15 +386,7 @@
                     detail_level: this.filters.detailLevel
                 };
 
-                fetch('/backend/api/dashboard/visits', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(payload)
-                })
-                    .then(res => res.json())
-                    .then(data => {
-                        this.visits = data;
-                    });
+                this.loadVisits();
 
                 fetch('/backend/api/dashboard/metrics', {
                     method: 'POST',
