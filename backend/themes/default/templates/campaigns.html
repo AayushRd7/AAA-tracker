@@ -864,6 +864,9 @@
                         <v-btn small color="warning" elevation="0" :loading="bulkLoading" @click="bulkSetStatus('paused')">
                             <v-icon small class="mr-1">mdi-pause</v-icon>Pause
                         </v-btn>
+                        <v-btn small color="red" elevation="0" class="ml-2" :loading="bulkLoading" @click="bulkDelete">
+                            <v-icon small class="mr-1">mdi-trash-can-outline</v-icon>Delete
+                        </v-btn>
                         <v-spacer></v-spacer>
                         <v-btn small text @click="selected = []">Clear selection</v-btn>
                     </div>
@@ -1849,6 +1852,36 @@
                 this.$root.$emit('show-message', {
                     type: failed ? 'warning' : 'success',
                     text: `${done} campaign(s) ${status === 'active' ? 'activated' : 'paused'}` + (failed ? `, ${failed} failed` : '')
+                });
+            },
+            async bulkDelete() {
+                const n = this.selected.length;
+                const ok = await this.$refs.confirm.open(
+                    'Delete Campaigns',
+                    `Are you sure you want to delete ${n} campaign(s)? This cannot be undone.`,
+                    'Delete'
+                );
+                if (!ok) return;
+                this.bulkLoading = true;
+                let done = 0, failed = 0;
+                for (const item of this.selected.slice()) {
+                    try {
+                        const res = await fetch(`/backend/api/campaigns/${item.id}`, {
+                            method: 'DELETE',
+                            credentials: 'include'
+                        });
+                        if (!res.ok) throw new Error(await res.text());
+                        done++;
+                    } catch (e) {
+                        failed++;
+                    }
+                }
+                this.bulkLoading = false;
+                this.selected = [];
+                this.loadCampaigns();
+                this.$root.$emit('show-message', {
+                    type: failed ? 'warning' : 'success',
+                    text: `${done} campaign(s) deleted` + (failed ? `, ${failed} failed` : '')
                 });
             },
             generateAlias(length = 8) {

@@ -31,7 +31,7 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 
 ## ⚙️ Production Hardening
 
-- [ ] **17. Remove `--reload` / add uvicorn workers** in docker-compose (dev mode still on in prod containers) + ClickHouse memory cap in compose.
+- [x] **17. Remove `--reload` / add uvicorn workers** — `docker-compose.prod.yml` override: uvicorn with 2 workers, no reload, ClickHouse memory cap. Dev compose stays hot-reload. Run with `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`.
 - [x] **18. Automated tests** — `backend/tests/api_smoke.py`: 15-check live suite (auth, 401 protection, campaign CRUD/clone, weighted redirect, fallback, hide-referrer, reports, cleanup). 15/15 passing.
 - [x] **19. CI** — GitHub Actions: compileall over backend+frontend and compose YAML sanity on push/PR.
 - [ ] **20. HTTPS/Certbot automation check** — certbot scaffolding exists but the auto-renewal flow is unverified.
@@ -39,6 +39,6 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 ## 🎨 UI Polish (smaller)
 
 - [ ] **21. Campaign duplicate/clone button** — very common need.
-- [ ] **22. Bulk actions on lists** — delete/enable multiple.
+- [x] **22. Bulk actions on lists** — select multiple campaigns: Activate / Pause / Delete (with confirm).
 - [ ] **23. Global search** — campaigns/offers/landings by name.
 - [ ] **24. Dark mode toggle** — CSS tokens are already set up for it.
