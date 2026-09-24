@@ -211,6 +211,10 @@
                         <v-list-item-title class="text-capitalize">{{ roleLabel }}</v-list-item-title>
                     </v-list-item>
                     <v-divider></v-divider>
+                    <v-list-item link @click="openPasswordDialog">
+                        <v-list-item-icon class="mr-2"><v-icon small>mdi-key-change</v-icon></v-list-item-icon>
+                        <v-list-item-title>Change password</v-list-item-title>
+                    </v-list-item>
                     <v-list-item link @click="logout">
                         <v-list-item-icon class="mr-2"><v-icon small>mdi-logout</v-icon></v-list-item-icon>
                         <v-list-item-title>Logout</v-list-item-title>
@@ -218,6 +222,45 @@
                 </v-list>
             </v-menu>
         </v-app-bar>
+        {% endraw %}
+        {% endif %}
+
+        {% if is_authenticated_user_type %}
+        {% raw %}
+        <v-dialog v-model="passwordDialog" max-width="420px" persistent>
+            <v-card>
+                <v-card-title class="text-h6">Change Password</v-card-title>
+                <v-card-text>
+                    <v-text-field
+                            label="Current password"
+                            v-model="pwForm.current"
+                            type="password"
+                            outlined
+                            dense
+                    ></v-text-field>
+                    <v-text-field
+                            label="New password (min 6 chars)"
+                            v-model="pwForm.new1"
+                            type="password"
+                            outlined
+                            dense
+                    ></v-text-field>
+                    <v-text-field
+                            label="Repeat new password"
+                            v-model="pwForm.new2"
+                            type="password"
+                            outlined
+                            dense
+                            :rules="[v => v === pwForm.new1 || 'Passwords do not match']"
+                    ></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="passwordDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" :loading="pwSaving" @click="changeMyPassword">Change</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
         {% endraw %}
         {% endif %}
 
@@ -249,6 +292,9 @@
             return {
                 activeSection: 'dashboard',
                 drawer: null,
+                passwordDialog: false,
+                pwSaving: false,
+                pwForm: {current: '', new1: '', new2: ''},
                 dashboardShell: {{ 'true' if page == 'dashboard' and is_authenticated_user_type else 'false' }},
                 roleLabel: '{{ is_authenticated_user_type if is_authenticated_user_type else "" }}',
                 navItems: [
@@ -308,6 +354,33 @@
             }
         },
         methods: {
+            openPasswordDialog() {
+                this.pwForm = {current: '', new1: '', new2: ''};
+                this.passwordDialog = true;
+            },
+            async changeMyPassword() {
+                if (!this.pwForm.current || this.pwForm.new1.length < 6 || this.pwForm.new1 !== this.pwForm.new2) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Check the fields — new passwords must match and be at least 6 characters.'});
+                    return;
+                }
+                this.pwSaving = true;
+                try {
+                    const res = await fetch('/backend/api/users/me/password', {
+                        method: 'PATCH',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify({current_password: this.pwForm.current, new_password: this.pwForm.new1})
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Failed to change password');
+                    this.passwordDialog = false;
+                    this.$root.$emit('show-message', {type: 'success', text: 'Password changed'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error', text: err.message});
+                } finally {
+                    this.pwSaving = false;
+                }
+            },
             async logout() {
                 document.cookie = "session_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=" + window.location.hostname + ";";
                 await fetch('/backend/api/logout', {

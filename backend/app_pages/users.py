@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from hashlib import md5
@@ -8,6 +8,7 @@ from datetime import datetime
 
 from db import get_db
 from models.user import UserORM
+from auth import hash_password
 
 router = APIRouter()
 
@@ -33,6 +34,37 @@ class UserCreateUpdate(BaseModel):
     is_admin: Optional[bool] = False
     active: Optional[bool] = True
 
+# ====== Change my own password (any logged-in user) ======
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.patch("/me/password")
+def change_my_password(data: PasswordChange, request: Request, db: Session = Depends(get_db)):
+    from fastapi import Request as FastAPIRequest  # noqa: F401 (kept for clarity)
+    from auth import get_session_username, verify_password, hash_password
+
+    username = get_session_username(request)
+    if not username:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    user_obj = db.query(UserORM).filter(UserORM.username == username).first()
+    if not user_obj:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not verify_password(data.current_password, user_obj.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    if len(data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+
+    user_obj.password_hash = hash_password(data.new_password)
+    db.commit()
+    return {"message": "Password changed"}
+
+
 # ====== List all users ======
 
 @router.get("/", response_model=List[UserOut])
@@ -49,7 +81,7 @@ def create_user(user: UserCreateUpdate, db: Session = Depends(get_db)):
     if user.username.lower() == "tracker_admin":
         raise HTTPException(status_code=403, detail="Cannot create tracker_admin user")
 
-    password_hash = md5((pass_salt + user.password).encode()).hexdigest()
+    password_hash = hash_password(user.password)
 
     new_user = UserORM(
         username=user.username,
@@ -87,7 +119,7 @@ def update_user(user_id: int, user: UserCreateUpdate, db: Session = Depends(get_
     if user.active is not None:
         user_obj.active = user.active
     if user.password:
-        user_obj.password_hash = md5((pass_salt + user.password).encode()).hexdigest()
+        user_obj.password_hash = hash_password(user.password)
 
     if user_obj.username.lower() != "tracker_admin":
         user.is_admin = False

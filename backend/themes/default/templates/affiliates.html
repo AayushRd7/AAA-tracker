@@ -150,6 +150,7 @@
             return {
                 dialog: false,
                 isEdit: false,
+                postbackKey: '',
                 form: {
                     id: null,
                     name: '',
@@ -176,6 +177,14 @@
         },
         mounted() {
             this.loadAffiliateNetworks();
+            // Postback security key (when enabled) so copied URLs include it
+            fetch('/backend/api/settings/', {credentials: 'include'})
+                .then(res => res.ok ? res.json() : null)
+                .then(data => {
+                    const sec = (data && data.postback_security) || {};
+                    this.postbackKey = sec.enabled ? (sec.secret_key || '') : '';
+                })
+                .catch(() => {});
             this.$root.$on('load-affiliates', this.loadAffiliateNetworks);
         },
         methods: {
@@ -197,10 +206,27 @@
                     });
             },
 
-            copyPostback(item) {
-                navigator.clipboard.writeText(item.s2s_postback).then(() => {
-                    this.$root.$emit('show-message', {type: 'success', text: 'Postback URL copied'});
-                });
+            readyPostbackUrl(item) {
+                // Build a ready-to-use postback URL: fill in this tracker's domain,
+                // append the security key when postback protection is enabled.
+                let url = item.s2s_postback || '';
+                url = url.replace(/YOUR-TRACKER-DOMAIN/gi, window.location.host);
+                if (!/^https?:\/\//i.test(url)) {
+                    url = window.location.origin + '/' + url.replace(/^\/+/, '');
+                }
+                if (this.postbackKey) {
+                    url += (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(this.postbackKey);
+                }
+                return url;
+            },
+            async copyPostback(item) {
+                const url = this.readyPostbackUrl(item);
+                try {
+                    await navigator.clipboard.writeText(url);
+                    this.$root.$emit('show-message', {type: 'success', text: 'Ready postback URL copied'});
+                } catch (e) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Copy failed — copy it from the Postback column'});
+                }
             },
 
             openCreate() {

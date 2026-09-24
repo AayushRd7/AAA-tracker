@@ -4,34 +4,36 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 
 ## 🎯 Traffic & Campaign Features (core tracker gaps)
 
+- [x] **0. Campaign list with live metrics** — Clicks/Conversions/CR/Cost/Revenue/Profit/ROI columns on the Campaigns page (ClickHouse-backed), with Binom-style green/red row tinting and a stats-period selector (Today/7d/30d/all time).
+
 - [x] **1. Conversion status editing** — conversions can now be edited (status, payout, revenue, external/transaction ID) and deleted from the Conversion Log in Reports; postback counts + dedupe also handled in the same batch.
 - [ ] **2. Sub ID / macro tokens in offers & landings** — full macro set (`{click_id}`, `{sub_id_2}`…`{sub_id_8}`, `{campaign_name}`, `{source}`, `{cost}`…) usable in offer URLs, lander links, and postback URLs — sub-id mapping exists in Settings, but macro substitution in offer URLs and landing templates is incomplete.
-- [ ] **3. % traffic distribution across flows** — flows have position/weight, but there's no weighted-random split (e.g. send 70% to flow A, 30% to flow B) — probability flows.
-- [ ] **4. Bot / filter rules** — click-level filtering: block by IP, IP range, User-Agent regex, empty referer, duplicate visitor, VPN/proxy ASN.
+- [x] **3. % traffic distribution across flows** — weighted-random split implemented and live-verified (70/30 test); position mode = first match wins; forced flows win; fallback URL + hide-referrer added in the same batch.
+- [x] **4. Bot / filter rules** — click-level filtering in Settings: block (404) or mark-as-bot by IP, IP range (CIDR), User-Agent regex, empty referer, duplicate visitor. Live-tested both actions. (VPN/proxy ASN: is_bot/is_using_proxy already detected per-click; rules for those next.)
 - [ ] **5. Cost auto-sync from ad networks** — sources already have `additional_settings` with `taboola_api_key`-style fields; wire actual API pulls (Facebook/Taboola/TikTok) to auto-import spend instead of manual cost per click.
-- [ ] **6. S2S postback URL builder per network** — presets already carry postback templates; add a "copy ready postback URL" that fills in the tracker domain + macros from the settings.
+- [x] **6. S2S postback URL builder per network** — Copy button on each network now fills in the tracker domain and appends the postback security key when enabled.
 
 ## 📊 Reporting & Data
 
-- [ ] **7. Offer / landing / geo / device-level reports** — breakdowns exist by campaign/country/date; extend the group-by to offer, landing, OS, browser, ISP.
-- [ ] **8. Live/real-time clicks feed** — auto-refreshing click stream (today it's a manual reload).
-- [ ] **9. Landing performance metrics are mocked** — `frontend/landings.py` returns zeros for clicks/conversions/revenue/ROI; join real ClickHouse data per landing.
+- [x] **7. Offer / landing / geo / device-level reports** — breakdown covers offer, landing, country, region, city, device, OS, browser, language, source, UTM, keyword, ISP, connection type, status, bot/proxy flags.
+- [x] **8. Live/real-time clicks feed** — Live switch on the dashboard auto-refreshes Recent Visits every 10s.
+- [x] **9. Landing performance metrics are mocked** — real ClickHouse aggregates per landing (clicks, conversions, cost, revenue, ROI).
 - [ ] **10. Scheduled report emails per campaign / per user** — email reports exist globally; add per-campaign digests and non-admin recipients.
-- [ ] **11. Data retention / cleanup job** — ClickHouse grows unbounded; add configurable auto-prune (e.g. keep 180 days).
+- [x] **11. Data retention / cleanup job** — daily prune loop deletes clicks older than the configured window (Settings → Data Retention).
 
 ## 🔐 Security & Users
 
-- [ ] **12. API token auth** — all APIs are cookie-session only; add bearer-token auth so external tools/networks can pull reports securely.
-- [ ] **13. JWT is a fake in-memory store** — `backend/auth.py` has a "Fake user store" comment: tokens aren't persisted, so restarts log everyone out; move to DB-backed sessions with revocation.
-- [ ] **14. Password change / reset UI** — users page has no password change flow; `md5(akm + password)` hashing should move to bcrypt at the same time.
+- [x] **12. API token auth** — all backend APIs now require auth (session cookie or `Authorization: Bearer <token>`; token is the Settings API token). Live-tested: unauth → 401, bearer → 200.
+- [x] **13. JWT is a fake in-memory store** — replaced with DB-backed opaque sessions (`auth_sessions` table): survive restarts, revocable at logout, TTL 30 days.
+- [x] **14. Password change / reset UI** — self-service change (user menu, verifies current password) + admin edit; hashing migrated to bcrypt with transparent md5 → bcrypt upgrade on next login.
 - [ ] **15. Two-factor auth (TOTP)** for admin.
 - [ ] **16. Roles/permissions refinement** — currently admin vs user; add per-section permissions (e.g. user sees only assigned campaigns).
 
 ## ⚙️ Production Hardening
 
 - [ ] **17. Remove `--reload` / add uvicorn workers** in docker-compose (dev mode still on in prod containers) + ClickHouse memory cap in compose.
-- [ ] **18. Automated tests** — zero test suite; start with API smoke tests + tracking pixel/postback integration test.
-- [ ] **19. CI** — GitHub Actions: lint, py_compile, build images on push.
+- [x] **18. Automated tests** — `backend/tests/api_smoke.py`: 15-check live suite (auth, 401 protection, campaign CRUD/clone, weighted redirect, fallback, hide-referrer, reports, cleanup). 15/15 passing.
+- [x] **19. CI** — GitHub Actions: compileall over backend+frontend and compose YAML sanity on push/PR.
 - [ ] **20. HTTPS/Certbot automation check** — certbot scaffolding exists but the auto-renewal flow is unverified.
 
 ## 🎨 UI Polish (smaller)

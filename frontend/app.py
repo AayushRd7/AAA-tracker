@@ -59,6 +59,9 @@ async def startup():
     # Idempotent schema migration (safe to run on every boot)
     await ensure_schema()
 
+    # Daily data-retention prune loop
+    app.state.retention_task = asyncio.create_task(retention_loop())
+
 
 async def ensure_schema():
     try:
@@ -70,6 +73,43 @@ async def ensure_schema():
             """)
     except Exception as e:
         log_track(f"Schema migration error: {e}")
+
+
+async def retention_loop():
+    """Prune ClickHouse data older than the configured retention window, daily."""
+    while True:
+        try:
+            await prune_old_data()
+        except Exception as e:
+            log_track(f"Retention prune error: {e}")
+        await asyncio.sleep(24 * 3600)
+
+
+async def prune_old_data():
+    """Delete clicks older than settings.data_retention.days when enabled."""
+    conn = psycopg2.connect(
+        host="tracker_postgres", dbname="db",
+        user="user", password="password_password_password")
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM settings WHERE name = 'settings'")
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row[0]:
+        return
+    cfg = json.loads(row[0]).get("data_retention") or {}
+    if not cfg.get("enabled"):
+        return
+    try:
+        days = int(cfg.get("days") or 0)
+    except (TypeError, ValueError):
+        return
+    if days <= 0:
+        return
+    ch = app.state.ch
+    await asyncio.to_thread(
+        ch.command,
+        f"ALTER TABLE clicks_data DELETE WHERE received_at < now() - INTERVAL {days} DAY")
+    log_track(f"🧹 Retention: pruned clicks_data older than {days} days")
 
 
 # 🛑 Shutdown
@@ -403,6 +443,114 @@ def check_postback_access(request: Request, sec: dict) -> tuple[bool, str]:
             return False, "Invalid or missing postback key"
 
     return True, ""
+
+
+# ====== Bot & filter rules ======
+_seen_visitors: set = set()
+_SEEN_VISITORS_CAP = 200_000
+
+
+def load_bot_rules() -> dict:
+    """Read the bot_rules block from the settings row (sync, own connection)."""
+    try:
+        conn = psycopg2.connect(
+            host="tracker_postgres", dbname="db",
+            user="user", password="password_password_password")
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE name = 'settings'")
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0]:
+            cfg = json.loads(row[0])
+            return cfg.get("bot_rules") or {}
+    except Exception as e:
+        log_track(f"Bot rules config load error: {e}")
+    return {}
+
+
+def visitor_key_for(request: Request) -> str:
+    """Stable per-visitor key (IP + User-Agent) used by the duplicate-visitor rule."""
+    ua = request.headers.get("user-agent", "") or ""
+    ip = (request.client.host if request.client else "") or ""
+    import hashlib
+    return hashlib.md5(f"{ip}|{ua}".encode()).hexdigest()
+
+
+def match_bot_rule(request: Request, rules: list, visitor_key: str):
+    """Return the first matching rule, or None."""
+    client_ip = (request.client.host if request.client else "") or ""
+    ua = request.headers.get("user-agent", "") or ""
+    referer = request.headers.get("referer", "") or ""
+
+    for rule in rules or []:
+        if rule.get("enabled") is False:
+            continue
+        rtype = rule.get("type") or ""
+        value = (rule.get("value") or "").strip()
+
+        if rtype == "ip":
+            if client_ip and client_ip in [x.strip() for x in value.split(",") if x.strip()]:
+                return rule
+        elif rtype == "ip_range":
+            from ipaddress import ip_address, ip_network
+            try:
+                addr = ip_address(client_ip)
+            except ValueError:
+                continue
+            for raw in value.split(","):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    if addr in ip_network(raw, strict=False):
+                        return rule
+                except ValueError:
+                    continue
+        elif rtype == "ua_regex":
+            if value:
+                try:
+                    if re.search(value, ua):
+                        return rule
+                except re.error:
+                    continue
+        elif rtype == "empty_referer":
+            if not referer:
+                return rule
+        elif rtype == "duplicate_visitor":
+            if visitor_key and visitor_key in _seen_visitors:
+                return rule
+
+    return None
+
+
+def apply_bot_rules(request: Request):
+    """Evaluate bot rules for an inbound visit.
+
+    Returns (rule, blocked) — blocked=True means serve 404 without tracking;
+    otherwise the rule (if any) marks the click as a bot but tracking continues.
+    """
+    cfg = load_bot_rules()
+    if not cfg.get("enabled"):
+        return None, False
+
+    rules = cfg.get("rules") or []
+    has_duplicate_rule = any(
+        (r.get("type") == "duplicate_visitor" and r.get("enabled") is not False)
+        for r in rules)
+    visitor_key = visitor_key_for(request) if has_duplicate_rule else ""
+
+    rule = match_bot_rule(request, rules, visitor_key)
+
+    if has_duplicate_rule and visitor_key:
+        if len(_seen_visitors) >= _SEEN_VISITORS_CAP:
+            _seen_visitors.clear()
+        _seen_visitors.add(visitor_key)
+
+    if rule:
+        if (rule.get("action") or "block") == "block":
+            return rule, True
+        return rule, False
+    return None, False
 
 
 def notify_telegram_conversion(click_id: str, status: str, payout: float, row: dict = None):
@@ -869,6 +1017,10 @@ async def track_event(campaign, request: Request):
         if k in VALID_PARAMS:
             result_row[k] = v
 
+    # Bot rule with "mark" action — flag the click but keep tracking it
+    if getattr(request.state, "bot_marked", None):
+        result_row["is_bot"] = True
+
     # Apply the mapping and add the query parameters
     for key in VALID_PARAMS:
         if key in query:
@@ -946,6 +1098,14 @@ async def get_with_campaign_alias(campaign_alias: str, request: Request):
         log_track(msg)
         raise HTTPException(status_code=404, detail=msg)
 
+    # Bot & filter rules
+    rule, blocked = apply_bot_rules(request)
+    if rule:
+        request.state.bot_marked = rule.get("type")
+        if blocked:
+            log_track(f"🤖 Blocked visit to '{campaign_alias}' by rule '{rule.get('type')}'")
+            return render_404_html()
+
     # tracking
     await track_event(campaign, request)
     return await do_campaign_execution(campaign, request)
@@ -970,6 +1130,14 @@ async def post_with_campaign_alias(campaign_alias: str, request: Request):
         msg = f"❌ Campaign '{campaign_alias}' not found"
         log_track(msg)
         raise HTTPException(status_code=404, detail=msg)
+
+    # Bot & filter rules
+    rule, blocked = apply_bot_rules(request)
+    if rule:
+        request.state.bot_marked = rule.get("type")
+        if blocked:
+            log_track(f"🤖 Blocked post visit to '{campaign_alias}' by rule '{rule.get('type')}'")
+            return render_404_html()
 
     # tracking
     await track_event(campaign, request)
