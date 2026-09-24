@@ -25,7 +25,7 @@
                             </v-avatar>
                             <div class="text-caption grey--text text--darken-1">{{ metric.title }}</div>
                         </div>
-                        <div class="text-h5 font-weight-bold mt-3">{{ metric.value }}</div>
+                        <div class="text-h5 font-weight-bold mt-3" :class="metric.title === 'ROI' ? (String(metric.value).startsWith('-') ? 'num-neg' : 'num-pos') : ''">{{ metric.value }}</div>
                     </template>
                 </v-card>
             </v-col>
@@ -354,13 +354,16 @@
                 })
                     .then(res => res.json())
                     .then(data => {
+                        const m = data.metrics;
+                        const roiNum = parseFloat(m.roi) || 0;
+                        const roiColor = roiNum > 0 ? '#16a34a' : (roiNum < 0 ? '#dc2626' : '#009688');
                         this.metrics = [
-                            {title: 'Clicks', value: data.metrics.clicks, color: '#2196f3', icon: 'mdi-cursor-default-click-outline'},
-                            {title: 'Unique Clicks', value: data.metrics.unique_clicks, color: '#3f51b5', icon: 'mdi-account-switch-outline'},
-                            {title: 'Conversions', value: data.metrics.conversions, color: '#673ab7', icon: 'mdi-check-decagram-outline'},
-                            {title: 'Cost', value: `$${data.metrics.cost}`, color: '#ef4444', icon: 'mdi-cash-minus'},
-                            {title: 'Revenue', value: `$${data.metrics.revenue}`, color: '#16a34a', icon: 'mdi-cash-plus'},
-                            {title: 'ROI', value: data.metrics.roi, color: '#009688', icon: 'mdi-trending-up'},
+                            {title: 'Clicks', value: Number(m.clicks || 0).toLocaleString(), color: '#2196f3', icon: 'mdi-cursor-default-click-outline'},
+                            {title: 'Unique Clicks', value: Number(m.unique_clicks || 0).toLocaleString(), color: '#3f51b5', icon: 'mdi-account-switch-outline'},
+                            {title: 'Conversions', value: Number(m.conversions || 0).toLocaleString(), color: '#673ab7', icon: 'mdi-check-decagram-outline'},
+                            {title: 'Cost', value: '$' + Number(m.cost || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}), color: '#ef4444', icon: 'mdi-cash-minus'},
+                            {title: 'Revenue', value: '$' + Number(m.revenue || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}), color: '#16a34a', icon: 'mdi-cash-plus'},
+                            {title: 'ROI', value: (roiNum < 0 ? '' : '+') + (Number(roiNum).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})) + '%', color: roiColor, icon: roiNum < 0 ? 'mdi-trending-down' : 'mdi-trending-up'},
                         ];
 
                         const categories = data.chart.labels;

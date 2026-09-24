@@ -493,3 +493,80 @@ body::-webkit-scrollbar-thumb {
 body::-webkit-scrollbar-thumb:hover {
   background: #98a2b3;
 }
+/* ---------- Performance tables (Binom-style conditional coloring) ---------- */
+
+/* Rows tint by profit magnitude: the stronger the result, the deeper the tint. */
+.v-data-table tr.perf-win-1 > td { background: #f3faf6 !important; }
+.v-data-table tr.perf-win-2 > td { background: #e2f5ea !important; }
+.v-data-table tr.perf-win-3 > td { background: #cdefdd !important; }
+.v-data-table tr.perf-loss-1 > td { background: #fdf3f2 !important; }
+.v-data-table tr.perf-loss-2 > td { background: #fce4e2 !important; }
+.v-data-table tr.perf-loss-3 > td { background: #fad4d1 !important; }
+
+/* Colored leading edge on each perf row, like Binom's left bar. */
+.v-data-table tr.perf-win-1 > td:first-child { box-shadow: inset 3px 0 0 #86c9a4; }
+.v-data-table tr.perf-win-2 > td:first-child { box-shadow: inset 3px 0 0 #4db384; }
+.v-data-table tr.perf-win-3 > td:first-child { box-shadow: inset 3px 0 0 #16a34a; }
+.v-data-table tr.perf-loss-1 > td:first-child { box-shadow: inset 3px 0 0 #f3a19a; }
+.v-data-table tr.perf-loss-2 > td:first-child { box-shadow: inset 3px 0 0 #e97066; }
+.v-data-table tr.perf-loss-3 > td:first-child { box-shadow: inset 3px 0 0 #dc2626; }
+
+/* Hover keeps the tint but deepens it slightly. */
+.v-data-table tr.perf-win-1:hover > td,
+.v-data-table tr.perf-win-2:hover > td,
+.v-data-table tr.perf-win-3:hover > td { background: #d8f0e2 !important; }
+.v-data-table tr.perf-loss-1:hover > td,
+.v-data-table tr.perf-loss-2:hover > td,
+.v-data-table tr.perf-loss-3:hover > td { background: #fad9d6 !important; }
+
+/* Positive/negative figures. */
+.num-pos { color: #16a34a; font-weight: 600; }
+.num-neg { color: #dc2626; font-weight: 600; }
+.num-neutral { color: var(--text-secondary, #667085); }
+
+/* Tabular figures so columns line up like a trading desk. */
+.v-data-table td, .v-data-table th {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Totals footer row under a perf table. */
+.perf-totals-row > td {
+  background: #f4f6f8 !important;
+  border-top: 2px solid var(--border, #e3e8ef) !important;
+  font-weight: 700 !important;
+  position: sticky;
+  bottom: 0;
+}
+
+/* ---------- Top navigation (Binom-style, sidebar removed for full-width data) ---------- */
+
+.topnav-bar {
+  border-bottom: 1px solid var(--border, #e3e8ef);
+}
+
+.top-nav {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+.top-nav .v-btn {
+  text-transform: none;
+  font-weight: 500;
+  font-size: 14px;
+  color: #475467;
+  height: 56px;
+  border-radius: 0;
+  min-width: auto;
+  padding: 0 14px;
+  letter-spacing: 0.2px;
+}
+
+.top-nav .v-btn.top-nav-item--active {
+  color: #16a34a;
+  box-shadow: inset 0 -2px 0 0 #16a34a;
+}
+
+.top-nav .v-btn:hover {
+  color: #101828;
+}

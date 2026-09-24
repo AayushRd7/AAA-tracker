@@ -32,7 +32,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/terser@5.30.2/dist/bundle.min.js"></script>
 
-    <link href="/backend/backend/css/style.css" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=2" rel="stylesheet">
 </head>
 <body>
 {% raw %}
@@ -161,73 +161,44 @@
     <v-app>
         {% if page == 'dashboard' and is_authenticated_user_type %}
         {% raw %}
-        <v-navigation-drawer v-model="drawer" app color="#1a2332" dark permanent>
-            <div class="brand-block d-flex align-center px-4">
-                <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo mr-3">
-                <div>
-                    <div class="white--text font-weight-bold" style="font-size: 16px; letter-spacing: 0.4px;">AAA TRACKER</div>
-                    <div style="font-size: 11px; color: #64748b;">Campaign Analytics</div>
-                </div>
+        <v-app-bar app color="white" elevation="0" height="56" class="topnav-bar">
+            <div class="d-flex align-center mr-5">
+                <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo mr-2">
+                <div class="font-weight-bold" style="font-size: 15px; letter-spacing: 0.4px;">AAA TRACKER</div>
             </div>
-            <v-list dense nav class="mt-2">
-                <v-list-item link :input-value="activeSection === 'dashboard'" active-class="nav-item--active" @click="activeSection = 'dashboard'">
-                    <v-list-item-icon><v-icon>mdi-view-dashboard-outline</v-icon></v-list-item-icon>
-                    <v-list-item-title>Dashboard</v-list-item-title>
-                </v-list-item>
-                <v-list-item link :input-value="activeSection === 'campaigns'" active-class="nav-item--active" @click="activeSection = 'campaigns'">
-                    <v-list-item-icon><v-icon>mdi-sitemap</v-icon></v-list-item-icon>
-                    <v-list-item-title>Campaigns</v-list-item-title>
-                </v-list-item>
-                <v-list-item link :input-value="activeSection === 'landings'" active-class="nav-item--active" @click="activeSection = 'landings'">
-                    <v-list-item-icon><v-icon>mdi-lan</v-icon></v-list-item-icon>
-                    <v-list-item-title>Landing Pages</v-list-item-title>
-                </v-list-item>
-                <v-list-item link :input-value="activeSection === 'affiliates'" active-class="nav-item--active" @click="activeSection = 'affiliates'">
-                    <v-list-item-icon><v-icon>mdi-cash-multiple</v-icon></v-list-item-icon>
-                    <v-list-item-title>Affiliate Networks</v-list-item-title>
-                </v-list-item>
-                <v-list-item link :input-value="activeSection === 'offers'" active-class="nav-item--active" @click="activeSection = 'offers'">
-                    <v-list-item-icon><v-icon>mdi-tag-outline</v-icon></v-list-item-icon>
-                    <v-list-item-title>Offers</v-list-item-title>
-                </v-list-item>
-                <v-list-item link :input-value="activeSection === 'sources'" active-class="nav-item--active" @click="activeSection = 'sources'">
-                    <v-list-item-icon><v-icon>mdi-database-outline</v-icon></v-list-item-icon>
-                    <v-list-item-title>Sources</v-list-item-title>
-                </v-list-item>
-                <v-list-item link :input-value="activeSection === 'reports'" active-class="nav-item--active" @click="activeSection = 'reports'">
-                    <v-list-item-icon><v-icon>mdi-chart-line</v-icon></v-list-item-icon>
-                    <v-list-item-title>Reports</v-list-item-title>
-                </v-list-item>
-                {% endraw %}{% if is_authenticated_user_type == 'admin' %}{% raw %}
-                <v-list-item link :input-value="activeSection === 'domains'" active-class="nav-item--active" @click="activeSection = 'domains'">
-                    <v-list-item-icon><v-icon>mdi-domain</v-icon></v-list-item-icon>
-                    <v-list-item-title>Domains</v-list-item-title>
-                </v-list-item>
-                <v-list-item link :input-value="activeSection === 'settings'" active-class="nav-item--active" @click="activeSection = 'settings'">
-                    <v-list-item-icon><v-icon>mdi-cog-outline</v-icon></v-list-item-icon>
-                    <v-list-item-title>Settings</v-list-item-title>
-                </v-list-item>
-                <v-list-item link :input-value="activeSection === 'users'" active-class="nav-item--active" @click="activeSection = 'users'">
-                    <v-list-item-icon><v-icon>mdi-account-group</v-icon></v-list-item-icon>
-                    <v-list-item-title>Users</v-list-item-title>
-                </v-list-item>
-                {% endraw %}{% endif %}{% raw %}
-                <v-list-item link :input-value="activeSection === 'about'" active-class="nav-item--active" @click="activeSection = 'about'">
-                    <v-list-item-icon><v-icon>mdi-book-open-variant</v-icon></v-list-item-icon>
-                    <v-list-item-title>Documentation</v-list-item-title>
-                </v-list-item>
-            </v-list>
-            <template v-slot:append>
-                <div class="pa-4" style="font-size: 11px; color: #4b5a6e;">
-                    AAA Tracker · v1.0
-                </div>
-            </template>
-        </v-navigation-drawer>
-
-        <v-app-bar app clipped-left color="white" elevation="0" height="60">
-            <v-app-bar-nav-icon class="d-lg-none" @click="drawer = !drawer"></v-app-bar-nav-icon>
-            <v-app-bar-title>{{ pageTitle }}</v-app-bar-title>
+            <!-- Desktop: horizontal nav, Binom-style, keeps every pixel for data -->
+            <nav class="top-nav d-none d-lg-block">
+                <v-btn
+                        v-for="item in visibleNavItems"
+                        :key="item.key"
+                        text
+                        :input-value="activeSection === item.key"
+                        active-class="top-nav-item--active"
+                        @click="activeSection = item.key"
+                >{{ item.title }}</v-btn>
+            </nav>
             <v-spacer></v-spacer>
+            <!-- Mobile: all sections in a dropdown -->
+            <v-menu offset-y bottom nudge-bottom="6">
+                <template v-slot:activator="{ on, attrs }">
+                    <v-btn icon v-bind="attrs" v-on="on" class="d-lg-none">
+                        <v-icon>mdi-menu</v-icon>
+                    </v-btn>
+                </template>
+                <v-list dense>
+                    <v-list-item
+                            v-for="item in visibleNavItems"
+                            :key="'m-' + item.key"
+                            link
+                            :input-value="activeSection === item.key"
+                            active-class="nav-item--active"
+                            @click="activeSection = item.key"
+                    >
+                        <v-list-item-icon><v-icon small>{{ item.icon }}</v-icon></v-list-item-icon>
+                        <v-list-item-title>{{ item.title }}</v-list-item-title>
+                    </v-list-item>
+                </v-list>
+            </v-menu>
             <v-menu offset-y left>
                 <template v-slot:activator="{ on, attrs }">
                     <v-btn icon v-bind="attrs" v-on="on">
@@ -251,7 +222,7 @@
         {% endif %}
 
         <v-main>
-            <v-container fluid class="pa-6">
+            <v-container fluid class="pa-4">
                 {{ page_component | safe }}
             </v-container>
         </v-main>
@@ -280,9 +251,25 @@
                 drawer: null,
                 dashboardShell: {{ 'true' if page == 'dashboard' and is_authenticated_user_type else 'false' }},
                 roleLabel: '{{ is_authenticated_user_type if is_authenticated_user_type else "" }}',
+                navItems: [
+                    {key: 'dashboard', title: 'Dashboard', icon: 'mdi-view-dashboard-outline'},
+                    {key: 'campaigns', title: 'Campaigns', icon: 'mdi-sitemap'},
+                    {key: 'landings', title: 'Landing Pages', icon: 'mdi-lan'},
+                    {key: 'affiliates', title: 'Aff. Networks', icon: 'mdi-cash-multiple'},
+                    {key: 'offers', title: 'Offers', icon: 'mdi-tag-outline'},
+                    {key: 'sources', title: 'Traffic Sources', icon: 'mdi-database-outline'},
+                    {key: 'reports', title: 'Reports', icon: 'mdi-chart-line'},
+                    {key: 'domains', title: 'Domains', icon: 'mdi-domain', admin: true},
+                    {key: 'settings', title: 'Settings', icon: 'mdi-cog-outline', admin: true},
+                    {key: 'users', title: 'Users', icon: 'mdi-account-group', admin: true},
+                    {key: 'about', title: 'Documentation', icon: 'mdi-book-open-variant'},
+                ],
             };
         },
         computed: {
+            visibleNavItems() {
+                return this.navItems.filter(i => !i.admin || this.roleLabel === 'admin');
+            },
             pageTitle() {
                 const titles = {
                     dashboard: 'Dashboard',

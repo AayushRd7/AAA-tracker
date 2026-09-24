@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from db import get_db
 from models.base import Base
 
@@ -49,6 +50,10 @@ class Conversion(Base):
     is_using_proxy = Column(Boolean)
     is_bot = Column(Boolean)
     device_type = Column(String)
+    postback_count = Column(Integer)
+    last_postback_at = Column(DateTime)
+
+VALID_STATUSES = {"lead", "sale", "upsale", "rejected", "hold", "trash"}
 
 @router.get("/")
 def get_conversions(request: Request, limit: int = 100, db: Session = Depends(get_db)):
@@ -73,8 +78,58 @@ def get_conversions(request: Request, limit: int = 100, db: Session = Depends(ge
             query = query.filter(Conversion.received_at >= datetime.fromisoformat(value))
         elif key == "date_to":
             query = query.filter(Conversion.received_at <= datetime.fromisoformat(value))
+        elif key == "search":
+            # free-text search across the identifier columns
+            term = f"%{value}%"
+            query = query.filter(
+                (Conversion.click_id.ilike(term)) |
+                (Conversion.external_id.ilike(term)) |
+                (Conversion.transaction_id.ilike(term)) |
+                (Conversion.visitor_id.ilike(term))
+            )
 
     rows = query.order_by(Conversion.received_at.desc()).limit(limit).all()
 
     # Convert the ORM objects to dicts
     return [row.__dict__ for row in rows]
+
+
+class ConversionUpdate(BaseModel):
+    status: Optional[str] = None
+    payout: Optional[float] = None
+    revenue: Optional[float] = None
+    external_id: Optional[str] = None
+    transaction_id: Optional[str] = None
+
+
+@router.patch("/{conversion_id}")
+def update_conversion(conversion_id: int, data: ConversionUpdate, db: Session = Depends(get_db)):
+    conv = db.query(Conversion).filter_by(id=conversion_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversion not found")
+
+    updates = data.dict(exclude_none=True)
+    if "status" in updates:
+        if updates["status"] not in VALID_STATUSES:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {', '.join(sorted(VALID_STATUSES))}")
+        conv.status = updates["status"]
+    for field in ("payout", "revenue"):
+        if field in updates:
+            setattr(conv, field, updates[field])
+    for field in ("external_id", "transaction_id"):
+        if field in updates:
+            setattr(conv, field, updates[field])
+
+    db.commit()
+    return {"message": "Conversion updated"}
+
+
+@router.delete("/{conversion_id}")
+def delete_conversion(conversion_id: int, db: Session = Depends(get_db)):
+    conv = db.query(Conversion).filter_by(id=conversion_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversion not found")
+
+    db.delete(conv)
+    db.commit()
+    return {"message": "Conversion deleted"}

@@ -4,7 +4,7 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 
 ## 🎯 Traffic & Campaign Features (core tracker gaps)
 
-- [ ] **1. Conversion status editing** — currently a conversion's status (lead/sale/rejected…) is set by the postback and can't be changed afterward. Add API + UI to edit/override a conversion status from the click log & reports (needed for returns, chargebacks, late network postbacks).
+- [x] **1. Conversion status editing** — conversions can now be edited (status, payout, revenue, external/transaction ID) and deleted from the Conversion Log in Reports; postback counts + dedupe also handled in the same batch.
 - [ ] **2. Sub ID / macro tokens in offers & landings** — full macro set (`{click_id}`, `{sub_id_2}`…`{sub_id_8}`, `{campaign_name}`, `{source}`, `{cost}`…) usable in offer URLs, lander links, and postback URLs — sub-id mapping exists in Settings, but macro substitution in offer URLs and landing templates is incomplete.
 - [ ] **3. % traffic distribution across flows** — flows have position/weight, but there's no weighted-random split (e.g. send 70% to flow A, 30% to flow B) — probability flows.
 - [ ] **4. Bot / filter rules** — click-level filtering: block by IP, IP range, User-Agent regex, empty referer, duplicate visitor, VPN/proxy ASN.

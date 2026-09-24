@@ -112,7 +112,7 @@ CREATE TABLE sources (
     s2s_postback VARCHAR(1024),
     s2s_postback_statuses JSONB,        -- {"sale": true, "lead": false, ...}
     settings JSONB,                     -- array of [{"name": ..., "parameter": ..., "token": ..., "editable_name": ...}]
-    additional_settings JSONB,          -- taboola_api_key and others
+    additional_settings JSONB,          -- arbitrary per-source extras: API keys etc. {"taboola_api_key": "..."}
     created_at TIMESTAMP DEFAULT now(),
     updated_at TIMESTAMP DEFAULT now()
 );
@@ -127,9 +127,7 @@ VALUES
   {"name": "Sub id 1", "parameter": "sub_id_1", "token": "", "editable_name": true},
   {"name": "Sub id 2", "parameter": "sub_id_2", "token": "", "editable_name": true}
  ]'::jsonb,
- '{
-   "taboola_api_key": "taboola-us-key-123"
- }'::jsonb);
+ '{}'::jsonb);
 
 CREATE TABLE IF NOT EXISTS settings (
     id SERIAL PRIMARY KEY,
@@ -190,7 +188,9 @@ CREATE TABLE conversions_data (
     isp VARCHAR(100),
     is_using_proxy BOOLEAN,
     is_bot BOOLEAN,
-    device_type VARCHAR(50)
+    device_type VARCHAR(50),
+    postback_count INTEGER DEFAULT 0,          -- how many postbacks this conversion received
+    last_postback_at TIMESTAMP                 -- time of the most recent postback
 );
 
 CREATE INDEX idx_conversions_received_at ON conversions_data(received_at);
