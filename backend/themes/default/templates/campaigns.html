@@ -187,6 +187,23 @@
                                                                   dense></v-switch>
                                                     </v-col>
                                                     <v-col cols="12">
+                                                        <v-switch label="Hide Referrer (meta refresh)"
+                                                                  v-model="form.hide_referrer"
+                                                                  inset
+                                                                  dense
+                                                                  hint="Redirect visitors through an HTML meta refresh so target pages see no referrer"
+                                                                  persistent-hint></v-switch>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-text-field
+                                                                label="Fallback URL"
+                                                                v-model="form.fallback_url"
+                                                                outlined
+                                                                dense
+                                                                hint="Where to send visitors when no flow's filters match. Leave empty to show a 404 page."
+                                                                persistent-hint></v-text-field>
+                                                    </v-col>
+                                                    <v-col cols="12">
                                                         <v-select
                                                                 label="Tracking Script Method"
                                                                 v-model="form.integration_method"
@@ -389,13 +406,15 @@
                                 <h3 class="mb-2 mt-2">Flow Configuration</h3>
 
                                 <v-row>
-                                    <v-col cols="12" md="4">
+                                    <v-col cols="12" md="5">
                                         <v-select
                                                 v-model="form.flowScheme"
-                                                :items="flowSchemes"
-                                                label="Flow Scheme"
+                                                :items="[{text: 'Position (first match wins)', value: 'position'}, {text: 'Weight % (random split)', value: 'weight'}]"
+                                                label="Distribution"
                                                 outlined
-                                                dense></v-select>
+                                                dense
+                                                hint="Weight % splits visitors across flows by their weight — e.g. 70/30"
+                                                persistent-hint></v-select>
                                     </v-col>
                                 </v-row>
 
@@ -1013,6 +1032,10 @@
                         0,
                     cost_from_cost_parameter:
                         false,
+                    hide_referrer:
+                        false,
+                    fallback_url:
+                        '',
 
 
                     paramsIdMapping:[
@@ -1491,6 +1514,8 @@
                         cost: this.form.cost,
                         cost_currency: this.form.cost_currency,
                         cost_from_cost_parameter: this.form.cost_from_cost_parameter,
+                        hide_referrer: this.form.hide_referrer,
+                        fallback_url: this.form.fallback_url,
                         paramsIdMapping: this.form.paramsIdMapping,
                         postbacks: this.form.postbacks,
                         flows: this.form.flows
@@ -1579,6 +1604,8 @@
                     cost: item.config?.cost ?? 0,
                     cost_currency: item.config?.cost_currency || 'USD',
                     cost_from_cost_parameter: item.config?.cost_from_cost_parameter ?? false,
+                    hide_referrer: item.config?.hide_referrer ?? false,
+                    fallback_url: item.config?.fallback_url || '',
                     paramsIdMapping: item.config?.paramsIdMapping || [],
                     postbacks: item.config?.postbacks || [],
                     flows: item.config?.flows || []

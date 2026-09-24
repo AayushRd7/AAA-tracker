@@ -42,9 +42,44 @@
                             item-text="name"
                             item-value="id"
                             v-model="form.affiliate_network_id"
+                            append-outer-icon="mdi-plus-circle-outline"
+                            @click:append-outer="openNetworkDialog"
                             outlined
                             dense
+                            hint="No network? Click + to add one without leaving this form."
+                            persistent-hint
                     ></v-select>
+
+                    <!-- Quick create affiliate network, inline from the offer form -->
+                    <v-dialog v-model="networkDialog" max-width="480px">
+                        <v-card>
+                            <v-card-title class="text-h6">Add Affiliate Network</v-card-title>
+                            <v-card-text>
+                                <v-text-field label="Name" v-model="networkForm.name" outlined dense></v-text-field>
+                                <v-text-field
+                                        label="Offer Parameters (query string)"
+                                        v-model="networkForm.offer_parameters"
+                                        outlined
+                                        dense
+                                        hint="e.g. sub1={click_id}&sub2={payout}"
+                                        persistent-hint
+                                ></v-text-field>
+                                <v-text-field
+                                        label="S2S Postback Template"
+                                        v-model="networkForm.s2s_postback"
+                                        outlined
+                                        dense
+                                        hint="e.g. https://your-tracker/pb/{click_id}/{status}/{payout}"
+                                        persistent-hint
+                                ></v-text-field>
+                            </v-card-text>
+                            <v-card-actions>
+                                <v-spacer></v-spacer>
+                                <v-btn text @click="networkDialog = false">Cancel</v-btn>
+                                <v-btn color="primary" :loading="networkSaving" @click="createNetwork">Create</v-btn>
+                            </v-card-actions>
+                        </v-card>
+                    </v-dialog>
 
                     <v-combobox
                             v-model="form.countries"
@@ -199,6 +234,13 @@
                 isEdit: false,
                 loadingOffers: false,
                 affiliateNetworks: [],
+                networkDialog: false,
+                networkSaving: false,
+                networkForm: {
+                    name: '',
+                    offer_parameters: '',
+                    s2s_postback: ''
+                },
                 form: {
                     id: null,
                     name: '',
@@ -231,6 +273,36 @@
             this.$root.$on('load-offers', this.loadOffers);
         },
         methods: {
+            openNetworkDialog() {
+                this.networkForm = {name: '', offer_parameters: '', s2s_postback: ''};
+                this.networkDialog = true;
+            },
+            async createNetwork() {
+                if (!this.networkForm.name) {
+                    this.$root.$emit("show-message", {type: "error", text: "Network name is required."});
+                    return;
+                }
+                this.networkSaving = true;
+                try {
+                    const res = await fetch("/backend/api/affiliate-networks/", {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        credentials: "include",
+                        body: JSON.stringify(this.networkForm)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || "Failed to create network");
+                    this.networkDialog = false;
+                    await this.loadAffiliateNetworks();
+                    // Select the freshly created network on the offer being edited
+                    this.form.affiliate_network_id = data.id;
+                    this.$root.$emit("show-message", {type: "success", text: "Affiliate network created"});
+                } catch (err) {
+                    this.$root.$emit("show-message", {type: "error", text: err.message});
+                } finally {
+                    this.networkSaving = false;
+                }
+            },
             loadAffiliateNetworks() {
                 fetch("/backend/api/affiliate-networks/", {
                     credentials: "include"

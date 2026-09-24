@@ -1,7 +1,7 @@
 import random
 
 from fastapi import FastAPI, Request, HTTPException, Response, BackgroundTasks
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from fastapi.encoders import jsonable_encoder
 import httpagentparser
 from datetime import datetime
@@ -56,6 +56,20 @@ async def startup():
         password='password_password_password',
         database='default'
     )
+    # Idempotent schema migration (safe to run on every boot)
+    await ensure_schema()
+
+
+async def ensure_schema():
+    try:
+        async with app.state.pg.acquire() as conn:
+            await conn.execute("""
+                ALTER TABLE conversions_data
+                ADD COLUMN IF NOT EXISTS postback_count INTEGER DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS last_postback_at TIMESTAMP
+            """)
+    except Exception as e:
+        log_track(f"Schema migration error: {e}")
 
 
 # 🛑 Shutdown
@@ -330,6 +344,67 @@ def load_telegram_config() -> dict:
     return {}
 
 
+def load_postback_security() -> dict:
+    """Read the postback_security block from the settings row (sync, own connection)."""
+    try:
+        conn = psycopg2.connect(
+            host="tracker_postgres", dbname="db",
+            user="user", password="password_password_password")
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE name = 'settings'")
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0]:
+            cfg = json.loads(row[0])
+            return cfg.get("postback_security") or {}
+    except Exception as e:
+        log_track(f"Postback security config load error: {e}")
+    return {}
+
+
+def check_postback_access(request: Request, sec: dict) -> tuple[bool, str]:
+    """Enforce the optional secret key and IP allowlist on inbound postbacks."""
+    client_ip = (request.client.host if request.client else "") or ""
+
+    # IP allowlist: comma-separated IPs or CIDR ranges (e.g. 52.1.2.3, 52.0.0.0/8)
+    allowed = (sec.get("allowed_ips") or "").strip()
+    if allowed:
+        from ipaddress import ip_address, ip_network
+        try:
+            addr = ip_address(client_ip)
+        except ValueError:
+            return False, f"Client IP '{client_ip}' is not a valid address"
+        ok = False
+        for raw in allowed.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                if "/" in raw:
+                    if addr in ip_network(raw, strict=False):
+                        ok = True
+                        break
+                elif addr == ip_address(raw):
+                    ok = True
+                    break
+            except ValueError:
+                continue
+        if not ok:
+            return False, f"Client IP '{client_ip}' is not in the allowlist"
+
+    # Secret key: accept ?key=... or ?secret=... (or an X-Postback-Key header)
+    secret = (sec.get("secret_key") or "").strip()
+    if secret:
+        provided = (request.query_params.get("key")
+                    or request.query_params.get("secret")
+                    or request.headers.get("x-postback-key")
+                    or "")
+        if provided != secret:
+            return False, "Invalid or missing postback key"
+
+    return True, ""
+
+
 def notify_telegram_conversion(click_id: str, status: str, payout: float, row: dict = None):
     """Send a Telegram message for a conversion (runs in a background task)."""
     try:
@@ -347,7 +422,7 @@ def notify_telegram_conversion(click_id: str, status: str, payout: float, row: d
         emoji = TELEGRAM_STATUS_EMOJI.get(status, "🔔")
         row = row or {}
         lines = [f"{emoji} <b>{status.upper()}</b> — {payout}"]
-        campaign = row.get("name") or ""
+        campaign = row.get("campaign_name") or row.get("name") or ""
         if campaign:
             lines.append(f"📊 Campaign: {campaign}")
         geo = " • ".join(x for x in [row.get("country"), row.get("device_type"), row.get("os")] if x)
@@ -380,38 +455,51 @@ async def postback_receive(click_id: str, status: str, payout: str, request: Req
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid payout format")
 
+    # Postback protection (optional secret key + IP allowlist, from Settings)
+    sec = load_postback_security()
+    allowed, deny_reason = check_postback_access(request, sec)
+    if not allowed:
+        log_track(f"🚫 Postback denied for {click_id}: {deny_reason}")
+        raise HTTPException(status_code=403, detail=deny_reason)
+
     pg = request.app.state.pg
 
     async with pg.acquire() as conn:
+        # Fetch the click first so we can detect duplicate postbacks
+        row = await conn.fetchrow("""
+                                  SELECT c.*, ca.config AS campaign_config, ca.name AS campaign_name
+                                  FROM conversions_data c
+                                      LEFT JOIN campaigns ca on c.campaign_id = ca.id
+                                  WHERE c.click_id = $1
+                                  """, click_id)
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Click ID not found")
+
+        # Dedupe: identical (status, payout) repeated for the same click is a no-op
+        prev_status = row["status"]
+        prev_payout = float(row["payout"] or 0)
+        is_duplicate = (prev_status == status and abs(prev_payout - payout_value) < 0.005)
+        new_count = (row["postback_count"] or 0) + 1
+
         result = await conn.execute("""
                                     UPDATE conversions_data
-                                    SET status = $1, payout = $2
-                                    WHERE click_id = $3
-                                    """, status, payout_value, click_id)
+                                    SET status = $1, payout = $2, postback_count = $3,
+                                        last_postback_at = NOW()
+                                    WHERE click_id = $4
+                                    """, status, payout_value, new_count, click_id)
 
-        # try:
-        if True:
-            # look up the campaign by click_id
-            row = await conn.fetchrow("""
-                                      SELECT *
-                                      FROM conversions_data
-                                          JOIN campaigns c on conversions_data.campaign_id = c.id
-                                      WHERE click_id = $1
-                                      """, click_id)
-
-            # log_track(f'postbacks row {click_id}')
-            # log_track(row)
-            # Telegram conversion notification (respects settings toggle/statuses)
+        # Telegram conversion notification (respects settings toggle/statuses);
+        # skipped for duplicate postbacks so chat stays spam-free
+        if not is_duplicate:
             background_tasks.add_task(
                 notify_telegram_conversion, click_id, status, payout_value,
-                dict(row) if row else None)
+                dict(row))
 
-            if row and row["config"]:
-                config = json.loads(row["config"])
+            if row["campaign_config"]:
+                config = json.loads(row["campaign_config"])
                 # cycle of postbacks
                 postbacks = config.get("postbacks", [])
-                # log_track('postbacks')
-                # log_track(postbacks)
 
                 offer_id = row["offer_id"]
                 # get offer from db
@@ -437,12 +525,12 @@ async def postback_receive(click_id: str, status: str, payout: str, request: Req
                         # await send_postback(url, data, post_type)
                         background_tasks.add_task(send_postback, url, data, post=True)
 
-        # except:
-        #     log_track(f"<UNK> CAMPAIGN NOT FOUND request {click_id}")
-        #     # log error
-        #     raise HTTPException(status_code=404, detail="Click ID not found")
-
-    return JSONResponse(content={"status": "ok", "click_id": click_id, "updated_status": status})
+    return JSONResponse(content={
+        "status": "ok",
+        "click_id": click_id,
+        "updated_status": status,
+        "duplicate": is_duplicate,
+    })
 
 
 @app.get("/")
@@ -542,14 +630,36 @@ def get_params_id_mapping_from_campaign(campaign: dict) -> list:
         return []
 
 
+def meta_refresh_redirect(url: str) -> Response:
+    """Redirect via an HTML meta refresh so the browser sends no referrer."""
+    import html as html_module
+    safe_url = html_module.escape(url, quote=True)
+    html_doc = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Redirecting...</title>
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="refresh" content="0; url={safe_url}">
+</head>
+<body>
+    <p style="font-family: sans-serif; text-align: center; margin-top: 40vh;">Continue...</p>
+</body>
+</html>"""
+    return HTMLResponse(html_doc)
+
+
 async def do_campaign_execution(campaign, request: Request) -> Response:
     log_track(f"🔁 New campaign execution call for '{campaign}'")
 
     config = json.loads(campaign["config"])
     flows = config.get("flows", [])
-    # log_track(flows)
 
     pg = app.state.pg
+
+    # Distribution mode: 'position' = first matching flow wins,
+    # 'weight' = weighted random split across matching flows (Binom-style %).
+    distribution_mode = (campaign.get("redirect_mode") if hasattr(campaign, "get") else campaign["redirect_mode"]) or "position"
 
     # FORCED FLOWS FIRST
     sorted_flows = sorted(
@@ -560,102 +670,122 @@ async def do_campaign_execution(campaign, request: Request) -> Response:
         )
     )
 
-    # log_track('ALL FLOWS SORTED')
-    # log_track(sorted_flows)
-
     paramsIdMapping = get_params_id_mapping_from_campaign(campaign)
     meta_data = await enrich_meta(request, paramsIdMapping)
-    # log_track('META DATA')
-    # log_track(meta_data)
 
+    # Collect eligible flows: enabled + filters passed
+    eligible = []
     for flow in sorted_flows:
-        if not flow.get("enabled"):
+        if not flow or not flow.get("enabled"):
             continue
-
-        # log_track('FLOW')
-        # log_track(flow)
-        if not flow:
-            raise HTTPException(status_code=404, detail="No active flow")
-
         filters = flow.get("filters", [])
         if filters and not check_filters(meta_data, filters, request):
-            # log_track(f"❌ Filters not passed: {filters}")
             continue
+        eligible.append(flow)
 
-        schema = flow.get("schema")
+    # Choose the flow to serve
+    chosen = None
+    if eligible:
+        # Forced flows always win first (position order)
+        forced = [f for f in eligible if f.get("type") == "forced"]
+        if forced:
+            chosen = forced[0]
+        elif distribution_mode == "weight":
+            weights = []
+            for f in eligible:
+                try:
+                    w = max(float(f.get("weight", 100) or 0), 0)
+                except (TypeError, ValueError):
+                    w = 0
+                weights.append(w)
+            if sum(weights) > 0:
+                chosen = random.choices(eligible, weights=weights, k=1)[0]
+            else:
+                chosen = eligible[0]
+        else:
+            chosen = eligible[0]
 
-        # log_track('SCHEMA')
-        # log_track(schema)
+    # Nothing matched → campaign fallback URL if set, else 404
+    if chosen is None:
+        fallback_url = (config.get("fallback_url") or "").strip()
+        if fallback_url:
+            if config.get("hide_referrer"):
+                return meta_refresh_redirect(fallback_url)
+            return RedirectResponse(fallback_url)
+        return render_404_html()
 
-        # SCHEMA: direct
-        if schema == "direct":
-            offer_url = get_real_offer_url(flow.get("offer"))
-            # TODO: save_click_to_db
-            # await save_click_info(flow.get("campaign_id"), flow.get("offer"), request)
-            return RedirectResponse(offer_url)
+    flow = chosen
+    schema = flow.get("schema")
+    # Respect per-campaign "hide referrer" on outbound redirects
+    if config.get("hide_referrer"):
+        def campaign_redirect(url):
+            return meta_refresh_redirect(url)
+    else:
+        def campaign_redirect(url):
+            return RedirectResponse(url)
 
+    # SCHEMA: direct
+    if schema == "direct":
+        offer_url = get_real_offer_url(flow.get("offer"))
+        return campaign_redirect(offer_url)
 
-        # SCHEMA: landing → offer
-        elif schema == "landing_offer":
-            landing = flow.get("landing")
-            offer_id = flow.get("offer")
-            if landing:
-                async with pg.acquire() as conn:
-                    row = await conn.fetchrow("SELECT * FROM landings WHERE id = $1", landing)
-                    if row:
-                        landing_folder = row["folder"]
-                        offer_url = await get_offer_click_url(campaign['alias'], offer_id, row['id'], meta_data)
-                        return await show_landing(landing_folder, offer_url)
-            return render_404_html()
+    # SCHEMA: landing → offer
+    elif schema == "landing_offer":
+        landing = flow.get("landing")
+        offer_id = flow.get("offer")
+        if landing:
+            async with pg.acquire() as conn:
+                row = await conn.fetchrow("SELECT * FROM landings WHERE id = $1", landing)
+                if row:
+                    landing_folder = row["folder"]
+                    offer_url = await get_offer_click_url(campaign['alias'], offer_id, row['id'], meta_data)
+                    return await show_landing(landing_folder, offer_url)
+        return render_404_html()
 
-        # SCHEMA: landing only
-        elif schema == "landing_only":
-            landing = flow.get("landing")
-            if landing:
-                async with pg.acquire() as conn:
-                    row = await conn.fetchrow("SELECT * FROM landings WHERE id = $1", landing)
-                    if row:
-                        landing_folder = row["folder"]
-                        return await show_landing(landing_folder)
-            return render_404_html()
+    # SCHEMA: landing only
+    elif schema == "landing_only":
+        landing = flow.get("landing")
+        if landing:
+            async with pg.acquire() as conn:
+                row = await conn.fetchrow("SELECT * FROM landings WHERE id = $1", landing)
+                if row:
+                    landing_folder = row["folder"]
+                    return await show_landing(landing_folder)
+        return render_404_html()
 
-        # SCHEMA: multi
-        elif schema == "multi":
-            # Pick random landing and offer
-            landing_id = random.choice(flow.get("landings", []))
-            offer_id = random.choice(flow.get("offers", []))
+    # SCHEMA: multi
+    elif schema == "multi":
+        # Pick random landing and offer
+        landing_id = random.choice(flow.get("landings", []))
+        offer_id = random.choice(flow.get("offers", []))
 
-            if landing_id:
-                async with pg.acquire() as conn:
-                    row = await conn.fetchrow("SELECT * FROM landings WHERE id = $1", landing_id)
-                    if row:
-                        landing_folder = row["folder"]
-                        offer_url = await get_offer_click_url(campaign['alias'], offer_id, row['id'], meta_data)
-                        return await show_landing(landing_folder, offer_url)
-            return render_404_html()
+        if landing_id:
+            async with pg.acquire() as conn:
+                row = await conn.fetchrow("SELECT * FROM landings WHERE id = $1", landing_id)
+                if row:
+                    landing_folder = row["folder"]
+                    offer_url = await get_offer_click_url(campaign['alias'], offer_id, row['id'], meta_data)
+                    return await show_landing(landing_folder, offer_url)
+        return render_404_html()
 
-        # SCHEMA: redirect
-        elif schema == "redirect":
-            # log_track(flow.get("redirect_url"))
-            # TODO: save_click_to_db
-            return RedirectResponse(flow.get("redirect_url"))
+    # SCHEMA: redirect
+    elif schema == "redirect":
+        return campaign_redirect(flow.get("redirect_url"))
 
-        # SCHEMA: redirect_campaign ++++
-        elif schema == "redirect_campaign":
-            campaign_id = flow.get("redirect_campaign")
+    # SCHEMA: redirect_campaign ++++
+    elif schema == "redirect_campaign":
+        campaign_id = flow.get("redirect_campaign")
 
-            if campaign_id:
-                async with pg.acquire() as conn:
-                    campaign = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", campaign_id)
-                    # log_track(f"🔁 campaign for redirect - '{campaign}'")
-                    if campaign:
-                        return await do_campaign_execution(campaign, request)
-            return render_404_html()
-            # return RedirectResponse(flow.get("redirect_campaign"))
+        if campaign_id:
+            async with pg.acquire() as conn:
+                target_campaign = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", campaign_id)
+                if target_campaign:
+                    return await do_campaign_execution(target_campaign, request)
+        return render_404_html()
 
-        # SCHEMA: return_404 +++
-        elif schema == "return_404":
-            return render_404_html()
+    # SCHEMA: return_404 +++
+    elif schema == "return_404":
+        return render_404_html()
 
     # Default fallback
     return render_404_html()

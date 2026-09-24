@@ -2,3 +2,6 @@
 .env
 __pycache__
 .idea
+/frontend/frontend_data/
+/backend/backend_data/
+ssl/*.key

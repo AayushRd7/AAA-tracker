@@ -56,12 +56,40 @@
                         </v-col>
                     </v-row>
 
-                    <v-text-field
-                            label="Taboola API Key"
-                            v-model="form.additional_settings.taboola_api_key"
-                            outlined
+                    <div class="d-flex align-center mt-2">
+                        <v-subheader class="pl-0">Additional Settings (API keys, etc.)</v-subheader>
+                        <v-btn x-small icon color="primary" @click="addAdditionalSetting">
+                            <v-icon>mdi-plus</v-icon>
+                        </v-btn>
+                    </div>
+                    <v-row
+                            v-for="(extra, index) in form.additionalSettingsList"
+                            :key="'extra-' + index"
                             dense
-                    ></v-text-field>
+                            align="center"
+                    >
+                        <v-col cols="4">
+                            <v-text-field
+                                    label="Key"
+                                    v-model="extra.key"
+                                    outlined
+                                    dense
+                                    hide-details
+                            ></v-text-field>
+                        </v-col>
+                        <v-col cols="6">
+                            <v-text-field
+                                    label="Value"
+                                    v-model="extra.value"
+                                    outlined
+                                    dense
+                                    hide-details
+                            ></v-text-field>
+                        </v-col>
+                        <v-col cols="2" class="d-flex justify-center">
+                            <v-icon small color="red" @click="removeAdditionalSetting(index)">mdi-delete-outline</v-icon>
+                        </v-col>
+                    </v-row>
 
                     <v-btn
                             small
@@ -206,9 +234,8 @@
                         reject: false,
                         upsell: false
                     },
-                    additional_settings: {
-                        taboola_api_key: ''
-                    },
+                    additional_settings: {},
+                    additionalSettingsList: [],
                     settings: []
                 }
 
@@ -259,6 +286,24 @@
             removeSetting(index) {
                 this.form.settings.splice(index, 1);
             },
+            addAdditionalSetting() {
+                this.form.additionalSettingsList.push({key: '', value: ''});
+            },
+            removeAdditionalSetting(index) {
+                this.form.additionalSettingsList.splice(index, 1);
+            },
+            // additional_settings is stored as an object; the dialog edits it as a
+            // key/value list so any source can carry any API keys it needs.
+            toAdditionalSettingsObject(list) {
+                const obj = {};
+                (list || []).forEach(e => {
+                    if (e.key && e.key.trim()) obj[e.key.trim()] = e.value || '';
+                });
+                return obj;
+            },
+            toAdditionalSettingsList(obj) {
+                return Object.entries(obj || {}).map(([key, value]) => ({key, value}));
+            },
             loadSources() {
                 this.loadingSources = true;
                 fetch("/backend/api/sources/", {
@@ -291,9 +336,8 @@
                         reject: false,
                         upsell: false
                     },
-                    additional_settings: {
-                        taboola_api_key: ''
-                    },
+                    additional_settings: {},
+                    additionalSettingsList: [],
                     settings: this.getDefaultSettings()
                 };
             },
@@ -301,13 +345,15 @@
             openEdit(source) {
                 this.isEdit = true;
                 this.dialog = true;
+                const additional = source.additional_settings || {};
                 this.form = {
                     id: source.id,
                     name: source.name,
                     traffic_loss: source.traffic_loss,
                     s2s_postback: source.s2s_postback,
                     s2s_postback_statuses: source.s2s_postback_statuses || {},
-                    additional_settings: source.additional_settings || {},
+                    additional_settings: additional,
+                    additionalSettingsList: this.toAdditionalSettingsList(additional),
                     settings: source.settings || []
                 };
             },
@@ -323,7 +369,7 @@
                     traffic_loss: this.form.traffic_loss,
                     s2s_postback: this.form.s2s_postback,
                     s2s_postback_statuses: this.form.s2s_postback_statuses,
-                    additional_settings: this.form.additional_settings,
+                    additional_settings: this.toAdditionalSettingsObject(this.form.additionalSettingsList),
                     settings: this.form.settings
                 };
 

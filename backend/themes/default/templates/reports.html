@@ -93,9 +93,65 @@
                     :items-per-page="15"
                     :footer-props="{ 'items-per-page-options': [15, 25, 50, 100] }"
                     :loading="loading"
+                    :item-class="perfRowClass"
             >
+                <template v-slot:item.visits="{ item }">
+                    <span>{{ Number(item.visits || 0).toLocaleString() }}</span>
+                </template>
+                <template v-slot:item.unique_visits="{ item }">
+                    <span>{{ Number(item.unique_visits || 0).toLocaleString() }}</span>
+                </template>
+                <template v-slot:item.clicks="{ item }">
+                    <span>{{ Number(item.clicks || 0).toLocaleString() }}</span>
+                </template>
+                <template v-slot:item.unique_clicks="{ item }">
+                    <span>{{ Number(item.unique_clicks || 0).toLocaleString() }}</span>
+                </template>
+                <template v-slot:item.leads="{ item }">
+                    <span>{{ Number(item.leads || 0).toLocaleString() }}</span>
+                </template>
+                <template v-slot:item.conversions="{ item }">
+                    <span>{{ Number(item.conversions || 0).toLocaleString() }}</span>
+                </template>
+                <template v-slot:item.rejected="{ item }">
+                    <span>{{ Number(item.rejected || 0).toLocaleString() }}</span>
+                </template>
+                <template v-slot:item.cost="{ item }">
+                    <span>{{ formatMoney(item.cost) }}</span>
+                </template>
+                <template v-slot:item.revenue="{ item }">
+                    <span>{{ formatMoney(item.revenue) }}</span>
+                </template>
+                <template v-slot:item.profit="{ item }">
+                    <span :class="signClass(item.profit)">{{ formatMoney(item.profit) }}</span>
+                </template>
+                <template v-slot:item.cr="{ item }">
+                    <span>{{ formatPct(item.cr) }}</span>
+                </template>
+                <template v-slot:item.epc="{ item }">
+                    <span>{{ formatEpc(item.epc) }}</span>
+                </template>
                 <template v-slot:item.roi="{ item }">
-                    <span :class="roiClass(item.roi)" class="font-weight-medium">{{ item.roi }}%</span>
+                    <span :class="signClass(item.roi)">{{ formatPct(item.roi) }}</span>
+                </template>
+                <template v-slot:body.append="{ headers }">
+                    <tr class="perf-totals-row" v-if="reportRows.length">
+                        <td>Total</td>
+                        <td v-for="h in headers.slice(1)" :key="h.value" :class="h.align === 'end' ? 'text-end' : ''">
+                            <template v-if="['visits','unique_visits','clicks','unique_clicks','leads','conversions','rejected'].includes(h.value)">
+                                {{ Number(totals[h.value] || 0).toLocaleString() }}
+                            </template>
+                            <template v-else-if="['cost','revenue','profit'].includes(h.value)">
+                                <span :class="h.value === 'profit' ? signClass(totals.profit) : ''">{{ formatMoney(totals[h.value]) }}</span>
+                            </template>
+                            <template v-else-if="h.value === 'cr'">{{ formatPct(totals.cr) }}</template>
+                            <template v-else-if="h.value === 'epc'">{{ formatEpc(totals.epc) }}</template>
+                            <template v-else-if="h.value === 'roi'">
+                                <span :class="signClass(totals.roi)">{{ formatPct(totals.roi) }}</span>
+                            </template>
+                            <template v-else>&nbsp;</template>
+                        </td>
+                    </tr>
                 </template>
                 <template v-slot:no-data>
                     <div class="empty-state">
@@ -187,9 +243,12 @@
             </v-data-table>
         </v-card>
 
-        <!-- Raw conversions -->
+        <!-- Conversion log -->
         <div class="d-flex align-center justify-space-between mt-6 mb-2">
-            <div class="font-weight-medium">Conversions (raw)</div>
+            <div>
+                <div class="font-weight-medium">Conversion Log</div>
+                <div class="page-subtitle">Every conversion received via postback — edit status, payout or delete</div>
+            </div>
             <div>
                 <v-btn text small color="primary" class="mr-2" :disabled="!conversions || !conversions.length" @click="exportCsv">
                     <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
@@ -199,6 +258,30 @@
                 </v-btn>
             </div>
         </div>
+        <v-card class="pa-4 mb-2">
+            <div class="d-flex flex-wrap align-center">
+                <v-select
+                        v-model="convFilters.status"
+                        :items="['', 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash']"
+                        label="Status"
+                        outlined dense hide-details clearable
+                        style="max-width: 130px;"
+                        class="mr-2"
+                ></v-select>
+                <v-text-field
+                        v-model="convFilters.search"
+                        label="Search (click id, external id, transaction id, visitor id)"
+                        prepend-inner-icon="mdi-magnify"
+                        outlined dense hide-details clearable
+                        style="max-width: 320px;"
+                        class="mr-2"
+                        @keyup.enter="loadReports"
+                ></v-text-field>
+                <v-btn color="primary" elevation="0" :loading="convLoading" @click="loadReports">
+                    <v-icon small class="mr-1">mdi-magnify</v-icon>Search
+                </v-btn>
+            </div>
+        </v-card>
         <v-row dense>
             <v-col>
                 <v-card>
@@ -208,7 +291,45 @@
                             dense
                             :items-per-page="10"
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            :loading="convLoading"
                     >
+                        <template v-slot:item.status="{ item }">
+                            <v-chip x-small label outlined :color="statusColor(item.status)" class="font-weight-medium">
+                                {{ item.status || '—' }}
+                            </v-chip>
+                        </template>
+                        <template v-slot:item.payout="{ item }">
+                            <span>{{ formatMoney(item.payout) }}</span>
+                        </template>
+                        <template v-slot:item.profit="{ item }">
+                            <span :class="signClass(item.profit)">{{ formatMoney(item.profit) }}</span>
+                        </template>
+                        <template v-slot:item.revenue="{ item }">
+                            <span>{{ formatMoney(item.revenue) }}</span>
+                        </template>
+                        <template v-slot:item.postback_count="{ item }">
+                            <span v-if="item.postback_count > 1" class="font-weight-medium">{{ item.postback_count }}</span>
+                            <span v-else-if="item.postback_count === 1">1</span>
+                            <span v-else class="grey--text">—</span>
+                        </template>
+                        <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon x-small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                        <v-icon small>mdi-pencil-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Edit conversion</span>
+                            </v-tooltip>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon x-small color="error" v-bind="attrs" v-on="on" @click="deleteConversion(item)">
+                                        <v-icon small>mdi-trash-can-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Delete conversion</span>
+                            </v-tooltip>
+                        </template>
                         <template v-slot:no-data>
                             <div class="empty-state">
                                 <v-icon>mdi-inbox-outline</v-icon>
@@ -219,6 +340,41 @@
                 </v-card>
             </v-col>
         </v-row>
+
+        <!-- Edit conversion dialog -->
+        <v-dialog v-model="editDialog" max-width="520px">
+            <v-card>
+                <v-card-title class="text-h6">Edit Conversion</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-3">
+                        Click ID: <code>{{ editItem.click_id }}</code>
+                        <template v-if="editItem.received_at"> · {{ editItem.received_at }}</template>
+                    </div>
+                    <v-select
+                            v-model="editItem.status"
+                            :items="['lead', 'sale', 'upsale', 'rejected', 'hold', 'trash']"
+                            label="Status"
+                            outlined
+                            dense
+                    ></v-select>
+                    <v-row dense>
+                        <v-col cols="6">
+                            <v-text-field label="Payout" v-model="editItem.payout" type="number" step="0.01" outlined dense></v-text-field>
+                        </v-col>
+                        <v-col cols="6">
+                            <v-text-field label="Revenue" v-model="editItem.revenue" type="number" step="0.01" outlined dense></v-text-field>
+                        </v-col>
+                    </v-row>
+                    <v-text-field label="External ID" v-model="editItem.external_id" outlined dense></v-text-field>
+                    <v-text-field label="Transaction ID" v-model="editItem.transaction_id" outlined dense></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="editDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" :loading="editSaving" @click="saveConversion">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
 
         <confirm-dialog-component ref="confirm" />
     </v-container>
@@ -270,19 +426,19 @@
                 campaigns: [],
                 selectedCampaigns: [],
                 reportHeadersBase: [
-                    {text: 'Visits', value: 'visits'},
-                    {text: 'Unique Visits', value: 'unique_visits'},
-                    {text: 'Clicks', value: 'clicks'},
-                    {text: 'Unique Clicks', value: 'unique_clicks'},
-                    {text: 'Leads', value: 'leads'},
-                    {text: 'Conversions', value: 'conversions'},
-                    {text: 'Rejected', value: 'rejected'},
-                    {text: 'Cost', value: 'cost'},
-                    {text: 'Revenue', value: 'revenue'},
-                    {text: 'Profit', value: 'profit'},
-                    {text: 'CR %', value: 'cr'},
-                    {text: 'EPC', value: 'epc'},
-                    {text: 'ROI %', value: 'roi'},
+                    {text: 'Visits', value: 'visits', align: 'end'},
+                    {text: 'Unique Visits', value: 'unique_visits', align: 'end'},
+                    {text: 'Clicks', value: 'clicks', align: 'end'},
+                    {text: 'Unique Clicks', value: 'unique_clicks', align: 'end'},
+                    {text: 'Leads', value: 'leads', align: 'end'},
+                    {text: 'Conversions', value: 'conversions', align: 'end'},
+                    {text: 'Rejected', value: 'rejected', align: 'end'},
+                    {text: 'Cost', value: 'cost', align: 'end'},
+                    {text: 'Revenue', value: 'revenue', align: 'end'},
+                    {text: 'Profit', value: 'profit', align: 'end'},
+                    {text: 'CR %', value: 'cr', align: 'end'},
+                    {text: 'EPC', value: 'epc', align: 'end'},
+                    {text: 'ROI %', value: 'roi', align: 'end'},
                 ],
                 reportRows: [],
                 headers: [
@@ -291,13 +447,24 @@
                     {text: 'Campaign ID', value: 'campaign_id'},
                     {text: 'Offer ID', value: 'offer_id'},
                     {text: 'Status', value: 'status'},
+                    {text: 'External ID', value: 'external_id'},
                     {text: 'Sub ID 1', value: 'sub_id_1'},
                     {text: 'IP', value: 'ip'},
-                    {text: 'Payout', value: 'payout'},
-                    {text: 'Profit', value: 'profit'},
-                    {text: 'Revenue', value: 'revenue'},
+                    {text: 'Payout', value: 'payout', align: 'end'},
+                    {text: 'Profit', value: 'profit', align: 'end'},
+                    {text: 'Revenue', value: 'revenue', align: 'end'},
+                    {text: 'Postbacks', value: 'postback_count', align: 'end'},
+                    {text: 'Actions', value: 'actions', sortable: false},
                 ],
                 conversions: [],
+                convLoading: false,
+                convFilters: {
+                    status: '',
+                    search: '',
+                },
+                editDialog: false,
+                editSaving: false,
+                editItem: {},
                 logLoading: false,
                 clickLog: [],
                 logFilters: {
@@ -333,6 +500,28 @@
                 const dimLabel = (this.dimensionItems.find(d => d.key === this.dimension) || {}).label || 'Dimension';
                 return [{text: dimLabel, value: 'dimension'}, ...this.reportHeadersBase];
             },
+            totals() {
+                const rows = this.reportRows;
+                const sum = f => rows.reduce((a, r) => a + (parseFloat(r[f]) || 0), 0);
+                const clicks = sum('clicks');
+                const cost = sum('cost');
+                const revenue = sum('revenue');
+                const conversions = sum('conversions');
+                const profit = sum('profit');
+                return {
+                    visits: sum('visits'),
+                    unique_visits: sum('unique_visits'),
+                    clicks,
+                    unique_clicks: sum('unique_clicks'),
+                    leads: sum('leads'),
+                    conversions,
+                    rejected: sum('rejected'),
+                    cost, revenue, profit,
+                    cr: clicks ? (conversions / clicks) * 100 : 0,
+                    epc: clicks ? revenue / clicks : 0,
+                    roi: cost ? (profit / cost) * 100 : 0,
+                };
+            },
         },
         mounted() {
             this.loadCampaigns();
@@ -345,6 +534,42 @@
                 const v = parseFloat(roi);
                 if (isNaN(v) || v === 0) return 'grey--text';
                 return v > 0 ? 'success--text' : 'error--text';
+            },
+            // Binom-style row tint: deeper tint the further from break-even (ROI-led,
+            // profit as fallback when the dimension has no ROI).
+            perfRowClass(item) {
+                const roi = parseFloat(item.roi);
+                const profit = parseFloat(item.profit) || 0;
+                let score = null;
+                if (!isNaN(roi) && roi !== 0) score = roi;
+                else if (profit !== 0) {
+                    const cost = Math.abs(parseFloat(item.cost) || 0);
+                    score = cost ? (profit / cost) * 100 : (profit > 0 ? 100 : -100);
+                }
+                if (score === null || score === 0) return '';
+                if (score >= 50) return 'perf-win-3';
+                if (score >= 10) return 'perf-win-2';
+                if (score > 0) return 'perf-win-1';
+                if (score <= -50) return 'perf-loss-3';
+                if (score <= -10) return 'perf-loss-2';
+                return 'perf-loss-1';
+            },
+            signClass(v) {
+                const n = parseFloat(v);
+                if (isNaN(n) || n === 0) return 'num-neutral';
+                return n > 0 ? 'num-pos' : 'num-neg';
+            },
+            formatMoney(v) {
+                const n = parseFloat(v) || 0;
+                return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            },
+            formatPct(v) {
+                const n = parseFloat(v) || 0;
+                return n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%';
+            },
+            formatEpc(v) {
+                const n = parseFloat(v) || 0;
+                return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 5, maximumFractionDigits: 5});
             },
             applyPreset(preset) {
                 this.activePreset = preset.label;
@@ -460,16 +685,73 @@
                 this.$root.$emit("show-message", {type: "success", text: 'Conversions reloaded successfully!'});
             },
             loadReports() {
-                fetch('/backend/api/reports/')
+                this.convLoading = true;
+                const params = new URLSearchParams();
+                if (this.convFilters.status) params.set('status', this.convFilters.status);
+                if (this.convFilters.search) params.set('search', this.convFilters.search);
+                fetch('/backend/api/reports/?' + params.toString())
                     .then(response => response.json())
                     .then(data => {
                         this.conversions = data;
+                        this.convLoading = false;
                     })
                     .catch(err => {
+                        this.convLoading = false;
                         console.error("Failed to load conversions:", err)
                         this.$root.$emit("show-message", {type: "error", text: err.message});
                     });
-            }
+            },
+            statusColor(status) {
+                const map = {sale: 'success', lead: 'info', upsale: 'success', rejected: 'error', hold: 'warning', trash: 'grey'};
+                return map[status] || 'grey';
+            },
+            openEdit(item) {
+                this.editItem = Object.assign({}, item);
+                this.editDialog = true;
+            },
+            async saveConversion() {
+                this.editSaving = true;
+                const payload = {
+                    status: this.editItem.status,
+                    payout: this.editItem.payout === '' || this.editItem.payout == null ? null : parseFloat(this.editItem.payout),
+                    revenue: this.editItem.revenue === '' || this.editItem.revenue == null ? null : parseFloat(this.editItem.revenue),
+                    external_id: this.editItem.external_id || null,
+                    transaction_id: this.editItem.transaction_id || null,
+                };
+                try {
+                    const res = await fetch('/backend/api/reports/' + this.editItem.id, {
+                        method: 'PATCH',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Update failed');
+                    this.editDialog = false;
+                    this.$root.$emit("show-message", {type: "success", text: 'Conversion updated'});
+                    this.loadReports();
+                } catch (err) {
+                    this.$root.$emit("show-message", {type: "error", text: err.message});
+                } finally {
+                    this.editSaving = false;
+                }
+            },
+            async deleteConversion(item) {
+                const ok = await this.$refs.confirm.open(
+                    'Delete conversion?',
+                    `Click ${item.click_id} will be permanently removed. This cannot be undone.`,
+                    'Delete'
+                );
+                if (!ok) return;
+                try {
+                    const res = await fetch('/backend/api/reports/' + item.id, {method: 'DELETE'});
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Delete failed');
+                    this.$root.$emit("show-message", {type: "success", text: 'Conversion deleted'});
+                    this.loadReports();
+                } catch (err) {
+                    this.$root.$emit("show-message", {type: "error", text: err.message});
+                }
+            },
         },
     });
 </script>

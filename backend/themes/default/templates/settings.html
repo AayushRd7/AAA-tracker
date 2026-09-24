@@ -279,6 +279,52 @@
                 <!--                        </v-card-text>-->
                 <!--                    </v-card>-->
                 <!--                </v-col>-->
+                <v-col cols="12" md="6">
+                    <v-card flat class="pa-2">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-shield-lock-outline</v-icon>
+                            Postback Security
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.postback_security.enabled"
+                                    label="Require a secret key or IP allowlist for inbound postbacks"
+                                    inset
+                                    dense
+                                    hide-details
+                            ></v-switch>
+
+                            <v-text-field
+                                    label="Secret Key"
+                                    v-model="settings.postback_security.secret_key"
+                                    :disabled="!settings.postback_security.enabled"
+                                    :append-icon="showPbSecret ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                                    :type="showPbSecret ? 'text' : 'password'"
+                                    @click:append="showPbSecret = !showPbSecret"
+                                    outlined
+                                    dense
+                                    hint="Networks must pass it as ?key=... or ?secret=... or an X-Postback-Key header. Leave empty to allow the key check."
+                                    persistent-hint
+                            ></v-text-field>
+
+                            <v-textarea
+                                    label="Allowed IPs"
+                                    v-model="settings.postback_security.allowed_ips"
+                                    :disabled="!settings.postback_security.enabled"
+                                    outlined
+                                    dense
+                                    rows="2"
+                                    hint="Comma-separated IPs or CIDR ranges, e.g. 203.0.113.5, 10.0.0.0/8. Leave empty to allow any IP."
+                                    persistent-hint
+                            ></v-textarea>
+
+                            <div class="caption grey--text">
+                                When enabled, inbound postbacks must satisfy every non-empty check. If both stay empty while enabled, postbacks are allowed.
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
                 <!-- Variable mapping block -->
                 <v-col cols="12">
                     <v-card flat class="pa-2">
@@ -366,6 +412,11 @@
                         recipients: '',
                         hour: 9,
                     },
+                    postback_security: {
+                        enabled: false,
+                        secret_key: '',
+                        allowed_ips: '',
+                    },
                 },
                 subIdMapping: [
                 ],
@@ -376,6 +427,7 @@
                 emailTesting: false,
                 showSmtpPassword: false,
                 showBrevoApiKey: false,
+                showPbSecret: false,
             };
         },
         mounted() {
@@ -434,12 +486,17 @@
                             from_name: 'AAA Tracker', from_email: '',
                             recipients: '', hour: 9,
                         };
+                        const pbDefaults = {
+                            enabled: false, secret_key: '', allowed_ips: '',
+                        };
                         this.settings = Object.assign({}, this.settings, data.settings || {});
                         this.settings.telegram = Object.assign({}, tgDefaults, this.settings.telegram || {});
                         this.settings.telegram.statuses = Object.assign(
                             {}, tgDefaults.statuses, this.settings.telegram.statuses || {});
                         this.settings.email_reports = Object.assign(
                             {}, erDefaults, this.settings.email_reports || {});
+                        this.settings.postback_security = Object.assign(
+                            {}, pbDefaults, this.settings.postback_security || {});
                         if (data.subIdMapping) this.subIdMapping = data.subIdMapping;
                     });
             },
