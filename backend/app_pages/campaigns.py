@@ -7,6 +7,7 @@ from typing import List
 from pydantic import BaseModel
 from typing import Optional, Literal
 from datetime import datetime, date, timedelta
+from sqlalchemy import text
 
 from clickHouse import get_report_breakdown
 
@@ -148,11 +149,21 @@ def update_campaign(campaign_id: int, data: CampaignIn, db: Session = Depends(ge
     return campaign
 
 @router.delete("/{campaign_id}")
-def delete_campaign(campaign_id: int, db: Session = Depends(get_db)):
+def delete_campaign(campaign_id: int, request: Request, db: Session = Depends(get_db)):
     campaign = db.query(CampaignORM).filter_by(id=campaign_id).first()
     if not campaign:
         raise HTTPException(404, detail="Campaign not found")
 
+    # Purge the tracking history too — otherwise orphaned clicks keep
+    # feeding dashboard/report numbers for a campaign that no longer exists.
+    try:
+        request.state.ch.command(
+            f"ALTER TABLE clicks_data DELETE WHERE campaign_id = {campaign_id}")
+    except Exception as e:
+        print(f"campaign delete: ClickHouse purge failed for {campaign_id}:", e)
+
+    db.execute(text("DELETE FROM conversions_data WHERE campaign_id = :cid"),
+               {"cid": campaign_id})
     db.delete(campaign)
     db.commit()
     return {"message": "Campaign deleted"}

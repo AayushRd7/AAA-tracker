@@ -2104,7 +2104,7 @@
             async deleteCampaign(item) {
                 const ok = await this.$refs.confirm.open(
                     'Delete Campaign',
-                    `Are you sure you want to delete campaign "${item.name}"? This cannot be undone.`,
+                    `Are you sure you want to delete campaign "${item.name}"? All tracked clicks and conversions for it will be permanently deleted too. This cannot be undone.`,
                     'Delete'
                 );
                 if (!ok) return;
@@ -2225,7 +2225,7 @@
                 const n = this.selected.length;
                 const ok = await this.$refs.confirm.open(
                     'Delete Campaigns',
-                    `Are you sure you want to delete ${n} campaign(s)? This cannot be undone.`,
+                    `Are you sure you want to delete ${n} campaign(s)? All tracked clicks and conversions for them will be permanently deleted too. This cannot be undone.`,
                     'Delete'
                 );
                 if (!ok) return;
