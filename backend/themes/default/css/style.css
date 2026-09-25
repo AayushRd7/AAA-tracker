@@ -549,21 +549,20 @@ body::-webkit-scrollbar-thumb:hover {
    without this the nav rides high and sits off the brand baseline. */
 .topnav-bar .v-toolbar__content {
   align-items: center;
-  height: 58px !important;
+  height: 40px !important;
+}
+
+.topnav-bar .brand-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  box-shadow: none;
 }
 
 .brand-block-top {
   padding-right: 22px;
   border-right: 1px solid rgba(255, 255, 255, 0.09);
   margin-right: 22px !important;
-}
-
-.brand-name {
-  font-weight: 700;
-  font-size: 14.5px;
-  letter-spacing: 0.9px;
-  color: #ffffff;
-  white-space: nowrap;
 }
 
 .top-nav {
@@ -581,12 +580,12 @@ body::-webkit-scrollbar-thumb:hover {
 .top-nav .v-btn {
   text-transform: none;
   font-weight: 500;
-  font-size: 13.5px;
+  font-size: 13px;
   color: #9aa4b6;
-  height: 38px;
-  border-radius: 8px;
+  height: 28px;
+  border-radius: 7px;
   min-width: auto;
-  padding: 0 13px;
+  padding: 0 12px;
   margin: 0 2px;
   letter-spacing: 0.2px;
   background: transparent;
@@ -652,4 +651,20 @@ body.col-resizing * {
 table.cols-free {
     width: max-content !important;
     min-width: 100% !important;
+}
+
+/* ---------- Campaign table: blended totals row + column picker ---------- */
+.totals-row td {
+  border-top: 2px solid #e3e8ef;
+  background: #f8fafc;
+  font-weight: 600;
+  color: #101828;
+  height: 38px;
+}
+.totals-row td.text-end {
+  text-align: right !important;
+}
+.col-menu-list {
+  max-height: 400px;
+  overflow-y: auto;
 }

@@ -34,6 +34,7 @@ class CampaignORM(Base):
     domain_id = Column(Integer, ForeignKey("domains.id"), nullable=True)
     traffic_source_id = Column(Integer, ForeignKey("sources.id"), nullable=True)
     notes = Column(Text, nullable=True)
+    tags = Column(JSONB, nullable=True, default=list)
     config = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
