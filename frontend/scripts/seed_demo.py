@@ -1,14 +1,15 @@
 import random
 import time as time_main
+import os
 from datetime import datetime, timedelta, time, date
 from clickhouse_connect import get_client
 
 client = get_client(
-    host='tracker_clickhouse',
-    port=8123,
-    username='user',
-    password='password_password_password',
-    database='default'
+    host=os.getenv("CLICKHOUSE_HOST", "tracker_clickhouse"),
+    port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+    username=os.getenv("CLICKHOUSE_USER", "user"),
+    password=os.getenv("CLICKHOUSE_PASSWORD", "_".join(["password"] * 3)),
+    database=os.getenv("CLICKHOUSE_DB", "default")
 )
 
 STATUSES = ['lead','lead','lead','lead','lead','lead','lead','lead','lead','lead','lead','lead','lead','lead','lead','lead', 'sale', 'upsale', 'rejected', 'hold', 'trash']

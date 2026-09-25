@@ -134,8 +134,8 @@ nginx/
   ├── nginx.dev.conf
   ├── nginx.prod.conf
   └── Dockerfile
-certbot-etc/
 certbot-var/
+letsencrypt/
 ssl/
   ├──
 frontend/
@@ -157,7 +157,19 @@ frontend/
 
 ## ⚙ Testing:
 
-- Not realized yet, but should be in the future.
+A live API smoke test suite exists at `backend/tests/api_smoke.py`. It runs against a running instance (dev or prod), exercises auth, 401 protection, campaign CRUD/clone, weighted redirect, fallback, hide-referrer, reports, and cleanup, and cleans up the temporary data it creates. Exits non-zero on the first failure.
+
+```bash
+TEST_BASE_URL=https://localhost TEST_INSECURE=1 \
+TEST_USER=tracker_admin TEST_PASS=admin \
+python3 backend/tests/api_smoke.py
+```
+
+Environment variables:
+
+- `TEST_BASE_URL` — base URL of the running instance (default: `http://localhost`).
+- `TEST_INSECURE=1` — skip TLS certificate verification (needed for the self-signed local cert).
+- `TEST_USER` / `TEST_PASS` — login credentials (default: `tracker_admin` / `admin`).
 
 ## 🧰 Contribution Guidelines
 

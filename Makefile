@@ -69,18 +69,15 @@ restart-nginx:
 	docker-compose restart nginx
 
 clear-logs:
-
 	@echo "Stopping containers..."
 	$(COMPOSE) down
 	@echo "Truncating logs..."
 	sudo truncate -s 0 /var/lib/docker/containers/*/*-json.log || true
-	@echo "Logs cleared."
-
 	@echo "Clearing logs..."
 	$(COMPOSE) logs --no-color > /dev/null 2>&1 || true
-	@docker system prune -f --volumes
+	@docker system prune -f --volumes || true
 	@echo "Logs cleared (via prune)."
 	rm -f logs/*.log || true
 	@echo "Log files removed"
-
-	make start
+	@echo "Starting containers..."
+	$(COMPOSE) --compatibility up --build -d

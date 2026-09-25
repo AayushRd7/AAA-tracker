@@ -47,7 +47,7 @@
 
                     <v-subheader class="pl-0">S2S Postback Statuses</v-subheader>
                     <v-row dense>
-                        <v-col cols="3" v-for="status in ['sale', 'lead', 'reject', 'upsell']" :key="status">
+                        <v-col cols="3" v-for="status in ['sale', 'lead', 'rejected', 'upsale']" :key="status">
                             <v-checkbox
                                     :label="status"
                                     v-model="form.s2s_postback_statuses[status]"
@@ -231,8 +231,8 @@
                     s2s_postback_statuses: {
                         sale: true,
                         lead: false,
-                        reject: false,
-                        upsell: false
+                        rejected: false,
+                        upsale: false
                     },
                     additional_settings: {},
                     additionalSettingsList: [],
@@ -333,8 +333,8 @@
                     s2s_postback_statuses: {
                         sale: true,
                         lead: false,
-                        reject: false,
-                        upsell: false
+                        rejected: false,
+                        upsale: false
                     },
                     additional_settings: {},
                     additionalSettingsList: [],

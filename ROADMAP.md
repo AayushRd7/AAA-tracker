@@ -38,7 +38,7 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 
 ## 🎨 UI Polish (smaller)
 
-- [ ] **21. Campaign duplicate/clone button** — very common need.
+- [x] **21. Campaign duplicate/clone button** — implemented: `POST /api/campaigns/{id}/clone` (live-verified in the smoke suite).
 - [x] **22. Bulk actions on lists** — select multiple campaigns: Activate / Pause / Delete (with confirm).
 - [ ] **23. Global search** — campaigns/offers/landings by name.
 - [ ] **24. Dark mode toggle** — CSS tokens are already set up for it.

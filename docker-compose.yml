@@ -1,19 +1,39 @@
-version: '3.9'
-
 services:
+  docker-socket-proxy:
+    image: wollomatic/socket-proxy:1
+    container_name: tracker_socket_proxy
+    restart: always
+    # run as nobody + host docker group so the socket is reachable but the
+    # process is not root inside the container
+    user: "65534:991"
+    environment:
+      # wollomatic/socket-proxy uses SP_* env vars; allowlists are regexes per HTTP method.
+      # Minimum for `docker exec <container> nginx -s reload`:
+      #   GET  /_ping (CLI handshake), /version (API negotiation),
+      #        /containers/... (inspect), /exec/<id>/json (exit code)
+      #   POST /containers/<name>/exec (create), /exec/<id>/start|resize
+      # Everything else (containers create/start/stop/delete, images, build,
+      # volumes, networks, swarm...) stays denied by default.
+      - SP_LISTENIP=0.0.0.0
+      - 'SP_ALLOW_GET=/(_ping|version)|/v1\..{1,2}/(version|containers/.+|exec/.+/json)'
+      - 'SP_ALLOW_POST=/v1\..{1,2}/(containers/.+/exec|exec/.+/(start|resize))'
+      # only the frontend container (by hostname) may connect — this image has
+      # no password auth; hostname + IP allowlist is its access control
+      - SP_ALLOWFROM=frontend
+      - SP_LOGLEVEL=info
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
   postgres:
     image: postgres:15
     container_name: tracker_postgres
     restart: always
-    environment:
-      POSTGRES_DB: db
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password_password_password
+    env_file: .env
     # host port binding removed: DBs are reached via the internal docker network only
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d db"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -23,10 +43,7 @@ services:
     container_name: tracker_clickhouse
     restart: always
     # host port binding removed: DBs are reached via the internal docker network only
-    environment:
-      CLICKHOUSE_USER: user
-      CLICKHOUSE_PASSWORD: password_password_password
-      CLICKHOUSE_DB: default
+    env_file: .env
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/clickhouse-config.xml:/etc/clickhouse-server/config.xml:ro
@@ -49,13 +66,12 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
+    env_file: .env
     environment:
-      - DB_HOST=postgres
-      - DB_NAME=db
-      - DB_USER=user
-      - DB_PASSWORD=password_password_password
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ./frontend:/app
       - ./certbot-var:/var/www/certbot
       - ./letsencrypt:/etc/letsencrypt
@@ -80,11 +96,7 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
-    environment:
-      - DB_HOST=postgres
-      - DB_NAME=db
-      - DB_USER=user
-      - DB_PASSWORD=password_password_password
+    env_file: .env
     volumes:
       - ./backend:/app
       - ./certbot-var:/var/www/certbot

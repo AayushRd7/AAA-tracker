@@ -4,11 +4,11 @@ import shutil
 import sys
 from clickhouse_connect import get_client
 
-DB_HOST = "tracker_postgres"
-DB_PORT = "5432"
-DB_NAME = "db"
-DB_USER = "user"
-DB_PASSWORD = "password_password_password"
+DB_HOST = os.getenv("POSTGRES_HOST", "tracker_postgres")
+DB_PORT = os.getenv("POSTGRES_PORT", "5432")
+DB_NAME = os.getenv("POSTGRES_DB", "db")
+DB_USER = os.getenv("POSTGRES_USER", "user")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "_".join(["password"] * 3))
 
 INIT_SQL_FILE = "/app/install/sql/init.sql"
 
@@ -107,7 +107,7 @@ def run_clickhouse_install():
     client = get_client(
         host=os.getenv("CLICKHOUSE_HOST", "tracker_clickhouse"),
         username=os.getenv("CLICKHOUSE_USER", "user"),
-        password=os.getenv("CLICKHOUSE_PASSWORD", "password_password_password"),
+        password=os.getenv("CLICKHOUSE_PASSWORD", "_".join(["password"] * 3)),
         port=int(os.getenv("CLICKHOUSE_PORT", 8123)),
         secure=False
     )

@@ -1577,7 +1577,7 @@
 
                               // 5. Method for conversions
                               window.trackConversion = async (eventType, cost = 0) => {
-                                if (!['lead', 'sale', 'reject', 'upsale', 'pending'].includes(eventType)) return;
+                                if (!['lead', 'sale', 'rejected', 'upsale', 'pending'].includes(eventType)) return;
                                 try {
                                   await fetch(TRACKING_URL, {
                                     method: 'POST',

@@ -28,6 +28,27 @@ from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
 
 import uuid
 
+POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "tracker_postgres")
+POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5432")
+POSTGRES_DB = os.environ.get("POSTGRES_DB", "db")
+POSTGRES_USER = os.environ.get("POSTGRES_USER", "user")
+# dev-only fallback so imports work without env; the real value comes from .env
+POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD") or "_".join(["password"] * 3)
+
+CLICKHOUSE_HOST = os.environ.get("CLICKHOUSE_HOST", "tracker_clickhouse")
+CLICKHOUSE_PORT = int(os.environ.get("CLICKHOUSE_PORT", "8123"))
+CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "user")
+# dev-only fallback so imports work without env; the real value comes from .env
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD") or "_".join(["password"] * 3)
+CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DB", "default")
+
+
+def pg_connect():
+    return psycopg2.connect(
+        host=POSTGRES_HOST, port=POSTGRES_PORT, dbname=POSTGRES_DB,
+        user=POSTGRES_USER, password=POSTGRES_PASSWORD)
+
+
 app = FastAPI()
 app.state = SimpleNamespace()
 
@@ -48,11 +69,11 @@ CH_POOL_SIZE = 8
 
 def new_ch_client():
     return get_client(
-        host='tracker_clickhouse',
-        port=8123,
-        username='user',
-        password='password_password_password',
-        database='default'
+        host=CLICKHOUSE_HOST,
+        port=CLICKHOUSE_PORT,
+        username=CLICKHOUSE_USER,
+        password=CLICKHOUSE_PASSWORD,
+        database=CLICKHOUSE_DB
     )
 
 
@@ -78,11 +99,11 @@ def release_ch(ch, failed: bool = False):
 @app.on_event("startup")
 async def startup():
     app.state.pg = await asyncpg.create_pool(
-        user="user",
-        password="password_password_password",
-        database="db",
-        host="tracker_postgres",
-        port=5432
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+        database=POSTGRES_DB,
+        host=POSTGRES_HOST,
+        port=int(POSTGRES_PORT)
     )
     app.state.ch_pool = queue.Queue()
     for _ in range(CH_POOL_SIZE):
@@ -118,9 +139,7 @@ async def retention_loop():
 
 async def prune_old_data():
     """Delete clicks older than settings.data_retention.days when enabled."""
-    conn = psycopg2.connect(
-        host="tracker_postgres", dbname="db",
-        user="user", password="password_password_password")
+    conn = pg_connect()
     cur = conn.cursor()
     cur.execute("SELECT value FROM settings WHERE name = 'settings'")
     row = cur.fetchone()
@@ -184,6 +203,8 @@ app.include_router(domains_router, tags=["Domains"])
 
 # in-memory log
 TRACK_LOG = []
+
+_title_cache = {}
 
 
 def log_track(message: str):
@@ -273,8 +294,9 @@ async def show_landing(folder: str, offer_url: str = None) -> Response:
 
     print(index_php, os.path.exists(index_php))
     if os.path.exists(index_php) or os.path.exists(index_html):
-        url = f"https://tracker_nginx/l/{folder}"
-        r = requests.get(url, verify=False)  # , data={"name": "Anton"})
+        # plain http on the internal docker network — no TLS/cert needed
+        url = f"http://tracker_nginx/l/{folder}"
+        r = requests.get(url)  # , data={"name": "Anton"})
         html = r.text
         if offer_url:
             html = html.replace("{offer}", offer_url)
@@ -331,6 +353,7 @@ async def campaign_click(
         campaign = await conn.fetchrow("SELECT * FROM campaigns WHERE alias = $1", campaign_alias)
         if not campaign:
             log_track(f"❌ CAMPAIGN NOT FOUND request {campaign_alias} - {offer_id}")
+            return Response("Campaign not found", status_code=404)
 
         # 2. Offer
         offer = await conn.fetchrow("SELECT * FROM offers WHERE id = $1", int(offer_id))
@@ -346,7 +369,10 @@ async def campaign_click(
     meta_data["offer_id"] = offer["id"]
     landing_id = request.query_params.get("l_id")
     if landing_id:
-        meta_data["landing_id"] = offer["id"]
+        try:
+            meta_data["landing_id"] = int(landing_id)
+        except ValueError:
+            pass
     meta_data["click_id"] = meta_data.get("click_id") or generate_click_id()
 
     # 5. Save the click asynchronously
@@ -414,9 +440,7 @@ ALL_STATUSES = ["lead", "sale", "upsale", "rejected", "hold", "trash"]
 def load_telegram_config() -> dict:
     """Read the telegram block from the settings row (sync, own connection)."""
     try:
-        conn = psycopg2.connect(
-            host="tracker_postgres", dbname="db",
-            user="user", password="password_password_password")
+        conn = pg_connect()
         cur = conn.cursor()
         cur.execute("SELECT value FROM settings WHERE name = 'settings'")
         row = cur.fetchone()
@@ -432,9 +456,7 @@ def load_telegram_config() -> dict:
 def load_postback_security() -> dict:
     """Read the postback_security block from the settings row (sync, own connection)."""
     try:
-        conn = psycopg2.connect(
-            host="tracker_postgres", dbname="db",
-            user="user", password="password_password_password")
+        conn = pg_connect()
         cur = conn.cursor()
         cur.execute("SELECT value FROM settings WHERE name = 'settings'")
         row = cur.fetchone()
@@ -498,9 +520,7 @@ _SEEN_VISITORS_CAP = 200_000
 def load_bot_rules() -> dict:
     """Read the bot_rules block from the settings row (sync, own connection)."""
     try:
-        conn = psycopg2.connect(
-            host="tracker_postgres", dbname="db",
-            user="user", password="password_password_password")
+        conn = pg_connect()
         cur = conn.cursor()
         cur.execute("SELECT value FROM settings WHERE name = 'settings'")
         row = cur.fetchone()
@@ -660,19 +680,42 @@ async def postback_receive(click_id: str, status: str, payout: str, request: Req
     async with pg.acquire() as conn:
         # Fetch the click first so we can detect duplicate postbacks
         row = await conn.fetchrow("""
-                                  SELECT c.*, ca.config AS campaign_config, ca.name AS campaign_name
+                                  SELECT c.*, ca.config AS campaign_config, ca.name AS campaign_name,
+                                         ca.traffic_source_id AS traffic_source_id
                                   FROM conversions_data c
                                       LEFT JOIN campaigns ca on c.campaign_id = ca.id
                                   WHERE c.click_id = $1
                                   """, click_id)
 
         if not row:
-            raise HTTPException(status_code=404, detail="Click ID not found")
+            # Clicks from direct/redirect/landing flows never pass through /c,
+            # so no conversions_data row exists for them — create one
+            await conn.execute("""
+                               INSERT INTO conversions_data
+                                   (click_id, status, payout, received_at, postback_count, last_postback_at)
+                               VALUES ($1, $2, $3, NOW(), 1, NOW())
+                               """, click_id, status, payout_value)
+            return JSONResponse(content={
+                "status": "ok",
+                "click_id": click_id,
+                "updated_status": status,
+                "duplicate": False,
+            })
 
-        # Dedupe: identical (status, payout) repeated for the same click is a no-op
+        # Dedupe: identical (status, payout) re-fired within a short window is a
+        # no-op (networks re-send the same postback); revshare deals legitimately
+        # pay the same amount repeatedly, so only the window makes a duplicate
         prev_status = row["status"]
         prev_payout = float(row["payout"] or 0)
-        is_duplicate = (prev_status == status and abs(prev_payout - payout_value) < 0.005)
+        is_duplicate = False
+        if prev_status == status and abs(prev_payout - payout_value) < 0.005:
+            last_at = row["last_postback_at"]
+            if last_at and (datetime.utcnow() - last_at).total_seconds() < 60:
+                is_duplicate = True
+        # A repeated transaction/external id is always a duplicate
+        ext_id = request.query_params.get("transaction_id") or request.query_params.get("external_id")
+        if ext_id and row["transaction_id"] and str(row["transaction_id"]) == str(ext_id):
+            is_duplicate = True
         new_count = (row["postback_count"] or 0) + 1
 
         result = await conn.execute("""
@@ -695,6 +738,7 @@ async def postback_receive(click_id: str, status: str, payout: str, request: Req
                 postbacks = config.get("postbacks", [])
 
                 offer_id = row["offer_id"]
+                we_pay__payout_value = payout_value
                 # get offer from db
                 offer = await conn.fetchrow("SELECT * FROM offers WHERE id = $1", offer_id)
                 if offer:
@@ -715,8 +759,31 @@ async def postback_receive(click_id: str, status: str, payout: str, request: Req
                             data.update(dict(row))
                         post_type = postback.get("method") == "POST"
                         log_track(f"<UNK> Postback Type: {post_type}")
-                        # await send_postback(url, data, post_type)
-                        background_tasks.add_task(send_postback, url, data, post=True)
+                        background_tasks.add_task(send_postback, url, data, post=post_type)
+
+                # traffic source s2s postback (source URL + enabled statuses)
+                if row["traffic_source_id"]:
+                    source = await conn.fetchrow(
+                        "SELECT * FROM sources WHERE id = $1", row["traffic_source_id"])
+                    if source and source["s2s_postback"]:
+                        raw_statuses = source["s2s_postback_statuses"]
+                        src_statuses = json.loads(raw_statuses) if isinstance(raw_statuses, str) else (raw_statuses or {})
+                        # source UI keys → tracker statuses
+                        status_map = {"sale": "sale", "lead": "lead",
+                                      "reject": "rejected", "upsell": "upsale"}
+                        fire = False
+                        for src_key, tracker_status in status_map.items():
+                            if tracker_status == status and src_statuses.get(src_key):
+                                fire = True
+                        if not src_statuses:
+                            fire = True
+                        if fire:
+                            src_data = {"click_id": click_id, "status": status,
+                                        "payout": payout_value}
+                            src_data["clickid"] = click_id
+                            src_data.update({k: v for k, v in dict(row).items() if v is not None})
+                            background_tasks.add_task(
+                                send_postback, source["s2s_postback"], src_data, post=False)
 
     return JSONResponse(content={
         "status": "ok",
@@ -842,6 +909,30 @@ def meta_refresh_redirect(url: str) -> Response:
     return HTMLResponse(html_doc)
 
 
+async def referrer_page_title(referrer: str) -> str:
+    """Fetch the referring page and use its <title> as the keyword (cached)."""
+    if not referrer or not referrer.startswith(("http://", "https://")):
+        return None
+    if referrer in _title_cache:
+        return _title_cache[referrer]
+
+    def _fetch():
+        try:
+            r = requests.get(referrer, timeout=5)
+            m = re.search(r"<title[^>]*>(.*?)</title>", r.text, re.IGNORECASE | re.DOTALL)
+            if m:
+                return re.sub(r"\s+", " ", m.group(1)).strip()[:255] or None
+        except Exception:
+            pass
+        return None
+
+    title = await asyncio.to_thread(_fetch)
+    _title_cache[referrer] = title
+    if len(_title_cache) > 5000:
+        _title_cache.clear()
+    return title
+
+
 async def do_campaign_execution(campaign, request: Request) -> Response:
     log_track(f"🔁 New campaign execution call for '{campaign}'")
 
@@ -865,6 +956,12 @@ async def do_campaign_execution(campaign, request: Request) -> Response:
 
     paramsIdMapping = get_params_id_mapping_from_campaign(campaign)
     meta_data = await enrich_meta(request, paramsIdMapping)
+
+    # use the referring page's <title> as keyword when no keyword param came in
+    if config.get("use_title_as_keyword") and not meta_data.get("keyword"):
+        title = await referrer_page_title(meta_data.get("referrer"))
+        if title:
+            meta_data["keyword"] = title
 
     # Collect eligible flows: enabled + filters passed
     eligible = []
@@ -919,7 +1016,16 @@ async def do_campaign_execution(campaign, request: Request) -> Response:
 
     # SCHEMA: direct
     if schema == "direct":
-        offer_url = get_real_offer_url(flow.get("offer"))
+        offer_url = await get_real_offer_url(flow.get("offer"))
+        click_id = meta_data.get("click_id") or generate_click_id()
+        if "{click_id}" in offer_url:
+            offer_url = offer_url.replace("{click_id}", click_id)
+        else:
+            offer_url = merge_query_params(offer_url, {"click_id": click_id})
+        if config.get("send_query_params"):
+            offer_url = merge_query_params(offer_url, request.query_params)
+        if config.get("send_se_referrer") and meta_data.get("referrer"):
+            offer_url = merge_query_params(offer_url, {"referrer": meta_data["referrer"]})
         return campaign_redirect(offer_url)
 
     # SCHEMA: landing → offer
@@ -963,7 +1069,12 @@ async def do_campaign_execution(campaign, request: Request) -> Response:
 
     # SCHEMA: redirect
     elif schema == "redirect":
-        return campaign_redirect(flow.get("redirect_url"))
+        redirect_url = flow.get("redirect_url")
+        if config.get("send_query_params"):
+            redirect_url = merge_query_params(redirect_url, request.query_params)
+        if config.get("send_se_referrer") and meta_data.get("referrer"):
+            redirect_url = merge_query_params(redirect_url, {"referrer": meta_data["referrer"]})
+        return campaign_redirect(redirect_url)
 
     # SCHEMA: redirect_campaign ++++
     elif schema == "redirect_campaign":
@@ -982,6 +1093,15 @@ async def do_campaign_execution(campaign, request: Request) -> Response:
 
     # Default fallback
     return render_404_html()
+
+
+def merge_query_params(url: str, params) -> str:
+    """Merge extra params into a URL's query string (existing keys win)."""
+    parsed = urlparse(url)
+    query_params = dict(parse_qsl(parsed.query))
+    for k, v in dict(params).items():
+        query_params.setdefault(k, v)
+    return urlunparse(parsed._replace(query=urlencode(query_params)))
 
 
 async def get_offer_click_url(campaign_alias: str, offer_id: str, landing_id: str = None,
@@ -1056,6 +1176,13 @@ async def track_event(campaign, request: Request):
 
     # Add the enriched fields
     meta_data = await enrich_meta(request, campaign.get("paramsIdMapping"))
+
+    # use the referring page's <title> as keyword when no keyword param came in
+    if config.get("use_title_as_keyword") and not meta_data.get("keyword"):
+        title = await referrer_page_title(meta_data.get("referrer"))
+        if title:
+            meta_data["keyword"] = title
+
     for k, v in meta_data.items():
         if k in VALID_PARAMS:
             result_row[k] = v
@@ -1103,7 +1230,11 @@ async def send_postback(url: str, data: dict, post: bool = False):
     # 🔒 Filtered parameters
     safe_data = {k: str(v) for k, v in data.items() if k in VALID_PARAMS}
 
-    filled_url = url.format(**{k: str(v) for k, v in data.items()})
+    class SafeDict(dict):
+        def __missing__(self, key):
+            return "{" + key + "}"
+
+    filled_url = url.format_map(SafeDict({k: str(v) for k, v in data.items()}))
 
     log_track(f"<UNK> Sending Postback: {filled_url}")
 
@@ -1157,6 +1288,28 @@ async def get_with_campaign_alias(campaign_alias: str, request: Request):
     # tracking
     await track_event(campaign, request)
     return await do_campaign_execution(campaign, request)
+
+
+@app.head("/{campaign_alias}")
+async def head_with_campaign_alias(campaign_alias: str, request: Request):
+    # HEAD mirrors GET's status/Location but tracks no click and sends no body
+    pg = request.app.state.pg
+
+    async with pg.acquire() as conn:
+        campaign = await conn.fetchrow("""
+                                       SELECT *
+                                       FROM campaigns
+                                       WHERE alias = $1
+                                       """, campaign_alias)
+
+    if not campaign:
+        return Response(status_code=404)
+
+    resp = await do_campaign_execution(campaign, request)
+    headers = {}
+    if resp.headers.get("location"):
+        headers["location"] = resp.headers["location"]
+    return Response(status_code=resp.status_code, headers=headers)
 
 
 

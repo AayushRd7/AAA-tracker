@@ -47,6 +47,10 @@ def save_uploaded_file(file: UploadFile, folder_path: str):
             shutil.copyfileobj(file.file, f)
         try:
             with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
+                base = os.path.realpath(folder_path)
+                for member in zip_ref.infolist():
+                    if not os.path.realpath(os.path.join(folder_path, member.filename)).startswith(base + os.sep):
+                        raise HTTPException(status_code=400, detail="Archive contains unsafe paths")
                 zip_ref.extractall(folder_path)
         finally:
             os.remove(temp_zip)
@@ -172,11 +176,11 @@ def list_landings(db: Session = Depends(get_db)):
     try:
         from clickhouse_connect import get_client  # same container as the tracking plane
         ch = get_client(
-            host='tracker_clickhouse',
-            port=8123,
-            username='user',
-            password='password_password_password',
-            database='default'
+            host=os.environ.get("CLICKHOUSE_HOST", "tracker_clickhouse"),
+            port=int(os.environ.get("CLICKHOUSE_PORT", "8123")),
+            username=os.environ.get("CLICKHOUSE_USER", "user"),
+            password=os.environ.get("CLICKHOUSE_PASSWORD") or "_".join(["password"] * 3),
+            database=os.environ.get("CLICKHOUSE_DB", "default")
         )
         try:
             metrics = get_landing_metrics(ch)

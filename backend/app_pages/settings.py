@@ -8,9 +8,6 @@ from db import get_db
 from models.settings import SettingsORM  # the settings model
 from email_reports import send_daily_report
 
-router = APIRouter()
-
-
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
