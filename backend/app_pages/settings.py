@@ -56,7 +56,7 @@ def telegram_test(db: Session = Depends(get_db)):
     if not token or not chat_id:
         raise HTTPException(status_code=400, detail="Bot Token and Chat ID are required — fill them in and save settings first")
     if not re.match(r"^\d+:[A-Za-z0-9_-]{30,}$", token):
-        raise HTTPException(status_code=400, detail="Token format looks wrong — it should look like 1234567890:AAExampleTokenFormat-DoNotUse (from @BotFather)")
+        raise HTTPException(status_code=400, detail="Token format looks wrong — it should look like 123456789:AAExampleTokenFormat (from @BotFather)")
 
     try:
         resp = httpx.post(
