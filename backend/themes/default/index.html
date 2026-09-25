@@ -32,7 +32,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/terser@5.30.2/dist/bundle.min.js"></script>
 
-    <link href="/backend/backend/css/style.css?v=3" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=4" rel="stylesheet">
 </head>
 <body>
 {% raw %}
@@ -234,10 +234,10 @@
     <v-app>
         {% if page == 'dashboard' and is_authenticated_user_type %}
         {% raw %}
-        <v-app-bar app color="white" elevation="0" height="56" class="topnav-bar">
-            <div class="d-flex align-center mr-5">
+        <v-app-bar app color="#151d2b" dark elevation="0" height="58" class="topnav-bar">
+            <div class="d-flex align-center mr-6 brand-block-top">
                 <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo mr-2">
-                <div class="font-weight-bold" style="font-size: 15px; letter-spacing: 0.4px;">AAA TRACKER</div>
+                <div class="brand-name">AAA TRACKER</div>
             </div>
             <!-- Desktop: horizontal nav keeps every pixel for data -->
             <nav class="top-nav d-none d-lg-block">
