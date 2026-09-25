@@ -58,7 +58,7 @@
                         hide-details
                         style="max-width: 170px;"
                         class="mr-3"
-                        @change="loadCampaignMetrics"
+                        @change="metricsPeriodChanged"
                 ></v-select>
                 <v-btn color="primary" elevation="0" @click="openCreate">
                     <v-icon small class="mr-1">mdi-plus</v-icon>Create Campaign
@@ -961,6 +961,20 @@
             </v-card>
         </v-dialog>
 
+        <v-dialog v-model="metricsCustomDialog" max-width="380px" persistent>
+            <v-card>
+                <v-card-title class="text-h6">Custom stats period</v-card-title>
+                <v-card-text>
+                    <v-date-picker v-model="customRange" range no-title :first-day-of-week="1" full-width></v-date-picker>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="metricsCustomDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" @click="applyCustomMetricsRange">Apply</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
 
         <v-row dense class="mt-4">
             <v-col>
@@ -1166,10 +1180,23 @@
                 metricsPeriod: '30d',
                 metricsPeriodItems: [
                     {text: 'Today', value: 'today'},
+                    {text: 'Yesterday', value: 'yesterday'},
+                    {text: 'This week', value: 'this_week'},
+                    {text: 'Last week', value: 'last_week'},
+                    {text: 'Last 2 days', value: '2d'},
+                    {text: 'Last 3 days', value: '3d'},
                     {text: 'Last 7 days', value: '7d'},
+                    {text: 'Last 14 days', value: '14d'},
                     {text: 'Last 30 days', value: '30d'},
+                    {text: 'This month', value: 'this_month'},
+                    {text: 'Last month', value: 'last_month'},
+                    {text: 'This year', value: 'this_year'},
+                    {text: 'Last year', value: 'last_year'},
                     {text: 'All time', value: 'all'},
+                    {text: 'Custom date', value: 'custom'},
                 ],
+                metricsCustomDialog: false,
+                customRange: [],
 
                 filterFields: ["country", "city", "device", "os", "browser", "ip", 'ad_campaign_id', 'browser',
                     'campaign_id', 'connection_type', 'currency',
@@ -1891,29 +1918,73 @@
                 this.loadCampaignMetrics();
             },
             loadCampaignMetrics() {
-                // Live per-campaign stats from ClickHouse
-                const to = new Date();
-                let from = null;
-                if (this.metricsPeriod === 'today') {
-                    from = new Date(to);
-                } else if (this.metricsPeriod === '7d') {
-                    from = new Date(to.getTime() - 6 * 86400000);
-                } else if (this.metricsPeriod === '30d') {
-                    from = new Date(to.getTime() - 29 * 86400000);
+                // Live per-campaign stats from ClickHouse over the selected period
+                const now = new Date();
+                const iso = d => d.toISOString().split('T')[0];
+                const daysAgo = n => { const d = new Date(now); d.setDate(d.getDate() - n); return d; };
+                const mondayThisWeek = () => { const d = new Date(now); const off = (d.getDay() + 6) % 7; d.setDate(d.getDate() - off); return d; };
+                let from = null, to = null;
+
+                switch (this.metricsPeriod) {
+                    case 'today': from = now; to = now; break;
+                    case 'yesterday': { const y = daysAgo(1); from = y; to = y; break; }
+                    case 'this_week': from = mondayThisWeek(); to = now; break;
+                    case 'last_week': { const prevEnd = new Date(mondayThisWeek()); prevEnd.setDate(prevEnd.getDate() - 1); const d = new Date(prevEnd); const off = (d.getDay() + 6) % 7; d.setDate(d.getDate() - off); from = d; to = prevEnd; break; }
+                    case '2d': from = daysAgo(1); to = now; break;
+                    case '3d': from = daysAgo(2); to = now; break;
+                    case '7d': from = daysAgo(6); to = now; break;
+                    case '14d': from = daysAgo(13); to = now; break;
+                    case '30d': from = daysAgo(29); to = now; break;
+                    case 'this_month': from = new Date(now.getFullYear(), now.getMonth(), 1); to = now; break;
+                    case 'last_month': from = new Date(now.getFullYear(), now.getMonth() - 1, 1); to = new Date(now.getFullYear(), now.getMonth(), 0); break;
+                    case 'this_year': from = new Date(now.getFullYear(), 0, 1); to = now; break;
+                    case 'last_year': from = new Date(now.getFullYear() - 1, 0, 1); to = new Date(now.getFullYear() - 1, 11, 31); break;
+                    case 'custom': from = this.customRange[0] ? new Date(this.customRange[0]) : null; to = this.customRange[1] ? new Date(this.customRange[1]) : null; break;
+                    default: from = null; to = null; // all time
                 }
+
                 const qs = [];
-                if (from) qs.push('date_from=' + from.toISOString().split('T')[0]);
-                qs.push('date_to=' + to.toISOString().split('T')[0]);
-                fetch('/backend/api/campaigns/metrics?' + qs.join('&'), {
+                if (from) qs.push('date_from=' + iso(from));
+                if (to) qs.push('date_to=' + iso(to));
+                fetch('/backend/api/campaigns/metrics' + (qs.length ? '?' + qs.join('&') : ''), {
                     credentials: 'include'
                 })
-                    .then(res => res.json())
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
                     .then(data => {
                         const map = {};
                         Object.keys(data || {}).forEach(id => { map[parseInt(id, 10)] = data[id]; });
                         this.metricsMap = map;
+                        // Mirror metric values onto the rows so table sorting works
+                        this.campaigns.forEach(c => {
+                            const m = map[c.id] || {};
+                            ['clicks', 'unique_clicks', 'conversions', 'leads', 'cost', 'revenue', 'profit', 'cr', 'epc', 'roi'].forEach(k => {
+                                if (m[k] !== undefined) Vue.set(c, k, m[k]);
+                            });
+                        });
                     })
                     .catch(err => console.error('metrics', err));
+            },
+            metricsPeriodChanged() {
+                if (this.metricsPeriod === 'custom') {
+                    if (!this.customRange || this.customRange.length !== 2) {
+                        const now = new Date();
+                        const from = new Date(now); from.setDate(from.getDate() - 29);
+                        this.customRange = [from.toISOString().split('T')[0], now.toISOString().split('T')[0]];
+                    }
+                    this.metricsCustomDialog = true;
+                } else {
+                    this.loadCampaignMetrics();
+                }
+            },
+            applyCustomMetricsRange() {
+                const picked = this.customRange || [];
+                if (picked.length !== 2) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Pick a start and an end date, then hit Apply.'});
+                    return;
+                }
+                this.customRange = [...picked].sort();
+                this.metricsCustomDialog = false;
+                this.loadCampaignMetrics();
             },
             toggleCol(value, on) {
                 if (value === 'name' || value === 'actions') return;

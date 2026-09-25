@@ -685,3 +685,22 @@ table.cols-free {
   border-color: #16a34a !important;
   color: #ffffff !important;
 }
+
+/* ---------- Settings page grid ---------- */
+.settings-grid .v-card {
+  height: 100%;
+}
+.code-row {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.code-inline {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow-x: auto;
+  max-width: calc(100% - 48px);
+}
