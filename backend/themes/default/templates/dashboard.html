@@ -377,7 +377,7 @@
             },
             loadData(date) {
                 this.loading = true;
-                this.$root.$emit('show-overlay', 'Can take a while, 1+ minute');
+                this.$root.$emit('show-overlay', 'Crunching your traffic data — big date ranges can take up to a minute, thanks for hanging tight');
                 this.loadFiltersData();
 
                 const payload = {
