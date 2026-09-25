@@ -178,7 +178,10 @@ def list_landings(db: Session = Depends(get_db)):
             password='password_password_password',
             database='default'
         )
-        metrics = get_landing_metrics(ch)
+        try:
+            metrics = get_landing_metrics(ch)
+        finally:
+            ch.close()
     except Exception as e:
         print("Landing metrics unavailable:", str(e))
     return [

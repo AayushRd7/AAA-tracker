@@ -39,7 +39,7 @@ async def get_visits(
         filters: Filters
 ):
     try:
-        ch = request.app.state.ch
+        ch = request.state.ch
         rows = get_recent_visits(ch, filters)
         return rows
     except Exception as e:
@@ -48,7 +48,7 @@ async def get_visits(
 
 @router.post("/metrics")
 async def get_metrics(request: Request, filters: Filters):
-    ch = request.app.state.ch
+    ch = request.state.ch
     series = get_metrics_series(ch, filters)
 
     total_visits = sum(row['visits'] for row in series)
@@ -91,7 +91,7 @@ async def get_dimensions():
 @router.post("/breakdown")
 async def get_breakdown(request: Request, body: ReportRequest):
     try:
-        ch = request.app.state.ch
+        ch = request.state.ch
         rows = get_report_breakdown(ch, body.filters.dict(), body.dimension)
         return {"dimension": body.dimension, "rows": rows}
     except ValueError as e:
@@ -103,7 +103,7 @@ async def get_breakdown(request: Request, body: ReportRequest):
 @router.post("/click-log")
 async def get_click_log_view(request: Request, filters: ClickLogFilters):
     try:
-        ch = request.app.state.ch
+        ch = request.state.ch
         rows = get_click_log(ch, filters.dict(), limit=filters.limit)
         return rows
     except Exception as e:

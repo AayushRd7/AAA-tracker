@@ -275,7 +275,7 @@ def send_daily_report(ch, cfg, day: datetime = None):
 
 async def email_report_loop():
     """Background scheduler: sends the daily report at the configured UTC hour."""
-    from app import app  # clickhouse client lives on app.state
+    from clickHouse import get_clickhouse_client
     while True:
         try:
             await asyncio.sleep(60)
@@ -292,8 +292,12 @@ async def email_report_loop():
                 hour = int(cfg.get("hour", 9) or 9)
                 if now.hour != hour or cfg.get("last_sent") == today:
                     continue
-                ok, detail = send_daily_report(
-                    app.state.ch, cfg, now - timedelta(days=1))
+                ch = get_clickhouse_client()
+                try:
+                    ok, detail = send_daily_report(
+                        ch, cfg, now - timedelta(days=1))
+                finally:
+                    ch.close()
                 print(f"Email report ({today}): ok={ok} {detail}")
                 if ok:
                     cfg["last_sent"] = today

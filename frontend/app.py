@@ -17,6 +17,7 @@ import httpx
 import psycopg2
 
 import asyncio
+import queue
 
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -39,6 +40,40 @@ app.add_middleware(
 )
 
 
+# ClickHouse client pool — the tracking plane runs inserts via asyncio.to_thread,
+# so one shared client would hit clickhouse-connect's concurrent-queries-per-session
+# guard under load. A small pool hands each thread its own client/session.
+CH_POOL_SIZE = 8
+
+
+def new_ch_client():
+    return get_client(
+        host='tracker_clickhouse',
+        port=8123,
+        username='user',
+        password='password_password_password',
+        database='default'
+    )
+
+
+def acquire_ch(timeout: float = 2.0):
+    try:
+        return app.state.ch_pool.get(timeout=timeout)
+    except queue.Empty:
+        return new_ch_client()
+
+
+def release_ch(ch, failed: bool = False):
+    if failed:
+        # A client that just errored may hold a bad connection — swap in a fresh one.
+        try:
+            ch.close()
+        except Exception:
+            pass
+        ch = new_ch_client()
+    app.state.ch_pool.put(ch)
+
+
 # 🚀 Startup
 @app.on_event("startup")
 async def startup():
@@ -49,13 +84,9 @@ async def startup():
         host="tracker_postgres",
         port=5432
     )
-    app.state.ch = get_client(
-        host='tracker_clickhouse',
-        port=8123,
-        username='user',
-        password='password_password_password',
-        database='default'
-    )
+    app.state.ch_pool = queue.Queue()
+    for _ in range(CH_POOL_SIZE):
+        app.state.ch_pool.put(new_ch_client())
     # Idempotent schema migration (safe to run on every boot)
     await ensure_schema()
 
@@ -105,10 +136,15 @@ async def prune_old_data():
         return
     if days <= 0:
         return
-    ch = app.state.ch
-    await asyncio.to_thread(
-        ch.command,
-        f"ALTER TABLE clicks_data DELETE WHERE received_at < now() - INTERVAL {days} DAY")
+    ch = acquire_ch()
+    try:
+        await asyncio.to_thread(
+            ch.command,
+            f"ALTER TABLE clicks_data DELETE WHERE received_at < now() - INTERVAL {days} DAY")
+    except Exception:
+        release_ch(ch, failed=True)
+        raise
+    release_ch(ch)
     log_track(f"🧹 Retention: pruned clicks_data older than {days} days")
 
 
@@ -116,6 +152,15 @@ async def prune_old_data():
 @app.on_event("shutdown")
 async def shutdown():
     await app.state.pg.close()
+    while True:
+        try:
+            ch = app.state.ch_pool.get_nowait()
+        except queue.Empty:
+            break
+        try:
+            ch.close()
+        except Exception:
+            pass
 
 
 VALID_PARAMS = [
@@ -986,8 +1031,6 @@ async def track_event(campaign, request: Request):
         log_track(msg)
         raise HTTPException(status_code=400, detail=msg)
 
-    ch = request.app.state.ch
-
     content_type = request.headers.get('content-type', '')
     if content_type.startswith('application/x-www-form-urlencoded'):
         query = dict(await request.form())
@@ -1034,8 +1077,13 @@ async def track_event(campaign, request: Request):
     try:
         columns = list(result_row.keys())
         values = [list(result_row.values())]
-        # ch.insert("clicks_data", values, column_names=columns)
-        await asyncio.to_thread(ch.insert, "clicks_data", values, column_names=columns)
+        ch = acquire_ch()
+        try:
+            await asyncio.to_thread(ch.insert, "clicks_data", values, column_names=columns)
+        except Exception:
+            release_ch(ch, failed=True)
+            raise
+        release_ch(ch)
         # log_track(f"✅ Inserted into ClickHouse: {campaign_alias}")
     except Exception as e:
         log_track(f"❌ ClickHouse insert failed: {str(e)}")
