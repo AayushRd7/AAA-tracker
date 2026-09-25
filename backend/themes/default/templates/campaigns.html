@@ -1028,7 +1028,13 @@
                             <span class="font-weight-bold" :class="signClass(metricsMap[item.id]?.roi || 0)">{{ formatPct((metricsMap[item.id] || {}).roi) }}</span>
                         </template>
                         <template v-slot:item.tags="{ item }">
-                            <v-chip v-for="t in (item.tags || []).slice(0, 3)" :key="t" x-small outlined class="mr-1">{{ t }}</v-chip>
+                            <v-chip v-for="t in (item.tags || []).slice(0, 3)" :key="t"
+                                    x-small outlined
+                                    class="mr-1 tag-chip"
+                                    :class="tagFilter.includes(t) ? 'tag-chip--on' : ''"
+                                    :title="'Click to show only campaigns tagged &quot;' + t + '&quot;'"
+                                    @click="toggleTagFilter(t)"
+                            >{{ t }}</v-chip>
                             <span v-if="(item.tags || []).length > 3" class="grey--text text--darken-1 caption">+{{ item.tags.length - 3 }}</span>
                             <v-btn icon x-small class="ml-1" @click="openTagEditor(item)">
                                 <v-icon x-small>mdi-pencil-outline</v-icon>
@@ -1923,6 +1929,11 @@
             },
             openTagEditor(item) {
                 this.tagEditor = {open: true, id: item.id, name: item.name, tags: [...(item.tags || [])]};
+            },
+            toggleTagFilter(tag) {
+                const i = this.tagFilter.indexOf(tag);
+                if (i >= 0) this.tagFilter.splice(i, 1);
+                else this.tagFilter.push(tag);
             },
             async saveTagEditor() {
                 const tags = (this.tagEditor.tags || []).map(t => String(t).trim()).filter(Boolean);
