@@ -668,3 +668,20 @@ table.cols-free {
   max-height: 400px;
   overflow-y: auto;
 }
+
+/* Campaign tag chips — click to filter the table */
+.tag-chip {
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.tag-chip:hover {
+  background: rgba(22, 163, 74, 0.1);
+  border-color: rgba(22, 163, 74, 0.4) !important;
+  color: #15803d !important;
+}
+.tag-chip--on,
+.tag-chip--on:hover {
+  background: #16a34a !important;
+  border-color: #16a34a !important;
+  color: #ffffff !important;
+}
