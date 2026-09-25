@@ -23,7 +23,7 @@ async def clear_tracking_data(
 ):
 
     try:
-        ch = request.app.state.ch
+        ch = request.state.ch
         ch.command("TRUNCATE TABLE clicks_data")
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"ClickHouse error: {str(e)}"})
@@ -93,7 +93,7 @@ def email_test(request: Request, db: Session = Depends(get_db)):
     has_smtp = all((email_cfg.get(f) or "").strip() for f in ("smtp_host", "smtp_login", "smtp_password"))
     if not has_api_key and not has_smtp:
         raise HTTPException(status_code=400, detail="Either Brevo API Key or SMTP Host/Login/Password is required — fill it in and save settings first")
-    ok, detail = send_daily_report(request.app.state.ch, email_cfg)
+    ok, detail = send_daily_report(request.state.ch, email_cfg)
     if not ok:
         raise HTTPException(status_code=500, detail=detail)
     return {"status": "ok", "message": detail}

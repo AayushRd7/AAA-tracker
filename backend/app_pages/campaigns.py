@@ -50,7 +50,7 @@ def get_campaign_metrics(
     """
     filters = {"campaigns": [], "date_from": date_from, "date_to": date_to}
     try:
-        rows = get_report_breakdown(request.app.state.ch, filters, "campaign_id")
+        rows = get_report_breakdown(request.state.ch, filters, "campaign_id")
     except Exception:
         return {}
     return {row["dimension"]: row for row in rows}

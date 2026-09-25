@@ -587,8 +587,9 @@
             },
             loadCampaigns() {
                 fetch('/backend/api/campaigns/')
-                    .then(res => res.json())
-                    .then(data => { this.campaigns = data; });
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => { this.campaigns = Array.isArray(data) ? data : []; })
+                    .catch(err => { this.campaigns = []; });
             },
             runReport() {
                 this.loading = true;
@@ -659,9 +660,9 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 })
-                    .then(res => res.json())
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
                     .then(data => {
-                        this.clickLog = data || [];
+                        this.clickLog = Array.isArray(data) ? data : [];
                         this.logLoading = false;
                     })
                     .catch(err => {
@@ -690,9 +691,9 @@
                 if (this.convFilters.status) params.set('status', this.convFilters.status);
                 if (this.convFilters.search) params.set('search', this.convFilters.search);
                 fetch('/backend/api/reports/?' + params.toString())
-                    .then(response => response.json())
+                    .then(response => response.ok ? response.json() : Promise.reject(new Error('HTTP ' + response.status)))
                     .then(data => {
-                        this.conversions = data;
+                        this.conversions = Array.isArray(data) ? data : [];
                         this.convLoading = false;
                     })
                     .catch(err => {

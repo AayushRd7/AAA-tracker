@@ -305,9 +305,9 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(this.livePayload)
                 })
-                    .then(res => res.json())
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
                     .then(data => {
-                        this.visits = data;
+                        this.visits = Array.isArray(data) ? data : [];
                     })
                     .catch(err => console.error('visits', err));
             },
@@ -369,10 +369,11 @@
             },
             loadFiltersData() {
                 fetch('/backend/api/campaigns/')
-                    .then(res => res.json())
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
                     .then(data => {
-                        this.campaigns = data;
-                    });
+                        this.campaigns = Array.isArray(data) ? data : [];
+                    })
+                    .catch(() => { this.campaigns = []; });
             },
             loadData(date) {
                 this.loading = true;
@@ -393,7 +394,7 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 })
-                    .then(res => res.json())
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
                     .then(data => {
                         const m = data.metrics;
                         const roiNum = parseFloat(m.roi) || 0;

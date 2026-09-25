@@ -22,10 +22,30 @@ app.state = SimpleNamespace()
 
 @app.on_event("startup")
 async def startup():
-    app.state.ch = get_clickhouse_client()
     import asyncio
     from email_reports import email_report_loop
     asyncio.create_task(email_report_loop())
+
+
+@app.middleware("http")
+async def ch_client_per_request(request: Request, call_next):
+    """One ClickHouse client per request.
+
+    Sync endpoints run in FastAPI's threadpool while async endpoints run on the
+    event loop — a single shared client gets used from both simultaneously and
+    clickhouse-connect rejects concurrent queries within one session.
+    """
+    path = request.scope.get("path", "")
+    if not (path.startswith("/img") or path.startswith("/css") or path == "/favicon.ico"):
+        request.state.ch = get_clickhouse_client()
+        try:
+            return await call_next(request)
+        finally:
+            try:
+                request.state.ch.close()
+            except Exception:
+                pass
+    return await call_next(request)
 
 # app = FastAPI() # for production
 
