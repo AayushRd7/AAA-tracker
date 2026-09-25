@@ -6,44 +6,45 @@
                 <div class="page-title">Settings</div>
                 <div class="page-subtitle">Tracker configuration and postback URLs</div>
             </div>
+            <v-btn
+                    color="primary"
+                    elevation="0"
+                    @click="saveSettings"
+            >
+                <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save Settings
+            </v-btn>
         </div>
-        <v-container fluid class="px-0">
+        <v-container fluid class="px-0 settings-grid">
 
-            <v-row class="mt-2 mb-2">
-                <v-btn
-                        color="primary"
-                        elevation="0"
-                        @click="saveSettings"
-                >
-                    <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save Settings
-                </v-btn>
-            </v-row>
-            <v-row>
-                <v-col cols="12" md="6">
+            <v-row class="mb-2">
+                <v-col cols="12">
                     <v-card flat class="pa-2">
-                        <v-card-title class="d-flex align-center flex-wrap">
-                            App postback URL - GET REQUEST to:&nbsp;<code>{{ postbackUrl }}</code>
-                            <v-tooltip bottom>
-                                <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="primary" class="ml-1" v-bind="attrs" v-on="on" @click="copyText(postbackUrl)">
-                                        <v-icon small>mdi-content-copy</v-icon>
-                                    </v-btn>
-                                </template>
-                                <span>Copy postback URL</span>
-                            </v-tooltip>
-                        </v-card-title>
-                        <v-card-title>Demo:&nbsp;<code>{{ postbackUrlDemo }}</code>
-                            <v-tooltip bottom>
-                                <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="primary" class="ml-1" v-bind="attrs" v-on="on" @click="copyText(postbackUrlDemo)">
-                                        <v-icon small>mdi-content-copy</v-icon>
-                                    </v-btn>
-                                </template>
-                                <span>Copy demo URL</span>
-                            </v-tooltip>
-                        </v-card-title>
+                        <v-card-title>Postback URLs</v-card-title>
                         <v-card-text>
-                        <b>Statuses can be only: 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'</b>
+                            <div class="caption grey--text mb-2">Accepts GET requests — statuses can only be: 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'</div>
+                            <div class="d-flex align-center code-row">
+                                <code class="code-inline">{{ postbackUrl }}</code>
+                                <v-tooltip bottom>
+                                    <template v-slot:activator="{ on, attrs }">
+                                        <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="copyText(postbackUrl)">
+                                            <v-icon small>mdi-content-copy</v-icon>
+                                        </v-btn>
+                                    </template>
+                                    <span>Copy postback URL</span>
+                                </v-tooltip>
+                            </div>
+                            <div class="d-flex align-center code-row mt-2">
+                                <span class="caption grey--text mr-2" style="min-width: 42px;">Demo</span>
+                                <code class="code-inline">{{ postbackUrlDemo }}</code>
+                                <v-tooltip bottom>
+                                    <template v-slot:activator="{ on, attrs }">
+                                        <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="copyText(postbackUrlDemo)">
+                                            <v-icon small>mdi-content-copy</v-icon>
+                                        </v-btn>
+                                    </template>
+                                    <span>Copy demo URL</span>
+                                </v-tooltip>
+                            </div>
                         </v-card-text>
                     </v-card>
                 </v-col>
@@ -255,30 +256,6 @@
                     </v-card>
                 </v-col>
 
-                <!--                <v-col cols="12" md="6">-->
-                <!--                    <v-card dark flat class="pa-4">-->
-                <!--                        <v-card-title>Advanced Settings</v-card-title>-->
-                <!--                        <v-card-text>-->
-
-                <!--                            <v-text-field-->
-                <!--                                    label="API Access Token"-->
-                <!--                                    v-model="settings.apiToken"-->
-                <!--                                    outlined-->
-                <!--                                    dense-->
-                <!--                                    append-icon="mdi-refresh"-->
-                <!--                                    @click:append="generateToken"-->
-                <!--                            ></v-text-field>-->
-
-                <!--                            <v-switch-->
-                <!--                                    label="Enable Request Logging"-->
-                <!--                                    v-model="settings.enableLogging"-->
-                <!--                                    inset-->
-                <!--                                    dense-->
-                <!--                            ></v-switch>-->
-
-                <!--                        </v-card-text>-->
-                <!--                    </v-card>-->
-                <!--                </v-col>-->
                 <v-col cols="12" md="6">
                     <v-card flat class="pa-2">
                         <v-card-title class="d-flex align-center">
