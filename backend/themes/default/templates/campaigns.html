@@ -870,7 +870,7 @@
                         <v-spacer></v-spacer>
                         <v-btn small text @click="selected = []">Clear selection</v-btn>
                     </div>
-                    <v-data-table
+                    <v-data-table v-col-resize:campaigns="headers"
                             v-model="selected"
                             :headers="headers"
                             :items="campaigns"
@@ -1682,7 +1682,7 @@
                 this.loadCampaignMetrics();
             },
             loadCampaignMetrics() {
-                // Live per-campaign stats (Binom-style columns) from ClickHouse
+                // Live per-campaign stats from ClickHouse
                 const to = new Date();
                 let from = null;
                 if (this.metricsPeriod === 'today') {

@@ -5,3 +5,4 @@ __pycache__
 /frontend/frontend_data/
 /backend/backend_data/
 ssl/*.key
+/COMPETITOR-GAP.md

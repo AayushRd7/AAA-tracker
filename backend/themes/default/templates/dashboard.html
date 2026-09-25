@@ -128,7 +128,7 @@
                             <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
                         </v-btn>
                     </div>
-                    <v-data-table
+                    <v-data-table v-col-resize:dash-conversions="headers2" v-col-resize:dash-visits="headers"
                             :headers="headers"
                             :items="visits"
                             :items-per-page="10"
