@@ -61,7 +61,14 @@
                                 class="mr-2"
                         ></v-text-field>
                     </template>
-                    <v-date-picker v-model="filters.date_range" range @input="date_menu2 = false"></v-date-picker>
+                    <v-card>
+                        <v-date-picker v-model="filters.date_range" range no-title :first-day-of-week="1"></v-date-picker>
+                        <v-card-actions class="pt-0">
+                            <v-spacer></v-spacer>
+                            <v-btn text small @click="cancelCustomRange">Cancel</v-btn>
+                            <v-btn color="primary" elevation="0" small @click="applyCustomRange">Apply</v-btn>
+                        </v-card-actions>
+                    </v-card>
                 </v-menu>
                 <v-select
                         :items="['Hours', 'Days', 'Weeks', 'Months']"
@@ -181,6 +188,7 @@
                 liveMode: false,
                 liveTimer: null,
                 date_menu2: false,
+                dateRangeBackup: null,
                 activePreset: 'Last 30 days',
                 datePresets: [
                     { label: 'Today', days: 0 },
@@ -289,6 +297,9 @@
             this.stopLiveFeed();
         },
         watch: {
+            date_menu2(open) {
+                if (open) this.dateRangeBackup = this.filters.date_range.slice();
+            },
             liveMode(on) {
                 if (on) {
                     this.loadVisits();
@@ -332,6 +343,21 @@
                 }
                 this.filters.date_range = [from.toISOString().split('T')[0], to.toISOString().split('T')[0]];
                 this.loadData();
+            },
+            applyCustomRange() {
+                const picked = this.filters.date_range || [];
+                if (picked.length !== 2) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Pick a start and an end date, then hit Apply.'});
+                    return;
+                }
+                this.filters.date_range = [...picked].sort();
+                this.activePreset = null;
+                this.date_menu2 = false;
+                this.loadData();
+            },
+            cancelCustomRange() {
+                if (this.dateRangeBackup) this.filters.date_range = this.dateRangeBackup;
+                this.date_menu2 = false;
             },
             downloadCsv(headers, rows, filename) {
                 const csv = [headers, ...rows].map(r => r.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(',')).join('\n');
