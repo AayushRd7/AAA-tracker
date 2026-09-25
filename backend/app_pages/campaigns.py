@@ -158,7 +158,8 @@ def delete_campaign(campaign_id: int, request: Request, db: Session = Depends(ge
     # feeding dashboard/report numbers for a campaign that no longer exists.
     try:
         request.state.ch.command(
-            f"ALTER TABLE clicks_data DELETE WHERE campaign_id = {campaign_id}")
+            "ALTER TABLE clicks_data DELETE WHERE campaign_id = %(campaign_id)s",
+            {"campaign_id": int(campaign_id)})
     except Exception as e:
         print(f"campaign delete: ClickHouse purge failed for {campaign_id}:", e)
 

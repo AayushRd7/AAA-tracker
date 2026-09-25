@@ -12,6 +12,8 @@ from hashlib import md5
 from datetime import datetime, timedelta
 import secrets
 import json
+import time
+import os
 
 import bcrypt
 from sqlalchemy import text
@@ -21,7 +23,7 @@ from models.user import UserORM
 router = APIRouter()
 
 # JWT configuration (kept for compatibility; sessions are now DB-backed)
-SECRET_KEY = "your-super-secret-key-for-jwt"
+SECRET_KEY = os.environ.get("JWT_SECRET", "your-super-secret-key-for-jwt")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 2400
 pass_salt = 'akm_'
@@ -179,13 +181,39 @@ def require_api_auth(request: Request, authorization: Optional[str] = Header(Non
 
 
 # ====== POST /login ======
+# In-process rate limiter: max 5 failed attempts per IP+username per rolling 60s
+LOGIN_MAX_FAILED = 5
+LOGIN_WINDOW_SECONDS = 60
+_login_failures: dict = {}
+
+
+def _record_failed_login(key: str):
+    now = time.time()
+    cutoff = now - LOGIN_WINDOW_SECONDS
+    attempts = [t for t in _login_failures.get(key, []) if t > cutoff]
+    attempts.append(now)
+    _login_failures[key] = attempts
+
+
+def _login_limited(key: str) -> bool:
+    cutoff = time.time() - LOGIN_WINDOW_SECONDS
+    return len([t for t in _login_failures.get(key, []) if t > cutoff]) >= LOGIN_MAX_FAILED
+
+
 @router.post("/login")
 async def login(request: Request, response: Response, login_data: LoginRequest, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    limit_key = f"{client_ip}:{login_data.username}"
+    if _login_limited(limit_key):
+        raise HTTPException(status_code=429, detail="Too many failed login attempts — try again in a minute.")
+
     user = get_user(db, login_data.username)
     if not user:
+        _record_failed_login(limit_key)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if not verify_password(login_data.password, user.password_hash):
+        _record_failed_login(limit_key)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials 2")
 
     # Transparent upgrade from the legacy md5 hash to bcrypt
@@ -194,6 +222,7 @@ async def login(request: Request, response: Response, login_data: LoginRequest, 
         db.commit()
 
     token = create_session(user.username)
+    _login_failures.pop(limit_key, None)
 
     # Store the token in cookies
     response.set_cookie(key="session_token", value=token, httponly=True, samesite="lax")

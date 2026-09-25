@@ -31,8 +31,8 @@ class UserCreateUpdate(BaseModel):
     username: str
     email: Optional[EmailStr] = None
     password: Optional[str] = None
-    is_admin: Optional[bool] = False
-    active: Optional[bool] = True
+    is_admin: Optional[bool] = None
+    active: Optional[bool] = None
 
 # ====== Change my own password (any logged-in user) ======
 
@@ -114,17 +114,14 @@ def update_user(user_id: int, user: UserCreateUpdate, db: Session = Depends(get_
 
     if user.email is not None:
         user_obj.email = user.email
-    if user.is_admin is not None:
+    if user_obj.username.lower() == "tracker_admin":
+        user_obj.is_admin = True
+    elif user.is_admin is not None:
         user_obj.is_admin = user.is_admin
     if user.active is not None:
         user_obj.active = user.active
     if user.password:
         user_obj.password_hash = hash_password(user.password)
-
-    if user_obj.username.lower() != "tracker_admin":
-        user.is_admin = False
-    else:
-        user.is_admin = True
 
     db.commit()
     db.refresh(user_obj)

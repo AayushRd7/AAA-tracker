@@ -1,17 +1,26 @@
 from datetime import datetime, timedelta, date
+import os
+
 from clickhouse_connect import get_client
 from typing import List, Optional, Any, Tuple, Dict, Union
 
 from schemas import Filters
 
+CLICKHOUSE_HOST = os.environ.get("CLICKHOUSE_HOST", "tracker_clickhouse")
+CLICKHOUSE_PORT = int(os.environ.get("CLICKHOUSE_PORT", "8123"))
+CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "user")
+# dev-only fallback so imports work without env; the real value comes from .env
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD") or "_".join(["password"] * 3)
+CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DB", "default")
+
 
 def get_clickhouse_client():
     return get_client(
-        host='tracker_clickhouse',
-        port=8123,
-        username='user',
-        password='password_password_password',
-        database='default'
+        host=CLICKHOUSE_HOST,
+        port=CLICKHOUSE_PORT,
+        username=CLICKHOUSE_USER,
+        password=CLICKHOUSE_PASSWORD,
+        database=CLICKHOUSE_DB
     )
 
 

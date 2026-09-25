@@ -60,7 +60,7 @@ if [ -n "$DOMAIN" ]; then
     --non-interactive
 
   echo "→ Switch nginx to SSL config"
-  cp nginx.prod.conf nginx/default.conf
+  cp nginx/nginx.prod.conf nginx/default.conf
   docker compose restart nginx
 else
   echo "⚠️  Domain empty — running HTTP only"
