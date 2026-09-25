@@ -146,6 +146,7 @@ CREATE TABLE campaigns (
     traffic_source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
     config JSONB,
     notes TEXT,
+    tags JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP DEFAULT now(),
     updated_at TIMESTAMP DEFAULT now()
 );

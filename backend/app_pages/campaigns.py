@@ -21,7 +21,14 @@ class CampaignIn(BaseModel):
     traffic_source_id: Optional[int] = None
     domain_id: Optional[int] = None
     notes: Optional[str] = None
+    tags: Optional[List[str]] = None
     config: Optional[dict] = None
+
+
+class BulkTagsIn(BaseModel):
+    ids: List[int]
+    tags: List[str]
+    mode: Literal['add', 'replace'] = 'add'
 
 class CampaignOut(CampaignIn):
     id: int
@@ -79,6 +86,7 @@ def clone_campaign(campaign_id: int, db: Session = Depends(get_db)):
         traffic_source_id=campaign.traffic_source_id,
         domain_id=campaign.domain_id,
         notes=campaign.notes,
+        tags=campaign.tags,
         config=campaign.config,
     )
     db.add(clone)
@@ -94,13 +102,44 @@ def create_campaign(data: CampaignIn, db: Session = Depends(get_db)):
     db.refresh(campaign)
     return {"message": "Campaign created", "id": campaign.id}
 
+@router.patch("/{campaign_id}/tags", response_model=CampaignOut)
+def set_campaign_tags(campaign_id: int, data: dict, db: Session = Depends(get_db)):
+    """Replace one campaign's tag set."""
+    campaign = db.query(CampaignORM).filter(CampaignORM.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+
+    raw = data.get("tags") or []
+    campaign.tags = sorted({str(t).strip() for t in raw if str(t).strip()})
+    campaign.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(campaign)
+    return campaign
+
+
+@router.post("/bulk/tags", response_model=dict)
+def bulk_set_tags(data: BulkTagsIn, db: Session = Depends(get_db)):
+    """Apply a tag set to many campaigns at once — add merges, replace overwrites."""
+    clean = sorted({str(t).strip() for t in data.tags if str(t).strip()})
+    campaigns = db.query(CampaignORM).filter(CampaignORM.id.in_(data.ids)).all()
+    for campaign in campaigns:
+        if data.mode == 'replace':
+            campaign.tags = list(clean)
+        else:
+            campaign.tags = sorted(set(campaign.tags or []) | set(clean))
+    db.commit()
+    return {"message": f"Tags applied to {len(campaigns)} campaigns", "updated": len(campaigns)}
+
+
 @router.put("/{campaign_id}", response_model=CampaignOut)
 def update_campaign(campaign_id: int, data: CampaignIn, db: Session = Depends(get_db)):
     campaign = db.query(CampaignORM).filter(CampaignORM.id == campaign_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found.")
 
-    for key, value in data.dict().items():
+    # Only touch fields the caller actually sent — omitted fields (e.g. tags
+    # edited from elsewhere) keep their current value.
+    for key, value in data.dict(exclude_unset=True).items():
         setattr(campaign, key, value)
     campaign.updated_at = datetime.utcnow()
 

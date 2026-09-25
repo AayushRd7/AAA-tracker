@@ -32,7 +32,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/terser@5.30.2/dist/bundle.min.js"></script>
 
-    <link href="/backend/backend/css/style.css?v=5" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=6" rel="stylesheet">
 </head>
 <body>
 {% raw %}
@@ -234,7 +234,7 @@
     <v-app>
         {% if page == 'dashboard' and is_authenticated_user_type %}
         {% raw %}
-        <v-app-bar app color="#151d2b" dark elevation="0" height="58" class="topnav-bar">
+        <v-app-bar app color="#151d2b" dark elevation="0" height="40" class="topnav-bar">
             <div class="d-flex align-center mr-6 brand-block-top">
                 <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo mr-2">
                 <div class="brand-name">AAA TRACKER</div>
@@ -363,7 +363,7 @@
         }),
         data() {
             return {
-                activeSection: 'dashboard',
+                activeSection: '{{ initial_section }}',
                 drawer: null,
                 passwordDialog: false,
                 pwSaving: false,
@@ -411,20 +411,45 @@
                 if (!this.dashboardShell) return;
                 this.$emit('load-' + key);
                 localStorage.setItem('dashboard_tab', key);
+                // Keep the URL on the section's own page (back button works)
+                const target = '/backend/' + key;
+                if (window.location.pathname !== target) {
+                    history.pushState({section: key}, '', target);
+                }
             },
         },
         mounted() {
             if (!this.dashboardShell) return;
-            const saved = localStorage.getItem('dashboard_tab');
-            if (saved != null && saved !== '') {
-                if (/^\d+$/.test(saved)) {
-                    // Legacy numeric tab index from the old tabs UI
-                    const legacyOrder = ['dashboard','campaigns','landings','affiliates','offers','sources','reports','domains','settings','users','about'];
-                    this.activeSection = legacyOrder[parseInt(saved, 10)] || 'dashboard';
-                } else {
-                    this.activeSection = saved;
+            // Non-admins landing on an admin-only section URL fall back to dashboard
+            const initial = this.navItems.find(i => i.key === this.activeSection);
+            if (!initial || (initial.admin && this.roleLabel !== 'admin')) {
+                this.activeSection = 'dashboard';
+            }
+            // A bare /backend/dashboard URL restores the last visited section;
+            // a section-specific URL (/backend/campaigns) already set it via Jinja.
+            if (window.location.pathname.replace(/\/+$/, '') === '/backend/dashboard') {
+                const saved = localStorage.getItem('dashboard_tab');
+                if (saved != null && saved !== '') {
+                    if (/^\d+$/.test(saved)) {
+                        // Legacy numeric tab index from the old tabs UI
+                        const legacyOrder = ['dashboard','campaigns','landings','affiliates','offers','sources','reports','domains','settings','users','about'];
+                        this.activeSection = legacyOrder[parseInt(saved, 10)] || 'dashboard';
+                    } else {
+                        this.activeSection = saved;
+                    }
+                    const restored = this.navItems.find(i => i.key === this.activeSection);
+                    if (!restored || (restored.admin && this.roleLabel !== 'admin')) this.activeSection = 'dashboard';
                 }
             }
+            history.replaceState({section: this.activeSection}, '', '/backend/' + this.activeSection);
+            // Browser back/forward between section pages
+            window.addEventListener('popstate', () => {
+                const key = (window.location.pathname.replace(/^\/backend\/?/, '') || 'dashboard').replace(/\/+$/, '');
+                const item = this.navItems.find(i => i.key === key);
+                if (item && (!item.admin || this.roleLabel === 'admin')) {
+                    this.activeSection = key;
+                }
+            });
         },
         methods: {
             openPasswordDialog() {

@@ -7,6 +7,48 @@
                 <div class="page-subtitle">Manage traffic campaigns and their flows</div>
             </div>
             <v-col class="d-flex justify-end align-center">
+                <v-menu v-model="colMenu" offset-y :close-on-content-click="false">
+                    <template v-slot:activator="{ on, attrs }">
+                        <v-btn small outlined class="mr-3" v-bind="attrs" v-on="on">
+                            <v-icon small class="mr-1">mdi-view-column-outline</v-icon>Columns
+                        </v-btn>
+                    </template>
+                    <v-card min-width="230">
+                        <div class="col-menu-list pa-2">
+                            <v-checkbox
+                                    v-for="h in headers"
+                                    :key="h.value"
+                                    dense
+                                    hide-details
+                                    class="mt-1"
+                                    :label="h.text"
+                                    :input-value="colVisibility[h.value] !== false"
+                                    :disabled="h.value === 'name' || h.value === 'actions'"
+                                    @change="toggleCol(h.value, $event)"
+                            ></v-checkbox>
+                        </div>
+                        <v-divider></v-divider>
+                        <v-card-actions>
+                            <v-btn small text @click="resetCols">Show all</v-btn>
+                            <v-spacer></v-spacer>
+                            <v-btn small text color="primary" @click="colMenu = false">Done</v-btn>
+                        </v-card-actions>
+                    </v-card>
+                </v-menu>
+                <v-select
+                        v-model="tagFilter"
+                        :items="allTags"
+                        multiple
+                        chips
+                        small-chips
+                        deletable-chips
+                        outlined
+                        dense
+                        hide-details
+                        label="Tags"
+                        style="max-width: 200px;"
+                        class="mr-3"
+                ></v-select>
                 <v-select
                         v-model="metricsPeriod"
                         :items="metricsPeriodItems"
@@ -100,9 +142,19 @@
                                                     </v-col>
 
                                                     <v-col cols="12">
-                                                        <v-text-field label="Group" v-model="form.group_id"
-                                                                      outlined
-                                                                      dense></v-text-field>
+                                                        <v-combobox
+                                                                label="Tags"
+                                                                v-model="form.tags"
+                                                                :items="allTags"
+                                                                multiple
+                                                                chips
+                                                                small-chips
+                                                                deletable-chips
+                                                                outlined
+                                                                dense
+                                                                hint="Type a tag and press Enter — e.g. vertical, geo, traffic type"
+                                                                persistent-hint
+                                                        ></v-combobox>
                                                     </v-col>
                                                     <v-col cols="12">
                                                         <v-select label="Traffic Source"
@@ -851,6 +903,64 @@
             </v-card>
         </v-dialog>
 
+        <v-dialog v-model="tagEditor.open" max-width="440px" persistent>
+            <v-card>
+                <v-card-title class="text-h6">Tags — {{ tagEditor.name }}</v-card-title>
+                <v-card-text>
+                    <v-combobox
+                            v-model="tagEditor.tags"
+                            :items="allTags"
+                            label="Tags"
+                            multiple
+                            chips
+                            small-chips
+                            deletable-chips
+                            outlined
+                            dense
+                            hint="Type a tag and press Enter"
+                            persistent-hint
+                    ></v-combobox>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="tagEditor.open = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" @click="saveTagEditor">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="bulkTagDialog" max-width="440px" persistent>
+            <v-card>
+                <v-card-title class="text-h6">Tag {{ selected.length }} campaigns</v-card-title>
+                <v-card-text>
+                    <v-select
+                            label="Mode"
+                            v-model="bulkTagMode"
+                            :items="[{text: 'Add to existing tags', value: 'add'}, {text: 'Replace all tags', value: 'replace'}]"
+                            outlined
+                            dense
+                    ></v-select>
+                    <v-combobox
+                            v-model="bulkTagInput"
+                            label="Tags"
+                            multiple
+                            chips
+                            small-chips
+                            deletable-chips
+                            outlined
+                            dense
+                            hint="Type a tag and press Enter"
+                            persistent-hint
+                    ></v-combobox>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="bulkTagDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="bulkLoading" @click="applyBulkTags">Apply</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
 
         <v-row dense class="mt-4">
             <v-col>
@@ -864,16 +974,19 @@
                         <v-btn small color="warning" elevation="0" :loading="bulkLoading" @click="bulkSetStatus('paused')">
                             <v-icon small class="mr-1">mdi-pause</v-icon>Pause
                         </v-btn>
+                        <v-btn small color="secondary" elevation="0" class="mr-2 ml-2" @click="openBulkTags">
+                            <v-icon small class="mr-1">mdi-tag-multiple-outline</v-icon>Tag
+                        </v-btn>
                         <v-btn small color="red" elevation="0" class="ml-2" :loading="bulkLoading" @click="bulkDelete">
                             <v-icon small class="mr-1">mdi-trash-can-outline</v-icon>Delete
                         </v-btn>
                         <v-spacer></v-spacer>
                         <v-btn small text @click="selected = []">Clear selection</v-btn>
                     </div>
-                    <v-data-table v-col-resize:campaigns="headers"
+                    <v-data-table v-col-resize:campaigns="visibleHeaders"
                             v-model="selected"
-                            :headers="headers"
-                            :items="campaigns"
+                            :headers="visibleHeaders"
+                            :items="filteredCampaigns"
                             show-select
                             item-key="id"
                             :item-class="perfRowClass"
@@ -884,11 +997,23 @@
                         <template v-slot:item.clicks="{ item }">
                             {{ (metricsMap[item.id] || {}).clicks != null ? Number(metricsMap[item.id].clicks).toLocaleString() : '—' }}
                         </template>
+                        <template v-slot:item.unique_clicks="{ item }">
+                            {{ (metricsMap[item.id] || {}).unique_clicks != null ? Number(metricsMap[item.id].unique_clicks).toLocaleString() : '—' }}
+                        </template>
                         <template v-slot:item.conversions="{ item }">
                             {{ (metricsMap[item.id] || {}).conversions != null ? Number(metricsMap[item.id].conversions).toLocaleString() : '—' }}
                         </template>
+                        <template v-slot:item.leads="{ item }">
+                            {{ (metricsMap[item.id] || {}).leads != null ? Number(metricsMap[item.id].leads).toLocaleString() : '—' }}
+                        </template>
                         <template v-slot:item.cr="{ item }">
                             {{ (metricsMap[item.id] || {}).cr != null ? metricsMap[item.id].cr + '%' : '—' }}
+                        </template>
+                        <template v-slot:item.epc="{ item }">
+                            {{ (metricsMap[item.id] || {}).epc != null ? formatMoney(metricsMap[item.id].epc) : '—' }}
+                        </template>
+                        <template v-slot:item.cpc="{ item }">
+                            {{ (metricsMap[item.id] || {}).cpc != null ? formatMoney(metricsMap[item.id].cpc) : '—' }}
                         </template>
                         <template v-slot:item.cost="{ item }">
                             <span :class="signClass(-(metricsMap[item.id]?.cost || 0))">{{ formatMoney((metricsMap[item.id] || {}).cost) }}</span>
@@ -902,14 +1027,30 @@
                         <template v-slot:item.roi="{ item }">
                             <span class="font-weight-bold" :class="signClass(metricsMap[item.id]?.roi || 0)">{{ formatPct((metricsMap[item.id] || {}).roi) }}</span>
                         </template>
+                        <template v-slot:item.tags="{ item }">
+                            <v-chip v-for="t in (item.tags || []).slice(0, 3)" :key="t" x-small outlined class="mr-1">{{ t }}</v-chip>
+                            <span v-if="(item.tags || []).length > 3" class="grey--text text--darken-1 caption">+{{ item.tags.length - 3 }}</span>
+                            <v-btn icon x-small class="ml-1" @click="openTagEditor(item)">
+                                <v-icon x-small>mdi-pencil-outline</v-icon>
+                            </v-btn>
+                        </template>
+                        <template v-slot:item.source="{ item }">
+                            {{ sourceMap[item.traffic_source_id] || '—' }}
+                        </template>
                         <template v-slot:no-data>
                             <div class="empty-state">
                                 <v-icon>mdi-sitemap</v-icon>
                                 <div class="mt-2">No campaigns yet — create your first one</div>
                             </div>
                         </template>
-
-                    >
+                        <template v-slot:body.append="{ headers: tHeaders }">
+                            <tr v-if="filteredCampaigns.length" class="totals-row">
+                                <td></td>
+                                <td v-for="h in tHeaders" :key="'t-' + h.value" :class="h.align === 'end' ? 'text-end' : ''">
+                                    {{ totalsCell(h.value) }}
+                                </td>
+                            </tr>
+                        </template>
                         <template v-slot:item.type="{ item }">
                             <v-chip small>{{ item.type }}</v-chip>
                         </template>
@@ -984,14 +1125,20 @@
                 bulkLoading: false,
                 headers: [
                     {text: 'Name', value: 'name'},
+                    {text: 'Tags', value: 'tags', sortable: false},
+                    {text: 'Source', value: 'source', sortable: false},
                     {text: 'Domain', value: 'domain'},
                     {text: 'Alias', value: 'alias'},
                     {text: 'Link', value: 'link'}, // value 'link' is domain+'/'+alias
                     {text: 'Type', value: 'type'},
                     {text: 'Flow Mode', value: 'redirect_mode'},
                     {text: 'Clicks', value: 'clicks', align: 'end'},
+                    {text: 'Unique Clicks', value: 'unique_clicks', align: 'end'},
                     {text: 'Conversions', value: 'conversions', align: 'end'},
+                    {text: 'Leads', value: 'leads', align: 'end'},
                     {text: 'CR %', value: 'cr', align: 'end'},
+                    {text: 'EPC', value: 'epc', align: 'end'},
+                    {text: 'CPC', value: 'cpc', align: 'end'},
                     {text: 'Cost', value: 'cost', align: 'end'},
                     {text: 'Revenue', value: 'revenue', align: 'end'},
                     {text: 'Profit', value: 'profit', align: 'end'},
@@ -1002,6 +1149,13 @@
                     {text: 'Updated', value: 'updated_at'},
                     {text: 'Actions', value: 'actions', sortable: false}
                 ],
+                colMenu: false,
+                colVisibility: {},
+                tagFilter: [],
+                tagEditor: {open: false, id: null, name: '', tags: []},
+                bulkTagDialog: false,
+                bulkTagMode: 'add',
+                bulkTagInput: [],
                 metricsMap: {},
                 metricsPeriod: '30d',
                 metricsPeriodItems: [
@@ -1095,6 +1249,9 @@
                     // S2S Postback
                     postbacks:
                         [],  // array of objects {url: '', status: 'approved' | 'rejected' | ...}
+
+                    tags:
+                        [],
 
                     notes:
                         '',
@@ -1202,6 +1359,38 @@
                 this.sources.forEach(o => (map[o.id] = o.name));
                 return map;
             },
+            visibleHeaders() {
+                return this.headers.filter(h => this.colVisibility[h.value] !== false);
+            },
+            allTags() {
+                const set = new Set();
+                this.campaigns.forEach(c => (c.tags || []).forEach(t => set.add(t)));
+                return [...set].sort();
+            },
+            filteredCampaigns() {
+                if (!this.tagFilter.length) return this.campaigns;
+                return this.campaigns.filter(c => (c.tags || []).some(t => this.tagFilter.includes(t)));
+            },
+            metricsTotals() {
+                // Blended totals across every campaign in the (filtered) table
+                const t = {clicks: 0, unique_clicks: 0, leads: 0, conversions: 0, cost: 0, revenue: 0, profit: 0, cr: 0, epc: 0, cpc: 0, roi: 0};
+                this.filteredCampaigns.forEach(c => {
+                    const m = this.metricsMap[c.id];
+                    if (!m) return;
+                    t.clicks += Number(m.clicks) || 0;
+                    t.unique_clicks += Number(m.unique_clicks) || 0;
+                    t.leads += Number(m.leads) || 0;
+                    t.conversions += Number(m.conversions) || 0;
+                    t.cost += Number(m.cost) || 0;
+                    t.revenue += Number(m.revenue) || 0;
+                    t.profit += Number(m.profit) || 0;
+                });
+                t.cr = t.clicks ? t.conversions / t.clicks * 100 : 0;
+                t.epc = t.clicks ? t.revenue / t.clicks : 0;
+                t.cpc = t.clicks ? t.cost / t.clicks : 0;
+                t.roi = t.cost ? (t.revenue - t.cost) / t.cost * 100 : 0;
+                return t;
+            },
 
             campaignUrl() {
                 if (this.form.domain_id) {
@@ -1222,6 +1411,18 @@
             }
         },
         mounted() {
+            // Out of the box show the dense working set; the Columns picker
+            // reveals the rest. Persisted per browser in localStorage.
+            const defaultHidden = ['domain', 'alias', 'link', 'type', 'redirect_mode', 'leads', 'notes', 'created_at', 'updated_at'];
+            try {
+                this.colVisibility = JSON.parse(localStorage.getItem('colv:campaigns')) || {};
+            } catch (e) {
+                this.colVisibility = {};
+            }
+            if (!localStorage.getItem('colv:campaigns')) {
+                this.colVisibility = {};
+                defaultHidden.forEach(v => Vue.set(this.colVisibility, v, false));
+            }
             this.loadCampaigns();
             this.$root.$on('load-campaigns', this.loadCampaigns);
             this.generateTrackingScript();
@@ -1554,6 +1755,7 @@
                     domain_id: this.form.domain_id,
                     traffic_source_id: this.form.traffic_source_id,
                     notes: this.form.notes,
+                    tags: (this.form.tags || []).map(t => String(t).trim()).filter(Boolean),
                     config: {
                         integration_method: this.form.integration_method,
                         send_se_referrer: this.form.send_se_referrer,
@@ -1645,6 +1847,7 @@
                     domain_id: item.domain_id,
                     traffic_source_id: item.traffic_source_id,
                     notes: item.notes || '',
+                    tags: [...(item.tags || [])],
                     integration_method: item.config?.integration_method || null,
                     send_se_referrer: item.config?.send_se_referrer ?? true,
                     use_title_as_keyword: item.config?.use_title_as_keyword ?? true,
@@ -1705,6 +1908,88 @@
                         this.metricsMap = map;
                     })
                     .catch(err => console.error('metrics', err));
+            },
+            toggleCol(value, on) {
+                if (value === 'name' || value === 'actions') return;
+                Vue.set(this.colVisibility, value, !!on);
+                this.persistCols();
+            },
+            persistCols() {
+                try { localStorage.setItem('colv:campaigns', JSON.stringify(this.colVisibility)); } catch (e) {}
+            },
+            resetCols() {
+                this.colVisibility = {};
+                this.persistCols();
+            },
+            openTagEditor(item) {
+                this.tagEditor = {open: true, id: item.id, name: item.name, tags: [...(item.tags || [])]};
+            },
+            async saveTagEditor() {
+                const tags = (this.tagEditor.tags || []).map(t => String(t).trim()).filter(Boolean);
+                try {
+                    const res = await fetch(`/backend/api/campaigns/${this.tagEditor.id}/tags`, {
+                        method: 'PATCH',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({tags})
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const updated = await res.json();
+                    const i = this.campaigns.findIndex(c => c.id === updated.id);
+                    if (i >= 0) Vue.set(this.campaigns, i, Object.assign({}, this.campaigns[i], {tags: updated.tags || []}));
+                    this.tagEditor.open = false;
+                    this.$root.$emit('show-message', {type: 'success', text: 'Tags saved'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Failed to save tags: ' + err.message});
+                }
+            },
+            openBulkTags() {
+                this.bulkTagInput = [];
+                this.bulkTagMode = 'add';
+                this.bulkTagDialog = true;
+            },
+            async applyBulkTags() {
+                const tags = (this.bulkTagInput || []).map(t => String(t).trim()).filter(Boolean);
+                if (!tags.length) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Add at least one tag first.'});
+                    return;
+                }
+                this.bulkLoading = true;
+                try {
+                    const res = await fetch('/backend/api/campaigns/bulk/tags', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids: this.selected.map(c => c.id), tags, mode: this.bulkTagMode})
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.bulkTagDialog = false;
+                    this.selected = [];
+                    this.loadCampaigns();
+                    this.$root.$emit('show-message', {type: 'success', text: 'Tags applied'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Bulk tagging failed: ' + err.message});
+                } finally {
+                    this.bulkLoading = false;
+                }
+            },
+            totalsCell(value) {
+                const t = this.metricsTotals;
+                switch (value) {
+                    case 'name': return 'Totals';
+                    case 'clicks': return t.clicks.toLocaleString();
+                    case 'unique_clicks': return t.unique_clicks.toLocaleString();
+                    case 'leads': return t.leads.toLocaleString();
+                    case 'conversions': return t.conversions.toLocaleString();
+                    case 'cr': return t.cr.toFixed(2) + '%';
+                    case 'epc': return this.formatMoney(t.epc);
+                    case 'cpc': return this.formatMoney(t.cpc);
+                    case 'cost': return this.formatMoney(t.cost);
+                    case 'revenue': return this.formatMoney(t.revenue);
+                    case 'profit': return this.formatMoney(t.profit);
+                    case 'roi': return this.formatPct(t.roi);
+                    default: return '';
+                }
             },
             perfRowClass(item) {
                 const m = this.metricsMap[item.id];
@@ -1975,6 +2260,7 @@
                     domain_id: null,
                     traffic_source_id: null,
                     notes: '',
+                    tags: [],
                     flowScheme: 'position',
                     integration_method: null,
                     send_se_referrer: true,

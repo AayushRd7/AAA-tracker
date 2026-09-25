@@ -22,6 +22,17 @@ app.state = SimpleNamespace()
 
 @app.on_event("startup")
 async def startup():
+    # Lightweight schema migration for installs created before a column existed.
+    # Idempotent — safe to run on every boot.
+    from sqlalchemy import text
+    from db import engine
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb"))
+            conn.commit()
+    except Exception as e:
+        print("startup migration:", e)
+
     import asyncio
     from email_reports import email_report_loop
     asyncio.create_task(email_report_loop())
@@ -80,6 +91,11 @@ async def favicon():
 
 ALLOWED_PAGES = {"auth", "dashboard", "editor"}
 
+# Sections of the dashboard shell that get their own URL — /backend/<section>
+# serves the shell pre-focused on that section (deep-linkable, back-button friendly).
+NAV_SECTIONS = {"dashboard", "campaigns", "landings", "affiliates", "offers",
+                "sources", "reports", "domains", "settings", "users", "about"}
+
 
 from typing import Optional
 from auth import is_authenticated, router as auth_router
@@ -129,6 +145,13 @@ async def serve_page(request: Request, page: Optional[str] = None):
         page = "auth"
     if page == "auth" and user_type:
         page = "dashboard"
+    section = None
+    if page in NAV_SECTIONS:
+        if not user_type:
+            page = "auth"
+        else:
+            section = page
+            page = "dashboard"
     if page not in ALLOWED_PAGES or not user_type:
         page = "auth"  # Or a 404 could be returned instead
     page_file = f"pages/{page}.html"
@@ -137,5 +160,6 @@ async def serve_page(request: Request, page: Optional[str] = None):
         "page": page,
         "THEME_NAME": THEME_NAME,
         "is_authenticated_user_type": user_type,
+        "initial_section": section or "dashboard",
         "page_component": '<'+page+'-page-component></'+page+'-page-component>',
     })
