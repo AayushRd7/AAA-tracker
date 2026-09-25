@@ -545,6 +545,13 @@ body::-webkit-scrollbar-thumb:hover {
   border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
 }
 
+/* Vuetify doesn't vertically center toolbar children at custom heights —
+   without this the nav rides high and sits off the brand baseline. */
+.topnav-bar .v-toolbar__content {
+  align-items: center;
+  height: 58px !important;
+}
+
 .brand-block-top {
   padding-right: 22px;
   border-right: 1px solid rgba(255, 255, 255, 0.09);
