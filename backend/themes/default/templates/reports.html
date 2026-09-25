@@ -86,7 +86,7 @@
 
         <!-- Breakdown table -->
         <v-card>
-            <v-data-table
+            <v-data-table v-col-resize:reports-conversions="headers" v-col-resize:reports-clicklog="clickLogHeaders" v-col-resize:reports-breakdown="reportHeaders"
                     :headers="reportHeaders"
                     :items="reportRows"
                     dense
@@ -535,7 +535,7 @@
                 if (isNaN(v) || v === 0) return 'grey--text';
                 return v > 0 ? 'success--text' : 'error--text';
             },
-            // Binom-style row tint: deeper tint the further from break-even (ROI-led,
+            // Row tint: deeper tint the further from break-even (ROI-led,
             // profit as fallback when the dimension has no ROI).
             perfRowClass(item) {
                 const roi = parseFloat(item.roi);

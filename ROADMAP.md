@@ -4,7 +4,7 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 
 ## 🎯 Traffic & Campaign Features (core tracker gaps)
 
-- [x] **0. Campaign list with live metrics** — Clicks/Conversions/CR/Cost/Revenue/Profit/ROI columns on the Campaigns page (ClickHouse-backed), with Binom-style green/red row tinting and a stats-period selector (Today/7d/30d/all time).
+- [x] **0. Campaign list with live metrics** — Clicks/Conversions/CR/Cost/Revenue/Profit/ROI columns on the Campaigns page (ClickHouse-backed), with green/red row tinting and a stats-period selector (Today/7d/30d/all time).
 
 - [x] **1. Conversion status editing** — conversions can now be edited (status, payout, revenue, external/transaction ID) and deleted from the Conversion Log in Reports; postback counts + dedupe also handled in the same batch.
 - [ ] **2. Sub ID / macro tokens in offers & landings** — full macro set (`{click_id}`, `{sub_id_2}`…`{sub_id_8}`, `{campaign_name}`, `{source}`, `{cost}`…) usable in offer URLs, lander links, and postback URLs — sub-id mapping exists in Settings, but macro substitution in offer URLs and landing templates is incomplete.

@@ -136,6 +136,79 @@
             },
         },
     });
+
+    // Draggable column widths on data tables.
+    // Usage: v-col-resize:UNIQUE-KEY="headersArray" — widths persist per browser
+    // in localStorage under colw:<KEY>. Double-click a handle to reset one column.
+    const COLW_KEY = 'colw:';
+    function colWidthsGet(key) {
+        try { return JSON.parse(localStorage.getItem(COLW_KEY + key)) || {}; } catch (e) { return {}; }
+    }
+    function colWidthsSet(key, map) {
+        try { localStorage.setItem(COLW_KEY + key, JSON.stringify(map)); } catch (e) {}
+    }
+    function wireColResize(el, binding) {
+        const headers = binding.value;
+        if (!headers || !Array.isArray(headers) || !headers.length) return;
+        const key = binding.arg || 'table';
+        const saved = colWidthsGet(key);
+        // Re-apply persisted widths onto the (possibly recreated) header objects
+        headers.forEach(function (h, i) {
+            const id = h.value != null ? String(h.value) : ('c' + i);
+            if (saved[id] && h.width !== saved[id]) Vue.set(h, 'width', saved[id]);
+        });
+        const table = el.querySelector('table');
+        try {
+            if (localStorage.getItem(COLW_KEY + key + ':free') === '1' && table) table.classList.add('cols-free');
+        } catch (e) {}
+        // Match ths to headers by label text — tables with row checkboxes
+        // (show-select) render an extra leading th that is not in the array.
+        const avail = headers.slice();
+        el.querySelectorAll('table > thead th').forEach(function (th) {
+            if (th.querySelector('.col-drag-handle')) return;
+            const txt = th.textContent.trim();
+            let h = null;
+            for (let k = 0; k < avail.length; k++) {
+                if ((avail[k].text || '').trim() === txt) { h = avail[k]; avail.splice(k, 1); break; }
+            }
+            if (!h) return;
+            const id = h.value != null ? String(h.value) : ('c' + headers.indexOf(h));
+            const origW = h.width;
+            const handle = document.createElement('div');
+            handle.className = 'col-drag-handle';
+            handle.title = 'Drag to resize · double-click to reset';
+            th.appendChild(handle);
+            handle.addEventListener('mousedown', function (ev) {
+                ev.preventDefault(); ev.stopPropagation();
+                if (table) table.classList.add('cols-free');
+                try { localStorage.setItem(COLW_KEY + key + ':free', '1'); } catch (e) {}
+                const startX = ev.clientX;
+                const startW = th.getBoundingClientRect().width;
+                document.body.classList.add('col-resizing');
+                function onMove(e) {
+                    const w = Math.max(44, Math.min(1200, Math.round(startW + e.clientX - startX)));
+                    Vue.set(h, 'width', w);
+                    const map = colWidthsGet(key); map[id] = w; colWidthsSet(key, map);
+                }
+                function onUp() {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    document.body.classList.remove('col-resizing');
+                }
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+            handle.addEventListener('dblclick', function (ev) {
+                ev.preventDefault(); ev.stopPropagation();
+                const map = colWidthsGet(key); delete map[id]; colWidthsSet(key, map);
+                if (origW != null) Vue.set(h, 'width', origW); else Vue.delete(h, 'width');
+            });
+        });
+    }
+    Vue.directive('col-resize', {
+        inserted: wireColResize,
+        componentUpdated: wireColResize,
+    });
 </script>
 
 {% endraw %}
@@ -166,7 +239,7 @@
                 <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo mr-2">
                 <div class="font-weight-bold" style="font-size: 15px; letter-spacing: 0.4px;">AAA TRACKER</div>
             </div>
-            <!-- Desktop: horizontal nav, Binom-style, keeps every pixel for data -->
+            <!-- Desktop: horizontal nav keeps every pixel for data -->
             <nav class="top-nav d-none d-lg-block">
                 <v-btn
                         v-for="item in visibleNavItems"

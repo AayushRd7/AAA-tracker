@@ -851,7 +851,7 @@ async def do_campaign_execution(campaign, request: Request) -> Response:
     pg = app.state.pg
 
     # Distribution mode: 'position' = first matching flow wins,
-    # 'weight' = weighted random split across matching flows (Binom-style %).
+    # 'weight' = weighted random split across matching flows (% share per flow).
     distribution_mode = (campaign.get("redirect_mode") if hasattr(campaign, "get") else campaign["redirect_mode"]) or "position"
 
     # FORCED FLOWS FIRST

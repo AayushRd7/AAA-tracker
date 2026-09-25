@@ -79,7 +79,7 @@
         <v-row dense class="mt-4">
             <v-col>
                 <v-card>
-                    <v-data-table
+                    <v-data-table v-col-resize:users="headers"
                             :headers="headers"
                             :items="users"
                             dense

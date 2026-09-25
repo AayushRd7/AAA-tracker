@@ -493,7 +493,7 @@ body::-webkit-scrollbar-thumb {
 body::-webkit-scrollbar-thumb:hover {
   background: #98a2b3;
 }
-/* ---------- Performance tables (Binom-style conditional coloring) ---------- */
+/* ---------- Performance tables (conditional win/loss coloring) ---------- */
 
 /* Rows tint by profit magnitude: the stronger the result, the deeper the tint. */
 .v-data-table tr.perf-win-1 > td { background: #f3faf6 !important; }
@@ -503,7 +503,7 @@ body::-webkit-scrollbar-thumb:hover {
 .v-data-table tr.perf-loss-2 > td { background: #fce4e2 !important; }
 .v-data-table tr.perf-loss-3 > td { background: #fad4d1 !important; }
 
-/* Colored leading edge on each perf row, like Binom's left bar. */
+/* Colored leading edge on each perf row. */
 .v-data-table tr.perf-win-1 > td:first-child { box-shadow: inset 3px 0 0 #86c9a4; }
 .v-data-table tr.perf-win-2 > td:first-child { box-shadow: inset 3px 0 0 #4db384; }
 .v-data-table tr.perf-win-3 > td:first-child { box-shadow: inset 3px 0 0 #16a34a; }
@@ -538,7 +538,7 @@ body::-webkit-scrollbar-thumb:hover {
   bottom: 0;
 }
 
-/* ---------- Top navigation (Binom-style, sidebar removed for full-width data) ---------- */
+/* ---------- Top navigation (horizontal bar keeps every pixel for data) ---------- */
 
 .topnav-bar {
   border-bottom: 1px solid var(--border, #e3e8ef);
@@ -569,4 +569,49 @@ body::-webkit-scrollbar-thumb:hover {
 
 .top-nav .v-btn:hover {
   color: #101828;
+}
+
+/* ---------- Draggable column resizing on data tables ---------- */
+/* Each <th> gets a .col-drag-handle edge strip (wired by the v-col-resize
+   directive in index.html). Once a user resizes anything on a table, the
+   table switches to .cols-free: content-driven width + horizontal scroll,
+   so widened columns push the table wider instead of stealing space from
+   their neighbors. */
+.v-data-table > .v-data-table__wrapper > table > thead th {
+    position: relative;
+}
+.col-drag-handle {
+    position: absolute;
+    top: 0;
+    right: -4px;
+    width: 9px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 3;
+}
+.col-drag-handle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 3.5px;
+    width: 2px;
+    height: 100%;
+    background: transparent;
+    transition: background .12s ease;
+}
+.col-drag-handle:hover::after,
+body.col-resizing .col-drag-handle::after {
+    background: rgba(22, 163, 74, .55);
+}
+body.col-resizing {
+    user-select: none;
+    -webkit-user-select: none;
+}
+body.col-resizing,
+body.col-resizing * {
+    cursor: col-resize !important;
+}
+table.cols-free {
+    width: max-content !important;
+    min-width: 100% !important;
 }

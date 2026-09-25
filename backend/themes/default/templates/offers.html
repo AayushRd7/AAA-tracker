@@ -153,7 +153,7 @@
         <v-row dense class="mt-4">
             <v-col>
                 <v-card>
-                    <v-data-table
+                    <v-data-table v-col-resize:offers="headers"
                             :headers="headers"
                             :items="offers"
                             dense

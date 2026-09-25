@@ -44,7 +44,7 @@ def get_campaign_metrics(
     date_to: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """Per-campaign live metrics (Binom-style columns) from ClickHouse.
+    """Per-campaign live metric columns from ClickHouse.
 
     Returns {campaign_id: {clicks, conversions, cost, revenue, profit, cr, epc, roi, ...}}.
     """
