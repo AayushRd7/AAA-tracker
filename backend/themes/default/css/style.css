@@ -538,31 +538,52 @@ body::-webkit-scrollbar-thumb:hover {
   bottom: 0;
 }
 
-/* ---------- Top navigation (horizontal bar keeps every pixel for data) ---------- */
+/* ---------- Top navigation (dark chrome bar keeps every pixel for data) ---------- */
 
 .topnav-bar {
-  border-bottom: 1px solid var(--border, #e3e8ef);
+  background: #151d2b !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+
+.brand-block-top {
+  padding-right: 22px;
+  border-right: 1px solid rgba(255, 255, 255, 0.09);
+  margin-right: 22px !important;
+}
+
+.brand-name {
+  font-weight: 700;
+  font-size: 14.5px;
+  letter-spacing: 0.9px;
+  color: #ffffff;
+  white-space: nowrap;
 }
 
 .top-nav {
   display: flex;
   align-items: center;
   height: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.top-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .top-nav .v-btn {
   text-transform: none;
   font-weight: 500;
-  font-size: 14px;
-  color: #475467;
-  height: 40px;
-  border-radius: 7px;
+  font-size: 13.5px;
+  color: #9aa4b6;
+  height: 38px;
+  border-radius: 8px;
   min-width: auto;
-  padding: 0 14px;
+  padding: 0 13px;
   margin: 0 2px;
   letter-spacing: 0.2px;
-  /* flat buttons: never show the framework's pale active/hover wash */
   background: transparent;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
 .top-nav .v-btn::before {
@@ -570,13 +591,14 @@ body::-webkit-scrollbar-thumb:hover {
 }
 
 .top-nav .v-btn:hover {
-  color: #101828;
-  background: #eef2f6;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .top-nav .v-btn.top-nav-item--active {
   color: #ffffff !important;
-  background: #1a2332 !important;
+  background: #16a34a !important;
+  font-weight: 600;
   box-shadow: none;
 }
 
