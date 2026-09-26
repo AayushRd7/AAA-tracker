@@ -40,7 +40,11 @@ CREATE TABLE clicks_data (
     ip IPv4,
     is_using_proxy Nullable(Bool),
     is_bot Nullable(Bool),
-    device_type LowCardinality(String)
+    device_type LowCardinality(String),
+    flow_index UInt8 DEFAULT 0,
+    utm_medium String DEFAULT '',
+    impression UInt8 DEFAULT 0,
+    fraud_score UInt8 DEFAULT 0
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(received_at)

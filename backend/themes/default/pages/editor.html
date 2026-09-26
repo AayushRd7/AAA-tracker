@@ -57,19 +57,19 @@
     <v-container fluid class="editor-page">
         <div class="editor-topbar">
             <a href="/backend/dashboard" class="editor-back">
-                <v-icon small>mdi-arrow-left</v-icon> Back to Dashboard
+                <v-icon small>mdi-arrow-left</v-icon> Back to dashboard
             </a>
-            <span class="editor-title">Landing Editor</span>
+            <span class="editor-title">Landing editor</span>
             <span v-if="landingId" class="page-subtitle">Landing #{{ landingId }}</span>
         </div>
 
         <v-row>
             <v-col cols="3">
                 <v-btn block small color="primary" elevation="0" class="mb-2" @click="promptCreateFile">
-                    <v-icon small class="mr-1">mdi-file-plus-outline</v-icon>Create File
+                    <v-icon small class="mr-1">mdi-file-plus-outline</v-icon>Create file
                 </v-btn>
                 <v-btn block small color="secondary" elevation="0" class="mb-2" @click="triggerUpload">
-                    <v-icon small class="mr-1">mdi-upload</v-icon>Upload File
+                    <v-icon small class="mr-1">mdi-upload</v-icon>Upload file
                 </v-btn>
                 <input ref="upload" type="file" style="display: none" @change="uploadFile">
 

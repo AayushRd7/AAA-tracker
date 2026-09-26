@@ -222,8 +222,9 @@ def require_api_auth(request: Request, authorization: Optional[str] = Header(Non
 # Sections a non-admin user can read by default (today's behavior). The admin
 # sections were already admin-only in the UI; the API now enforces the same.
 PERMISSION_SECTIONS = ["dashboard", "campaigns", "landings", "affiliates", "offers",
-                       "sources", "reports", "domains", "settings", "users", "about"]
-ADMIN_ONLY_SECTIONS = {"users", "settings", "domains"}
+                       "sources", "reports", "domains", "settings", "users", "about",
+                       "fraud", "optimizer"]
+ADMIN_ONLY_SECTIONS = {"users", "settings", "domains", "fraud", "optimizer"}
 
 
 def resolve_permissions(user) -> dict:
@@ -506,8 +507,11 @@ async def logout(request: Request, response: Response):
     return {"message": "Logged out"}
 
 
-# ====== GET /status ======
-@router.get("/status")
+# ====== GET /auth-status ======
+# Renamed from /status: the G78 system-status API now owns /api/status
+# (admin-gated). Nothing in the UI consumed this endpoint; it stays available
+# under its explicit name for external session checks.
+@router.get("/auth-status")
 async def auth_status(request: Request):
     if is_authenticated(request):
         return {"authenticated": True}

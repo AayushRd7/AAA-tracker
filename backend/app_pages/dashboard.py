@@ -56,6 +56,7 @@ class ClickLogFilters(BaseModel):
     traffic_source_name: Optional[str] = None
     status: Optional[str] = None
     search: Optional[str] = None
+    fraud_score: Optional[int] = None
     limit: int = 500
 
 

@@ -7,9 +7,13 @@
                 <div class="page-subtitle">Manage your affiliate networks</div>
             </v-col>
             <v-col class="d-flex justify-end" cols="auto">
+                <v-btn class="mr-2" elevation="0" @click="openCatalog">
+                    <v-icon small class="mr-1">mdi-view-grid-outline</v-icon>
+                    From catalog
+                </v-btn>
                 <v-btn color="primary" elevation="0" @click="openCreate">
                     <v-icon small class="mr-1">mdi-plus</v-icon>
-                    Add Affiliate Network
+                    Add affiliate network
                 </v-btn>
             </v-col>
         </v-row>
@@ -17,20 +21,20 @@
         <v-dialog v-model="dialog">
             <v-card class="dialog-md">
                 <v-card-title>
-                    <span class="text-h6">{{ isEdit ? 'Edit Affiliate Network' : 'Add Affiliate Network' }}</span>
+                    <span class="text-h6">{{ isEdit ? 'Edit affiliate network' : 'Add affiliate network' }}</span>
                 </v-card-title>
 
                 <v-card-text>
 
                     <v-text-field
-                            label="Network Name"
+                            label="Network name"
                             v-model="form.name"
                             outlined
                             dense
                     ></v-text-field>
 
                     <v-textarea
-                            label="Offer Parameters (comma or JSON format)"
+                            label="Offer parameters (comma or JSON format)"
                             v-model="form.offer_parameters"
                             outlined
                             dense
@@ -39,7 +43,7 @@
                     ></v-textarea>
 
                     <v-text-field
-                            label="S2S Postback URL"
+                            label="S2S postback URL"
                             v-model="form.s2s_postback"
                             outlined
                             dense
@@ -55,6 +59,77 @@
             </v-card>
         </v-dialog>
 
+        <v-dialog v-model="catalogOpen" scrollable>
+            <v-card class="dialog-lg">
+                <v-card-title class="d-flex align-center">
+                    <span class="text-h6">Offer Sources Catalog</span>
+                    <v-spacer></v-spacer>
+                    <v-btn icon small @click="catalogOpen = false">
+                        <v-icon small>mdi-close</v-icon>
+                    </v-btn>
+                </v-card-title>
+
+                <v-card-text>
+                    <v-text-field
+                            v-model="catalogSearch"
+                            label="Search networks or verticals"
+                            prepend-inner-icon="mdi-magnify"
+                            outlined
+                            dense
+                            clearable
+                            hide-details
+                            class="mb-3"
+                    ></v-text-field>
+
+                    <div class="aff-catalog-verticals mb-3">
+                        <v-chip
+                                v-for="v in topVerticals"
+                                :key="v"
+                                x-small
+                                label
+                                class="mr-1 mb-1"
+                                :class="catalogVertical === v ? 'aff-catalog-vchip--on' : ''"
+                                :outlined="catalogVertical !== v"
+                                @click="catalogVertical = catalogVertical === v ? '' : v"
+                        >{{ v }}</v-chip>
+                    </div>
+
+                    <div class="aff-catalog-grid">
+                        <div v-for="p in filteredPresets" :key="p.name" class="aff-catalog-card">
+                            <div class="d-flex align-center">
+                                <div class="aff-catalog-logo">
+                                    <div class="aff-catalog-logo-fallback">{{ p.name.charAt(0) }}</div>
+                                    <img :src="'/backend/api/affiliate-networks/favicon/' + encodeURIComponent(p.logo_domain)"
+                                         width="48" height="48" alt="">
+                                </div>
+                                <div class="aff-catalog-name">{{ p.name }}</div>
+                            </div>
+                            <div class="aff-catalog-verticals">
+                                <span v-for="v in p.verticals.slice(0, 4)" :key="v" class="status-chip status-chip--neutral mr-1 mb-1">{{ v }}</span>
+                                <span v-if="p.verticals.length > 4" class="status-chip status-chip--neutral mr-1 mb-1">+{{ p.verticals.length - 4 }}</span>
+                            </div>
+                            <v-btn
+                                    small
+                                    elevation="0"
+                                    color="primary"
+                                    class="mt-auto"
+                                    :disabled="addedNames.includes(p.name)"
+                                    @click="addFromPreset(p)"
+                            >
+                                <v-icon small class="mr-1">{{ addedNames.includes(p.name) ? 'mdi-check' : 'mdi-plus' }}</v-icon>
+                                {{ addedNames.includes(p.name) ? 'Added' : 'Add' }}
+                            </v-btn>
+                        </div>
+                    </div>
+
+                    <div v-if="!filteredPresets.length" class="empty-state py-6">
+                        <v-icon>mdi-magnify</v-icon>
+                        <div class="mt-2">No networks match your search</div>
+                    </div>
+                </v-card-text>
+            </v-card>
+        </v-dialog>
+
         <v-row dense class="mt-4">
             <v-col>
                 <v-card>
@@ -67,7 +142,14 @@
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
                     >
                         <template v-slot:item.name="{ item }">
-                            {{ item.name }}
+                            <div class="aff-name-cell">
+                                <div v-if="presetLogo(item.name)" class="aff-logo-wrap">
+                                    <div class="aff-table-logo-fallback">{{ item.name.charAt(0) }}</div>
+                                    <img :src="'/backend/api/affiliate-networks/favicon/' + encodeURIComponent(presetLogo(item.name))"
+                                         width="20" height="20" alt="" class="aff-table-logo">
+                                </div>
+                                <span>{{ item.name }}</span>
+                            </div>
                             <v-tooltip bottom v-if="presetNames.includes(item.name)">
                                 <template v-slot:activator="{ on, attrs }">
                                     <v-chip
@@ -158,12 +240,10 @@
                     offer_parameters: '',
                     s2s_postback: ''
                 },
-                presetNames: [
-                    'MaxBounty', 'Admitad', 'Adsterra', 'Affise', 'ClickDealer',
-                    'CrakRevenue', 'CPAGrip', 'CPAlead', 'Dr.Cash', 'Everad',
-                    'HasOffers', 'HilltopAds', 'Leadbit', 'Mobidea', 'MyLead',
-                    'PropellerAds', 'Zeydoo', 'T3Leads', 'ClickBank', 'Galaksion'
-                ],
+                presets: [],
+                catalogOpen: false,
+                catalogSearch: '',
+                catalogVertical: '',
                 headers: [
                     {text: 'Name', value: 'name'},
                     {text: 'Offer Parameters', value: 'offer_parameters'},
@@ -189,8 +269,90 @@
                 })
                 .catch(() => {});
             this.$root.$on('load-affiliates', this.loadAffiliateNetworks);
+            this.loadPresets();
+        },
+        computed: {
+            presetNames() {
+                return this.presets.map(p => p.name);
+            },
+            presetByName() {
+                const map = {};
+                this.presets.forEach(p => { map[p.name] = p; });
+                return map;
+            },
+            addedNames() {
+                return this.affiliateNetworks.map(n => n.name);
+            },
+            topVerticals() {
+                const counts = {};
+                this.presets.forEach(p => p.verticals.forEach(v => {
+                    counts[v] = (counts[v] || 0) + 1;
+                }));
+                return Object.keys(counts).sort((a, b) => counts[b] - counts[a]).slice(0, 12);
+            },
+            filteredPresets() {
+                const q = (this.catalogSearch || '').trim().toLowerCase();
+                return this.presets.filter(p => {
+                    if (this.catalogVertical && !p.verticals.includes(this.catalogVertical)) return false;
+                    if (!q) return true;
+                    return p.name.toLowerCase().includes(q) ||
+                        p.verticals.some(v => v.toLowerCase().includes(q));
+                });
+            }
         },
         methods: {
+            loadPresets() {
+                fetch("/backend/api/affiliate-networks/presets", {credentials: "include"})
+                    .then(res => res.json())
+                    .then(data => {
+                        this.presets = (data && data.presets) || [];
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    });
+            },
+
+            openCatalog() {
+                this.catalogOpen = true;
+                if (!this.presets.length) this.loadPresets();
+            },
+
+            presetLogo(name) {
+                const p = this.presetByName[name];
+                return p ? p.logo_domain : '';
+            },
+
+            addFromPreset(p) {
+                fetch("/backend/api/affiliate-networks/", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({
+                        name: p.name,
+                        offer_parameters: p.offer_parameters,
+                        s2s_postback: "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"
+                    }),
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const text = await res.text();
+                        if (!res.ok) {
+                            let msg = text;
+                            try {
+                                const err = JSON.parse(text);
+                                msg = err.detail || msg;
+                            } catch {
+                            }
+                            throw new Error(msg);
+                        }
+                        this.$root.$emit("show-message", {type: "success", text: p.name + " added"});
+                        this.loadAffiliateNetworks();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    });
+            },
+
             loadAffiliateNetworks() {
                 this.loading = true;
                 fetch("/backend/api/affiliate-networks/", {
@@ -228,7 +390,7 @@
                     await navigator.clipboard.writeText(url);
                     this.$root.$emit('show-message', {type: 'success', text: 'Ready postback URL copied'});
                 } catch (e) {
-                    this.$root.$emit('show-message', {type: 'error', text: 'Copy failed — copy it from the Postback column'});
+                    this.$root.$emit('show-message', {type: 'error', text: 'Copy failed — copy it from the postback column'});
                 }
             },
 
@@ -292,7 +454,7 @@
                         this.dialog = false;
                         this.$root.$emit("show-message", {
                             type: "success",
-                            text: this.isEdit ? "Affiliate Network updated" : "Affiliate Network created"
+                            text: this.isEdit ? "Affiliate network updated" : "Affiliate network created"
                         });
                         this.loadAffiliateNetworks();
                     })
@@ -302,7 +464,7 @@
             },
 
             async deleteAffiliateNetwork(network) {
-                const ok = await this.$refs.confirm.open('Delete Affiliate Network', 'Are you sure you want to delete this affiliate network? This cannot be undone.');
+                const ok = await this.$refs.confirm.open('Delete affiliate network', 'Are you sure you want to delete this affiliate network? This cannot be undone.');
                 if (!ok) return;
 
                 fetch(`/backend/api/affiliate-networks/${network.id}`, {
@@ -323,7 +485,7 @@
 
                         this.$root.$emit("show-message", {
                             type: "success",
-                            text: "Affiliate Network deleted"
+                            text: "Affiliate network deleted"
                         });
                         this.loadAffiliateNetworks();
                     })

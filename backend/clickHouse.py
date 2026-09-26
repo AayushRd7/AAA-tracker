@@ -48,6 +48,15 @@ def build_filters(filters: Union[dict, object]) -> Tuple[str, dict]:
         conditions.append("campaign_id IN %(campaigns)s")
         params["campaigns"] = tuple(campaigns)
 
+    # Fraud filter: minimum heuristic fraud score (0-100)
+    fraud_score = get("fraud_score")
+    if fraud_score is not None and str(fraud_score) != "":
+        try:
+            params["fraud_score"] = int(fraud_score)
+            conditions.append("fraud_score >= %(fraud_score)s")
+        except (TypeError, ValueError):
+            pass
+
     # Additional filters can be added here:
     # detail_level = get("detail_level")
     # if detail_level == "SomeLevel":
@@ -125,6 +134,15 @@ def get_click_log(client, filters: dict, limit: int = 500) -> List[Dict[str, Any
         conditions.append("campaign_id IN %(campaigns)s")
         params["campaigns"] = tuple(campaigns)
 
+    # Minimum heuristic fraud score (0-100) — the fraud admin UI filters on it
+    fraud_score = filters.get("fraud_score")
+    if fraud_score is not None and str(fraud_score) != "":
+        try:
+            params["fraud_score"] = int(fraud_score)
+            conditions.append("fraud_score >= %(fraud_score)s")
+        except (TypeError, ValueError):
+            pass
+
     # Exact-match filters on low-cardinality columns
     for field in ("country", "device_type", "os", "browser", "traffic_source_name", "status"):
         value = filters.get(field)
@@ -153,7 +171,8 @@ def get_click_log(client, filters: dict, limit: int = 500) -> List[Dict[str, Any
             language, isp, connection_type, url, referrer, keyword,
             utm_source, utm_campaign, utm_creative,
             traffic_source_name, campaign_id, offer_id, landing_id,
-            status, cost, revenue, visitor_id, is_bot, is_using_proxy
+            status, cost, revenue, visitor_id, is_bot, is_using_proxy,
+            fraud_score
         FROM clicks_data
         {where_clause}
         ORDER BY received_at DESC
@@ -275,6 +294,7 @@ REPORT_DIMENSIONS = {
     "status": "status",
     "is_bot": "toString(is_bot)",
     "is_using_proxy": "toString(is_using_proxy)",
+    "fraud_score": "toString(fraud_score)",
 }
 
 
@@ -298,7 +318,10 @@ def get_report_breakdown(client, filters: dict, dimension: str, limit: int = 100
             countIf(status = 'rejected') AS rejected,
             sumOrNull(toFloat64(cost)) AS cost,
             sumOrNull(toFloat64(revenue)) AS revenue,
-            sumOrNull(toFloat64(profit)) AS profit
+            sumOrNull(toFloat64(profit)) AS profit,
+            countIf(is_bot = true) AS bot_clicks,
+            sumIf(toFloat64(clicks_data.cost), is_bot = true) AS bot_cost,
+            avgOrNull(fraud_score) AS fraud_score_avg
         FROM clicks_data
         {where_clause}
         GROUP BY dimension
@@ -332,10 +355,13 @@ def get_report_breakdown(client, filters: dict, dimension: str, limit: int = 100
 BASE_METRICS = (
     "visits", "unique_visits", "clicks", "unique_clicks", "leads",
     "conversions", "rejected", "cost", "revenue", "profit",
+    "bot_clicks", "bot_cost",
 )
 
 # Metrics a custom-metric formula may reference (numbers + these keys only)
-FORMULA_METRIC_KEYS = frozenset(BASE_METRICS + ("cr", "epc", "roi", "rejected_rate", "click_through_rate"))
+FORMULA_METRIC_KEYS = frozenset(BASE_METRICS + ("cr", "epc", "roi", "rejected_rate",
+                                                "click_through_rate", "human_clicks",
+                                                "fraud_score_avg"))
 
 METRIC_SELECT_SQL = """
             count(*) AS visits,
@@ -347,22 +373,32 @@ METRIC_SELECT_SQL = """
             countIf(status = 'rejected') AS rejected,
             sumOrNull(toFloat64(cost)) AS cost,
             sumOrNull(toFloat64(revenue)) AS revenue,
-            sumOrNull(toFloat64(profit)) AS profit
+            sumOrNull(toFloat64(profit)) AS profit,
+            countIf(is_bot = true) AS bot_clicks,
+            sumIf(toFloat64(clicks_data.cost), is_bot = true) AS bot_cost,
+            avgOrNull(fraud_score) AS fraud_score_avg
 """
 
 
 def derive_metrics(row: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize a raw aggregate row and add derived rates (cr/epc/roi,
-    rejected_rate/click_through_rate — G54)."""
+    rejected_rate/click_through_rate — G54) plus the fraud split
+    (bot_clicks/bot_cost/fraud_score_avg feed in from the SELECT;
+    human_clicks is derived here)."""
     cost = float(row.get("cost") or 0)
     revenue = float(row.get("revenue") or 0)
     visits = int(row.get("visits") or 0)
     clicks = int(row.get("clicks") or 0)
     conversions = int(row.get("conversions") or 0)
     rejected = int(row.get("rejected") or 0)
+    bot_clicks = int(row.get("bot_clicks") or 0)
     row["cost"] = round(cost, 4)
     row["revenue"] = round(revenue, 4)
     row["profit"] = round(float(row.get("profit") or 0), 4)
+    row["bot_clicks"] = bot_clicks
+    row["bot_cost"] = round(float(row.get("bot_cost") or 0), 4)
+    row["fraud_score_avg"] = round(float(row.get("fraud_score_avg") or 0), 2)
+    row["human_clicks"] = visits - bot_clicks
     row["cr"] = round(conversions / clicks * 100, 2) if clicks else 0.0
     row["epc"] = round(revenue / clicks, 4) if clicks else 0.0
     row["roi"] = round((revenue - cost) / cost * 100, 2) if cost else 0.0
@@ -548,9 +584,13 @@ def apply_custom_metrics(rows: List[Dict[str, Any]], custom_metrics: List[Dict[s
 
 
 def sum_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Fold aggregate rows into a totals row (derived rates recomputed)."""
+    """Fold aggregate rows into a totals row (derived rates recomputed).
+    fraud_score_avg is re-weighted by visits; it is None without any visits."""
     totals: Dict[str, Any] = {m: 0 for m in BASE_METRICS}
+    score_weighted = 0.0
     for row in rows:
         for m in BASE_METRICS:
             totals[m] += float(row.get(m) or 0)
+        score_weighted += float(row.get("fraud_score_avg") or 0) * int(row.get("visits") or 0)
+    totals["fraud_score_avg"] = round(score_weighted / totals["visits"], 2) if totals["visits"] else None
     return derive_metrics(totals)

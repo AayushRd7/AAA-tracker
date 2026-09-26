@@ -1,3 +1,4 @@
+import socket
 from fastapi import APIRouter, Depends, HTTPException, Request
 from enum import Enum
 from pydantic import BaseModel
@@ -13,6 +14,27 @@ from datetime import datetime
 from pathlib import Path
 
 router = APIRouter()
+
+
+def server_public_ip() -> str:
+    """Best-effort egress IP of this machine (what an A record should point to).
+    UDP connect sends no traffic; falls back to loopback on failure."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        return "127.0.0.1"
+
+
+def resolve_domain(domain: str) -> list:
+    try:
+        infos = socket.getaddrinfo(domain, 443, type=socket.SOCK_STREAM)
+        return sorted({i[4][0] for i in infos})
+    except OSError:
+        return []
 
 
 # Pydantic model for the API
@@ -54,6 +76,34 @@ async def get_domains(db: Session = Depends(get_db)):
         }
         for domain in domains
     ]
+
+
+# ====== GET /domains/dns-status ======
+@router.get("/server-info")
+async def server_info():
+    """What an operator's DNS record should point at (A record target for
+    self-hosted; the CNAME target hostname for the SaaS model)."""
+    return {"server_ip": server_public_ip()}
+
+
+@router.get("/dns-status")
+async def dns_status(domain: str, db: Session = Depends(get_db)):
+    """Pre-SSL DNS check: does the domain resolve, and does it point at this
+    server? Let's Encrypt's HTTP-01 challenge can only succeed once the domain
+    routes to this box — same reason RedTrack/Keitaro ask for a CNAME/A record
+    FIRST. Only domains already in our table may be looked up (no open resolver)."""
+    row = db.query(DomainORM).filter(DomainORM.domain == domain).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Domain not in the domain list")
+    addresses = resolve_domain(domain)
+    server_ip = server_public_ip()
+    return {
+        "domain": domain,
+        "resolves": bool(addresses),
+        "addresses": addresses,
+        "server_ip": server_ip,
+        "points_to_server": server_ip in addresses,
+    }
 
 
 # ====== POST /domains ======

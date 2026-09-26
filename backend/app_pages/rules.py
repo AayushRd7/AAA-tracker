@@ -33,6 +33,9 @@ METRICS = ("roi", "profit", "cost", "conversions", "clicks", "revenue")
 COMPARATORS = ("<", ">", "<=", ">=", "==", "!=")
 ACTIONS = ("pause_campaign", "alert_telegram", "alert_email")
 
+# G78 — last cycle that ran at least one rule, surfaced on the status page.
+_loop_last_run = None
+
 
 # ---------------------------------------------------------------------------
 # Validation
@@ -205,6 +208,7 @@ def perform_action(rule: dict, evaluation: dict) -> dict:
 
 async def auto_rules_loop():
     """Evaluate every enabled rule every 15 minutes."""
+    global _loop_last_run
     await asyncio.sleep(90)  # stagger vs the monitor loop
     while True:
         try:
@@ -221,6 +225,7 @@ async def auto_rules_loop():
                             await run_rule(dict(_rule_public(r)), ch, persist=True)
                         except Exception as e:
                             print(f"Auto rule {r[0]} error:", e)
+                    _loop_last_run = datetime.utcnow()
                 finally:
                     ch.close()
         except Exception as e:

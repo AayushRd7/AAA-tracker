@@ -5,6 +5,10 @@
             <v-col>
                 <div class="page-title">Reports</div>
                 <div class="page-subtitle">Break down performance by any dimension</div>
+                <v-btn-toggle v-model="reportView" dense class="mt-3" mandatory>
+                    <v-btn value="builder" small>Report builder</v-btn>
+                    <v-btn value="funnel" small>Funnel</v-btn>
+                </v-btn-toggle>
             </v-col>
             <v-col class="d-flex justify-end" cols="auto">
                 <v-btn
@@ -19,12 +23,13 @@
                 </v-btn>
                 <v-btn color="primary" elevation="0" :loading="loading" @click="runReport">
                     <v-icon small class="mr-1">mdi-play</v-icon>
-                    Run Report
+                    Run report
                 </v-btn>
             </v-col>
         </v-row>
 
         <!-- Report builder controls -->
+        <template v-if="reportView === 'builder'">
         <v-card class="pa-4 mb-4">
             <div class="filter-bar align-center">
                 <v-menu v-model="dateMenu" :close-on-content-click="false" transition="scale-transition" offset-y min-width="auto">
@@ -180,7 +185,7 @@
                 </v-btn>
                 <v-btn color="primary" elevation="0" :loading="loading" @click="runReport">
                     <v-icon small class="mr-1">mdi-play</v-icon>
-                    Run Report
+                    Run report
                 </v-btn>
             </div>
             <div v-if="basisNote" class="basis-note mt-2">
@@ -264,6 +269,18 @@
                 <template v-slot:item.click_through_rate="{ item }">
                     <span>{{ formatPct(item.click_through_rate) }}</span>
                 </template>
+                <template v-slot:item.bot_clicks="{ item }">
+                    <span :class="item.bot_clicks ? 'num-neg' : ''">{{ Number(item.bot_clicks || 0).toLocaleString() }}</span>
+                </template>
+                <template v-slot:item.bot_cost="{ item }">
+                    <span :class="signClass(-Math.abs(item.bot_cost || 0))">{{ formatMoney(item.bot_cost) }}</span>
+                </template>
+                <template v-slot:item.fraud_score_avg="{ item }">
+                    <span>{{ item.fraud_score_avg == null ? '—' : Number(item.fraud_score_avg).toFixed(2) }}</span>
+                </template>
+                <template v-slot:item.human_clicks="{ item }">
+                    <span>{{ Number(item.human_clicks || 0).toLocaleString() }}</span>
+                </template>
                 <template v-for="cm in customMetrics" v-slot:[customSlot(cm)]="{ item }">
                     <span :key="cm.name + '-' + rowKey(item)">{{ formatCustom(item[cm.name]) }}</span>
                 </template>
@@ -285,6 +302,13 @@
                             <template v-else-if="h.value === 'rejected_rate' || h.value === 'click_through_rate'">
                                 {{ formatPct(reportTotals[h.value]) }}
                             </template>
+                            <template v-else-if="['bot_clicks','human_clicks'].includes(h.value)">
+                                {{ Number(reportTotals[h.value] || 0).toLocaleString() }}
+                            </template>
+                            <template v-else-if="h.value === 'bot_cost'">{{ formatMoney(reportTotals.bot_cost) }}</template>
+                            <template v-else-if="h.value === 'fraud_score_avg'">
+                                {{ reportTotals.fraud_score_avg == null ? '—' : Number(reportTotals.fraud_score_avg).toFixed(2) }}
+                            </template>
                             <template v-else-if="customMetricNames.includes(h.value)">{{ formatCustom(reportTotals[h.value]) }}</template>
                             <template v-else>&nbsp;</template>
                         </td>
@@ -303,7 +327,7 @@
         <!-- Save report dialog -->
         <v-dialog v-model="saveDialog" max-width="420">
             <v-card>
-                <v-card-title class="text-h6">Save Report</v-card-title>
+                <v-card-title class="text-h6">Save report</v-card-title>
                 <v-card-text>
                     <v-text-field v-model="saveName" label="Report name" outlined dense autofocus
                                   @keyup.enter="saveReport"></v-text-field>
@@ -320,7 +344,7 @@
         <!-- Custom metrics dialog (G49) -->
         <v-dialog v-model="customMetricDialog" max-width="560">
             <v-card>
-                <v-card-title class="text-h6">Custom Metrics</v-card-title>
+                <v-card-title class="text-h6">Custom metrics</v-card-title>
                 <v-card-text>
                     <div class="caption grey--text mb-3">
                         Formula references built-in metrics by key with <code>+ - * / ( )</code>, e.g.
@@ -358,7 +382,7 @@
         <!-- G52: share dialog -->
         <v-dialog v-model="shareDialog" max-width="560">
             <v-card>
-                <v-card-title class="text-h6">Share Report</v-card-title>
+                <v-card-title class="text-h6">Share report</v-card-title>
                 <v-card-text>
                     <div class="caption grey--text mb-3">
                         Anyone with this link can view a read-only copy of <b>{{ shareReportName }}</b> — no login needed.
@@ -395,7 +419,7 @@
         <!-- G53: email schedule dialog -->
         <v-dialog v-model="emailScheduleDialog" max-width="520">
             <v-card>
-                <v-card-title class="text-h6">Email Schedule</v-card-title>
+                <v-card-title class="text-h6">Email schedule</v-card-title>
                 <v-card-text>
                     <div class="caption grey--text mb-3">
                         Email a snapshot of <b>{{ emailScheduleReportName }}</b> on a schedule.
@@ -434,7 +458,7 @@
         <!-- Click log drill-down -->
         <div class="d-flex align-center justify-space-between mt-6 mb-2">
             <div>
-                <div class="font-weight-medium">Click Log</div>
+                <div class="font-weight-medium">Click log</div>
                 <div class="page-subtitle">Raw click records with drill-down filters</div>
             </div>
             <v-btn text small color="primary" :disabled="!clickLog.length" @click="exportClickLogCsv">
@@ -523,7 +547,7 @@
         <!-- Conversion log -->
         <div class="d-flex align-center justify-space-between mt-6 mb-2">
             <div>
-                <div class="font-weight-medium">Conversion Log</div>
+                <div class="font-weight-medium">Conversion log</div>
                 <div class="page-subtitle">Every conversion received via postback — edit status, payout or delete</div>
             </div>
             <div class="d-flex align-center">
@@ -636,7 +660,7 @@
         <!-- Edit conversion dialog -->
         <v-dialog v-model="editDialog">
             <v-card class="dialog-md">
-                <v-card-title class="text-h6">Edit Conversion</v-card-title>
+                <v-card-title class="text-h6">Edit conversion</v-card-title>
                 <v-card-text>
                     <div class="caption grey--text mb-3">
                         Click ID: <code>{{ editItem.click_id }}</code>
@@ -671,7 +695,7 @@
         <!-- Import conversions dialog (G25) -->
         <v-dialog v-model="importDialog" max-width="640">
             <v-card>
-                <v-card-title class="text-h6">Import Conversions</v-card-title>
+                <v-card-title class="text-h6">Import conversions</v-card-title>
                 <v-card-text>
                     <div class="caption grey--text mb-2">
                         One conversion per line: <code>click_id,payout,transaction_id,status</code>.
@@ -700,6 +724,60 @@
                 </v-card-actions>
             </v-card>
         </v-dialog>
+        </template>
+
+        <!-- FUNNEL VIEW (G10): per-step visits / click-outs / conversions -->
+        <template v-else>
+            <v-card class="pa-4 mb-4">
+                <div class="filter-bar align-center">
+                    <v-select
+                            :items="funnelCampaigns"
+                            v-model="funnelCampaignId"
+                            label="Funnel campaign"
+                            item-text="name"
+                            item-value="id"
+                            outlined
+                            dense
+                            hide-details
+                            class="campaigns-select"
+                    ></v-select>
+                    <v-btn color="primary" elevation="0" :loading="funnelLoading"
+                           :disabled="!funnelCampaignId" @click="loadFunnelReport">
+                        <v-icon small class="mr-1">mdi-play</v-icon>
+                        Load funnel
+                    </v-btn>
+                </div>
+                <div class="mt-2 builder-hint">
+                    Funnel campaigns only. Visits = ClickHouse clicks at each step; click-outs = conversion rows created at the step;
+                    conversions = rows not rejected/trash. Visitors advance one step per campaign-URL visit after a click-out.
+                </div>
+            </v-card>
+            <v-alert v-if="!funnelCampaigns.length" type="info" dense outlined>
+                No funnel campaigns yet — enable a funnel on a campaign (Campaigns → edit → Funnel tab) and traffic will appear here.
+            </v-alert>
+            <v-card v-if="funnelSteps.length">
+                <v-data-table
+                        :headers="funnelHeaders"
+                        :items="funnelSteps"
+                        :items-per-page="-1"
+                        hide-default-footer
+                        dense
+                >
+                    <template v-slot:item.revenue="{ item }">{{ formatMoney(item.revenue) }}</template>
+                    <template v-slot:item.profit="{ item }">
+                        <span :class="signClass(item.profit)">{{ formatMoney(item.profit) }}</span>
+                    </template>
+                    <template v-slot:item.cr="{ item }">{{ pct(item.cr) }}</template>
+                    <template v-slot:item.cumulative_cr="{ item }">{{ pct(item.cumulative_cr) }}</template>
+                    <template v-slot:item.drop_off_pct="{ item }">
+                        {{ item.drop_off_pct == null ? '—' : item.drop_off_pct + '%' }}
+                    </template>
+                </v-data-table>
+            </v-card>
+            <v-alert v-else-if="funnelLoaded" type="info" dense outlined>
+                No funnel data for this campaign yet — visits and click-outs will appear once traffic flows through the steps.
+            </v-alert>
+        </template>
 
         <confirm-dialog-component ref="confirm" />
     </v-container>
@@ -766,19 +844,19 @@
                     { key: 'hour', label: 'Hour' },
                     { key: 'campaign_id', label: 'Campaign' },
                     { key: 'offer_id', label: 'Offer' },
-                    { key: 'landing_id', label: 'Landing Page' },
+                    { key: 'landing_id', label: 'Landing page' },
                     { key: 'country', label: 'Country' },
                     { key: 'region', label: 'Region' },
                     { key: 'city', label: 'City' },
-                    { key: 'device_type', label: 'Device Type' },
+                    { key: 'device_type', label: 'Device type' },
                     { key: 'os', label: 'OS' },
                     { key: 'browser', label: 'Browser' },
                     { key: 'language', label: 'Language' },
-                    { key: 'traffic_source_name', label: 'Traffic Source' },
-                    { key: 'utm_source', label: 'UTM Source' },
-                    { key: 'utm_medium', label: 'UTM Medium' },
-                    { key: 'utm_campaign', label: 'UTM Campaign' },
-                    { key: 'utm_creative', label: 'UTM Creative' },
+                    { key: 'traffic_source_name', label: 'Traffic source' },
+                    { key: 'utm_source', label: 'UTM source' },
+                    { key: 'utm_medium', label: 'UTM medium' },
+                    { key: 'utm_campaign', label: 'UTM campaign' },
+                    { key: 'utm_creative', label: 'UTM creative' },
                     { key: 'keyword', label: 'Keyword' },
                     { key: 'sub_id_1', label: 'Sub ID 1' },
                     { key: 'sub_id_2', label: 'Sub ID 2' },
@@ -786,10 +864,10 @@
                     { key: 'sub_id_4', label: 'Sub ID 4' },
                     { key: 'sub_id_5', label: 'Sub ID 5' },
                     { key: 'isp', label: 'ISP' },
-                    { key: 'connection_type', label: 'Connection Type' },
-                    { key: 'status', label: 'Conversion Status' },
-                    { key: 'is_bot', label: 'Bot Flag' },
-                    { key: 'is_using_proxy', label: 'Proxy Flag' },
+                    { key: 'connection_type', label: 'Connection type' },
+                    { key: 'status', label: 'Conversion status' },
+                    { key: 'is_bot', label: 'Bot flag' },
+                    { key: 'is_using_proxy', label: 'Proxy flag' },
                 ],
                 campaigns: [],
                 selectedCampaigns: [],
@@ -809,6 +887,10 @@
                     {text: 'ROI %', value: 'roi', align: 'end'},
                     {text: 'Rejected Rate %', value: 'rejected_rate', align: 'end'},
                     {text: 'Click-through Rate %', value: 'click_through_rate', align: 'end'},
+                    {text: 'Bot Clicks', value: 'bot_clicks', align: 'end'},
+                    {text: 'Bot Cost', value: 'bot_cost', align: 'end'},
+                    {text: 'Fraud Score Avg', value: 'fraud_score_avg', align: 'end'},
+                    {text: 'Human Clicks', value: 'human_clicks', align: 'end'},
                 ],
                 reportRows: [],
                 headers: [
@@ -864,6 +946,23 @@
                     {text: 'Status', value: 'status'},
                     {text: 'Bot', value: 'is_bot'},
                     {text: 'Visitor ID', value: 'visitor_id'},
+                ],
+                reportView: 'builder',
+                funnelCampaignId: null,
+                funnelSteps: [],
+                funnelLoading: false,
+                funnelLoaded: false,
+                funnelHeaders: [
+                    {text: 'Step', value: 'step', width: '60px'},
+                    {text: 'Name', value: 'name'},
+                    {text: 'Visits', value: 'visits', align: 'end'},
+                    {text: 'Click-outs', value: 'clickouts', align: 'end'},
+                    {text: 'Conversions', value: 'conversions', align: 'end'},
+                    {text: 'Revenue', value: 'revenue', align: 'end'},
+                    {text: 'Profit', value: 'profit', align: 'end'},
+                    {text: 'Step CR', value: 'cr', align: 'end'},
+                    {text: 'Cumulative CR', value: 'cumulative_cr', align: 'end'},
+                    {text: 'Drop-off', value: 'drop_off_pct', align: 'end'},
                 ],
             }
         },
@@ -922,6 +1021,9 @@
             },
             statusOptions() {
                 return ['', 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash', ...this.customStatuses];
+            },
+            funnelCampaigns() {
+                return (this.campaigns || []).filter(c => c.config && c.config.funnel && c.config.funnel.enabled);
             },
         },
         mounted() {
@@ -1277,6 +1379,34 @@
             formatEpc(v) {
                 const n = parseFloat(v) || 0;
                 return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 5, maximumFractionDigits: 5});
+            },
+            pct(v) {
+                return this.formatPct((parseFloat(v) || 0) * 100);
+            },
+            loadFunnelReport() {
+                if (!this.funnelCampaignId) return;
+                this.funnelLoading = true;
+                fetch('/backend/api/reports/funnel/' + this.funnelCampaignId, {credentials: 'include'})
+                    .then(async res => {
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.detail || ('HTTP ' + res.status));
+                        }
+                        return res.json();
+                    })
+                    .then(data => {
+                        this.funnelSteps = data.steps || [];
+                        this.funnelLoaded = true;
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: 'Funnel report failed: ' + (err.message || err)
+                        });
+                    })
+                    .finally(() => {
+                        this.funnelLoading = false;
+                    });
             },
             applyPreset(preset) {
                 this.activePreset = preset.label;

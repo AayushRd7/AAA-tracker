@@ -74,20 +74,20 @@
                     <v-icon small class="mr-1">mdi-file-upload-outline</v-icon>Import
                 </v-btn>
                 <v-btn color="primary" elevation="0" @click="openCreate">
-                    <v-icon small class="mr-1">mdi-plus</v-icon>Create Campaign
+                    <v-icon small class="mr-1">mdi-plus</v-icon>Create campaign
                 </v-btn>
                 </div>
             </v-col>
         </div>
 
-        <v-dialog v-model="dialog" fullscreen persistent scrollable>
-            <v-card class="pa-4">
+        <v-dialog v-model="dialog" persistent>
+            <v-card class="pa-4 dialog-xl">
                 <v-row>
                     <v-col cols="12" class="ma-4">
 
                         <v-row dense class="mt-2">
                             <v-col cols="12" md="6">
-                                <h3>{{ isEdit ? 'Edit Campaign' : 'New Campaign' }}</h3>
+                                <h3>{{ isEdit ? 'Edit campaign' : 'New campaign' }}</h3>
                             </v-col>
                         </v-row>
                         <v-row dense class="mt-2">
@@ -110,7 +110,9 @@
                                     <v-tab>Cost</v-tab>
                                     <v-tab>Tracking</v-tab>
                                     <v-tab>Parameters</v-tab>
-                                    <v-tab>S2S Postbacks</v-tab>
+                                    <v-tab>S2S postbacks</v-tab>
+                                    <v-tab>Shield</v-tab>
+                                    <v-tab>Funnel</v-tab>
                                     <v-tab>Notes</v-tab>
                                 </v-tabs>
 
@@ -163,7 +165,7 @@
                                                         ></v-combobox>
                                                     </v-col>
                                                     <v-col cols="12">
-                                                        <v-select label="Traffic Source"
+                                                        <v-select label="Traffic source"
                                                                   v-model="form.traffic_source_id"
                                                                   :items="sources" item-text="name" item-value="id"
                                                                   outlined
@@ -172,7 +174,7 @@
 
                                                     <v-col cols="12">
                                                         <v-text-field
-                                                                label="Uniqueness Bind TTL (hours)"
+                                                                label="Uniqueness bind TTL (hours)"
                                                                 v-model="form.bind_ttl_hours"
                                                                 type="number"
                                                                 outlined
@@ -202,12 +204,12 @@
                                             <v-container>
                                                 <v-row dense>
                                                     <v-col cols="12">
-                                                        <v-select label="Cost Model" v-model="form.cost_model"
+                                                        <v-select label="Cost model" v-model="form.cost_model"
                                                                   :items="costModels"
                                                                   outlined dense></v-select>
                                                     </v-col>
                                                     <v-col cols="12">
-                                                        <v-text-field label="Traffic Loss (%)"
+                                                        <v-text-field label="Traffic loss (%)"
                                                                       v-model="form.traffic_loss_percent"
                                                                       type="number" outlined dense></v-text-field>
                                                     </v-col>
@@ -217,12 +219,12 @@
                                                                       type="number" outlined dense></v-text-field>
                                                     </v-col>
                                                     <v-col cols="12">
-                                                        <v-autocomplete label="Cost Currency"
+                                                        <v-autocomplete label="Cost currency"
                                                                         v-model="form.cost_currency"
                                                                         :items="currencies"
                                                                         outlined dense></v-autocomplete>
                                                         <v-col cols="12">
-                                                            <v-switch label="Cost from Cost Parameter"
+                                                            <v-switch label="Cost from cost parameter"
                                                                       v-model="form.cost_from_cost_parameter"
                                                                       inset
                                                                       dense></v-switch>
@@ -267,7 +269,7 @@
                                                                   dense></v-switch>
                                                     </v-col>
                                                     <v-col cols="12">
-                                                        <v-switch label="Hide Referrer (meta refresh)"
+                                                        <v-switch label="Hide referrer (meta refresh)"
                                                                   v-model="form.hide_referrer"
                                                                   inset
                                                                   dense
@@ -280,12 +282,12 @@
                                                                 v-model="form.fallback_url"
                                                                 outlined
                                                                 dense
-                                                                hint="Where to send visitors when no flow's filters match. Leave empty to show a 404 page."
+                                                                hint="Where to send visitors when no flow’s filters match. Leave empty to show a 404 page."
                                                                 persistent-hint></v-text-field>
                                                     </v-col>
                                                     <v-col cols="12">
                                                         <v-select
-                                                                label="Tracking Script Method"
+                                                                label="Tracking script method"
                                                                 v-model="form.integration_method"
                                                                 :items="Object.entries(integrationMethods).map(([key, value]) => ({ key, value }))"
                                                                 item-text="value"
@@ -296,7 +298,7 @@
                                                     </v-col>
                                                     <v-col cols="12" v-if="form.integration_method">
                                                         <v-textarea
-                                                                label="Tracking Script"
+                                                                label="Tracking script"
                                                                 readonly
                                                                 outlined
                                                                 dense
@@ -305,7 +307,7 @@
                                                         </v-textarea>
                                                     </v-col>
                                                     <v-col cols="12" class="direct-tracking-head">
-                                                        <div class="direct-tracking-title">Direct Tracking (no-redirect)</div>
+                                                        <div class="direct-tracking-title">Direct tracking (no-redirect)</div>
                                                         <div class="direct-tracking-hint">
                                                             First-party tracking without any redirect: the script records the
                                                             visit, stores the click id in a cookie, and your offer links plus the
@@ -318,7 +320,7 @@
                                                     </v-col>
                                                     <v-col cols="12">
                                                         <v-textarea
-                                                                label="Direct Tracking Script"
+                                                                label="Direct tracking script"
                                                                 :value="directTrackingScript"
                                                                 readonly
                                                                 outlined
@@ -329,7 +331,7 @@
                                                     </v-col>
                                                     <v-col cols="12">
                                                         <v-textarea
-                                                                label="Conversion Pixel (img — noscript / cross-domain safe)"
+                                                                label="Conversion pixel (img — noscript / cross-domain safe)"
                                                                 :value="conversionPixelImg"
                                                                 readonly
                                                                 outlined
@@ -340,7 +342,7 @@
                                                     </v-col>
                                                     <v-col cols="12">
                                                         <v-textarea
-                                                                label="Conversion Pixel (fetch — from the tracked page)"
+                                                                label="Conversion pixel (fetch — from the tracked page)"
                                                                 :value="conversionPixelFetch"
                                                                 readonly
                                                                 outlined
@@ -369,10 +371,10 @@
                                                         Name
                                                     </v-col>
                                                     <v-col cols="3">
-                                                        Parameter In System
+                                                        Parameter in system
                                                     </v-col>
                                                     <v-col cols="5">
-                                                        Variable Input (empty if same name)
+                                                        Variable input (empty if same name)
                                                     </v-col>
                                                     <v-col cols="1">
                                                     </v-col>
@@ -402,7 +404,7 @@
                                                     </v-col>
                                                     <v-col cols="5">
                                                         <v-text-field
-                                                                label="Variable Name"
+                                                                label="Variable name"
                                                                 v-model="mapping.token"
                                                                 outlined
                                                                 dense
@@ -434,7 +436,7 @@
                                                         <v-select
                                                                 v-model="pb.method"
                                                                 :items="['GET', 'POST']"
-                                                                label="Request Method"
+                                                                label="Request method"
                                                                 dense
                                                                 outlined
                                                                 class="mt-3"></v-select>
@@ -445,7 +447,7 @@
                                                                     rows="3"
                                                                     outlined></v-textarea>
                                                         <v-btn small text color="primary" @click="openPostbackEditor(i)">Edit
-                                                            Postback URL
+                                                            postback URL
                                                         </v-btn>
                                                     </v-col>
                                                     <v-col cols="10">
@@ -465,7 +467,7 @@
                                                 </v-row>
 
                                                 <v-divider class="my-4"></v-divider>
-                                                <h3>Add New</h3>
+                                                <h3>Add new</h3>
 
                                                 <!-- Adding a new one -->
                                                 <v-row dense>
@@ -473,7 +475,7 @@
                                                         <v-select
                                                                 v-model="newPostback.method"
                                                                 :items="['GET', 'POST']"
-                                                                label="Request Method"
+                                                                label="Request method"
                                                                 dense
                                                                 outlined
                                                                 class="mt-3"></v-select>
@@ -481,12 +483,12 @@
                                                     <v-col cols="12">
                                                         <v-textarea
                                                                 v-model="newPostback.url"
-                                                                label="New Postback URL"
+                                                                label="New postback URL"
                                                                 rows="3"
                                                                 dense
                                                                 outlined></v-textarea>
                                                         <v-btn small text color="primary" @click="openPostbackEditor()">Edit
-                                                            Postback URL
+                                                            postback URL
                                                         </v-btn>
                                                     </v-col>
                                                     <v-col cols="10">
@@ -510,11 +512,162 @@
                                         </v-card>
                                     </v-tab-item>
 
+                                    <!-- SHIELD -->
+                                    <v-tab-item>
+                                        <v-card flat>
+                                            <v-container>
+                                                <v-row dense>
+                                                    <v-col cols="12" class="mt-2">
+                                                        <v-switch
+                                                                label="Enable shield (cloaking)"
+                                                                v-model="form.shield.enabled"
+                                                                inset
+                                                                dense
+                                                                hint="Non-whitelisted visitors are checked against the global bot lists and bot rules before they reach your flows."
+                                                                persistent-hint
+                                                        ></v-switch>
+                                                    </v-col>
+                                                    <v-col cols="12" md="6">
+                                                        <v-select
+                                                                label="Action for suspected bots"
+                                                                v-model="form.shield.action"
+                                                                :items="[
+                                                                    {text: 'Blank page (200, no content)', value: 'blank'},
+                                                                    {text: '404 Not Found', value: '404'},
+                                                                    {text: 'Track & mark as bot (watch mode)', value: 'allow'},
+                                                                ]"
+                                                                outlined
+                                                                dense
+                                                        ></v-select>
+                                                    </v-col>
+                                                    <v-col cols="12" md="6">
+                                                        <v-switch
+                                                                label="Honeypot"
+                                                                v-model="form.shield.honeypot"
+                                                                inset
+                                                                dense
+                                                                hint="Trap: suspected bots are served a decoy page and logged to honeypot hits instead of being sent away silently."
+                                                                persistent-hint
+                                                                class="mt-md-4"
+                                                        ></v-switch>
+                                                    </v-col>
+                                                </v-row>
+
+                                                <v-divider class="my-3"></v-divider>
+                                                <div class="subtitle-2 mb-2">Whitelists — matching visitors always pass through untouched</div>
+                                                <v-row dense>
+                                                    <v-col cols="12">
+                                                        <v-combobox
+                                                                v-model="form.shield.whitelists.ips"
+                                                                label="Whitelisted IPs (CIDR allowed)"
+                                                                :items="[]"
+                                                                multiple chips small-chips deletable-chips outlined dense
+                                                                hint="Type an IP or CIDR (10.0.0.0/8) and press Enter"
+                                                                persistent-hint
+                                                        ></v-combobox>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-combobox
+                                                                v-model="form.shield.whitelists.referers"
+                                                                label="Whitelisted referers (substrings)"
+                                                                :items="[]"
+                                                                multiple chips small-chips deletable-chips outlined dense
+                                                                hint="Type a substring, e.g. facebook.com — press Enter to add"
+                                                                persistent-hint
+                                                        ></v-combobox>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-text-field
+                                                                label="Whitelisted User-Agent regex"
+                                                                v-model="form.shield.whitelists.ua_regex"
+                                                                :error-messages="shieldUaRegexError"
+                                                                outlined
+                                                                dense
+                                                                hint="Single regex pattern, e.g. bot|crawler|spider — empty = no UA restriction"
+                                                                persistent-hint
+                                                        ></v-text-field>
+                                                    </v-col>
+                                                </v-row>
+                                            </v-container>
+                                        </v-card>
+                                    </v-tab-item>
+
+                                    <!-- FUNNEL (G10) -->
+                                    <v-tab-item>
+                                        <v-card flat>
+                                            <v-container>
+                                                <v-row dense>
+                                                    <v-col cols="12" class="mt-2">
+                                                        <v-switch
+                                                                label="Enable multi-step funnel"
+                                                                v-model="form.funnel.enabled"
+                                                                inset
+                                                                dense
+                                                                hint="Funnel mode replaces flows: visitors progress through the ordered steps, one step per campaign-URL visit. A step advances only when the visitor clicks through to the offer. The signed bind cookie stores the current step, so editing the funnel resets every visitor to step 0."
+                                                                persistent-hint
+                                                        ></v-switch>
+                                                    </v-col>
+                                                </v-row>
+                                                <v-alert v-if="form.funnel.enabled" type="warning" dense outlined class="mb-3">
+                                                    Funnel mode is active — the flows list is ignored for this campaign.
+                                                    Visitors past the last step re-see the last step on repeat visits.
+                                                </v-alert>
+                                                <template v-if="form.funnel.enabled">
+                                                    <v-row dense v-for="(step, index) in form.funnel.steps" :key="index" class="mb-2">
+                                                        <v-col cols="12">
+                                                            <v-card flat outlined class="pa-3">
+                                                                <div class="d-flex justify-space-between align-center mb-2">
+                                                                    <strong>Step {{ index + 1 }}</strong>
+                                                                    <span>
+                                                                        <v-btn icon small @click="moveFunnelStepUp(index)"
+                                                                               :disabled="index === 0">
+                                                                            <v-icon>mdi-arrow-up</v-icon>
+                                                                        </v-btn>
+                                                                        <v-btn icon small @click="moveFunnelStepDown(index)"
+                                                                               :disabled="index === form.funnel.steps.length - 1">
+                                                                            <v-icon>mdi-arrow-down</v-icon>
+                                                                        </v-btn>
+                                                                        <v-btn icon small color="red" @click="removeFunnelStep(index)">
+                                                                            <v-icon>mdi-delete</v-icon>
+                                                                        </v-btn>
+                                                                    </span>
+                                                                </div>
+                                                                <v-row dense>
+                                                                    <v-col cols="12">
+                                                                        <v-text-field label="Step name" v-model="step.name"
+                                                                                      outlined dense></v-text-field>
+                                                                    </v-col>
+                                                                    <v-col cols="12">
+                                                                        <v-select label="Landing" v-model="step.landing"
+                                                                                  :items="landings" item-text="name" item-value="id"
+                                                                                  outlined dense></v-select>
+                                                                    </v-col>
+                                                                    <v-col cols="12">
+                                                                        <v-select label="Offers" v-model="step.offers"
+                                                                                  :items="offers" item-text="name" item-value="id"
+                                                                                  multiple chips small-chips deletable-chips
+                                                                                  outlined dense></v-select>
+                                                                    </v-col>
+                                                                    <v-col cols="12" md="6">
+                                                                        <v-select label="Schema" v-model="step.schema"
+                                                                                  :items="[{text: 'Landing → Offer', value: 'landing_offer'}, {text: 'Landing only', value: 'landing_only'}]"
+                                                                                  outlined dense></v-select>
+                                                                    </v-col>
+                                                                </v-row>
+                                                            </v-card>
+                                                        </v-col>
+                                                    </v-row>
+                                                    <v-btn small color="primary" @click="addFunnelStep">Add step</v-btn>
+                                                </template>
+                                            </v-container>
+                                        </v-card>
+                                    </v-tab-item>
+
                                     <!-- NOTES -->
                                     <v-tab-item>
                                         <v-card flat>
                                             <v-container>
-                                                <v-textarea v-model="form.notes" label="Internal Notes" outlined dense
+                                                <v-textarea v-model="form.notes" label="Internal notes" outlined dense
                                                             rows="5"
                                                             auto-grow></v-textarea>
                                             </v-container>
@@ -527,7 +680,11 @@
 
                             <!-- RIGHT: Flow Configuration -->
                             <v-col cols="12" md="6" v-if="form.type=='campaign'">
-                                <h3 class="mb-2 mt-2">Flow Configuration</h3>
+                                <h3 class="mb-2 mt-2">Flow configuration</h3>
+
+                                <v-alert v-if="form.funnel && form.funnel.enabled" type="warning" dense outlined class="mb-3">
+                                    Funnel mode is active — these flows are inactive and ignored while the funnel is enabled.
+                                </v-alert>
 
                                 <v-row>
                                     <v-col cols="12" md="5">
@@ -619,7 +776,7 @@
                                     </v-col>
                                 </v-row>
 
-                                <v-btn small color="primary" @click="openFlowEdit()">Add Flow</v-btn>
+                                <v-btn small color="primary" @click="openFlowEdit()">Add flow</v-btn>
                             </v-col>
 
                         </v-row>
@@ -637,12 +794,12 @@
         <v-dialog v-if="form.type=='campaign'" v-model="flowDialog" persistent>
             <v-card class="dialog-xl">
                 <v-card-title>
-                    <span class="text-h6">{{ isEditingFlow ? 'Edit Flow' : 'New Flow' }}</span>
+                    <span class="text-h6">{{ isEditingFlow ? 'Edit flow' : 'New flow' }}</span>
                 </v-card-title>
 
                 <v-card-text>
                     <v-tabs v-model="activeFlowTab">
-                        <v-tab>Flow Settings</v-tab>
+                        <v-tab>Flow settings</v-tab>
                         <v-tab  v-if="flowForm.type !== 'default'">Filters</v-tab>
                         <v-tab>Schema</v-tab>
                         <v-tab>Notes</v-tab>
@@ -657,7 +814,7 @@
                           <v-col cols="12">
                             <v-text-field
                               v-model="flowForm.name"
-                              label="Flow Name"
+                              label="Flow name"
                               outlined
                               dense
                               required
@@ -668,8 +825,8 @@
                           <v-col cols="12">
                             <v-select
                               v-model="flowForm.type"
-                              :items="['regular', 'forced', 'default']"
-                              label="Flow Type"
+                              :items="[{text: 'Regular', value: 'regular'}, {text: 'Forced', value: 'forced'}, {text: 'Default', value: 'default'}]"
+                              label="Flow type"
                               outlined
                               dense
                             ></v-select>
@@ -807,7 +964,7 @@
                                 <v-row dense align="center">
                                     <v-col cols="12" md="4">
                                         <v-select
-                                                :items="[{text: 'ALL groups must match', value: 'and'}, {text: 'ANY group must match', value: 'or'}]"
+                                                :items="[{text: 'All groups must match', value: 'and'}, {text: 'Any group must match', value: 'or'}]"
                                                 v-model="filtersModel.combinator"
                                                 label="Groups"
                                                 dense outlined hide-details
@@ -815,7 +972,7 @@
                                     </v-col>
                                     <v-col cols="12" md="8" class="text-md-right">
                                         <v-btn small color="primary" outlined @click="addFilterGroup">
-                                            <v-icon small class="mr-1">mdi-plus</v-icon>Add Group
+                                            <v-icon small class="mr-1">mdi-plus</v-icon>Add group
                                         </v-btn>
                                     </v-col>
                                 </v-row>
@@ -894,7 +1051,7 @@
                                         </v-row>
 
                                         <v-btn small text color="primary" class="mt-1" @click="addCondition(gi)">
-                                            <v-icon small class="mr-1">mdi-plus</v-icon>Add Condition
+                                            <v-icon small class="mr-1">mdi-plus</v-icon>Add condition
                                         </v-btn>
                                     </v-card-text>
                                 </v-card>
@@ -914,18 +1071,44 @@
                                         <v-select
                                                 v-model="flowForm.schema"
                                                 :items="[
-                                                    { text: 'Direct redirect to Offer', value: 'direct' },
+                                                    { text: 'Direct redirect to offer', value: 'direct' },
                                                     { text: 'Landing → Offer', value: 'landing_offer' },
-                                                    { text: 'Landing Only', value: 'landing_only' },
-                                                    { text: 'Multi Landing/Offer', value: 'multi' },
+                                                    { text: 'Landing only', value: 'landing_only' },
+                                                    { text: 'Multi landing/offer', value: 'multi' },
                                                     { text: 'Redirect to URL', value: 'redirect' },
                                                     { text: 'Return 404 (Not Found)', value: 'return_404' },
-                                                    { text: 'Redirect to Another Campaign', value: 'redirect_campaign' }
+                                                    { text: 'Redirect to another campaign', value: 'redirect_campaign' }
                                                   ]"
-                                                label="Flow Schema"
+                                                label="Flow schema"
                                                 outlined
                                                 dense
                                         ></v-select>
+                                    </v-col>
+
+                                    <!-- Delivery action (schemas with a destination) -->
+                                    <v-col cols="12" v-if="flowForm.schema !== 'direct' && flowForm.schema !== 'return_404'">
+                                        <v-select
+                                                v-model="flowForm.action"
+                                                :items="flowActionItems"
+                                                label="Delivery action"
+                                                outlined
+                                                dense
+                                        ></v-select>
+                                        <v-alert v-if="['landing_offer', 'landing_only', 'multi'].includes(flowForm.schema)"
+                                                 type="info" text dense>
+                                            Applies when the visitor reaches the destination URL — for landing
+                                            schemas that is the offer click-out.
+                                        </v-alert>
+                                    </v-col>
+
+                                    <v-col cols="12" v-if="flowForm.action === 'show_html'">
+                                        <v-textarea
+                                                v-model="flowForm.html"
+                                                label="HTML content"
+                                                outlined
+                                                auto-grow
+                                                dense
+                                        ></v-textarea>
                                     </v-col>
 
                                     <!-- Direct to Offer -->
@@ -949,7 +1132,7 @@
                                                     :items="landings"
                                                     item-text="name"
                                                     item-value="id"
-                                                    label="Landing Page"
+                                                    label="Landing page"
                                                     outlined
                                                     dense
                                             ></v-select>
@@ -974,7 +1157,7 @@
                                                 :items="landings"
                                                 item-text="name"
                                                 item-value="id"
-                                                label="Landing Page"
+                                                label="Landing page"
                                                 outlined
                                                 dense
                                         ></v-select>
@@ -988,7 +1171,7 @@
                                                     :items="landings"
                                                     item-text="name"
                                                     item-value="id"
-                                                    label="Landing Pages (multi)"
+                                                    label="Landing pages (multi)"
                                                     multiple
                                                     chips
                                                     outlined
@@ -1033,7 +1216,7 @@
                                                 :items="campaigns"
                                                 item-text="name"
                                                 item-value="id"
-                                                label="Target Campaign"
+                                                label="Target campaign"
                                                 outlined
                                                 dense
                                                 required
@@ -1074,7 +1257,7 @@
         <v-dialog v-model="postbackEditorDialog" persistent>
             <v-card class="dialog-lg">
                 <v-card-title>
-                    <span class="text-h6">Edit Postback URL</span>
+                    <span class="text-h6">Edit postback URL</span>
                 </v-card-title>
                 <v-card-text>
                     <v-textarea
@@ -1540,52 +1723,60 @@
 
                 filterFieldItems: [
                     {header: 'Geo'},
-                    {text: 'country', value: 'country'},
-                    {text: 'region', value: 'region'},
-                    {text: 'city', value: 'city'},
+                    {text: 'Country', value: 'country'},
+                    {text: 'Region', value: 'region'},
+                    {text: 'City', value: 'city'},
                     {header: 'Device'},
-                    {text: 'device_type', value: 'device_type'},
-                    {text: 'device_brand', value: 'device_brand'},
-                    {text: 'device_model', value: 'device_model'},
-                    {text: 'os', value: 'os'},
-                    {text: 'os_version', value: 'os_version'},
-                    {text: 'browser', value: 'browser'},
-                    {text: 'browser_version', value: 'browser_version'},
-                    {text: 'language', value: 'language'},
+                    {text: 'Device type', value: 'device_type'},
+                    {text: 'Device brand', value: 'device_brand'},
+                    {text: 'Device model', value: 'device_model'},
+                    {text: 'OS', value: 'os'},
+                    {text: 'OS version', value: 'os_version'},
+                    {text: 'Browser', value: 'browser'},
+                    {text: 'Browser version', value: 'browser_version'},
+                    {text: 'Language', value: 'language'},
                     {header: 'Traffic'},
-                    {text: 'ip', value: 'ip'},
-                    {text: 'isp', value: 'isp'},
-                    {text: 'connection_type', value: 'connection_type'},
-                    {text: 'referrer', value: 'referrer'},
-                    {text: 'keyword', value: 'keyword'},
-                    {text: 'source / traffic_source_name', value: 'traffic_source_name'},
-                    {text: 'campaign_id', value: 'campaign_id'},
-                    {text: 'external_id', value: 'external_id'},
-                    {text: 'ad_campaign_id', value: 'ad_campaign_id'},
-                    {text: 'is_bot', value: 'is_bot'},
-                    {text: 'is_using_proxy', value: 'is_using_proxy'},
+                    {text: 'IP', value: 'ip'},
+                    {text: 'ISP', value: 'isp'},
+                    {text: 'Connection type', value: 'connection_type'},
+                    {text: 'Referrer', value: 'referrer'},
+                    {text: 'Keyword', value: 'keyword'},
+                    {text: 'Source / traffic source name', value: 'traffic_source_name'},
+                    {text: 'Campaign ID', value: 'campaign_id'},
+                    {text: 'External ID', value: 'external_id'},
+                    {text: 'Ad campaign ID', value: 'ad_campaign_id'},
+                    {text: 'Is bot', value: 'is_bot'},
+                    {text: 'Using proxy', value: 'is_using_proxy'},
                     {header: 'SubIDs & UTM'},
-                    {text: 'sub_id_1', value: 'sub_id_1'},
-                    {text: 'sub_id_2', value: 'sub_id_2'},
-                    {text: 'sub_id_3', value: 'sub_id_3'},
-                    {text: 'sub_id_4', value: 'sub_id_4'},
-                    {text: 'sub_id_5', value: 'sub_id_5'},
-                    {text: 'sub_id_6', value: 'sub_id_6'},
-                    {text: 'sub_id_7', value: 'sub_id_7'},
-                    {text: 'sub_id_8', value: 'sub_id_8'},
-                    {text: 'sub_id_9', value: 'sub_id_9'},
-                    {text: 'sub_id_10', value: 'sub_id_10'},
-                    {text: 'utm_source', value: 'utm_source'},
-                    {text: 'utm_medium', value: 'utm_medium'},
-                    {text: 'utm_campaign', value: 'utm_campaign'},
-                    {text: 'utm_term', value: 'utm_term'},
-                    {text: 'utm_content', value: 'utm_content'},
+                    {text: 'SubID 1', value: 'sub_id_1'},
+                    {text: 'SubID 2', value: 'sub_id_2'},
+                    {text: 'SubID 3', value: 'sub_id_3'},
+                    {text: 'SubID 4', value: 'sub_id_4'},
+                    {text: 'SubID 5', value: 'sub_id_5'},
+                    {text: 'SubID 6', value: 'sub_id_6'},
+                    {text: 'SubID 7', value: 'sub_id_7'},
+                    {text: 'SubID 8', value: 'sub_id_8'},
+                    {text: 'SubID 9', value: 'sub_id_9'},
+                    {text: 'SubID 10', value: 'sub_id_10'},
+                    {text: 'UTM source', value: 'utm_source'},
+                    {text: 'UTM medium', value: 'utm_medium'},
+                    {text: 'UTM campaign', value: 'utm_campaign'},
+                    {text: 'UTM term', value: 'utm_term'},
+                    {text: 'UTM content', value: 'utm_content'},
                     {header: 'Time'},
-                    {text: 'hour_of_day', value: 'hour_of_day'},
-                    {text: 'day_of_week', value: 'day_of_week'},
+                    {text: 'Hour of day', value: 'hour_of_day'},
+                    {text: 'Day of week', value: 'day_of_week'},
                 ],
                 allOperators: ["equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with",
                     "regex", "greater", "less", "greater_eq", "less_eq", "in", "not_in", "exists", "not_exists", "cidr"],
+                operatorLabels: {
+                    equals: 'Equals', not_equals: 'Not equals', contains: 'Contains',
+                    not_contains: 'Not contains', starts_with: 'Starts with', ends_with: 'Ends with',
+                    regex: 'Regex', greater: 'Greater than', less: 'Less than',
+                    greater_eq: 'Greater or equal', less_eq: 'Less or equal',
+                    in: 'In list', not_in: 'Not in list', exists: 'Exists',
+                    not_exists: 'Not exists', cidr: 'CIDR'
+                },
                 numericFilterFields: ["hour_of_day"],
                 timezones: ['UTC', 'Europe/London', 'Europe/Berlin', 'Europe/Moscow', 'America/New_York',
                     'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Asia/Dubai', 'Asia/Shanghai',
@@ -1680,25 +1871,40 @@
                     notes:
                         '',
                     flows:
-                        []
+                        [],
+                    funnel:
+                        {enabled: false, steps: []},
+                    shield:
+                        {enabled: false, action: 'blank', honeypot: false,
+                            whitelists: {ips: [], referers: [], ua_regex: ''}}
                 }
                 ,
                 baseParamsIdMapping:[],
                 flowSchemes: ['position', 'weight'],
+                flowActionItems: [
+                    {text: '302 redirect', value: 'redirect'},
+                    {text: 'iFrame', value: 'iframe'},
+                    {text: 'Form POST', value: 'form_post'},
+                    {text: 'Serve content (CURL)', value: 'curl'},
+                    {text: 'Show HTML', value: 'show_html'},
+                    {text: 'Do nothing', value: 'none'}
+                ],
                 statuses:
                     ['active', 'paused'],
                 types:
-                    ['campaign', 'tracking_only'],
+                    [{text: 'Campaign', value: 'campaign'}, {text: 'Tracking only', value: 'tracking_only'}],
                 costModels:
-                    ['cpc', 'cpuc', 'cpm', 'cpa', 'cps', 'revshare', 'auto'],
+                    [{text: 'CPC', value: 'cpc'}, {text: 'CPUC', value: 'cpuc'}, {text: 'CPM', value: 'cpm'},
+                     {text: 'CPA', value: 'cpa'}, {text: 'CPS', value: 'cps'},
+                     {text: 'RevShare', value: 'revshare'}, {text: 'Auto', value: 'auto'}],
                 uniquenessMethods:
                     ['ip', 'ip_ua', 'cookie'],
                 integrationMethods: {
                     js: 'JS generated async script',
-                    php: 'php',
+                    php: 'PHP',
                     forced_php: 'Forced PHP redirect',
-                    qr: 'QR Code',
-                    pixel_email: 'Pixel for Email'
+                    qr: 'QR code',
+                    pixel_email: 'Pixel for email'
                 },
                 utmParams:
                     ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'],
@@ -1724,7 +1930,9 @@
                         caps: {per_hour: 0, per_day: 0, total: 0},
                         notes: '',
                         redirect_url: '',
-                        redirect_campaign_url: ''
+                        redirect_campaign_url: '',
+                        action: 'redirect',
+                        html: ''
                     }
                 ,
                 editedFlowIndex: null,
@@ -1764,6 +1972,16 @@
         computed: {
             dateRangeText() {
                 return this.date_range.join(' ~ ')
+            },
+            shieldUaRegexError() {
+                const pat = (((this.form || {}).shield || {}).whitelists || {}).ua_regex || '';
+                if (!pat) return '';
+                try {
+                    new RegExp(pat);
+                    return '';
+                } catch (e) {
+                    return 'Regex does not compile: ' + e.message;
+                }
             },
             landingMap() {
                 const map = {};
@@ -1917,7 +2135,7 @@
             },
             async bulkArchive() {
                 const ok = await this.$refs.confirm.open(
-                    'Archive Campaigns',
+                    'Archive campaigns',
                     `Archive ${this.selected.length} campaign(s)? They disappear from the lists but can be restored.`,
                     'Archive');
                 if (!ok) return;
@@ -2145,12 +2363,15 @@
                 if (group) group.conditions.splice(ci, 1);
             },
             operatorsForField(field) {
-                if (field === 'ip') return this.allOperators.slice();
-                if (this.numericFilterFields.includes(field)) {
-                    return this.allOperators.filter(o =>
+                let ops;
+                if (field === 'ip') ops = this.allOperators.slice();
+                else if (this.numericFilterFields.includes(field)) {
+                    ops = this.allOperators.filter(o =>
                         ['equals', 'not_equals', 'greater', 'less', 'greater_eq', 'less_eq', 'in', 'not_in', 'exists', 'not_exists'].includes(o));
+                } else {
+                    ops = this.allOperators.filter(o => o !== 'cidr');
                 }
-                return this.allOperators.filter(o => o !== 'cidr');
+                return ops.map(o => ({text: this.operatorLabels[o], value: o}));
             },
             isListOperator(op) {
                 return op === 'in' || op === 'not_in';
@@ -2431,6 +2652,26 @@
                     flow.position = 1 + idx * 2;
                 });
             },
+            addFunnelStep() {
+                this.form.funnel.steps.push({name: '', landing: null, offers: [], schema: 'landing_offer'});
+            },
+            removeFunnelStep(index) {
+                this.form.funnel.steps.splice(index, 1);
+            },
+            moveFunnelStepUp(index) {
+                if (index > 0) {
+                    const temp = this.form.funnel.steps[index];
+                    this.form.funnel.steps.splice(index, 1);
+                    this.form.funnel.steps.splice(index - 1, 0, temp);
+                }
+            },
+            moveFunnelStepDown(index) {
+                if (index < this.form.funnel.steps.length - 1) {
+                    const temp = this.form.funnel.steps[index];
+                    this.form.funnel.steps.splice(index, 1);
+                    this.form.funnel.steps.splice(index + 1, 0, temp);
+                }
+            },
             openFlowEdit(flow = null, index = null) {
                 this.isEditingFlow = !!flow;
                 this.flowDialog = true;
@@ -2452,7 +2693,9 @@
                         landing: null,
                         landings: [],
                         offers: [],
-                        filters: []
+                        filters: [],
+                        action: 'redirect',
+                        html: ''
                     };
                     this.editedFlowIndex = null;
                 }
@@ -2461,6 +2704,13 @@
                     this.flowForm.schedule = {timezone: 'UTC', days: [], hoursFrom: 0, hoursTo: 23};
                 } else {
                     this.flowForm.schedule = this.parseSchedule(this.flowForm.schedule);
+                }
+                if (!this.flowForm.action) {
+                    // flows saved before delivery actions existed default to redirect
+                    this.flowForm.action = 'redirect';
+                }
+                if (this.flowForm.html === undefined || this.flowForm.html === null) {
+                    this.flowForm.html = '';
                 }
                 if (!this.flowForm.caps || typeof this.flowForm.caps !== 'object') {
                     this.flowForm.caps = {per_hour: 0, per_day: 0, total: 0};
@@ -2472,7 +2722,7 @@
 
 
             async removeFlow(index) {
-                const ok = await this.$refs.confirm.open('Delete Flow', 'Delete this flow?', 'Delete');
+                const ok = await this.$refs.confirm.open('Delete flow', 'Delete this flow?', 'Delete');
                 if (ok) {
                     this.form.flows.splice(index, 1);
                 }
@@ -2499,6 +2749,14 @@
 
                 if(this.flowForm.type == 'default') {
                     this.flowForm.filters = [];
+                }
+
+                // keep configs small: the default action and unused html are omitted
+                if (this.flowForm.action === 'redirect') {
+                    delete this.flowForm.action;
+                }
+                if (this.flowForm.action !== 'show_html') {
+                    delete this.flowForm.html;
                 }
 
                 if (this.isEditingFlow && this.editedFlowIndex !== null) {
@@ -2533,7 +2791,7 @@
             },
 
             async confirmCancelFlow() {
-                const ok = await this.$refs.confirm.open('Discard Changes', 'Discard changes to flow?', 'Discard');
+                const ok = await this.$refs.confirm.open('Discard changes', 'Discard changes to flow?', 'Discard');
                 if (ok) {
                     this.flowDialog = false;
                 }
@@ -2547,6 +2805,27 @@
                 this.save(false);
             },
             save(closeDialog = true) {
+                const shieldUaRegex = ((this.form.shield || {}).whitelists || {}).ua_regex || '';
+                if (shieldUaRegex) {
+                    try {
+                        new RegExp(shieldUaRegex);
+                    } catch (e) {
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: 'Shield: whitelist User-Agent regex does not compile — fix it before saving.'
+                        });
+                        return;
+                    }
+                }
+                const funnel = this.form.funnel || {enabled: false, steps: []};
+                if (funnel.enabled && (funnel.steps || []).length < 2) {
+                    this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: 'Funnel: add at least 2 steps before saving — a funnel needs a sequence to advance through.'
+                    });
+                    return;
+                }
+                const shield = this.form.shield || this.defaultShield();
                 const payload = {
                     name: this.form.name,
                     alias: this.form.alias,
@@ -2573,7 +2852,26 @@
                         fallback_url: this.form.fallback_url,
                         paramsIdMapping: this.form.paramsIdMapping,
                         postbacks: this.form.postbacks,
-                        flows: this.form.flows
+                        flows: this.form.flows,
+                        funnel: {
+                            enabled: !!funnel.enabled,
+                            steps: (funnel.steps || []).map((s, i) => ({
+                                name: (s.name || '').trim() || `Step ${i + 1}`,
+                                landing: s.landing || null,
+                                offers: (s.offers || []).filter(Boolean),
+                                schema: ['landing_offer', 'landing_only'].includes(s.schema) ? s.schema : 'landing_offer',
+                            })),
+                        },
+                        shield: {
+                            enabled: !!shield.enabled,
+                            action: ['blank', '404', 'allow'].includes(shield.action) ? shield.action : 'blank',
+                            honeypot: !!shield.honeypot,
+                            whitelists: {
+                                ips: (shield.whitelists.ips || []).map(x => String(x).trim()).filter(Boolean),
+                                referers: (shield.whitelists.referers || []).map(x => String(x).trim()).filter(Boolean),
+                                ua_regex: (shield.whitelists.ua_regex || '').trim(),
+                            },
+                        }
                     }
                 };
 
@@ -2622,7 +2920,7 @@
                     });
             },
             async confirmCancel() {
-                const ok = await this.$refs.confirm.open('Discard Changes', 'Are you sure you want to discard changes?', 'Discard');
+                const ok = await this.$refs.confirm.open('Discard changes', 'Are you sure you want to discard changes?', 'Discard');
                 if (ok) {
                     this.dialog = false;
                     this.resetForm();
@@ -2665,7 +2963,30 @@
                     fallback_url: item.config?.fallback_url || '',
                     paramsIdMapping: item.config?.paramsIdMapping || [],
                     postbacks: item.config?.postbacks || [],
-                    flows: item.config?.flows || []
+                    flows: item.config?.flows || [],
+                    funnel: (() => {
+                        const fn = item.config?.funnel || {};
+                        return {
+                            enabled: !!fn.enabled,
+                            steps: (fn.steps || []).map(s => ({
+                                name: s.name || '',
+                                landing: s.landing || null,
+                                offers: s.offers || [],
+                                schema: ['landing_offer', 'landing_only'].includes(s.schema) ? s.schema : 'landing_offer',
+                            })),
+                        };
+                    })(),
+                    shield: (() => {
+                        const sh = item.config?.shield || {};
+                        return {
+                            enabled: sh.enabled ?? false,
+                            action: ['blank', '404', 'allow'].includes(sh.action) ? sh.action : 'blank',
+                            honeypot: sh.honeypot ?? false,
+                            whitelists: Object.assign(
+                                {ips: [], referers: [], ua_regex: ''},
+                                sh.whitelists || {}),
+                        };
+                    })()
                 };
 
             },
@@ -2882,7 +3203,7 @@
             },
             async deleteCampaign(item) {
                 const ok = await this.$refs.confirm.open(
-                    'Delete Campaign',
+                    'Delete campaign',
                     `Are you sure you want to delete campaign "${item.name}"? All tracked clicks and conversions for it will be permanently deleted too. This cannot be undone.`,
                     'Delete'
                 );
@@ -2920,7 +3241,7 @@
             },
             async duplicateCampaign(item) {
                 const ok = await this.$refs.confirm.open(
-                    'Duplicate Campaign',
+                    'Duplicate campaign',
                     `Create a copy of "${item.name}"?`,
                     'Duplicate'
                 );
@@ -3003,7 +3324,7 @@
             async bulkDelete() {
                 const n = this.selected.length;
                 const ok = await this.$refs.confirm.open(
-                    'Delete Campaigns',
+                    'Delete campaigns',
                     `Are you sure you want to delete ${n} campaign(s)? All tracked clicks and conversions for them will be permanently deleted too. This cannot be undone.`,
                     'Delete'
                 );
@@ -3136,7 +3457,18 @@
                     cost_from_cost_parameter: false,
                     paramsIdMapping: JSON.parse(JSON.stringify(this.baseParamsIdMapping)),
                     postbacks: [],
-                    flows: []
+                    flows: [],
+                    funnel: {enabled: false, steps: []},
+                    shield: this.defaultShield()
+                };
+            },
+
+            defaultShield() {
+                return {
+                    enabled: false,
+                    action: 'blank',
+                    honeypot: false,
+                    whitelists: {ips: [], referers: [], ua_regex: ''}
                 };
             },
 

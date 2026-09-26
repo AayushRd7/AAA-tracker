@@ -14,6 +14,7 @@ import re
 import sys
 import json
 import base64
+import shutil
 import subprocess
 from datetime import datetime, timezone
 
@@ -889,6 +890,216 @@ def main():
     r = s.get(f"{api}/reports/?limit=5")
     check("conversions endpoint", r.status_code == 200, r.text[:120])
 
+    print("== Fraud ==")
+    # Seed one flagged click (bot + fraud_score) and clean it up afterwards.
+    ch_query(
+        f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, "
+        f"country, browser, ip, cost, is_bot, fraud_score) "
+        f"VALUES (now(), 1, true, '', 'smoke-fraud-{os.getpid()}', 'US', 'SmokeBot/1.0', "
+        f"toIPv4('198.51.100.66'), 0.10, true, 80)")
+
+    r = s.get(f"{api}/fraud/summary")
+    body = r.json() if r.status_code == 200 else {}
+    check("fraud: summary 200 with card shape",
+          r.status_code == 200 and all(k in body for k in (
+              "total_clicks", "bot_clicks", "bot_share_pct", "avg_fraud_score",
+              "est_savings", "top_ips", "top_uas", "shields")), r.text[:200])
+    check("fraud: summary counts are ints",
+          isinstance(body.get("total_clicks"), int) and isinstance(body.get("bot_clicks"), int),
+          str({k: body.get(k) for k in ("total_clicks", "bot_clicks")}))
+    check("fraud: seeded bot click raises the 24h totals",
+          body.get("bot_clicks", 0) >= 1 and body.get("avg_fraud_score", 0) > 0, r.text[:200])
+    top_ip = (body.get("top_ips") or [{}])[0]
+    check("fraud: top_ips row shape",
+          isinstance(body.get("top_ips"), list)
+          and all(k in top_ip for k in ("ip", "hits", "avg_score", "last_seen")), str(top_ip))
+
+    r = s.get(f"{api}/fraud/feed")
+    feed = r.json() if r.status_code == 200 else []
+    check("fraud: feed 200, newest first, capped at 100",
+          r.status_code == 200 and isinstance(feed, list) and len(feed) <= 100
+          and all(feed[i].get("received_at") >= feed[i + 1].get("received_at")
+                  for i in range(len(feed) - 1)), r.text[:200])
+    check("fraud: feed carries bot/score fields and only flagged rows",
+          bool(feed) and all(k in feed[0] for k in ("ip", "campaign_id", "is_bot", "fraud_score"))
+          and all(row.get("is_bot") or (row.get("fraud_score") or 0) >= 50 for row in feed),
+          str(feed[0].keys() if feed else None))
+    r_future = s.get(f"{api}/fraud/feed", params={
+        "after": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")})
+    check("fraud: feed with future 'after' returns nothing newer",
+          r_future.status_code == 200 and r_future.json() == [], r_future.text[:150])
+
+    r = s.get(f"{api}/fraud/honeypot-hits")
+    check("fraud: honeypot-hits 200 with hits list",
+          r.status_code == 200 and isinstance(r.json().get("hits"), list), r.text[:150])
+
+    # bot-lists round trip (save -> read back -> restore the previous value)
+    r = s.get(f"{api}/settings/")
+    saved_lists = (r.json().get("settings") or {}).get("bot_lists")
+    test_lists = {"ua_regex": [f"smoke-bot-{os.getpid()}"],
+                  "ip_cidrs": ["203.0.113.0/24"],
+                  "referer_regex": []}
+    r = s.put(f"{api}/fraud/bot-lists", json={"bot_lists": test_lists})
+    check("fraud: bot-lists PUT 200", r.status_code == 200, r.text[:200])
+    r = s.get(f"{api}/fraud/bot-lists")
+    check("fraud: bot-lists round trip",
+          r.status_code == 200 and r.json().get("bot_lists") == test_lists, r.text[:200])
+    r = s.put(f"{api}/fraud/bot-lists", json={
+        "bot_lists": {"ua_regex": ["(["], "ip_cidrs": [], "referer_regex": []}})
+    check("fraud: invalid ua_regex -> 422", r.status_code == 422, f"{r.status_code} {r.text[:120]}")
+    r = s.put(f"{api}/fraud/bot-lists", json={
+        "bot_lists": {"ua_regex": [], "ip_cidrs": ["not-a-cidr"], "referer_regex": []}})
+    check("fraud: invalid ip_cidr -> 422", r.status_code == 422, f"{r.status_code} {r.text[:120]}")
+    cfg = dict((s.get(f"{api}/settings/").json().get("settings") or {}))
+    cfg["bot_lists"] = saved_lists  # null removes the key under merge semantics
+    r = s.post(f"{api}/settings/", json={"settings": cfg})
+    check("fraud: bot_lists restored", r.status_code == 200, r.text[:120])
+    r = s.get(f"{api}/fraud/bot-lists")
+    restored = (r.json().get("bot_lists") or {})
+    check("fraud: bot_lists gone after restore",
+          saved_lists is None and restored.get("ua_regex") == []
+          or restored == {k: (saved_lists or {}).get(k, []) for k in
+                          ("ua_regex", "ip_cidrs", "referer_regex")}, r.text[:200])
+
+    # shield stats surface campaigns with an enabled shield block
+    shield_alias = f"smoke-shield-{os.getpid()}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": shield_alias, "alias": shield_alias, "type": "campaign",
+        "status": "active", "redirect_mode": "position",
+        "config": {"flows": [], "postbacks": [], "hide_referrer": False,
+                   "fallback_url": f"https://example.com/smoke-{os.getpid()}-shield-fb",
+                   "shield": {"enabled": True, "action": "404", "honeypot": True,
+                              "whitelists": {"ips": ["10.0.0.0/8"], "referers": ["facebook.com"],
+                                             "ua_regex": ""}}}})
+    shield_cid = r.json().get("id") if r.status_code == 200 else None
+    check("fraud: shield campaign created", bool(shield_cid), r.text[:200])
+    r = s.get(f"{api}/fraud/summary")
+    shields = [x for x in (r.json().get("shields") or []) if x.get("campaign_id") == shield_cid]
+    check("fraud: enabled shield listed in summary",
+          bool(shields) and shields[0]["action"] == "404" and shields[0]["honeypot"] is True
+          and shields[0]["whitelist_ips"] == 1, str(shields[:1]))
+    if shield_cid:
+        r = s.delete(f"{api}/campaigns/{shield_cid}")
+        check("fraud: shield campaign cleaned up", r.status_code == 200, r.text[:120])
+    ch_query(f"ALTER TABLE clicks_data DELETE WHERE visitor_id = 'smoke-fraud-{os.getpid()}'")
+
+    print("== Fraud tracking plane ==")
+    # Tracking-side behavior of the fraud suite: heuristic scoring writes
+    # fraud_score on every row, the honeypot flags scrapers, the campaign
+    # shield blanks non-whitelisted visitors without tracking them, and a
+    # verified-crawler IP is flagged is_bot with the top score.
+
+    def fraud_pg(sql):
+        out = subprocess.run(
+            ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db",
+             "-tAc", sql], capture_output=True, text=True, timeout=30)
+        return out.stdout.strip()
+
+    tp_alias = f"smoke-fraudtp-{os.getpid()}"
+    tp_payload = {"name": tp_alias, "alias": tp_alias, "type": "campaign",
+                  "status": "active", "redirect_mode": "position",
+                  "config": {"flows": [{
+                      "type": "default", "position": 1, "enabled": True, "schema": "redirect",
+                      "redirect_url": f"https://example.com/smoke-fraudtp-{os.getpid()}-a",
+                      "filters": []}], "postbacks": [], "hide_referrer": False,
+                      "fallback_url": ""}}
+    r = s.post(f"{api}/campaigns/", json=tp_payload)
+    check("fraudtp: create campaign", r.status_code == 200 and "id" in r.json(), r.text[:200])
+    tp_id = r.json().get("id")
+
+    # (a) Verified crawler from a real crawler net: is_bot + fraud_score 100.
+    # nginx overwrites X-Real-IP, so push the crawler IP straight to uvicorn
+    # (X-Forwarded-For fallback) the same way the anonymize_ip test does.
+    # NB: the row is matched by browser, not ip — the privacy test earlier in
+    # this suite restores anonymize_ip but the frontend's 30s settings cache
+    # can still mask the last octet when this probe runs (scoring itself uses
+    # the true ip; masking happens after the score is computed).
+    crawler_ua = f"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html) SmokeCrawler/{os.getpid()}"
+    subprocess.run(["docker", "exec", "tracker_frontend", "curl", "-s", "-o", "/dev/null",
+                    "-H", "Host: localhost", "-H", "X-Forwarded-For: 66.249.66.1",
+                    "-A", crawler_ua,
+                    f"http://127.0.0.1:8000/{tp_alias}"],
+                   capture_output=True, timeout=30)
+    import time
+    time.sleep(1)
+    row = ch_query(f"SELECT is_bot, fraud_score, ip FROM clicks_data "
+                   f"WHERE campaign_id = {tp_id} AND browser = 'GoogleBot' LIMIT 1")
+    check("fraudtp: verified crawler IP -> is_bot + fraud_score=100",
+          bool(row) and not row.startswith("ERROR")
+          and row.split("\t")[:2] == ["true", "100"], row[:120])
+
+    # (b) Honeypot: /t/hp 204s, rate-limits to one row/hour, and the flagged
+    # visitor's next campaign click is recorded as a bot with fraud_score 100.
+    hp_ua = f"SmokeHp/{os.getpid()}"
+    r = requests.get(f"{BASE}/t/hp", params={"c": tp_alias}, verify=not INSECURE,
+                     headers={"User-Agent": hp_ua})
+    check("fraudtp: /t/hp returns 204", r.status_code == 204, str(r.status_code))
+    requests.get(f"{BASE}/t/hp", params={"c": tp_alias}, verify=not INSECURE,
+                 headers={"User-Agent": hp_ua})
+    hits = fraud_pg(f"SELECT count(*) FROM honeypot_hits WHERE ua = '{hp_ua}'")
+    check("fraudtp: honeypot rate-limited to one row/hour", hits == "1", hits[:50])
+    r = requests.get(f"{BASE}/t/hp.js", verify=not INSECURE)
+    check("fraudtp: /t/hp.js serves the decoy script",
+          r.status_code == 200 and "/t/hp" in r.text
+          and "javascript" in r.headers.get("content-type", ""), f"{r.status_code}")
+    r = requests.get(f"{BASE}/{tp_alias}", verify=not INSECURE, allow_redirects=False,
+                     params={"sub_id_1": f"smoke-hp-{os.getpid()}"},
+                     headers={"User-Agent": hp_ua})
+    check("fraudtp: honeypot-flagged visitor still redirected",
+          r.status_code in (301, 302, 307, 308), str(r.status_code))
+    time.sleep(1)
+    row = ch_query(f"SELECT is_bot, fraud_score FROM clicks_data "
+                   f"WHERE campaign_id = {tp_id} AND sub_id_1 = 'smoke-hp-{os.getpid()}' LIMIT 1")
+    check("fraudtp: honeypot-flagged click -> is_bot + fraud_score=100",
+          bool(row) and not row.startswith("ERROR") and row.split("\t") == ["true", "100"],
+          row[:120])
+
+    # (c) Shield "blank": non-whitelisted visitor gets a blank 200 and is NOT
+    # tracked; a whitelisted UA regex passes through to the normal redirect.
+    tp_payload["config"]["shield"] = {
+        "enabled": True, "action": "blank", "honeypot": True,
+        "whitelists": {"ips": ["192.0.2.0/24"], "referers": [], "ua_regex": ""}}
+    r = s.put(f"{api}/campaigns/{tp_id}", json=tp_payload)
+    check("fraudtp: shield config saved", r.status_code == 200, r.text[:150])
+    before = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {tp_id}")
+    shield_ua = f"SmokeShield/{os.getpid()}"
+    r = requests.get(f"{BASE}/{tp_alias}", verify=not INSECURE, allow_redirects=False,
+                     params={"sub_id_1": f"smoke-shield-{os.getpid()}"},
+                     headers={"User-Agent": shield_ua})
+    after = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {tp_id}")
+    check("fraudtp: shield blank serves blank 200",
+          r.status_code == 200 and "<body></body>" in r.text, f"{r.status_code} {r.text[:60]}")
+    check("fraudtp: shield blank is untracked", before == after, f"{before} -> {after}")
+
+    tp_payload["config"]["shield"]["whitelists"] = {
+        "ips": [], "referers": [], "ua_regex": shield_ua}
+    r = s.put(f"{api}/campaigns/{tp_id}", json=tp_payload)
+    check("fraudtp: shield whitelist updated", r.status_code == 200, r.text[:150])
+    r = requests.get(f"{BASE}/{tp_alias}", verify=not INSECURE, allow_redirects=False,
+                     params={"sub_id_1": f"smoke-shield-wl-{os.getpid()}"},
+                     headers={"User-Agent": shield_ua})
+    check("fraudtp: whitelisted UA regex redirects normally",
+          r.status_code in (301, 302, 307, 308)
+          and f"smoke-fraudtp-{os.getpid()}-a" in (r.headers.get("location") or ""),
+          f"{r.status_code} {r.headers.get('location', '')[:80]}")
+    time.sleep(1)
+    row = ch_query(f"SELECT is_bot, fraud_score FROM clicks_data "
+                   f"WHERE campaign_id = {tp_id} AND sub_id_1 = 'smoke-shield-wl-{os.getpid()}' LIMIT 1")
+    check("fraudtp: whitelisted click tracked with a low fraud score",
+          bool(row) and not row.startswith("ERROR") and row.split("\t") == ["false", "0"],
+          row[:120])
+
+    print("== Fraud tracking plane cleanup ==")
+    ch_query(f"ALTER TABLE clicks_data DELETE WHERE campaign_id = {tp_id}")
+    leftover = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {tp_id}")
+    check("fraudtp: CH rows removed", leftover == "0", leftover[:80])
+    fraud_pg(f"DELETE FROM honeypot_hits WHERE ua = '{hp_ua}'")
+    hits = fraud_pg(f"SELECT count(*) FROM honeypot_hits WHERE ua = '{hp_ua}'")
+    check("fraudtp: honeypot rows removed", hits == "0", hits[:50])
+    if tp_id:
+        r = s.delete(f"{api}/campaigns/{tp_id}")
+        check("fraudtp: delete campaign", r.status_code == 200, r.text[:120])
+
     print("== Regression: reporting depth ==")
     # Seed ClickHouse traffic (self-cleaned below; rows are visitor_id 'seed-%').
     ch_query(
@@ -906,7 +1117,9 @@ def main():
         "multiIf(number % 40 = 0, 5.0, number % 25 = 0, 1.0, 0) "
         "FROM numbers(500)")
 
-    today = datetime.now().date()
+    # Containers run on UTC — derive "today" from UTC so the suite is safe to
+    # run near local midnight (host-local date could lag/lead CH/PG by a day).
+    today = datetime.now(timezone.utc).date()
     d_from, d_to = str(today.fromordinal(today.toordinal() - 25)), str(today)
 
     # -- G47: multi-dimension drill-down breakdown --
@@ -1041,6 +1254,46 @@ def main():
           r_log_k.status_code == 200
           and not any(c["click_id"] == f"seed-rd-{basis_pid}-basis" for c in r_log_k.json()),
           r_log_k.text[:150])
+    # Positive click-date case: the CLICK is today, the conversion landed
+    # yesterday — click_date basis must show it, conversion_date must not.
+    ch_query(
+        f"INSERT INTO clicks_data (received_at, campaign_id, offer_id, click, status, visitor_id, country, cost) "
+        f"VALUES (now(), {basis_cid}, 5, true, '', 'seed-rd-{basis_pid}-today', 'US', 0.1)")
+    subprocess.run(
+        ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-c",
+         f"INSERT INTO conversions_data (received_at, click_id, campaign_id, offer_id, status, payout, revenue, profit, visitor_id) "
+         f"VALUES (now() - interval '1 day', 'seed-rd-{basis_pid}-today', {basis_cid}, 5, 'sale', 3, 3, 3, 'seed-rd-{basis_pid}-today')"],
+        capture_output=True, text=True, timeout=30)
+    r_log_tk = s.get(f"{api}/reports/", params={
+        "date_from": today_s, "date_to": today_s, "date_basis": "click_date",
+        "click_id": f"seed-rd-{basis_pid}-today"})
+    r_log_tc = s.get(f"{api}/reports/", params={
+        "date_from": today_s, "date_to": today_s, "date_basis": "conversion_date",
+        "click_id": f"seed-rd-{basis_pid}-today"})
+    check("conversions log click_date basis shows conversion whose click is today",
+          r_log_tk.status_code == 200 and any(c["click_id"] == f"seed-rd-{basis_pid}-today" for c in r_log_tk.json()),
+          r_log_tk.text[:150])
+    check("conversions log conversion_date basis hides yesterday-dated conversion",
+          r_log_tc.status_code == 200
+          and not any(c["click_id"] == f"seed-rd-{basis_pid}-today" for c in r_log_tc.json()),
+          r_log_tc.text[:150])
+    # Legacy rows (pre visitor attribution) have visitor_id NULL — under
+    # click_date they must fall back to their own date, not vanish.
+    subprocess.run(
+        ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-c",
+         f"INSERT INTO conversions_data (received_at, click_id, campaign_id, offer_id, status, payout, revenue, profit) "
+         f"VALUES (now(), 'seed-rd-{basis_pid}-legacy', {basis_cid}, 5, 'sale', 2, 2, 2)"],
+        capture_output=True, text=True, timeout=30)
+    r_log_lg = s.get(f"{api}/reports/", params={
+        "date_from": today_s, "date_to": today_s, "date_basis": "click_date",
+        "click_id": f"seed-rd-{basis_pid}-legacy"})
+    check("conversions log click_date basis keeps legacy NULL-visitor rows on their own date",
+          r_log_lg.status_code == 200 and any(c["click_id"] == f"seed-rd-{basis_pid}-legacy" for c in r_log_lg.json()),
+          r_log_lg.text[:150])
+    subprocess.run(
+        ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-c",
+         f"DELETE FROM conversions_data WHERE visitor_id LIKE 'seed-rd-{basis_pid}-%' OR click_id LIKE 'seed-rd-{basis_pid}-%'"],
+        capture_output=True, text=True, timeout=30)
 
     # -- click-log free-text search: no more 500 on LIKE metacharacters --
     for term in ("seed-", "100%_", '"quoted"', "\\"):
@@ -1056,7 +1309,7 @@ def main():
     ch_query("ALTER TABLE clicks_data DELETE WHERE visitor_id LIKE 'seed-%'")
     subprocess.run(
         ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-c",
-         f"DELETE FROM conversions_data WHERE visitor_id LIKE 'seed-rd-{basis_pid}-basis'"],
+         f"DELETE FROM conversions_data WHERE visitor_id LIKE 'seed-rd-{basis_pid}-%'"],
         capture_output=True, text=True, timeout=30)
     leftover = ch_query("SELECT count() FROM clicks_data WHERE visitor_id LIKE 'seed-%'")
     check("seeded CH rows removed", leftover == "0", leftover[:80])
@@ -1124,7 +1377,7 @@ def main():
     check("public report unknown token -> 404", r.status_code == 404, str(r.status_code))
     r = bare.get(f"{BASE}/backend/public-report", params={"t": share_tok})
     check("public report HTML page served without auth",
-          r.status_code == 200 and "Shared Report" in r.text, f"{r.status_code}")
+          r.status_code == 200 and "Shared report" in r.text, f"{r.status_code}")
     r = s.delete(f"{api}/settings/saved-reports/{share_rid}/share")
     check("share revoked", r.status_code == 200, r.text[:120])
     r = bare.post(f"{api}/dashboard/public/report/{share_tok}")
@@ -1468,6 +1721,13 @@ def main():
             ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-c", sql],
             capture_output=True, text=True, timeout=30)
 
+    def pg_exec_out(sql):
+        """pg_exec that returns stdout (first column, no header)."""
+        out = subprocess.run(
+            ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-tAc", sql],
+            capture_output=True, text=True, timeout=30)
+        return out.stdout
+
     # ----- G67: bulk tags add/remove + archive -----
     r = s.post(f"{api}/campaigns/", json={
         "name": f"smoke-admin-{ap_pid}", "alias": f"smoke-admin-{ap_pid}",
@@ -1694,6 +1954,170 @@ def main():
     pg_exec(f"UPDATE campaigns SET owner_id = NULL WHERE id = {ap_created_id}")
     if own_uid:
         s.delete(f"{api}/users/{own_uid}")
+
+    # ----- G76: AI auto-optimizer -----
+    r = s.post(f"{api}/offers/", json={
+        "name": f"Smoke Opt Offer {ap_pid}",
+        "url": f"https://example.com/smoke-opt-{ap_pid}?cid={{click_id}}"})
+    opt_oid = r.json().get("id") if r.status_code == 200 else None
+    check("optimizer: offer created", bool(opt_oid), r.text[:200])
+
+    # flows: two regular (a/b), one disabled forced, one disabled regular.
+    # Sorted routing order = [forced, a, b, off] — forced sorts first
+    # regardless of position, so CH flow_index 1 = a, 2 = b, 3 = off.
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"smoke-opt-{ap_pid}", "alias": f"smoke-opt-{ap_pid}",
+        "type": "campaign", "status": "active", "redirect_mode": "weight",
+        "config": {"flows": [
+            {"type": "regular", "name": "opt-a", "position": 1, "enabled": True,
+             "schema": "direct", "offer": opt_oid, "weight": 100, "filters": []},
+            {"type": "regular", "name": "opt-b", "position": 2, "enabled": True,
+             "schema": "direct", "offer": opt_oid, "weight": 100, "filters": []},
+            {"type": "forced", "name": "opt-forced", "position": 3, "enabled": False,
+             "schema": "direct", "offer": opt_oid, "weight": 100, "filters": []},
+            {"type": "regular", "name": "opt-off", "position": 4, "enabled": False,
+             "schema": "direct", "offer": opt_oid, "weight": 100, "filters": []}],
+            "postbacks": [], "hide_referrer": False, "stickiness": True,
+            "fallback_url": f"https://example.com/smoke-{ap_pid}-opt-fb"}})
+    opt_cid = r.json().get("id") if r.status_code == 200 else None
+    check("optimizer: campaign created", bool(opt_cid), r.text[:200])
+
+    r = s.get(f"{api}/optimizer/status")
+    st = r.json() if r.status_code == 200 else {}
+    mine = [c for c in st.get("campaigns", []) if c.get("id") == opt_cid]
+    mon = [c for c in st.get("campaigns", []) if c.get("id") == mon_cid]
+    check("optimizer: status shape",
+          r.status_code == 200 and bool(mine)
+          and "loop_last_run" in st
+          and mine[0]["optimizer"]["metric"] == "epc"
+          and mine[0]["optimizer"]["enabled"] is False
+          and [f["name"] for f in mine[0]["flows"]] == ["opt-forced", "opt-a", "opt-b", "opt-off"],
+          r.text[:250])
+    check("optimizer: position-mode campaign flagged unsupported",
+          bool(mon) and mon[0]["supported"] is False and mon[0]["flows"] == [],
+          r.text[:250])
+
+    r = s.get(f"{api}/optimizer/{opt_cid}")
+    check("optimizer: single-campaign GET", r.status_code == 200
+          and r.json().get("id") == opt_cid, r.text[:150])
+
+    r = s.put(f"{api}/optimizer/{opt_cid}", json={"metric": "nope"})
+    check("optimizer: bad metric -> 422", r.status_code == 422, r.text[:120])
+    r = s.put(f"{api}/optimizer/{opt_cid}", json={"max_shift_pct": 5})
+    check("optimizer: max_shift_pct below range -> 422", r.status_code == 422, r.text[:120])
+    r = s.put(f"{api}/optimizer/{opt_cid}", json={"max_shift_pct": 200})
+    check("optimizer: max_shift_pct above range -> 422", r.status_code == 422, r.text[:120])
+    r = s.put(f"{api}/optimizer/{opt_cid}", json={"min_clicks": -1})
+    check("optimizer: negative min_clicks -> 422", r.status_code == 422, r.text[:120])
+    r = s.put(f"{api}/optimizer/{opt_cid}", json={
+        "enabled": True, "metric": "epc", "lookback_hours": 24,
+        "min_clicks": 20, "max_shift_pct": 80, "protect_clicks": 0})
+    check("optimizer: settings saved", r.status_code == 200
+          and r.json()["optimizer"]["enabled"] is True, r.text[:200])
+
+    # seed: 60 human clicks on a; 60 human + 10 bot clicks on b (bots must be
+    # excluded from the metric). a: 6 convs @ profit 3 -> epc 0.30;
+    # b: 1 conv @ profit 0.5 -> epc ~0.0083.
+    ch_query(
+        f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, cost, revenue, flow_index, is_bot) "
+        f"SELECT now() - INTERVAL number MINUTE, {opt_cid}, true, '', 'smoke-opt-{ap_pid}-a-' || toString(number), 'US', 1.0, 0.0, 1, 0 FROM numbers(60)")
+    ch_query(
+        f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, cost, revenue, flow_index, is_bot) "
+        f"SELECT now() - INTERVAL number MINUTE, {opt_cid}, true, '', 'smoke-opt-{ap_pid}-b-' || toString(number), 'US', 1.0, 0.0, 2, 0 FROM numbers(60)")
+    ch_query(
+        f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, cost, revenue, flow_index, is_bot) "
+        f"SELECT now() - INTERVAL number MINUTE, {opt_cid}, true, '', 'smoke-opt-{ap_pid}-bot-' || toString(number), 'US', 1.0, 0.0, 2, 1 FROM numbers(10)")
+    pg_exec(f"INSERT INTO conversions_data (click_id, campaign_id, offer_id, status, payout, revenue, profit, currency, flow_index, received_at) "
+            f"SELECT 'smoke-opt-conv-a-{ap_pid}-' || g, {opt_cid}, {opt_oid}, 'sale', 5.0, 5.0, 3.0, 'USD', 1, now() - (g || ' minutes')::interval "
+            f"FROM generate_series(1, 6) g")
+    pg_exec(f"INSERT INTO conversions_data (click_id, campaign_id, offer_id, status, payout, revenue, profit, currency, flow_index, received_at) "
+            f"SELECT 'smoke-opt-conv-b-{ap_pid}-' || g, {opt_cid}, {opt_oid}, 'sale', 0.5, 0.5, 0.5, 'USD', 2, now() - (g || ' minutes')::interval "
+            f"FROM generate_series(1, 1) g")
+
+    r = s.post(f"{api}/optimizer/{opt_cid}/run")
+    run = r.json() if r.status_code == 200 else {}
+    flows_by_name = {f["name"]: f for f in run.get("flows", [])}
+    check("optimizer: run-now reweights the better flow up",
+          r.status_code == 200 and run.get("changed") is True
+          and flows_by_name.get("opt-a", {}).get("new_weight", 0)
+          > flows_by_name.get("opt-a", {}).get("old_weight", 0)
+          and flows_by_name.get("opt-a", {}).get("new_weight") == 180
+          and flows_by_name.get("opt-b", {}).get("new_weight") == 20
+          and flows_by_name.get("opt-a", {}).get("clicks") == 60
+          # bot clicks excluded from b's count
+          and flows_by_name.get("opt-b", {}).get("clicks") == 60,
+          r.text[:400])
+    check("optimizer: forced/disabled flows never analysed",
+          "opt-forced" not in flows_by_name and "opt-off" not in flows_by_name,
+          str(list(flows_by_name)))
+
+    r = s.get(f"{api}/campaigns/")
+    camp = [c for c in r.json() if c["id"] == opt_cid]
+    cfg_flows = {f["name"]: f for f in (camp[0]["config"].get("flows") or [])} if camp else {}
+    check("optimizer: weights persisted in campaign config",
+          cfg_flows.get("opt-a", {}).get("weight") == 180
+          and cfg_flows.get("opt-b", {}).get("weight") == 20
+          and cfg_flows.get("opt-forced", {}).get("weight") == 100
+          and cfg_flows.get("opt-off", {}).get("weight") == 100,
+          str({k: v.get("weight") for k, v in cfg_flows.items()}))
+    opt_block = (camp[0]["config"].get("optimizer") or {}) if camp else {}
+    check("optimizer: last_runs recorded in optimizer block",
+          len(opt_block.get("last_runs") or []) == 1
+          and opt_block["last_runs"][0]["shifts"].get("opt-a") == {"old": 100, "new": 180},
+          str(opt_block.get("last_runs"))[:200])
+
+    r = s.get(f"{api}/audit/", params={"action": "optimizer_run", "entity": "campaigns"})
+    check("optimizer: audit entry written",
+          r.status_code == 200 and any(e.get("entity_id") == str(opt_cid)
+                                       for e in r.json().get("entries", [])),
+          r.text[:250])
+
+    # guard: demand more clicks than exist -> pass skipped, weights untouched
+    s.put(f"{api}/optimizer/{opt_cid}", json={"min_clicks": 100})
+    r = s.post(f"{api}/optimizer/{opt_cid}/run")
+    check("optimizer: insufficient-clicks guard skips",
+          r.status_code == 200 and not r.json().get("changed")
+          and r.json().get("reason") == "insufficient_clicks", r.text[:200])
+    s.put(f"{api}/optimizer/{opt_cid}", json={"min_clicks": 20, "enabled": False})
+    r = s.post(f"{api}/optimizer/{opt_cid}/run")
+    check("optimizer: disabled campaign skips",
+          r.status_code == 200 and r.json().get("reason") == "disabled", r.text[:150])
+
+    # live attribution: campaign hit binds a flow via stickiness cookie, the
+    # click-out (/c/...) must stamp that flow's index on the conversion row
+    sess = requests.Session()
+    sess.verify = not INSECURE
+    r = sess.get(f"{BASE}/smoke-opt-{ap_pid}", allow_redirects=False)
+    check("optimizer: campaign hit binds + redirects",
+          r.status_code in (301, 302, 307, 308), f"got {r.status_code}")
+    r = sess.get(f"{BASE}/c/smoke-opt-{ap_pid}/{opt_oid}", allow_redirects=False)
+    loc = r.headers.get("location") or ""
+    check("optimizer: click-out redirects to offer", r.status_code in (301, 302, 307, 308)
+          and "click_id=" in loc, f"{r.status_code} {loc[:120]}")
+    qs = dict(pair.split("=", 1) for pair in loc.split("?", 1)[1].split("&") if "=" in pair) \
+        if "?" in loc else {}
+    out_click = qs.get("click_id", "")
+    flow_idx = ""
+    for _ in range(10):
+        flow_idx = pg_exec_out(
+            f"SELECT flow_index FROM conversions_data WHERE click_id = '{out_click}'").strip()
+        if flow_idx:
+            break
+        import time
+        time.sleep(0.5)
+    check("optimizer: conversion row carries flow_index from bind cookie",
+          out_click and flow_idx in ("1", "2"), f"click={out_click} flow_index={flow_idx!r}")
+
+    # cleanup: campaign delete must purge the seeded CH clicks
+    r = s.delete(f"{api}/campaigns/{opt_cid}")
+    check("optimizer: campaign deleted", r.status_code == 200, r.text[:120])
+    import time
+    time.sleep(1.5)
+    leftover_clicks = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {opt_cid}")
+    check("optimizer: CH clicks purged on delete", leftover_clicks == "0", leftover_clicks[:80])
+    if opt_oid:
+        r = s.delete(f"{api}/offers/{opt_oid}")
+        check("optimizer: offer deleted", r.status_code == 200, r.text[:120])
 
     print("== Regression: admin platform cleanup ==")
     for conv in ([rec] if rec else []):
@@ -2245,6 +2669,506 @@ print("ESCAPED-OK")
                  and any(u["username"].startswith(p) for p in
                          ("smoke-patch-", "smoke-afw-", "smoke-afo-", "smoke-bfa-"))]
     check("wave2: no wave-2 users left", not leftovers, str(leftovers))
+
+    print("== Flow actions ==")
+    act_pid = os.getpid()
+    act_alias = f"smoke-action-{act_pid}"
+    act_payload = {
+        "name": "Smoke Action Campaign", "alias": act_alias, "type": "campaign",
+        "status": "active", "redirect_mode": "position",
+        "config": {"flows": [{
+            "type": "default", "position": 1, "enabled": True, "schema": "redirect",
+            "redirect_url": "https://example.com/smoke-action-dest?a=1&b=2",
+            "filters": [],
+        }], "postbacks": [], "fallback_url": "", "hide_referrer": False},
+    }
+    r = s.post(f"{api}/campaigns/", json=act_payload)
+    check("actions: create campaign", r.status_code == 200 and "id" in r.json(), r.text[:200])
+    act_cid = r.json().get("id")
+    act_offer_id = None
+    act_landing_id = None
+
+    base_flow = {"type": "default", "position": 1, "enabled": True, "schema": "redirect",
+                 "redirect_url": "https://example.com/smoke-action-dest?a=1&b=2", "filters": []}
+
+    def put_action_flow(flow):
+        act_payload["config"]["flows"] = [flow]
+        return s.put(f"{api}/campaigns/{act_cid}", json=act_payload)
+
+    # default (absent action) stays a 302 redirect
+    r = requests.get(f"{BASE}/{act_alias}", verify=not INSECURE, allow_redirects=False)
+    check("actions: absent action redirects (302)", r.status_code in (301, 302, 307, 308)
+          and "smoke-action-dest" in (r.headers.get("location") or ""), f"got {r.status_code}")
+
+    # iframe — full-viewport wrapper page
+    r = put_action_flow({**base_flow, "action": "iframe"})
+    check("actions: save iframe flow", r.status_code == 200, r.text[:150])
+    r = requests.get(f"{BASE}/{act_alias}", verify=not INSECURE, allow_redirects=False)
+    check("actions: iframe serves wrapper HTML", r.status_code == 200
+          and "<iframe" in r.text
+          and 'src="https://example.com/smoke-action-dest?a=1&amp;b=2"' in r.text
+          and "position:fixed" in r.text, f"got {r.status_code}")
+
+    # form_post — auto-submitting form, URL query submitted as hidden fields
+    r = put_action_flow({**base_flow, "action": "form_post"})
+    r = requests.get(f"{BASE}/{act_alias}", verify=not INSECURE, allow_redirects=False)
+    check("actions: form_post serves auto-submit form", r.status_code == 200
+          and '<form method="post" action="https://example.com/smoke-action-dest?a=1&amp;b=2"' in r.text
+          and 'name="a" value="1"' in r.text and "document.forms[0].submit()" in r.text,
+          f"got {r.status_code}")
+
+    # curl — server-side fetch of an operator-configured URL (internal docker
+    # network address reachable from the frontend container)
+    r = put_action_flow({**base_flow, "action": "curl",
+                         "redirect_url": "http://tracker_nginx/backend/health"})
+    r = requests.get(f"{BASE}/{act_alias}", verify=not INSECURE, allow_redirects=False)
+    check("actions: curl serves fetched content", r.status_code == 200
+          and "text/html" in r.headers.get("content-type", "")
+          and "AAA TRACKER" in r.text, f"got {r.status_code} {r.headers.get('content-type')}")
+
+    # curl — fetch failure falls back to a normal redirect
+    r = put_action_flow({**base_flow, "action": "curl", "redirect_url": "http://127.0.0.1:1/nope"})
+    r = requests.get(f"{BASE}/{act_alias}", verify=not INSECURE, allow_redirects=False)
+    check("actions: curl failure falls back to redirect",
+          r.status_code in (301, 302, 307, 308) and "127.0.0.1:1" in (r.headers.get("location") or ""),
+          f"got {r.status_code}")
+
+    # show_html — custom HTML served verbatim
+    r = put_action_flow({**base_flow, "action": "show_html", "html": "<h1>SMOKE-ACTION-HTML</h1>"})
+    r = requests.get(f"{BASE}/{act_alias}", verify=not INSECURE, allow_redirects=False)
+    check("actions: show_html serves custom HTML", r.status_code == 200
+          and "<h1>SMOKE-ACTION-HTML</h1>" in r.text, f"got {r.status_code}")
+
+    # none — 200 empty body
+    r = put_action_flow({**base_flow, "action": "none"})
+    r = requests.get(f"{BASE}/{act_alias}", verify=not INSECURE, allow_redirects=False)
+    check("actions: none serves 200 empty", r.status_code == 200 and r.text == "",
+          f"got {r.status_code} {r.text[:60]!r}")
+
+    # click-out: landing_offer flow with action=iframe — applies at /c click-out
+    r = s.post(f"{BASE}/landing", files={
+        "file": ("index.html", '<html><body><a href="{offer}">continue</a></body></html>',
+                 "text/html")},
+        data={"name": f"Smoke Action LP {act_pid}", "site_folder": f"smoke-act-lp-{act_pid}",
+              "type": 2})
+    check("actions: upload landing", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    act_landing_id = r.json().get("id")
+    r = s.post(f"{api}/offers/", json={"name": f"Smoke Action Offer {act_pid}",
+                                       "url": "https://example.com/smoke-act-offer?cid={click_id}"})
+    check("actions: create offer", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    act_offer_id = r.json().get("id")
+    act_payload["config"]["stickiness"] = True
+    act_payload["config"]["flows"] = [{
+        "type": "default", "position": 1, "enabled": True, "schema": "landing_offer",
+        "landing": act_landing_id, "offer": act_offer_id, "action": "iframe", "filters": []}]
+    r = s.put(f"{api}/campaigns/{act_cid}", json=act_payload)
+    check("actions: save landing_offer iframe flow", r.status_code == 200, r.text[:150])
+    act_sess = requests.Session()
+    act_sess.verify = not INSECURE
+    r = act_sess.get(f"{BASE}/{act_alias}", allow_redirects=False)
+    m = re.search(r'href="(/c/[^"]+)"', r.text) if r.status_code == 200 else None
+    check("actions: landing served with click-out link", bool(m), r.text[:150])
+    if m:
+        r = act_sess.get(f"{BASE}{m.group(1)}", allow_redirects=False)
+        check("actions: click-out honors iframe action", r.status_code == 200
+              and "<iframe" in r.text and "example.com/smoke-act-offer" in r.text
+              and "click_id=" in r.text, f"got {r.status_code}")
+    act_payload["config"].pop("stickiness", None)
+
+    # click-api decision mirrors the action (decision-only path)
+    r = put_action_flow(base_flow)
+    r = requests.post(f"{BASE}/click-api/{act_alias}", verify=not INSECURE, json={
+        "ip": "203.0.113.50", "user_agent": "SmokeAction/1.0 Chrome/120"})
+    check("actions: click-api default action is redirect", r.status_code == 200
+          and (r.json().get("decision") or {}).get("action") == "redirect", r.text[:200])
+    r = put_action_flow({**base_flow, "action": "iframe"})
+    r = requests.post(f"{BASE}/click-api/{act_alias}", verify=not INSECURE, json={
+        "ip": "203.0.113.51", "user_agent": "SmokeAction/1.0 Chrome/120"})
+    check("actions: click-api decision carries action", r.status_code == 200
+          and (r.json().get("decision") or {}).get("action") == "iframe", r.text[:200])
+
+    print("== Flow actions cleanup ==")
+    if act_cid:
+        r = s.delete(f"{api}/campaigns/{act_cid}")
+        check("actions: delete campaign", r.status_code == 200, r.text[:120])
+    if act_offer_id:
+        r = s.delete(f"{api}/offers/{act_offer_id}")
+        check("actions: delete offer", r.status_code == 200, r.text[:120])
+    if act_landing_id:
+        r = s.delete(f"{BASE}/landing/{act_landing_id}")
+        check("actions: delete landing", r.status_code in (200, 204), r.text[:120])
+
+    print("== Funnel (G10) ==")
+    fn_pid = os.getpid()
+    fn_alias = f"smoke-funnel-{fn_pid}"
+    fn_landing_ids = []
+    fn_offer_id = None
+    fn_cid = None
+
+    for marker, label in (("SMOKE-FUNNEL-0", "A"), ("SMOKE-FUNNEL-1", "B")):
+        r = s.post(f"{BASE}/landing", files={
+            "file": ("index.html", f'<html><body>{marker}<a href="{{offer}}">continue</a></body></html>',
+                     "text/html")},
+            data={"name": f"Smoke Funnel LP {label} {fn_pid}", "site_folder": f"smoke-fn-lp-{label.lower()}-{fn_pid}",
+                  "type": 2})
+        check(f"funnel: upload landing {label}", r.status_code == 200 and "id" in r.json(), r.text[:150])
+        lid = r.json().get("id")
+        if lid:
+            fn_landing_ids.append(lid)
+    r = s.post(f"{api}/offers/", json={"name": f"Smoke Funnel Offer {fn_pid}",
+                                       "url": f"https://example.com/smoke-fn-offer-{fn_pid}?cid={{click_id}}"})
+    check("funnel: create offer", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    fn_offer_id = r.json().get("id")
+
+    fn_payload = None
+    if len(fn_landing_ids) == 2 and fn_offer_id:
+        fn_payload = {
+            "name": "Smoke Funnel Campaign", "alias": fn_alias, "type": "campaign",
+            "status": "active", "redirect_mode": "position",
+            "config": {"flows": [], "postbacks": [], "hide_referrer": False,
+                       "funnel": {"enabled": True, "steps": [
+                           {"name": "Quiz 1", "landing": fn_landing_ids[0], "offers": [fn_offer_id],
+                            "schema": "landing_offer"},
+                           {"name": "Offer Page", "landing": fn_landing_ids[1], "offers": [fn_offer_id],
+                            "schema": "landing_offer"}]}}}
+        r = s.post(f"{api}/campaigns/", json=fn_payload)
+        check("funnel: create campaign", r.status_code == 200 and "id" in r.json(), r.text[:200])
+        fn_cid = r.json().get("id")
+
+    fn_sess = requests.Session()
+    fn_sess.verify = not INSECURE
+
+    # (a) first hit serves step 0
+    r = fn_sess.get(f"{BASE}/{fn_alias}", allow_redirects=False)
+    check("funnel: first hit serves step 0 landing", r.status_code == 200
+          and "SMOKE-FUNNEL-0" in r.text, f"got {r.status_code}")
+    check("funnel: step bind cookie issued", fn_sess.cookies.get("aaa_bind") is not None)
+
+    # (b) click-out → cookie step advances
+    m = re.search(r'href="(/c/[^"]+)"', r.text) if r.status_code == 200 else None
+    check("funnel: step 0 landing has click-out link", bool(m), r.text[:150])
+    fn_click_ids = []
+    if m:
+        r = fn_sess.get(f"{BASE}{m.group(1)}", allow_redirects=False)
+        loc = r.headers.get("location") or ""
+        check("funnel: click-out redirects to offer", r.status_code in (301, 302, 307, 308)
+              and f"smoke-fn-offer-{fn_pid}" in loc, f"got {r.status_code} {loc[:80]}")
+        cm = re.search(r"click_id=([0-9a-fA-F-]{36})", loc)
+        if cm:
+            fn_click_ids.append(cm.group(1))
+
+    # (c) second hit serves step 1
+    r = fn_sess.get(f"{BASE}/{fn_alias}", allow_redirects=False)
+    check("funnel: second hit serves step 1 landing", r.status_code == 200
+          and "SMOKE-FUNNEL-1" in r.text, f"got {r.status_code}")
+
+    # click-out at the last step keeps the visitor on the last step
+    m = re.search(r'href="(/c/[^"]+)"', r.text) if r.status_code == 200 else None
+    if m:
+        r = fn_sess.get(f"{BASE}{m.group(1)}", allow_redirects=False)
+        loc = r.headers.get("location") or ""
+        cm = re.search(r"click_id=([0-9a-fA-F-]{36})", loc)
+        if cm:
+            fn_click_ids.append(cm.group(1))
+    r = fn_sess.get(f"{BASE}/{fn_alias}", allow_redirects=False)
+    check("funnel: repeat visit past last step re-sees last step", r.status_code == 200
+          and "SMOKE-FUNNEL-1" in r.text, f"got {r.status_code}")
+
+    # (d) ClickHouse rows carry the step in flow_index
+    if fn_cid:
+        out = ch_query(f"SELECT DISTINCT flow_index FROM clicks_data WHERE campaign_id = {fn_cid} ORDER BY flow_index")
+        check("funnel: CH flow_index stamped with steps 0 and 1",
+              set(out.split()) == {"0", "1"}, out[:80])
+
+    # (e) conversions_data rows carry funnel_step
+    out = pg_exec_out(f"SELECT string_agg(DISTINCT funnel_step::text, ',' ORDER BY funnel_step::text) "
+                      f"FROM conversions_data WHERE campaign_id = {fn_cid}").strip()
+    check("funnel: conversions_data carries funnel_step 0 and 1", out == "0,1", out[:80])
+
+    # (f) click-api decision mirrors the funnel
+    r = requests.post(f"{BASE}/click-api/{fn_alias}", verify=not INSECURE, json={
+        "ip": "203.0.113.99", "user_agent": "SmokeFunnel/1.0 Chrome/120"})
+    fn_dec = (r.json().get("decision") or {}) if r.status_code == 200 else {}
+    check("funnel: click-api decision returns funnel step 0", r.status_code == 200
+          and fn_dec.get("funnel") is True and fn_dec.get("step") == 0
+          and fn_dec.get("landing_id") == fn_landing_ids[0]
+          and fn_dec.get("landing_url") == f"/l/smoke-fn-lp-a-{fn_pid}", r.text[:200])
+
+    # (g) postback on the step-1 click marks a conversion; funnel report aggregates per step
+    if len(fn_click_ids) >= 2:
+        r = requests.get(f"{BASE}/pb/{fn_click_ids[1]}/sale/9.5", verify=not INSECURE)
+        check("funnel: postback on step-1 click accepted", r.status_code == 200, r.text[:150])
+        r = s.get(f"{api}/reports/funnel/{fn_cid}")
+        steps = (r.json().get("steps") or []) if r.status_code == 200 else []
+        check("funnel: funnel report returns both steps", r.status_code == 200 and len(steps) == 2,
+              r.text[:200])
+        if len(steps) == 2:
+            check("funnel: step 0 visits and click-outs counted",
+                  steps[0]["visits"] >= 1 and steps[0]["clickouts"] >= 1, str(steps[0])[:150])
+            check("funnel: step 1 conversion and revenue after postback",
+                  steps[1]["conversions"] >= 1 and steps[1]["revenue"] > 0, str(steps[1])[:150])
+            check("funnel: step 1 drop-off reported", steps[1]["drop_off_pct"] is not None,
+                  str(steps[1])[:150])
+            check("funnel: cumulative conversions accumulate",
+                  steps[1]["cumulative_conversions"] >= steps[0]["cumulative_conversions"],
+                  str(steps[1])[:150])
+    # (i) non-funnel campaigns are rejected by the funnel report
+    r = s.get(f"{api}/reports/funnel/{cid}")
+    check("funnel: non-funnel campaign report 404", r.status_code == 404, str(r.status_code))
+    r = s.get(f"{api}/reports/funnel/99999999")
+    check("funnel: unknown campaign report 404", r.status_code == 404, str(r.status_code))
+
+    # (h) a funnel config edit invalidates the bind cookie (routing_hash) → step resets to 0
+    if fn_payload and fn_cid:
+        fn_payload["config"]["funnel"]["steps"][1]["name"] = "Offer Page v2"
+        r = s.put(f"{api}/campaigns/{fn_cid}", json=fn_payload)
+        check("funnel: config edit saved", r.status_code == 200, r.text[:150])
+        r = fn_sess.get(f"{BASE}/{fn_alias}", allow_redirects=False)
+        check("funnel: config edit resets visitor to step 0", r.status_code == 200
+              and "SMOKE-FUNNEL-0" in r.text, f"got {r.status_code}")
+
+    print("== Funnel cleanup ==")
+    if fn_cid:
+        r = s.delete(f"{api}/campaigns/{fn_cid}")
+        check("funnel: delete campaign", r.status_code == 200, r.text[:120])
+        leftover = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {fn_cid}")
+        check("funnel: CH clicks purged on delete", leftover == "0", leftover[:80])
+    if fn_offer_id:
+        r = s.delete(f"{api}/offers/{fn_offer_id}")
+        check("funnel: delete offer", r.status_code == 200, r.text[:120])
+    for lid in fn_landing_ids:
+        r = s.delete(f"{BASE}/landing/{lid}")
+        check(f"funnel: delete landing {lid}", r.status_code in (200, 204), r.text[:120])
+
+    print("== Blacklists (G44) ==")
+    # Traffic-quality blacklists: named value lists on a field, global or
+    # per-campaign, action mark (tracked, is_bot) or block (untracked 404).
+    bl_alias = f"smoke-bl-{os.getpid()}"
+    bl_other_alias = f"smoke-bl-other-{os.getpid()}"
+    bl_payload = {"name": bl_alias, "alias": bl_alias, "type": "campaign",
+                  "status": "active", "redirect_mode": "position",
+                  "config": {"flows": [{
+                      "type": "default", "position": 1, "enabled": True, "schema": "redirect",
+                      "redirect_url": f"https://example.com/smoke-bl-{os.getpid()}-a",
+                      "filters": []}], "postbacks": [], "hide_referrer": False,
+                      "fallback_url": ""}}
+    r = s.post(f"{api}/campaigns/", json=bl_payload)
+    check("bl: create campaign", r.status_code == 200 and "id" in r.json(), r.text[:200])
+    bl_cid = r.json().get("id")
+    bl2_payload = dict(bl_payload, name=bl_other_alias, alias=bl_other_alias)
+    r = s.post(f"{api}/campaigns/", json=bl2_payload)
+    bl_other_cid = r.json().get("id") if r.status_code == 200 else None
+
+    # CRUD + validation
+    r = s.get(f"{api}/fraud/blacklists")
+    check("bl: list 200", r.status_code == 200
+          and isinstance(r.json().get("blacklists"), list), r.text[:150])
+    bl_mark = {"name": f"bl-mark-{os.getpid()}", "field": "sub_id_1",
+               "values": [f"bl-hit-{os.getpid()}"], "scope": "global",
+               "action": "mark", "enabled": True}
+    r = s.post(f"{api}/fraud/blacklists", json=bl_mark)
+    check("bl: create mark list", r.status_code == 200 and r.json().get("id"),
+          r.text[:200])
+    bl_mark_id = (r.json() or {}).get("id")
+    bl_block = {"name": f"bl-block-{os.getpid()}", "field": "sub_id_2",
+                "values": [f"bl-block-{os.getpid()}"], "scope": "campaign",
+                "campaign_id": bl_cid, "action": "block", "enabled": True}
+    r = s.post(f"{api}/fraud/blacklists", json=bl_block)
+    check("bl: create campaign-scoped block list",
+          r.status_code == 200 and r.json().get("campaign_id") == bl_cid, r.text[:200])
+    bl_block_id = (r.json() or {}).get("id")
+    bl_ip = {"name": f"bl-ip-{os.getpid()}", "field": "ip",
+             "values": ["198.51.100.0/24"], "scope": "global", "action": "block",
+             "enabled": True}
+    r = s.post(f"{api}/fraud/blacklists", json=bl_ip)
+    check("bl: create ip CIDR block list", r.status_code == 200, r.text[:200])
+    bl_ip_id = (r.json() or {}).get("id")
+
+    for bad, why in [
+            (dict(bl_mark, id=None, field="bogus"), "bad field"),
+            (dict(bl_mark, id=None, values=[]), "empty values"),
+            (dict(bl_mark, id=None, action="nuke"), "bad action"),
+            (dict(bl_mark, id=None, scope="campaign", campaign_id=None),
+             "campaign scope without id"),
+            (dict(bl_mark, id=None, values=["x"] * 5001), "too many values"),
+            (dict(bl_mark, id=None, field="ip", values=["not-an-ip"]), "bad ip")]:
+        bad.pop("id", None)
+        r = s.post(f"{api}/fraud/blacklists", json=bad)
+        check(f"bl: validation rejects {why} (400)",
+              r.status_code == 400, f"{r.status_code} {r.text[:100]}")
+
+    r = s.put(f"{api}/fraud/blacklists/{bl_mark_id}",
+              json={"enabled": False})
+    check("bl: toggle enabled via PUT", r.status_code == 200
+          and r.json().get("enabled") is False, r.text[:150])
+    r = s.put(f"{api}/fraud/blacklists/{bl_mark_id}", json={"enabled": True})
+    check("bl: re-enabled", r.status_code == 200 and r.json().get("enabled") is True,
+          r.text[:150])
+
+    # Tracking plane — settings cache is 30s, wait out the TTL once for all lists
+    settle_settings_cache()
+    bl_ua = f"SmokeBL/{os.getpid()}"
+    r = requests.get(f"{BASE}/{bl_alias}", params={"sub_id_1": f"bl-hit-{os.getpid()}"},
+                     verify=not INSECURE, allow_redirects=False, headers={"User-Agent": bl_ua})
+    check("bl: marked hit still redirects",
+          r.status_code in (301, 302, 307, 308), str(r.status_code))
+    r = requests.get(f"{BASE}/{bl_alias}", params={"sub_id_1": f"bl-miss-{os.getpid()}"},
+                     verify=not INSECURE, allow_redirects=False, headers={"User-Agent": bl_ua})
+    check("bl: non-matching hit redirects",
+          r.status_code in (301, 302, 307, 308), str(r.status_code))
+    import time as _time
+    _time.sleep(1)
+    rows = ch_query(f"SELECT sub_id_1, is_bot FROM clicks_data "
+                    f"WHERE campaign_id = {bl_cid} ORDER BY received_at")
+    lines = [l.split("\t") for l in rows.splitlines() if l]
+    mark_row = [l for l in lines if l[0] == f"bl-hit-{os.getpid()}"]
+    miss_row = [l for l in lines if l[0] == f"bl-miss-{os.getpid()}"]
+    check("bl: matching param tracked as bot",
+          bool(mark_row) and mark_row[0][1] == "true", rows[:120])
+    check("bl: non-matching param unaffected",
+          bool(miss_row) and miss_row[0][1] == "false", rows[:120])
+
+    before = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {bl_cid}")
+    r = requests.get(f"{BASE}/{bl_alias}", params={"sub_id_2": f"bl-block-{os.getpid()}"},
+                     verify=not INSECURE, allow_redirects=False, headers={"User-Agent": bl_ua})
+    check("bl: campaign-scoped block serves 404", r.status_code == 404, str(r.status_code))
+    after = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {bl_cid}")
+    check("bl: blocked hit is untracked", before == after, f"{before} -> {after}")
+
+    if bl_other_cid:
+        r = requests.get(f"{BASE}/{bl_other_alias}",
+                         params={"sub_id_2": f"bl-block-{os.getpid()}"},
+                         verify=not INSECURE, allow_redirects=False,
+                         headers={"User-Agent": bl_ua})
+        check("bl: campaign-scoped list does not block other campaigns",
+              r.status_code in (301, 302, 307, 308), str(r.status_code))
+
+    # IP CIDR block via direct uvicorn (nginx overwrites X-Real-IP with the
+    # peer address; X-Forwarded-For reaches uvicorn unmodified)
+    r = subprocess.run(["docker", "exec", "tracker_frontend", "curl", "-s", "-o", "/dev/null",
+                        "-w", "%{http_code}", "-H", "Host: localhost",
+                        "-H", "X-Forwarded-For: 198.51.100.77", "-A", bl_ua,
+                        f"http://127.0.0.1:8000/{bl_alias}"],
+                       capture_output=True, text=True, timeout=30)
+    check("bl: matching CIDR IP blocked 404", r.stdout.strip() == "404", r.stdout[:50])
+    r = subprocess.run(["docker", "exec", "tracker_frontend", "curl", "-s", "-o", "/dev/null",
+                        "-w", "%{http_code}", "-H", "Host: localhost",
+                        "-H", "X-Forwarded-For: 8.8.8.8", "-A", bl_ua,
+                        f"http://127.0.0.1:8000/{bl_alias}"],
+                       capture_output=True, text=True, timeout=30)
+    check("bl: non-matching public IP unaffected", r.stdout.strip() in
+          ("301", "302", "307", "308"), r.stdout[:50])
+
+    print("== Blacklists cleanup ==")
+    for bid, label in [(bl_mark_id, "mark"), (bl_block_id, "block"),
+                       (bl_ip_id, "ip")]:
+        if bid:
+            r = s.delete(f"{api}/fraud/blacklists/{bid}")
+            check(f"bl: delete {label} list", r.status_code == 200, r.text[:120])
+    r = s.delete(f"{api}/fraud/blacklists/does-not-exist")
+    check("bl: delete unknown 404", r.status_code == 404, str(r.status_code))
+    ch_query(f"ALTER TABLE clicks_data DELETE WHERE campaign_id IN ({bl_cid}, {bl_other_cid})")
+    if bl_cid:
+        r = s.delete(f"{api}/campaigns/{bl_cid}")
+        check("bl: delete campaign", r.status_code == 200, r.text[:120])
+    if bl_other_cid:
+        r = s.delete(f"{api}/campaigns/{bl_other_cid}")
+        check("bl: delete second campaign", r.status_code == 200, r.text[:120])
+
+    print("== Status (G78) ==")
+    r = s.get(f"{api}/status")
+    body = r.json() if r.status_code == 200 else {}
+    check("status: 200 with version + sections",
+          r.status_code == 200 and body.get("version") == "0.9.0"
+          and all(k in body for k in ("postgres", "clickhouse", "loops",
+                                      "clicks_24h", "conversions_24h")), r.text[:200])
+    check("status: both databases up with latency",
+          (body.get("postgres") or {}).get("ok") is True
+          and (body.get("clickhouse") or {}).get("ok") is True
+          and isinstance(body.get("postgres", {}).get("latency_ms"), (int, float)),
+          r.text[:200])
+    check("status: loop timestamps section shaped",
+          set((body.get("loops") or {}).keys()) == {"monitor", "rules", "optimizer"},
+          str((body.get("loops") or {}).keys()))
+    r = requests.get(f"{api}/status", verify=not INSECURE)
+    check("status: unauthenticated 401", r.status_code == 401, str(r.status_code))
+    r = s.get(f"{api}/auth-status")
+    check("status: legacy auth check moved to /auth-status",
+          r.status_code == 200 and r.json().get("authenticated") is True, r.text[:120])
+
+    print("== Lander grabber (G73) ==")
+    # Hermetic target: a fixture folder served by nginx at /l/<folder>/ on the
+    # container network. The SSRF guard rejects internal hosts unless the
+    # caller explicitly passes allow_private (own-infrastructure grabs).
+    landings_dir = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "frontend", "landings"))
+    grab_src_folder = "smoke-grab-src"
+    grab_src_path = os.path.join(landings_dir, grab_src_folder, "index.html")
+    grab_folder = f"smoke_grab_{os.getpid()}"
+    grab_id = None
+    os.makedirs(os.path.dirname(grab_src_path), exist_ok=True)
+    with open(grab_src_path, "w", encoding="utf-8") as f:
+        f.write("<!DOCTYPE html><html><head><title>Smoke Grab Fixture</title>"
+                '<link rel="stylesheet" href="assets/style.css"></head><body>'
+                '<img src="img/pic.png" srcset="img/pic.png 1x, /img/pic2.png 2x">'
+                '<a href="https://example.com/abs">abs</a>'
+                '<a href="page2.html">rel</a>'
+                "</body></html>")
+    try:
+        r = s.post(f"{BASE}/landing/grab",
+                   data={"url": f"http://tracker_nginx/l/{grab_src_folder}/",
+                         "folder": grab_folder, "allow_private": "true"})
+        check("grab: fixture grabbed 200",
+              r.status_code == 200 and r.json().get("site") == grab_folder,
+              f"{r.status_code} {r.text[:150]}")
+        grab_id = (r.json() or {}).get("id")
+        check("grab: name from <title>",
+              bool(grab_id) and r.json().get("name") == "Smoke Grab Fixture",
+              r.text[:150])
+
+        grabbed_path = os.path.join(landings_dir, grab_folder, "index.html")
+        grabbed = ""
+        if os.path.exists(grabbed_path):
+            with open(grabbed_path, encoding="utf-8") as f:
+                grabbed = f.read()
+        check("grab: relative assets rewritten absolute",
+              f"http://tracker_nginx/l/{grab_src_folder}/img/pic.png" in grabbed
+              and f"http://tracker_nginx/l/{grab_src_folder}/assets/style.css" in grabbed
+              and "http://tracker_nginx/img/pic2.png" in grabbed, grabbed[:200])
+        check("grab: absolute URL left untouched",
+              'href="https://example.com/abs"' in grabbed, grabbed[:200])
+
+        r = s.get(f"{BASE}/landings")
+        rows = [l for l in (r.json() if r.status_code == 200 else [])
+                if l.get("folder") == grab_folder]
+        check("grab: landing row exists as local_file",
+              r.status_code == 200 and len(rows) == 1
+              and rows[0].get("type") == "local_file", r.text[:200])
+
+        # SSRF guard + validation
+        r = s.post(f"{BASE}/landing/grab", data={"url": "http://localhost/",
+                                                 "folder": f"{grab_folder}_x1"})
+        check("grab: localhost rejected 400", r.status_code == 400, f"{r.status_code}")
+        r = s.post(f"{BASE}/landing/grab",
+                   data={"url": f"http://tracker_nginx/l/{grab_src_folder}/",
+                         "folder": f"{grab_folder}_x2"})
+        check("grab: internal host rejected without opt-in", r.status_code == 400,
+              f"{r.status_code}")
+        r = s.post(f"{BASE}/landing/grab", data={"url": "ftp://example.com/x",
+                                                 "folder": f"{grab_folder}_x3"})
+        check("grab: non-http scheme rejected 400", r.status_code == 400,
+              f"{r.status_code}")
+        r = s.post(f"{BASE}/landing/grab",
+                   data={"url": f"http://tracker_nginx/l/{grab_src_folder}/",
+                         "folder": "Bad-Folder!", "allow_private": "true"})
+        check("grab: invalid folder name rejected 400", r.status_code == 400,
+              f"{r.status_code}")
+    finally:
+        if grab_id:
+            r = s.delete(f"{BASE}/landing/{grab_id}")
+            check("grab: delete created landing", r.status_code in (200, 204), r.text[:120])
+        shutil.rmtree(os.path.join(landings_dir, grab_src_folder), ignore_errors=True)
+        shutil.rmtree(os.path.join(landings_dir, grab_folder), ignore_errors=True)
 
     print("== Cleanup ==")
     if conv_id:

@@ -7,9 +7,13 @@
                 <div class="page-subtitle">Manage your traffic sources</div>
             </v-col>
             <v-col class="d-flex justify-end" cols="auto">
+                <v-btn class="mr-2" outlined color="primary" @click="openCatalog">
+                    <v-icon small class="mr-1">mdi-view-grid-outline</v-icon>
+                    New from template
+                </v-btn>
                 <v-btn color="primary" elevation="0" @click="openCreate">
                     <v-icon small class="mr-1">mdi-plus</v-icon>
-                    Add Source
+                    Add source
                 </v-btn>
             </v-col>
         </v-row>
@@ -17,20 +21,20 @@
         <v-dialog v-model="dialog">
             <v-card class="dialog-lg">
                 <v-card-title>
-                    <span class="text-h6">{{ isEdit ? 'Edit Source' : 'Add Source' }}</span>
+                    <span class="text-h6">{{ isEdit ? 'Edit source' : 'Add source' }}</span>
                 </v-card-title>
 
                 <v-card-text>
 
                     <v-text-field
-                            label="Source Name"
+                            label="Source name"
                             v-model="form.name"
                             outlined
                             dense
                     ></v-text-field>
 
                     <v-text-field
-                            label="Traffic Loss (%)"
+                            label="Traffic loss (%)"
                             v-model="form.traffic_loss"
                             type="number"
                             step="0.01"
@@ -39,13 +43,13 @@
                     ></v-text-field>
 
                     <v-text-field
-                            label="S2S Postback URL"
+                            label="S2S postback URL"
                             v-model="form.s2s_postback"
                             outlined
                             dense
                     ></v-text-field>
 
-                    <v-subheader class="pl-0">S2S Postback Statuses</v-subheader>
+                    <v-subheader class="pl-0">S2S postback statuses</v-subheader>
                     <v-row dense>
                         <v-col cols="3" v-for="status in ['sale', 'lead', 'rejected', 'upsale']" :key="status">
                             <v-checkbox
@@ -57,7 +61,7 @@
                     </v-row>
 
                     <div class="d-flex align-center mt-2">
-                        <v-subheader class="pl-0">Additional Settings (API keys, etc.)</v-subheader>
+                        <v-subheader class="pl-0">Additional settings (API keys, etc.)</v-subheader>
                     </div>
                     <v-row
                             v-for="(extra, index) in form.additionalSettingsList"
@@ -102,10 +106,10 @@
                             class="mt-2"
                             @click="addAdditionalSetting"
                     >
-                        <v-icon small class="mr-1">mdi-plus</v-icon>Add Setting
+                        <v-icon small class="mr-1">mdi-plus</v-icon>Add setting
                     </v-btn>
 
-                    <v-subheader class="pl-0">Settings Mapping</v-subheader>
+                    <v-subheader class="pl-0">Settings mapping</v-subheader>
                     <v-row
                             v-for="(setting, index) in form.settings"
                             :key="index"
@@ -157,7 +161,7 @@
                             class="mt-2"
                             @click="addSetting"
                     >
-                        <v-icon small class="mr-1">mdi-plus</v-icon>Add Parameter
+                        <v-icon small class="mr-1">mdi-plus</v-icon>Add parameter
                     </v-btn>
 
                 </v-card-text>
@@ -167,6 +171,62 @@
                     <v-btn text @click="close">Cancel</v-btn>
                     <v-btn color="primary" elevation="0" @click="save">Save</v-btn>
                 </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+
+        <v-dialog v-model="catalogDialog" scrollable>
+            <v-card class="dialog-lg">
+                <v-card-title class="d-flex align-center">
+                    <span class="text-h6">Traffic sources catalog</span>
+                    <v-spacer></v-spacer>
+                    <v-btn icon small @click="catalogDialog = false">
+                        <v-icon small>mdi-close</v-icon>
+                    </v-btn>
+                </v-card-title>
+
+                <v-card-text>
+                    <div class="catalog-toolbar mb-3">
+                        <v-text-field
+                                v-model="catalogSearch"
+                                label="Search sources"
+                                prepend-inner-icon="mdi-magnify"
+                                outlined
+                                dense
+                                clearable
+                                hide-details
+                                class="catalog-search"
+                        ></v-text-field>
+                        <v-chip-group v-model="catalogFilter" mandatory>
+                            <v-chip value="all" small filter>All</v-chip>
+                            <v-chip value="api" small filter>With API integrations</v-chip>
+                        </v-chip-group>
+                    </div>
+
+                    <div class="catalog-grid" v-if="catalogPresets.length">
+                        <div class="catalog-card" v-for="preset in catalogPresets" :key="preset.name">
+                            <div class="aff-catalog-logo">
+                                <div class="aff-catalog-logo-fallback">{{ preset.name.charAt(0) }}</div>
+                                <img v-if="preset.logo_url || preset.logo_domain"
+                                     :src="preset.logo_url || ('/backend/api/sources/favicon/' + encodeURIComponent(preset.logo_domain))"
+                                     width="48" height="48" alt="">
+                            </div>
+                            <div class="catalog-card-name">{{ preset.name }}</div>
+                            <div class="catalog-card-caps">
+                                <span v-for="cap in preset.capabilities" :key="cap"
+                                      class="status-chip" :class="capChipClass(cap)">{{ capLabel(cap) }}</span>
+                                <span v-if="!preset.capabilities.length" class="catalog-card-nocaps">No API integration</span>
+                            </div>
+                            <v-btn small color="primary" elevation="0" @click="addPreset(preset)">
+                                <v-icon small class="mr-1">mdi-plus</v-icon>Add
+                            </v-btn>
+                        </div>
+                    </div>
+                    <div v-else class="empty-state py-8">
+                        <v-icon>mdi-magnify-close</v-icon>
+                        <div class="mt-2">No sources match your search</div>
+                    </div>
+                </v-card-text>
             </v-card>
         </v-dialog>
 
@@ -234,6 +294,17 @@
                 isEdit: false,
                 dialog: false,
                 loadingSources: false,
+                catalogDialog: false,
+                catalogSearch: '',
+                catalogFilter: 'all',
+                presets: [],
+                loadingPresets: false,
+                capLabels: {
+                    cost: 'Cost update',
+                    pause_campaign: 'Campaign pause',
+                    blacklist: 'Blacklist placement',
+                    pause_creative: 'Pause creative'
+                },
                 headers: [
                     {text: 'Name', value: 'name'},
                     {text: 'Traffic Loss', value: 'traffic_loss'},
@@ -268,6 +339,25 @@
             this.loadSources();
             this.$root.$on('load-sources', this.loadSources);
         },
+        computed: {
+            // Catalog cards: search + API filter, sources with capabilities
+            // first (alphabetical inside each group), "Other" always pinned last.
+            catalogPresets() {
+                const q = (this.catalogSearch || '').trim().toLowerCase();
+                let list = this.presets.filter(p => {
+                    if (this.catalogFilter === 'api' && !p.capabilities.length) return false;
+                    return !q || p.name.toLowerCase().indexOf(q) !== -1;
+                });
+                list.sort((a, b) => {
+                    if (a.name === 'Other') return 1;
+                    if (b.name === 'Other') return -1;
+                    const capDiff = (b.capabilities.length ? 1 : 0) - (a.capabilities.length ? 1 : 0);
+                    if (capDiff) return capDiff;
+                    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+                });
+                return list;
+            }
+        },
         methods: {
             getDefaultSettings() {
                 return [
@@ -277,7 +367,7 @@
                     {name: 'External ID', parameter: 'external_id', token: '', editable_name: false},
                     {name: 'Creative ID', parameter: 'utm_creative', token: '{{ad.name}}', editable_name: false},
                     {
-                        name: 'AD Campaign ID',
+                        name: 'Ad campaign ID',
                         parameter: 'utm_campaign',
                         token: '{{campaign.name}}',
                         editable_name: false
@@ -343,9 +433,95 @@
                     });
             },
 
+            openCatalog() {
+                this.catalogDialog = true;
+                this.catalogSearch = '';
+                this.catalogFilter = 'all';
+                if (!this.presets.length) {
+                    this.loadPresets();
+                }
+            },
+
+            loadPresets() {
+                this.loadingPresets = true;
+                fetch("/backend/api/sources/presets", {
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        if (!res.ok) throw new Error("Failed to load the sources catalog.");
+                        return res.json();
+                    })
+                    .then(data => {
+                        this.presets = data.presets || [];
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.loadingPresets = false;
+                    });
+            },
+
+            capLabel(cap) {
+                return this.capLabels[cap] || cap;
+            },
+
+            capChipClass(cap) {
+                return (cap === 'cost' || cap === 'pause_campaign') ? 'status-chip--info' : 'status-chip--neutral';
+            },
+
+            addPreset(preset) {
+                const payload = {
+                    name: preset.name,
+                    traffic_loss: 0,
+                    s2s_postback: '',
+                    s2s_postback_statuses: {sale: true, lead: false, rejected: false, upsale: false},
+                    additional_settings: {},
+                    settings: preset.params || []
+                };
+                fetch("/backend/api/sources/", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(payload),
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const text = await res.text();
+                        if (!res.ok) {
+                            let msg = text;
+                            try {
+                                const err = JSON.parse(text);
+                                msg = err.detail || msg;
+                            } catch {
+                            }
+                            // Presets live in the sources table, so adding one
+                            // that is already there is a no-op, not an error.
+                            if (res.status === 400 && /already exists/i.test(msg)) {
+                                this.catalogDialog = false;
+                                this.$root.$emit("show-message", {
+                                    type: "info",
+                                    text: `Source "${preset.name}" is already in your sources`
+                                });
+                                this.loadSources();
+                                return;
+                            }
+                            throw new Error(msg);
+                        }
+                        this.catalogDialog = false;
+                        this.$root.$emit("show-message", {
+                            type: "success",
+                            text: `Source "${preset.name}" created from template`
+                        });
+                        this.loadSources();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    });
+            },
+
             openCreate() {
-                this.isEdit = false;
-                this.dialog = true;
+                this.isEdit = false;                this.dialog = true;
                 this.form = {
                     id: null,
                     name: '',
@@ -429,7 +605,7 @@
             },
 
             async deleteSource(source) {
-                const ok = await this.$refs.confirm.open('Delete Source', 'Are you sure you want to delete this source? This cannot be undone.');
+                const ok = await this.$refs.confirm.open('Delete source', 'Are you sure you want to delete this source? This cannot be undone.');
                 if (!ok) return;
 
                 fetch(`/backend/api/sources/${source.id}`, {

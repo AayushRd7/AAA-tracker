@@ -11,7 +11,7 @@
                     elevation="0"
                     @click="saveSettings"
             >
-                <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save Settings
+                <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save settings
             </v-btn>
         </div>
         <v-container fluid class="px-0 settings-grid">
@@ -52,7 +52,7 @@
             <v-row>
                 <v-col cols="12" md="6">
                     <v-card class="pa-4">
-                        <v-card-title>General Settings</v-card-title>
+                        <v-card-title>General settings</v-card-title>
                         <v-card-text>
                             <v-switch
                                     v-model="darkMode"
@@ -66,7 +66,7 @@
                             ></v-switch>
 
                             <v-text-field
-                                    label="Tracker Domain"
+                                    label="Tracker domain"
                                     v-model="settings.domain"
                                     outlined
                                     dense
@@ -96,7 +96,7 @@
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-telegram</v-icon>
-                            Telegram Notifications
+                            Telegram notifications
                         </v-card-title>
                         <v-card-text>
                             <v-switch
@@ -108,7 +108,7 @@
                             ></v-switch>
 
                             <v-text-field
-                                    label="Bot Token"
+                                    label="Bot token"
                                     v-model="settings.telegram.bot_token"
                                     outlined
                                     dense
@@ -140,7 +140,7 @@
 
                             <div class="d-flex align-center mt-3">
                                 <v-btn small outlined color="primary" :loading="tgTesting" @click="testTelegram">
-                                    <v-icon small class="mr-1">mdi-send-outline</v-icon>Send Test Message
+                                    <v-icon small class="mr-1">mdi-send-outline</v-icon>Send test message
                                 </v-btn>
                                 <div class="caption grey--text ml-2">Saves settings first, then sends a test to your chat</div>
                             </div>
@@ -152,7 +152,7 @@
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-email-outline</v-icon>
-                            Daily Email Reports
+                            Daily email reports
                         </v-card-title>
                         <v-card-text>
                             <v-switch
@@ -166,7 +166,7 @@
                             <v-row dense>
                                 <v-col cols="8">
                                     <v-text-field
-                                            label="SMTP Host"
+                                            label="SMTP host"
                                             v-model="settings.email_reports.smtp_host"
                                             outlined
                                             dense
@@ -188,14 +188,14 @@
                             </v-row>
 
                             <v-text-field
-                                    label="SMTP Login"
+                                    label="SMTP login"
                                     v-model="settings.email_reports.smtp_login"
                                     outlined
                                     dense
                             ></v-text-field>
 
                             <v-text-field
-                                    label="SMTP Password"
+                                    label="SMTP password"
                                     v-model="settings.email_reports.smtp_password"
                                     :append-icon="showSmtpPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
                                     :type="showSmtpPassword ? 'text' : 'password'"
@@ -209,7 +209,7 @@
                             <v-row dense>
                                 <v-col cols="6">
                                     <v-text-field
-                                            label="From Name"
+                                            label="From name"
                                             v-model="settings.email_reports.from_name"
                                             outlined
                                             dense
@@ -217,7 +217,7 @@
                                 </v-col>
                                 <v-col cols="6">
                                     <v-text-field
-                                            label="From Email"
+                                            label="From email"
                                             v-model="settings.email_reports.from_email"
                                             outlined
                                             dense
@@ -226,7 +226,7 @@
                             </v-row>
 
                             <v-text-field
-                                    label="Brevo API Key (optional)"
+                                    label="Brevo API key (optional)"
                                     v-model="settings.email_reports.api_key"
                                     :append-icon="showBrevoApiKey ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
                                     :type="showBrevoApiKey ? 'text' : 'password'"
@@ -259,7 +259,7 @@
 
                             <div class="d-flex align-center mt-2">
                                 <v-btn small outlined color="primary" :loading="emailTesting" @click="testEmailReport">
-                                    <v-icon small class="mr-1">mdi-send-outline</v-icon>Send Test Report Now
+                                    <v-icon small class="mr-1">mdi-send-outline</v-icon>Send test report now
                                 </v-btn>
                                 <div class="caption grey--text ml-2">Saves settings first, then emails yesterday's report</div>
                             </div>
@@ -271,7 +271,7 @@
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-shield-lock-outline</v-icon>
-                            Postback Security
+                            Postback security
                         </v-card-title>
                         <v-card-text>
                             <v-switch
@@ -283,7 +283,7 @@
                             ></v-switch>
 
                             <v-text-field
-                                    label="Secret Key"
+                                    label="Secret key"
                                     v-model="settings.postback_security.secret_key"
                                     :disabled="!settings.postback_security.enabled"
                                     :append-icon="showPbSecret ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
@@ -317,7 +317,7 @@
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-database-refresh-outline</v-icon>
-                            Data Retention
+                            Data retention
                         </v-card-title>
                         <v-card-text>
                             <v-switch
@@ -346,7 +346,7 @@
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-robot-outline</v-icon>
-                            Bot &amp; Filter Rules
+                            Bot &amp; filter rules
                         </v-card-title>
                         <v-card-text>
                             <v-switch
@@ -408,7 +408,7 @@
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-tag-plus-outline</v-icon>
-                            Conversion Statuses
+                            Conversion statuses
                         </v-card-title>
                         <v-card-text>
                             <div class="caption grey--text mb-3">
@@ -453,7 +453,7 @@
                 <!-- Variable mapping block -->
                 <v-col cols="12">
                     <v-card class="pa-4">
-                        <v-card-title>Matching Variables (Sub IDs)</v-card-title>
+                        <v-card-title>Matching variables (Sub IDs)</v-card-title>
                         <v-card-text>
                             <v-row dense v-for="(mapping, index) in subIdMapping" :key="index" align="center">
                                 <v-col cols="3">
@@ -476,7 +476,7 @@
                                 </v-col>
                                 <v-col cols="6">
                                     <v-text-field
-                                            label="Variable Name"
+                                            label="Variable name"
                                             v-model="mapping.token"
                                             outlined
                                             dense
@@ -540,7 +540,7 @@
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-robot-outline</v-icon>
-                            Auto Rules
+                            Auto rules
                             <v-spacer></v-spacer>
                             <v-btn small outlined color="primary" @click="openRuleDialog">
                                 <v-icon small class="mr-1">mdi-plus</v-icon>Add rule
@@ -632,7 +632,7 @@
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-clipboard-text-clock-outline</v-icon>
-                            Audit Log
+                            Audit log
                         </v-card-title>
                         <v-card-text>
                             <div class="caption grey--text mb-3">
@@ -725,7 +725,7 @@
                         @click="clearData"
                         outlined
                 >
-                    <v-icon small class="mr-1">mdi-delete-alert-outline</v-icon>Delete Clicks & Conversion History Data
+                    <v-icon small class="mr-1">mdi-delete-alert-outline</v-icon>Delete clicks & conversion history data
                 </v-btn>
             </v-row>
 
@@ -733,7 +733,7 @@
 
         <v-dialog v-model="ruleDialog" persistent max-width="520px">
             <v-card>
-                <v-card-title class="text-h6">New Auto Rule</v-card-title>
+                <v-card-title class="text-h6">New auto rule</v-card-title>
                 <v-card-text>
                     <v-text-field
                             label="Rule name"
@@ -804,7 +804,7 @@
                 <v-card-actions>
                     <v-spacer></v-spacer>
                     <v-btn text @click="ruleDialog = false">Cancel</v-btn>
-                    <v-btn color="primary" elevation="0" :loading="ruleSaving" @click="saveRule">Create Rule</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="ruleSaving" @click="saveRule">Create rule</v-btn>
                 </v-card-actions>
             </v-card>
         </v-dialog>

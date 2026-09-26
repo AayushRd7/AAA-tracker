@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Request, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, or_, and_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import or_
+from sqlalchemy import text
 from db import get_db
 from models.base import Base
 from models.settings import SettingsORM
@@ -59,6 +60,7 @@ class Conversion(Base):
     device_type = Column(String)
     postback_count = Column(Integer)
     last_postback_at = Column(DateTime)
+    funnel_step = Column(Integer)
     events = Column(JSONB)
 
 VALID_STATUSES = {"lead", "sale", "upsale", "rejected", "hold", "trash"}
@@ -99,22 +101,27 @@ def get_conversions(request: Request, limit: int = 100, db: Session = Depends(ge
     params = dict(request.query_params)
     # G55: attribution basis — click_date (default): conversions attributed to the
     # click's received_at; conversion_date: counted on the conversion received_at.
+    # The join key is the first-party visitor cookie (aaa_vid): the tracking
+    # plane stamps it on both the ClickHouse click row and the Postgres
+    # conversion row. visitor_id is NOT the conversion's click_id — joining on
+    # that pair always yields empty.
     date_basis = params.get("date_basis") or "click_date"
     date_from = params.get("date_from")
     date_to = params.get("date_to")
 
-    click_ids_in_window = None
+    visitor_ids_in_window = None
     if date_from and date_to and date_basis == "click_date":
         ch = request.state.ch
         try:
             res = ch.query(
                 "SELECT DISTINCT visitor_id FROM clicks_data "
-                "WHERE toDate(received_at) BETWEEN toDate(%(df)s) AND toDate(%(dt)s)",
+                "WHERE toDate(received_at) BETWEEN toDate(%(df)s) AND toDate(%(dt)s) "
+                "AND visitor_id != ''",
                 parameters={"df": date_from, "dt": date_to},
             )
-            click_ids_in_window = {row[0] for row in res.result_rows}
+            visitor_ids_in_window = {row[0] for row in res.result_rows}
         except Exception:
-            click_ids_in_window = set()
+            visitor_ids_in_window = set()
 
     query = db.query(Conversion)
 
@@ -140,13 +147,111 @@ def get_conversions(request: Request, limit: int = 100, db: Session = Depends(ge
         if date_basis == "conversion_date":
             query = query.filter(Conversion.received_at >= datetime.fromisoformat(date_from))
             query = query.filter(Conversion.received_at < datetime.fromisoformat(date_to) + timedelta(days=1))
-        elif click_ids_in_window is not None:
-            query = query.filter(Conversion.click_id.in_(click_ids_in_window or ["__none__"]))
+        elif visitor_ids_in_window is not None:
+            # Linked conversions: window by their CLICK date (visitor cookie).
+            # Legacy rows written before visitor attribution have no link —
+            # fall back to their own conversion date for the window so the log
+            # doesn't silently empty out on reload.
+            window_start = datetime.fromisoformat(date_from)
+            window_end = datetime.fromisoformat(date_to) + timedelta(days=1)
+            query = query.filter(or_(
+                Conversion.visitor_id.in_(visitor_ids_in_window or ["__none__"]),
+                and_(Conversion.visitor_id.is_(None),
+                     Conversion.received_at >= window_start,
+                     Conversion.received_at < window_end),
+            ))
 
     rows = query.order_by(Conversion.received_at.desc()).limit(limit).all()
 
     # Convert the ORM objects to dicts
     return [row.__dict__ for row in rows]
+
+
+@router.get("/funnel/{campaign_id}")
+def get_funnel_report(campaign_id: int, request: Request, db: Session = Depends(get_db)):
+    """G10 funnel report: per-step visits/click-outs/conversions for a funnel
+    campaign. Visits come from ClickHouse (flow_index IS the step index for
+    funnel campaigns); conversion-side aggregates from conversions_data
+    (funnel_step = the step at click-out time). Non-funnel campaigns 404."""
+    row = db.execute(
+        text("SELECT id, name, config FROM campaigns WHERE id = :cid"),
+        {"cid": campaign_id}).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    raw_config = row["config"]
+    if isinstance(raw_config, dict):
+        config = raw_config
+    else:
+        try:
+            config = json.loads(raw_config or "{}")
+        except (TypeError, json.JSONDecodeError):
+            config = {}
+    funnel = config.get("funnel") or {}
+    steps_cfg = [s for s in (funnel.get("steps") or []) if isinstance(s, dict)]
+    if not funnel.get("enabled") or not steps_cfg:
+        raise HTTPException(status_code=404, detail="Campaign has no active funnel")
+
+    # Visits per step — funnel campaigns stamp the step into flow_index.
+    visits_by_step: dict = {}
+    ch = request.state.ch
+    try:
+        res = ch.query(
+            "SELECT flow_index, count() FROM clicks_data "
+            "WHERE campaign_id = %(cid)s GROUP BY flow_index",
+            parameters={"cid": campaign_id})
+        visits_by_step = {int(r[0]): int(r[1]) for r in res.result_rows}
+    except Exception:
+        visits_by_step = {}
+
+    # Click-out rows per step. Every conversions_data row originates from a
+    # click-out at /c, so COUNT(*) is the click-out count (status was 'lead'
+    # at insert time; a postback may later change it, the row still counts).
+    # Conversions = rows whose current status is not rejected/trash.
+    agg_rows = db.execute(text("""
+        SELECT funnel_step,
+               COUNT(*) AS clickouts,
+               COUNT(*) FILTER (WHERE status NOT IN ('rejected', 'trash')) AS conversions,
+               COALESCE(SUM(revenue) FILTER (WHERE status NOT IN ('rejected', 'trash')), 0) AS revenue,
+               COALESCE(SUM(profit)  FILTER (WHERE status NOT IN ('rejected', 'trash')), 0) AS profit
+        FROM conversions_data
+        WHERE campaign_id = :cid AND funnel_step IS NOT NULL
+        GROUP BY funnel_step
+    """), {"cid": campaign_id}).mappings().all()
+    agg_by_step = {int(r["funnel_step"]): r for r in agg_rows}
+
+    steps_out = []
+    cumulative_conversions = 0
+    prev_visits = None
+    for i, step in enumerate(steps_cfg):
+        visits = visits_by_step.get(i, 0)
+        agg = agg_by_step.get(i, {})
+        clickouts = int(agg.get("clickouts") or 0)
+        conversions = int(agg.get("conversions") or 0)
+        cumulative_conversions += conversions
+        step_out = {
+            "step": i,
+            "name": step.get("name") or f"Step {i + 1}",
+            "landing_id": step.get("landing"),
+            "offers": step.get("offers") or [],
+            "schema": step.get("schema") or "landing_offer",
+            "visits": visits,
+            "clickouts": clickouts,
+            "conversions": conversions,
+            "revenue": float(agg.get("revenue") or 0),
+            "profit": float(agg.get("profit") or 0),
+            "cr": (clickouts / visits) if visits else 0,
+            "cumulative_conversions": cumulative_conversions,
+            "cumulative_cr": (cumulative_conversions / visits_by_step.get(0, 0))
+                             if visits_by_step.get(0) else 0,
+            "drop_off_pct": None if prev_visits in (None, 0)
+                            else round(100 * (prev_visits - visits) / prev_visits, 2),
+        }
+        steps_out.append(step_out)
+        prev_visits = visits
+
+    return {"campaign_id": campaign_id, "campaign_name": row["name"],
+            "funnel": {"enabled": True}, "steps": steps_out}
 
 
 class ConversionImport(BaseModel):

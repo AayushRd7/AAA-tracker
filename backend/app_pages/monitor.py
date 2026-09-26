@@ -30,6 +30,9 @@ CHECK_TIMEOUT_SECONDS = 10
 FAIL_THRESHOLD = 3
 RETENTION_DAYS = 7
 
+# G78 — last successful cycle, surfaced on the status page.
+_loop_last_run = None
+
 # Tracking macros like {click_id} must not reach the HTTP checker as-is —
 # %-encoded braces make some servers 5xx, false-positiving auto-disable.
 _MACRO_RE = re.compile(r"\{[^{}]*\}")
@@ -267,10 +270,12 @@ async def run_monitor_cycle() -> dict:
 
 async def monitor_loop():
     """Background scheduler — first pass a minute after boot, then every 15 min."""
+    global _loop_last_run
     await asyncio.sleep(60)
     while True:
         try:
             summary = await run_monitor_cycle()
+            _loop_last_run = datetime.utcnow()
             print(f"Monitor cycle: {summary}")
         except Exception as e:
             print("Monitor loop error:", e)

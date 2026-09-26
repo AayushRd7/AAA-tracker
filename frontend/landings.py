@@ -2,10 +2,17 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Q
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import Optional
+import html as html_lib
+import ipaddress
+import re
+import socket
 import zipfile, os, shutil
 from datetime import datetime
+from html.parser import HTMLParser
+from urllib.parse import urlparse, urljoin
 from fastapi.responses import JSONResponse
 
+import httpx
 from db import get_db
 from models import Landing
 
@@ -23,6 +30,258 @@ LANDINGS_DIR = "/app/landings"  # path inside the src container
 os.makedirs(LANDINGS_DIR, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'.html', '.php', '.css', '.js', '.jpg', '.jpeg', '.png'}
+
+
+# ─── G73 — lander grabber ──────────────────────────────────────────
+FOLDER_NAME_RE = re.compile(r"^[a-z0-9_]{1,250}$")
+GRAB_MAX_BYTES = 3 * 1024 * 1024          # 3 MB page cap
+GRAB_TIMEOUT_SECONDS = 10
+GRAB_MAX_REDIRECTS = 5
+GRAB_UA = "AAA-Tracker-LanderGrabber/1.0"
+
+
+def validate_folder_name(folder: str) -> str:
+    """Same zip-slip-safe naming as the upload flow: lowercase letters,
+    numbers and underscores; no traversal, no absolute paths."""
+    folder = (folder or "").strip()
+    if not FOLDER_NAME_RE.match(folder):
+        raise HTTPException(
+            status_code=400,
+            detail="Folder name must be 1-250 chars of lowercase letters, numbers and underscores.")
+    if folder in (".", "..") or os.sep in folder:
+        raise HTTPException(status_code=400, detail="Invalid folder name.")
+    return folder
+
+
+def _check_grab_url(url: str, allow_private: bool):
+    """SSRF guard: http/https only, resolvable public host.
+
+    Returns the parsed URL. Private/loopback/link-local/reserved targets are
+    rejected unless the operator explicitly passes allow_private (self-hosted
+    operators mirroring pages from their own internal network)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Only http:// and https:// URLs can be grabbed.")
+    host = parsed.hostname
+    if not host:
+        raise HTTPException(status_code=400, detail="URL has no host.")
+    host_l = host.lower().rstrip(".")
+    if host_l in ("localhost",):
+        raise HTTPException(status_code=400, detail="Refusing to grab from localhost.")
+    if parsed.port not in (None, 80, 443):
+        raise HTTPException(status_code=400, detail="Only default ports (80/443) are allowed.")
+
+    try:
+        ips = {ipaddress.ip_address(host_l)}
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(
+                host_l, parsed.port or (443 if parsed.scheme == "https" else 80),
+                proto=socket.IPPROTO_TCP)
+            ips = {ipaddress.ip_address(i[4][0]) for i in infos}
+        except OSError:
+            raise HTTPException(status_code=400, detail=f"Cannot resolve host '{host}'.")
+
+    bad = [ip for ip in ips
+           if ip.is_private or ip.is_loopback or ip.is_link_local
+           or ip.is_multicast or ip.is_reserved or ip.is_unspecified]
+    if bad and not allow_private:
+        raise HTTPException(
+            status_code=400,
+            detail="Host resolves to a private/internal address — "
+                   "re-check the URL or enable 'allow internal address' for own-infrastructure grabs.")
+    return parsed
+
+
+class _AssetRewriter(HTMLParser):
+    """Re-serializes an HTML page, rewriting relative src/href/srcset URLs to
+    absolute ones against the final (post-redirect) page URL so the mirrored
+    copy loads remote assets. stdlib-only, no new dependencies."""
+
+    URL_ATTRS = ("src", "href", "poster")
+
+    def __init__(self, base_url: str):
+        super().__init__(convert_charrefs=False)
+        self.base_url = base_url
+        self.out = []
+        self.title_parts = []
+        self._in_title = False
+
+    def _rewrite(self, tag: str, attrs):
+        out = []
+        for k, v in attrs:
+            if v is None:
+                out.append((k, None))
+                continue
+            if k in self.URL_ATTRS:
+                v = urljoin(self.base_url, v)
+            elif k == "srcset":
+                parts = []
+                for entry in v.split(","):
+                    bits = entry.strip().split()
+                    if bits:
+                        bits[0] = urljoin(self.base_url, bits[0].strip())
+                    parts.append(" ".join(bits))
+                v = ", ".join(parts)
+            out.append((k, v))
+        return out
+
+    @staticmethod
+    def _render(tag, attrs, self_closing):
+        rendered = "".join(
+            f" {k}" if v is None else f' {k}="{html_lib.escape(v, quote=True)}"'
+            for k, v in attrs)
+        return f"<{tag}{rendered}{' /' if self_closing else ''}>"
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "title":
+            self._in_title = True
+        self.out.append(self._render(tag, self._rewrite(tag, attrs), False))
+
+    def handle_startendtag(self, tag, attrs):
+        self.out.append(self._render(tag, self._rewrite(tag, attrs), True))
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self._in_title = False
+        self.out.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        if self._in_title:
+            self.title_parts.append(data)
+        self.out.append(data)
+
+    def handle_comment(self, data):
+        self.out.append(f"<!--{data}-->")
+
+    def handle_decl(self, decl):
+        self.out.append(f"<!{decl}>")
+
+    def handle_pi(self, data):
+        self.out.append(f"<?{data}>")
+
+    def handle_entityref(self, name):
+        self.out.append(f"&{name};")
+
+    def handle_charref(self, name):
+        self.out.append(f"&#{name};")
+
+    @property
+    def html(self):
+        return "".join(self.out)
+
+    @property
+    def title(self):
+        return " ".join("".join(self.title_parts).split())[:255]
+
+
+@router.post("/landing/grab")
+def grab_landing(
+        url: str = Form(...),
+        folder: str = Form(...),
+        allow_private: bool = Form(False),
+        db: Session = Depends(get_db)
+):
+    """Fetch a remote page and store it as a local landing (G73).
+
+    Runs on the frontend service because only it (and nginx) mounts the
+    landings volume. The SSRF guard rejects internal addresses unless the
+    operator opts in with allow_private. Runs sync (threadpool) so the fetch
+    never blocks the tracking event loop.
+    """
+    url = (url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required.")
+    folder = validate_folder_name(folder)
+
+    current_url = url
+    response = None
+    try:
+        with httpx.Client(timeout=GRAB_TIMEOUT_SECONDS, headers={"User-Agent": GRAB_UA}) as client:
+            for _ in range(GRAB_MAX_REDIRECTS + 1):
+                _check_grab_url(current_url, allow_private)
+                response = client.get(current_url, follow_redirects=False)
+                if response.status_code in (301, 302, 303, 307, 308) \
+                        and response.headers.get("location"):
+                    current_url = urljoin(current_url, response.headers["location"])
+                    continue
+                break
+            else:
+                raise HTTPException(status_code=400, detail="Too many redirects.")
+    except HTTPException:
+        raise
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=400, detail="Fetch timed out (10s).")
+    except httpx.TransportError as e:
+        raise HTTPException(status_code=400, detail=f"Fetch failed: {str(e)[:200]}")
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"Remote page returned HTTP {response.status_code}.")
+    content_type = response.headers.get("content-type", "")
+    if "html" not in content_type.lower():
+        raise HTTPException(status_code=400,
+                            detail=f"Not an HTML page (content-type: {content_type or 'unknown'}).")
+    if len(response.content) > GRAB_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Page exceeds the 3 MB limit.")
+
+    final_url = str(response.url)
+    rewriter = _AssetRewriter(final_url)
+    try:
+        rewriter.feed(response.text)
+        rewriter.close()
+    except Exception:
+        # A malformed page still saves — fall back to the raw body so the
+        # operator gets the mirror even when the parser chokes on bad markup.
+        html_out, title = response.text, ""
+    else:
+        html_out, title = rewriter.html, rewriter.title
+
+    if not title:
+        title = urlparse(final_url).hostname or url
+
+    folder_path = landing_path(folder)
+    if os.path.exists(folder_path) and os.listdir(folder_path):
+        raise HTTPException(status_code=400,
+                            detail=f"Folder '{folder}' already exists and is not empty.")
+
+    os.makedirs(folder_path, exist_ok=True)
+    try:
+        with open(os.path.join(folder_path, "index.html"), "w", encoding="utf-8") as f:
+            f.write(html_out)
+    except Exception:
+        shutil.rmtree(folder_path, ignore_errors=True)
+        raise HTTPException(status_code=500, detail="Failed to save the grabbed page.")
+
+    landing = Landing(
+        folder=folder,
+        name=title,
+        link=url[:255],
+        type='local_file',
+        created_at=datetime.utcnow()
+    )
+    db.add(landing)
+    try:
+        db.commit()
+        db.refresh(landing)
+    except IntegrityError as e:
+        db.rollback()
+        shutil.rmtree(folder_path, ignore_errors=True)
+        if 'landings_folder_key' in str(e.orig):
+            raise HTTPException(status_code=400,
+                                detail="A landing with this folder already exists.")
+        if 'landings_name_key' in str(e.orig):
+            raise HTTPException(status_code=400,
+                                detail="A landing with this name already exists.")
+        raise HTTPException(status_code=500, detail="Database error: " + str(e.orig))
+
+    return {
+        "status": "ok",
+        "site": folder,
+        "url": f"/landing/{folder}/",
+        "id": landing.id,
+        "name": landing.name,
+        "bytes": len(response.content),
+    }
 
 
 

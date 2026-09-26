@@ -9,20 +9,27 @@
             <v-col class="d-flex justify-end" cols="auto">
                 <v-btn color="primary" elevation="0" class="mr-2" @click="checkDomains">
                     <v-icon small class="mr-1">mdi-check-circle-outline</v-icon>
-                    Check Domains Statuses
+                    Check domains statuses
                 </v-btn>
                 <v-btn color="primary" elevation="0" @click="openCreate">
                     <v-icon small class="mr-1">mdi-plus</v-icon>
-                    Add Domain
+                    Add domain
                 </v-btn>
             </v-col>
         </v-row>
+
+        <v-alert type="info" text dense class="mb-4" v-if="serverIp">
+            <strong>Before SSL can be issued, the domain must point at this server.</strong>
+            Create a DNS record for your tracking domain — an <code>A</code> record to
+            <code>{{ serverIp }}</code> (self-hosted), or a <code>CNAME</code> to your tracker host
+            (SaaS) — wait for propagation, then use "Check DNS" and "Update SSL".
+        </v-alert>
 
 
         <v-dialog v-model="dialog">
             <v-card class="dialog-md">
                 <v-card-title>
-                    <span class="text-h6">{{ isEdit ? 'Edit Domain' : 'Add Domain' }}</span>
+                    <span class="text-h6">{{ isEdit ? 'Edit domain' : 'Add domain' }}</span>
                 </v-card-title>
 
                 <v-card-text>
@@ -42,7 +49,7 @@
                     ></v-switch>
 
                     <v-select
-                            label="404 Handling"
+                            label="404 handling"
                             :items="[
                                 { text: 'Handle 404 errors', value: 'handle' },
                                 { text: 'Error', value: 'error' }
@@ -53,7 +60,7 @@
                     ></v-select>
 
                     <v-select
-                            label="Default Campaign"
+                            label="Default campaign"
                             :items="campaigns"
                             item-text="name"
                             item-value="id"
@@ -63,7 +70,7 @@
                     ></v-select>
 
                     <v-text-field
-                            label="Group Name (optional)"
+                            label="Group name (optional)"
                             v-model="form.group_name"
                             outlined
                             dense
@@ -110,6 +117,18 @@
                         </template>
                         <template v-slot:item.ssl_status="{ item }">
                             <span class="status-chip" :class="statusChipClass(item.ssl_status)">{{ item.ssl_status }}</span>
+                        </template>
+                        <template v-slot:item.dns="{ item }">
+                            <div class="d-flex align-center">
+                                <span v-if="dnsResults[item.id]" class="status-chip"
+                                      :class="dnsResults[item.id].points_to_server ? 'status-chip--success' : (dnsResults[item.id].resolves ? 'status-chip--warning' : 'status-chip--danger')"
+                                      :title="dnsResults[item.id].addresses.join(', ')">
+                                    {{ dnsResults[item.id].points_to_server ? 'Points here' : (dnsResults[item.id].resolves ? 'Resolves elsewhere' : 'No DNS') }}
+                                </span>
+                                <v-btn icon small @click="checkDns(item)" :loading="dnsLoading === item.id">
+                                    <v-icon small>mdi-dns</v-icon>
+                                </v-btn>
+                            </div>
                         </template>
                         <template v-slot:item.default_campaign_id="{ item }">
                             {{ campaignName(item.default_campaign_id) }}
@@ -182,6 +201,9 @@
                 loadingDomains: false,
                 domains: [],
                 campaigns: [],
+                serverIp: '',
+                dnsResults: {},
+                dnsLoading: null,
                 headers: [
                     {text: 'ID', value: 'id'},
                     {text: 'Domain', value: 'domain'},
@@ -190,6 +212,7 @@
                     {text: 'Default Campaign', value: 'default_campaign_id'},
                     {text: 'Group Name', value: 'group_name'},
                     {text: 'SSL Status', value: 'ssl_status'},
+                    {text: 'DNS', value: 'dns', sortable: false},
                     {text: 'Status', value: 'status'},
                     {text: 'Created At', value: 'created_at'},
                     {text: 'Updated At', value: 'updated_at'},
@@ -200,9 +223,28 @@
         mounted() {
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadDomains();
+            this.loadServerInfo();
             this.$root.$on('load-domains', this.loadDomains);
         },
         methods: {
+            async loadServerInfo() {
+                try {
+                    const r = await fetch('/backend/api/domains/server-info', {credentials: 'include'});
+                    if (r.ok) this.serverIp = (await r.json()).server_ip || '';
+                } catch (e) { /* banner stays hidden */ }
+            },
+            async checkDns(item) {
+                this.dnsLoading = item.id;
+                try {
+                    const r = await fetch('/backend/api/domains/dns-status?domain=' + encodeURIComponent(item.domain), {credentials: 'include'});
+                    if (r.ok) this.$set(this.dnsResults, item.id, await r.json());
+                    else this.$set(this.dnsResults, item.id, {resolves: false, addresses: [], points_to_server: false});
+                } catch (e) {
+                    this.$set(this.dnsResults, item.id, {resolves: false, addresses: [], points_to_server: false});
+                } finally {
+                    this.dnsLoading = null;
+                }
+            },
             statusChipClass(status) {
                 switch (status) {
                     case 'success':
@@ -294,7 +336,7 @@
                         throw new Error(message);
                     }
                     this.campaigns = JSON.parse(text);
-                    this.campaigns.unshift({id: '', name: '— No Campaign —'});
+                    this.campaigns.unshift({id: '', name: '— No campaign —'});
                 } catch (error) {
                     this.$root.$emit('show-message', {
                         type: 'error',
@@ -444,7 +486,7 @@
             },
 
             async deleteDomain(item) {
-                const ok = await this.$refs.confirm.open('Delete Domain', 'Are you sure you want to delete this domain? This cannot be undone.');
+                const ok = await this.$refs.confirm.open('Delete domain', 'Are you sure you want to delete this domain? This cannot be undone.');
                 if (!ok) {
                     return;
                 }

@@ -1,8 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from typing import List
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+import base64
+import re
+
+import httpx
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -15,27 +20,142 @@ router = APIRouter()
 
 # Built-in affiliate network presets, shipped out of the box.
 # {click_id} is replaced by the network's subid macro value.
+_POSTBACK = "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"
+
+
+def _p(name, offer_parameters, verticals, logo_domain):
+    return {"name": name, "offer_parameters": offer_parameters, "s2s_postback": _POSTBACK,
+            "verticals": verticals, "logo_domain": logo_domain}
+
+
 NETWORK_PRESETS = [
-    {"name": "MaxBounty", "offer_parameters": "s1={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "Admitad", "offer_parameters": "subid={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "Adsterra", "offer_parameters": "sub1={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "Affise", "offer_parameters": "sub1={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "ClickDealer", "offer_parameters": "sub1={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "CrakRevenue", "offer_parameters": "sub1={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "CPAGrip", "offer_parameters": "subid={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "CPAlead", "offer_parameters": "subid={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "Dr.Cash", "offer_parameters": "subid={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "Everad", "offer_parameters": "subid={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "HasOffers", "offer_parameters": "aff_sub={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "HilltopAds", "offer_parameters": "sub_id={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "Leadbit", "offer_parameters": "sub_id={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "Mobidea", "offer_parameters": "subid={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "MyLead", "offer_parameters": "sub_id={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "PropellerAds", "offer_parameters": "sub_id={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "Zeydoo", "offer_parameters": "sub_id={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "T3Leads", "offer_parameters": "subid={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "ClickBank", "offer_parameters": "tid={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
-    {"name": "Galaksion", "offer_parameters": "subid={click_id}", "s2s_postback": "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"},
+    # Legacy / existing presets (kept intact, enriched with verticals + logo)
+    _p("MaxBounty", "s1={click_id}", ["Dating", "Installs", "Forex / Binary"], "maxbounty.com"),
+    _p("Admitad", "subid={click_id}", ["Adult", "E-commerce", "Travel", "Games", "Financial", "Mobile Apps"], "admitad.com"),
+    _p("Adsterra", "sub1={click_id}", [], "adsterra.com"),
+    _p("Affise", "sub1={click_id}", ["Technology"], "affise.com"),
+    _p("ClickDealer", "sub1={click_id}", ["Gambling", "E-commerce", "Installs"], "clickdealer.com"),
+    _p("CrakRevenue", "sub1={click_id}", ["Gambling", "Adult", "Dating", "Sweepstakes", "Nutra", "Games", "Financial", "Mobile Apps"], "crakrevenue.com"),
+    _p("CPAGrip", "subid={click_id}", ["E-commerce", "Financial", "Real Estate", "Technology"], "cpagrip.com"),
+    _p("CPAlead", "subid={click_id}", [], "cpalead.com"),
+    _p("Dr.Cash", "subid={click_id}", ["Adult", "Nutra", "Health and Fitness"], "dr.cash"),
+    _p("Everad", "subid={click_id}", ["Nutra", "Health and Fitness"], "everad.com"),
+    _p("HasOffers", "aff_sub={click_id}", ["Technology"], "tune.com"),
+    _p("HilltopAds", "sub_id={click_id}", [], "hilltopads.com"),
+    _p("Leadbit", "sub_id={click_id}", ["Gambling", "Pin-submits", "Adult", "Dating", "Sweepstakes", "Nutra"], "leadbit.com"),
+    _p("Mobidea", "subid={click_id}", ["Pin-submits", "Dating", "E-commerce"], "mobidea.com"),
+    _p("MyLead", "sub_id={click_id}", ["Gambling", "Adult", "Travel", "Education", "Health and Fitness", "Sports", "Technology"], "mylead.io"),
+    _p("PropellerAds", "sub_id={click_id}", [], "propellerads.com"),
+    _p("Zeydoo", "sub_id={click_id}", [], "zeydoo.com"),
+    _p("T3Leads", "subid={click_id}", [], "t3leads.com"),
+    _p("ClickBank", "tid={click_id}", ["Gambling", "Travel", "Games", "Education", "Financial", "Health and Fitness", "Mobile Apps", "Religion and Spirituality", "Sports"], "clickbank.com"),
+    _p("Galaksion", "subid={click_id}", [], "galaksion.com"),
+    # Catalog additions
+    _p("3snet", "sub_id={click_id}", ["Gambling"], "3snet.io"),
+    _p("29Next", "sub_id={click_id}", [], "29next.com"),
+    _p("Ad2games", "sub_id={click_id}", ["Games"], "ad2games.com"),
+    _p("Adcombo", "sub_id={click_id}", ["Leadgen", "E-commerce", "Mobile Apps"], "adcombo.com"),
+    _p("AdCyd", "sub_id={click_id}", [], "adcyid.com"),
+    _p("AddWell", "sub_id={click_id}", [], "addwell.io"),
+    _p("Adobe commerce (ex. Magento)", "sub_id={click_id}", ["E-commerce"], "business.adobe.com"),
+    _p("Adscend Media", "sub_id={click_id}", [], "adscendmedia.com"),
+    _p("AdsEmpire", "sub_id={click_id}", ["Dating"], "adsempire.com"),
+    _p("Adtrafico", "sub_id={click_id}", ["Gambling", "CPI", "Dating", "Forex / Binary", "Sweepstakes"], "adtrafico.com"),
+    _p("AdultForce", "sub_id={click_id}", ["Adult"], "adultforce.com"),
+    _p("Advibe Media", "sub_id={click_id}", ["E-commerce"], "advibemedia.com"),
+    _p("Advidi", "subid={click_id}", ["Leadgen", "Adult", "Dating"], "advidi.com"),
+    _p("Affiliate Dragons", "sub_id={click_id}", [], "affiliatedragons.com"),
+    _p("Affiliati Network", "sub_id={click_id}", ["Leadgen", "E-commerce", "Sweepstakes", "Nutra", "Financial", "Insurance"], "affiliati.com"),
+    _p("Affiliaxe", "aff_sub={click_id}", ["Dating", "E-commerce", "Sweepstakes", "Nutra", "Travel", "Health and Fitness"], "affiliaxe.com"),
+    _p("Affsub2", "sub_id={click_id}", ["Gambling", "Dating", "Sweepstakes"], "affsub2.com"),
+    _p("AIVIX", "sub_id={click_id}", ["Gambling", "Adult", "Dating", "Sweepstakes", "Nutra", "Games", "Financial"], "aivix.com"),
+    _p("Alfaleads", "sub_id={click_id}", ["Gambling", "CPI", "Pin-submits", "Leadgen", "Adult", "Dating", "E-commerce", "Installs", "Forex / Binary", "Sweepstakes", "Nutra", "Social", "Games", "Downloads", "Education", "Insurance", "Legal", "Mobile Apps", "Sports"], "alfaleads.com"),
+    _p("Big Bang Ads", "sub_id={click_id}", ["Pin-submits", "Leadgen", "Sweepstakes"], "bigbangads.com"),
+    _p("BigCommerce", "sub_id={click_id}", ["E-commerce"], "bigcommerce.com"),
+    _p("BillyMob", "sub_id={click_id}", ["Gambling", "Adult", "Dating", "E-commerce", "Sweepstakes", "Travel", "Social", "Games", "Merchants", "Financial", "Health and Fitness", "Mobile Apps", "Religion and Spirituality"], "billymob.com"),
+    _p("Blitzads", "sub_id={click_id}", ["Nutra", "Leadgen", "E-commerce"], "blitzads.com"),
+    _p("Bodis", "sub_id={click_id}", [], "bodis.com"),
+    _p("BuyGoods", "sub_id={click_id}", [], "buygoods.com"),
+    _p("C3PA", "sub_id={click_id}", ["Dating"], "c3pa.net"),
+    _p("CallGrid", "sub_id={click_id}", ["Financial", "Legal", "Insurance", "Health and Fitness"], "callgrid.com"),
+    _p("Capital", "sub_id={click_id}", ["Financial"], "capital.com"),
+    _p("Cartpanda", "sub_id={click_id}", [], "cartpanda.com"),
+    _p("Checkout Champ/Konnektive", "sub_id={click_id}", [], "checkoutchamp.com"),
+    _p("CityAds", "sub_id={click_id}", ["Gambling", "E-commerce"], "cityads.com"),
+    _p("Clearpier", "sub_id={click_id}", ["Mobile Apps"], "clearpier.com"),
+    _p("Clickbank (S2S postback)", "tid={click_id}", ["Gambling", "Travel", "Games", "Education", "Financial", "Health and Fitness", "Mobile Apps", "Religion and Spirituality", "Sports"], "clickbank.com"),
+    _p("Clickdealer", "sub1={click_id}", ["Gambling", "Leadgen", "E-commerce", "Installs"], "clickdealer.com"),
+    _p("Convert2media", "sub_id={click_id}", ["Leadgen"], "convert2media.com"),
+    _p("CPAGetti", "sub_id={click_id}", ["Nutra"], "cpagetti.com"),
+    _p("CPA.house", "sub_id={click_id}", [], "cpa.house"),
+    _p("CJ Affiliate", "sub_id={click_id}", [], "cj.com"),
+    _p("digistore24", "sub_id={click_id}", ["Dating", "Nutra", "Carriers", "Education", "E-mail submits", "Health and Fitness", "Style and Fashion", "Technology", "Computing"], "digistore24.com"),
+    _p("Domain Active", "sub_id={click_id}", [], "domainactive.com"),
+    _p("Everflow", "sub_id={click_id}", ["Gambling", "Insurance", "Games"], "everflow.io"),
+    _p("Flow Network", "sub_id={click_id}", [], "flownetwork.com"),
+    _p("Gasmobi", "sub_id={click_id}", ["Sweepstakes", "Nutra", "Financial"], "gasmobi.com"),
+    _p("Giddy Up", "sub_id={click_id}", ["Health and Fitness", "Technology"], "giddyup.com"),
+    _p("Glitchy Co", "sub_id={click_id}", [], "glitchy.co"),
+    _p("Golden Goose", "sub_id={click_id}", ["Pin-submits", "Mobile Apps"], "goldengoose.com"),
+    _p("Gotzha", "sub_id={click_id}", ["Gambling", "Leadgen", "Sweepstakes"], "gotzha.com"),
+    _p("Gurumedia", "sub_id={click_id}", [], "gurumedia.io"),
+    _p("Impact", "sub_id={click_id}", ["Insurance", "Travel"], "impact.com"),
+    _p("Invictus Media", "sub_id={click_id}", ["E-commerce", "Health and Fitness"], "invictusmedia.com"),
+    _p("juddy.biz", "sub_id={click_id}", [], "juddy.biz"),
+    _p("JVZoo", "sub_id={click_id}", ["Education", "Technology", "Computing"], "jvzoo.com"),
+    _p("Kimia", "sub_id={click_id}", ["CPI"], "kimia.com"),
+    _p("kma.biz", "sub_id={click_id}", ["Adult", "E-commerce", "Health and Fitness", "Style and Fashion", "Technology"], "kma.biz"),
+    _p("Leadnomics", "sub_id={click_id}", [], "leadnomics.com"),
+    _p("Lemonads", "sub_id={click_id}", ["E-commerce", "Sweepstakes", "Nutra", "Games"], "lemonads.com"),
+    _p("Los Pollos", "sub_id={click_id}", ["Adult", "Dating", "Forex / Binary"], "lospollos.com"),
+    _p("Lucky Online", "sub_id={click_id}", ["Adult", "E-commerce", "Nutra", "Health and Fitness"], "luckyonline.com"),
+    _p("M4TRIX", "sub_id={click_id}", ["Nutra"], "m4trix.io"),
+    _p("Madrivo", "sub_id={click_id}", [], "madrivo.com"),
+    _p("Masters in Cash", "sub_id={click_id}", [], "mastersincash.com"),
+    _p("MaxWeb", "sub_id={click_id}", ["Health and Fitness", "Technology"], "maxweb.com"),
+    _p("Media500", "sub_id={click_id}", ["Gambling", "Nutra", "Financial"], "media500.com"),
+    _p("Mobipium", "sub_id={click_id}", ["Pin-submits", "Dating"], "mobipium.com"),
+    _p("Mobytize", "sub_id={click_id}", ["Dating", "E-commerce", "Sweepstakes", "Games", "Merchants", "Financial", "Mobile Apps"], "mobytize.com"),
+    _p("Moja Ai", "sub_id={click_id}", [], "moja.ai"),
+    _p("Monetizer", "sub_id={click_id}", ["Mobile Apps"], "monetizer.com"),
+    _p("Monetizze", "sub_id={click_id}", ["Education"], "monetizze.com"),
+    _p("Mundpay", "sub_id={click_id}", [], "mundpay.com"),
+    _p("MyCommerce", "sub_id={click_id}", [], "mycommerce.com"),
+    _p("Natifico", "sub_id={click_id}", ["Dating", "Installs", "Sweepstakes", "Games", "Downloads"], "natifico.com"),
+    _p("Nexusoffers", "sub_id={click_id}", ["Sweepstakes", "E-mail submits", "Health and Fitness", "Surveys"], "nexusoffers.com"),
+    _p("OUTBID", "sub_id={click_id}", [], "outbid.org"),
+    _p("PerformCB", "sub_id={click_id}", ["Health and Fitness"], "performcb.com"),
+    _p("Pinterest CAPI", "sub_id={click_id}", ["Ads"], "pinterest.com"),
+    _p("Prestashop", "sub_id={click_id}", ["E-commerce"], "prestashop.com"),
+    _p("PROX", "sub_id={click_id}", ["Financial"], "prox.com"),
+    _p("Retreaver", "sub_id={click_id}", [], "retreaver.com"),
+    _p("Ringba", "sub_id={click_id}", [], "ringba.com"),
+    _p("RocketProfit", "sub_id={click_id}", ["Health and Fitness"], "rocketprofit.com"),
+    _p("SEDO", "sub_id={click_id}", [], "sedo.com"),
+    _p("Shakes.pro", "sub_id={click_id}", ["Nutra", "Health and Fitness", "Technology"], "shakes.pro"),
+    _p("Shopify", "sub_id={click_id}", ["E-commerce"], "shopify.com"),
+    _p("SmartAdv", "sub_id={click_id}", ["Dating", "E-commerce", "Carriers", "Health and Fitness", "Insurance"], "smartadv.com"),
+    _p("Supreme Media", "sub_id={click_id}", [], "suprememedia.com"),
+    _p("Terra Leads", "sub_id={click_id}", ["Adult", "Nutra", "Health and Fitness"], "terraleads.com"),
+    _p("Tonic", "sub_id={click_id}", [], "tonic.com"),
+    _p("TopOffers", "sub_id={click_id}", ["Adult", "Dating", "Sweepstakes"], "topoffers.com"),
+    _p("TORO", "sub_id={click_id}", [], "toroadvertising.com"),
+    _p("TORO Advertising", "sub_id={click_id}", ["Gambling", "E-commerce", "Games", "Financial", "Health and Fitness"], "toroadvertising.com"),
+    _p("Traforce", "sub_id={click_id}", ["Dating"], "traforce.com"),
+    _p("Trafee", "sub_id={click_id}", ["Dating", "Adult", "Sweepstakes", "Games"], "trafee.com"),
+    _p("Traffic Company", "sub_id={click_id}", [], "trafficcompany.com"),
+    _p("TrumpYourAds", "sub_id={click_id}", ["Gambling", "Nutra", "Financial"], "trumpyourads.com"),
+    _p("TUNE (ex HasOffers)", "aff_sub={click_id}", ["Mobile Apps", "Financial"], "tune.com"),
+    _p("vCommission", "sub_id={click_id}", [], "vcommission.com"),
+    _p("Vellko Media", "sub_id={click_id}", ["Dating", "E-commerce", "Nutra", "Insurance"], "vellko.com"),
+    _p("Wap.click", "sub_id={click_id}", [], "wap.click"),
+    _p("WapEmpire", "sub_id={click_id}", ["Pin-submits", "Adult", "Dating", "Installs", "Social", "Downloads", "Sports"], "wapempire.com"),
+    _p("Wildo.click", "sub_id={click_id}", ["Gambling", "Adult"], "wildo.click"),
+    _p("WooCommerce", "sub_id={click_id}", ["E-commerce"], "woocommerce.com"),
+    _p("WowTrk", "sub_id={click_id}", [], "wowtrk.com"),
+    _p("Yeahmobi", "aff_sub={click_id}", ["Gambling", "E-commerce"], "yeahmobi.com"),
+    _p("YTZ Network", "sub_id={click_id}", ["Gambling", "Adult", "Dating", "Installs", "Sweepstakes", "Nutra", "Downloads", "Mobile Apps"], "ytznetwork.com"),
+    _p("Zorka.Network", "sub_id={click_id}", ["Gambling", "Installs", "Games", "Mobile Apps"], "zorka.network"),
 ]
 
 
@@ -48,7 +168,8 @@ def seed_network_presets(db: Session):
     existing = {name for (name,) in db.query(AffiliateNetworkORM.name).all()}
     missing = [p for p in NETWORK_PRESETS if p["name"] not in existing]
     if missing:
-        db.add_all([AffiliateNetworkORM(**p) for p in missing])
+        db.add_all([AffiliateNetworkORM(name=p["name"], offer_parameters=p["offer_parameters"],
+                                        s2s_postback=p["s2s_postback"]) for p in missing])
     db.add(SettingsORM(name="network_presets_seeded", value="1"))
     db.commit()
 
@@ -66,6 +187,44 @@ class AffiliateNetworkOut(AffiliateNetworkIn):
 
     class Config:
         orm_mode = True
+
+
+@router.get("/presets")
+def get_presets():
+    presets = [
+        {"name": p["name"], "verticals": p["verticals"], "logo_domain": p["logo_domain"],
+         "offer_parameters": p["offer_parameters"]}
+        for p in sorted(NETWORK_PRESETS, key=lambda x: x["name"].lower())
+    ]
+    return {"presets": presets}
+
+
+# 1x1 transparent PNG served (with HTTP 200) when no favicon exists, so the
+# browser never logs a failed-resource console error for missing logos.
+_EMPTY_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+_favicon_cache = {}
+
+
+@router.get("/favicon/{domain}")
+def get_favicon(domain: str):
+    if not re.fullmatch(r"[a-z0-9.\-]+", domain, re.I):
+        return Response(content=_EMPTY_PNG, media_type="image/png")
+    cached = _favicon_cache.get(domain.lower())
+    if cached is not None:
+        return Response(content=cached, media_type="image/png",
+                        headers={"Cache-Control": "max-age=86400"})
+    try:
+        r = httpx.get(f"https://www.google.com/s2/favicons?domain={domain}&sz=64",
+                      timeout=5.0, follow_redirects=True)
+        content = r.content if r.status_code == 200 and r.content else _EMPTY_PNG
+    except Exception:
+        content = _EMPTY_PNG
+    if len(_favicon_cache) > 500:
+        _favicon_cache.clear()
+    _favicon_cache[domain.lower()] = content
+    return Response(content=content, media_type="image/png",
+                    headers={"Cache-Control": "max-age=86400"})
 
 
 @router.get("/", response_model=List[AffiliateNetworkOut])

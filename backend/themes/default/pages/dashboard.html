@@ -33,6 +33,14 @@
             <domains-component></domains-component>
         </div>
 
+        <div v-show="$root.activeSection === 'fraud'">
+            <fraud-component></fraud-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'optimizer'">
+            <optimizer-component></optimizer-component>
+        </div>
+
         <div v-show="$root.activeSection === 'settings'">
             <settings-component></settings-component>
         </div>

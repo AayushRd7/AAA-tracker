@@ -79,14 +79,27 @@ async def startup():
     from audit_logger import ensure_audit_table
     ensure_audit_table()
 
+    # Fraud plane: clicks_data.fraud_score + PG honeypot_hits (both idempotent;
+    # coordinates with the tracking-plane migration of the same columns).
+    _fraud_ch = get_clickhouse_client()
+    try:
+        ensure_fraud_schema(_fraud_ch)
+    finally:
+        try:
+            _fraud_ch.close()
+        except Exception:
+            pass
+
     import asyncio
     from email_reports import email_report_loop
     asyncio.create_task(email_report_loop())
     # G69 + G70 — monitoring and auto-rules loops (15 min each, staggered)
     from app_pages.monitor import monitor_loop
     from app_pages.rules import auto_rules_loop
+    from app_pages.optimizer import optimizer_loop
     asyncio.create_task(monitor_loop())
     asyncio.create_task(auto_rules_loop())
+    asyncio.create_task(optimizer_loop())
 
 
 @app.middleware("http")
@@ -142,7 +155,8 @@ ALLOWED_PAGES = {"auth", "dashboard", "editor"}
 # Sections of the dashboard shell that get their own URL — /backend/<section>
 # serves the shell pre-focused on that section (deep-linkable, back-button friendly).
 NAV_SECTIONS = {"dashboard", "campaigns", "landings", "affiliates", "offers",
-                "sources", "reports", "domains", "settings", "users", "about"}
+                "sources", "reports", "domains", "settings", "users", "about",
+                "fraud", "optimizer"}
 
 
 from typing import Optional
@@ -160,6 +174,8 @@ from app_pages.reports import router as reports_router  # Import the router
 from app_pages.archive import router as archive_router, audit_router  # G66 + G65 read API
 from app_pages.monitor import router as monitor_router  # G69 flow monitoring
 from app_pages.rules import router as rules_router  # G70 auto rules
+from app_pages.fraud import router as fraud_router, ensure_fraud_schema  # fraud & cloaking
+from app_pages.optimizer import router as optimizer_router  # G76 AI auto-optimizer
 from app_pages.search import router as search_router  # G75 global search
 
 # G63: every router is gated by its nav section's read permission; mutating
@@ -206,9 +222,19 @@ app.include_router(monitor_router, prefix="/api/monitor", tags=["Monitoring"],
 # G70: auto rules — same admin plane as monitoring.
 app.include_router(rules_router, prefix="/api/rules", tags=["Auto Rules"],
                    dependencies=[Depends(require_section_write("settings"))])
+# Fraud & cloaking dashboard — same admin plane as monitoring/rules.
+app.include_router(fraud_router, prefix="/api/fraud", tags=["Fraud"],
+                   dependencies=[Depends(require_section_write("settings"))])
+# G76: AI auto-optimizer — same admin plane as monitoring/rules/fraud.
+app.include_router(optimizer_router, prefix="/api/optimizer", tags=["Optimizer"],
+                   dependencies=[Depends(require_section_write("settings"))])
 # G75: global search — any authenticated user; results filtered by permissions.
 app.include_router(search_router, prefix="/api/search", tags=["Search"],
                    dependencies=[Depends(require_section("dashboard"))])
+# G78: system status — admin-only section, like audit/monitoring.
+from app_pages.status import router as status_router
+app.include_router(status_router, prefix="/api/status", tags=["Status"],
+                   dependencies=[Depends(require_section("settings"))])
 
 
 # G52: minimal public view for shared reports — shell-less, token in the query

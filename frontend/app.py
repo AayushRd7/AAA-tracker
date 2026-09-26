@@ -25,6 +25,7 @@ import psycopg2
 
 import asyncio
 import queue
+from collections import deque
 
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -127,6 +128,7 @@ async def startup():
         app.state.ch_pool.put(new_ch_client())
     # Idempotent schema migration (safe to run on every boot)
     await ensure_schema()
+    await ensure_ch_schema()
 
     # Daily data-retention prune loop
     app.state.retention_task = asyncio.create_task(retention_loop())
@@ -139,6 +141,8 @@ async def ensure_schema():
                 ALTER TABLE conversions_data
                 ADD COLUMN IF NOT EXISTS postback_count INTEGER DEFAULT 0,
                 ADD COLUMN IF NOT EXISTS last_postback_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS flow_index INTEGER,
+                ADD COLUMN IF NOT EXISTS funnel_step INTEGER,
                 ADD COLUMN IF NOT EXISTS events JSONB NOT NULL DEFAULT '[]'::jsonb
             """)
             # Custom conversion statuses need values beyond the built-in enum
@@ -149,8 +153,47 @@ async def ensure_schema():
                 ADD COLUMN IF NOT EXISTS daily_conversions_cap INTEGER,
                 ADD COLUMN IF NOT EXISTS overflow_offer_id INTEGER
             """)
+            # G33 honeypot decoy hits — visitors that follow the hidden /t/hp
+            # link are scrapers/bots and get flagged on their next visit.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS honeypot_hits (
+                    id serial PRIMARY KEY,
+                    visitor_key text NOT NULL,
+                    ip text,
+                    ua text,
+                    campaign_id integer,
+                    received_at timestamp NOT NULL DEFAULT now()
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS honeypot_hits_visitor_key_idx
+                ON honeypot_hits (visitor_key)
+            """)
     except Exception as e:
         log_track(f"Schema migration error: {e}")
+
+
+async def ensure_ch_schema():
+    """Idempotent ClickHouse schema migration (safe to run on every boot).
+
+    Fresh installs get every column from install/sql/clickHouse.sql, but the
+    live table predates some of them — ALTER ... ADD COLUMN IF NOT EXISTS
+    brings older databases up to date (fraud scoring needs fraud_score).
+    """
+    ch = acquire_ch()
+    try:
+        await asyncio.to_thread(
+            ch.command,
+            "ALTER TABLE clicks_data "
+            "ADD COLUMN IF NOT EXISTS flow_index UInt8 DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS utm_medium String DEFAULT '', "
+            "ADD COLUMN IF NOT EXISTS impression UInt8 DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS fraud_score UInt8 DEFAULT 0")
+    except Exception as e:
+        release_ch(ch, failed=True)
+        log_track(f"ClickHouse schema migration error: {e}")
+        return
+    release_ch(ch)
 
 
 async def retention_loop():
@@ -455,6 +498,58 @@ async def campaign_click(
             pass
     meta_data["click_id"] = meta_data.get("click_id") or generate_click_id()
 
+    # G55: link the conversion to the visitor cookie set on the campaign hit —
+    # the conversions log joins click-date windows through this key.
+    if not meta_data.get("visitor_id"):
+        vid = request.cookies.get(VISITOR_COOKIE)
+        if vid:
+            meta_data["visitor_id"] = vid
+
+    # Per-flow delivery action — the flow is recovered from the signed
+    # stickiness cookie's fi; a missing/invalid cookie falls back to the
+    # legacy redirect. Resolved BEFORE the click row is queued so the
+    # conversion inherits flow_index (same sorted-flow index the tracking
+    # plane stamps on the ClickHouse click row).
+    # G10 funnels: funnel campaigns ignore config.flows — the bound step
+    # (cookie "st") is stamped on the conversion as flow_index + funnel_step
+    # (for funnel campaigns the ClickHouse flow_index IS the step), and a
+    # successful click-out advances the cookie to the next step.
+    action_flow = None
+    funnel_cfg = None
+    click_bound = None
+    click_cfg = {}
+    click_dmode = "position"
+    try:
+        click_cfg = json.loads(campaign["config"] or "{}")
+        click_dmode = (campaign.get("redirect_mode") if hasattr(campaign, "get")
+                       else campaign["redirect_mode"]) or "position"
+        funnel_cfg = click_cfg.get("funnel")
+        if not (isinstance(funnel_cfg, dict) and funnel_cfg.get("enabled")
+                and funnel_cfg.get("steps")):
+            funnel_cfg = None
+        click_bound = parse_bind_cookie(
+            request, campaign["id"], campaign_routing_hash(click_cfg, click_dmode))
+        if funnel_cfg is not None:
+            st = click_bound.get("st") if click_bound else None
+            if not (isinstance(st, int) and not isinstance(st, bool)
+                    and 0 <= st < len(funnel_cfg.get("steps") or [])):
+                st = 0
+            meta_data["flow_index"] = st
+            meta_data["funnel_step"] = st
+        elif click_bound is not None:
+            click_flows = sorted(
+                click_cfg.get("flows", []),
+                key=lambda f: (0 if f.get("type") == "forced" else 1,
+                               f.get("position", 9999)))
+            fi = click_bound.get("fi")
+            if isinstance(fi, int) and not isinstance(fi, bool) and 0 <= fi < len(click_flows):
+                action_flow = click_flows[fi]
+                meta_data["flow_index"] = fi
+    except Exception as e:
+        log_track(f"❌ click-out action resolve failed for '{campaign_alias}': {e}")
+        action_flow = None
+        funnel_cfg = None
+
     # 5. Save the click asynchronously
     background_tasks.add_task(save_click_to_db, meta_data)
 
@@ -473,7 +568,28 @@ async def campaign_click(
     # Assemble the final URL
     offer_url = urlunparse(parsed._replace(query=urlencode(query_params)))
 
-    return RedirectResponse(offer_url)
+    response = await flow_action_response(
+        offer_url, action_flow, lambda u: RedirectResponse(u))
+
+    # G10: a successful click-out advances the funnel — re-issue the binding
+    # cookie with st = min(current + 1, last step), so the NEXT campaign-URL
+    # visit serves the next step. Click-out at the last step keeps st at last.
+    # Only a previously-bound visitor advances; a bare click-out (no cookie)
+    # just redirects without touching funnel state.
+    if funnel_cfg is not None and click_bound is not None:
+        steps = funnel_cfg.get("steps") or []
+        if steps:
+            cur = meta_data.get("funnel_step") or 0
+            next_step = min(cur + 1, len(steps) - 1)
+            response.set_cookie(
+                BIND_COOKIE,
+                make_bind_cookie(campaign["id"], 0, offer["id"],
+                                 meta_data.get("landing_id"),
+                                 campaign_routing_hash(click_cfg, click_dmode),
+                                 step=next_step),
+                max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
+
+    return response
 
 
 async def save_click_to_db(meta: dict):
@@ -487,7 +603,7 @@ async def save_click_to_db(meta: dict):
         "sub_id_1", "sub_id_2", "sub_id_3", "sub_id_4", "sub_id_5",
         "sub_id_6", "sub_id_7", "sub_id_8", "sub_id_9", "sub_id_10",
         "utm_campaign", "utm_creative", "utm_source", "traffic_source_name",
-        "os", "isp", "is_using_proxy", "is_bot", "device_type"
+        "os", "isp", "is_using_proxy", "is_bot", "device_type", "flow_index", "funnel_step"
     }
 
     # keep only the allowed fields
@@ -747,6 +863,73 @@ async def direct_collect(request: Request) -> Response:
     return response
 
 
+# ─── G33: honeypot (scraper trap) ──────────────────────────────────
+# /t/hp.js injects a hidden decoy link into campaign pages; scrapers that
+# follow every link hit /t/hp and permanently (24h) flag their visitor key.
+HP_JS_SOURCE = """(function () {
+    "use strict";
+    var campaign = "";
+    try {
+        var scriptEl = document.currentScript;
+        var qs = (scriptEl.src.split("?")[1] || "").split("&");
+        for (var i = 0; i < qs.length; i++) {
+            var kv = qs[i].split("=");
+            if (decodeURIComponent(kv[0] || "") === "c") {
+                campaign = decodeURIComponent(kv.slice(1).join("=") || "");
+            }
+        }
+    } catch (e) { return; }
+    var trap = document.createElement("a");
+    trap.href = "/t/hp" + (campaign ? "?c=" + encodeURIComponent(campaign) : "");
+    trap.style.display = "none";
+    trap.rel = "nofollow";
+    trap.setAttribute("aria-hidden", "true");
+    trap.textContent = "";
+    (document.body || document.documentElement).appendChild(trap);
+})();
+"""
+
+
+@app.get("/t/hp.js")
+async def honeypot_js() -> Response:
+    return Response(content=HP_JS_SOURCE, media_type="application/javascript", headers={
+        "Cache-Control": "public, max-age=3600",
+        **open_cors_headers(),
+    })
+
+
+@app.get("/t/hp")
+async def honeypot_hit(request: Request) -> Response:
+    """Record a honeypot hit and return empty 204.
+
+    Rate-limited to one row per visitor key per hour. Real users never reach
+    this URL — the link is invisible — so every row is a scraper/bot; the
+    visitor key is flagged (24h, cached 60s in-memory) on subsequent gate
+    checks, which forces fraud_score=100 and is_bot on the tracked row and
+    fails campaign shield whitelists.
+    """
+    ua = request.headers.get("user-agent", "") or ""
+    vkey = visitor_key_for(request)
+    c_ref = (request.query_params.get("c") or "").strip()
+    campaign_id = None
+    if c_ref:
+        campaign = await find_campaign_for_tracking(c_ref)
+        if campaign:
+            campaign_id = campaign["id"]
+    try:
+        async with app.state.pg.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO honeypot_hits (visitor_key, ip, ua, campaign_id) "
+                "SELECT $1, $2, $3, $4 "
+                "WHERE NOT EXISTS (SELECT 1 FROM honeypot_hits "
+                "WHERE visitor_key = $1 "
+                "AND received_at > NOW() - INTERVAL '1 hour')",
+                vkey, resolve_client_ip(request), str(ua)[:512], campaign_id)
+    except Exception as e:
+        log_track(f"Honeypot insert error: {e}")
+    return Response(status_code=204)
+
+
 
 # ─── Telegram conversion notifications ─────────────────────────────
 TELEGRAM_STATUS_EMOJI = {
@@ -985,19 +1168,366 @@ async def apply_bot_rules(request: Request):
     return None, False
 
 
-async def apply_tracking_gate(request: Request, label: str) -> Response | None:
-    """Bot-rule + GDPR opt-out gate shared by every campaign-serving route.
+# ─── Traffic-quality blacklists (G44) ──────────────────────────────
+BLACKLIST_FIELDS = ("sub_id_1", "sub_id_2", "sub_id_3", "sub_id_4", "sub_id_5",
+                    "sub_id_6", "sub_id_7", "sub_id_8", "sub_id_9", "sub_id_10",
+                    "country", "city", "device_type", "os", "browser", "ip")
 
-    Returns a Response to short-circuit with (bot-blocked 404), or None to
-    proceed. A non-blocking bot rule marks request.state.bot_marked; an opted-out
-    visitor sets request.state.optout — the caller still serves the funnel but
-    stores nothing (do_campaign_execution skips tracking when optout is set).
+
+def load_blacklists() -> list:
+    """Read the blacklists block from the settings row (30s TTL cache)."""
+    raw = _settings_block("blacklists", default=[])
+    return raw if isinstance(raw, list) else []
+
+
+def blacklist_action(meta: dict, client_ip: str, lists: list, campaign_id):
+    """Decisive action of the enabled blacklists matching this hit:
+    "block" when any matching list blocks, "mark" when at least one matches
+    and none blocks, else None. A campaign-scoped list only applies to its
+    campaign; a global list applies everywhere. Field values come from the
+    hit meta (sub_id_1..10 land there via query/post/cookies, ip from the
+    resolved client IP). IP values match exactly or, when written as CIDR
+    (contains '/'), by network containment.
+    """
+    matched_mark = False
+    for bl in lists or []:
+        if not isinstance(bl, dict) or bl.get("enabled") is False:
+            continue
+        if (bl.get("scope") or "global") == "campaign":
+            try:
+                if campaign_id is None or int(bl.get("campaign_id")) != int(campaign_id):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        field = bl.get("field") or ""
+        if field not in BLACKLIST_FIELDS:
+            continue
+        values = [str(v).strip() for v in (bl.get("values") or []) if str(v).strip()]
+        if not values:
+            continue
+
+        if field == "ip":
+            if not client_ip:
+                continue
+            plain = [v for v in values if "/" not in v]
+            nets = [v for v in values if "/" in v]
+            if client_ip in plain or (nets and _ip_in_cidrs(client_ip, nets)):
+                action = (bl.get("action") or "mark").strip().lower()
+                if action == "block":
+                    return "block"
+                matched_mark = True
+            continue
+
+        value = str(meta.get(field) or "").strip()
+        if value and value in values:
+            action = (bl.get("action") or "mark").strip().lower()
+            if action == "block":
+                return "block"
+            matched_mark = True
+    return "mark" if matched_mark else None
+
+
+async def apply_blacklists(request: Request, campaign) -> "str | None":
+    """Evaluate the G44 blacklists for an inbound hit.
+
+    Returns "block" (caller serves 404 untracked, like a bot block) or "mark"
+    (request.state.bot_marked is set; track_event flags the row is_bot) or
+    None. Matching runs only when at least one blacklist exists; the list
+    itself comes from the 30s-TTL settings cache because this runs on every
+    hit. The hit meta (sub_id_1..10, country, os, ...) is built with the same
+    enrich_meta used downstream so blacklist values match stored values.
+    """
+    lists = load_blacklists()
+    if not lists:
+        return None
+    campaign_id = campaign["id"] if campaign is not None else None
+    meta = await enrich_meta(request)
+    action = blacklist_action(meta, resolve_client_ip(request), lists, campaign_id)
+    if action == "mark":
+        request.state.bot_marked = "blacklist"
+    return action
+
+
+# ─── Heuristic fraud scoring (monitoring-only) ─────────────────────
+# Signals are additive, capped at 100, and NEVER block anything by themselves —
+# blocking is the job of the bot rules and the campaign shield below.
+GENERIC_UA_PATTERN = re.compile(
+    r"curl|wget|python|requests|httpx|aiohttp|urllib|go-http-client|"
+    r"headless|phantom|selenium|puppeteer|playwright", re.IGNORECASE)
+HOSTING_ISP_PATTERN = re.compile(
+    r"hosting|cloud|datacenter|datacentre|server|ovh|digitalocean|amazon|"
+    r"google llc|hetzner|vultr|linode|m247|psychz|contabo", re.IGNORECASE)
+# A UA claiming to be one of these crawlers while its IP is NOT in the
+# verified crawler ranges is a spoofed crawler — a classic spy tool.
+CRAWLER_UA_PATTERN = re.compile(
+    r"googlebot|bingbot|duckduckbot|slurp|baiduspider|yandexbot", re.IGNORECASE)
+
+# Verified search-engine crawler nets (Googlebot, Bingbot, DuckDuckGo).
+# These are is_bot with the top score but NOT fraud: no hosting-pattern points,
+# reported separately so reporting can split "good bots" from fraud.
+VERIFIED_CRAWLER_CIDRS = [
+    "66.249.64.0/19",   # Googlebot
+    "157.55.39.0/24",   # Bingbot
+    "40.77.167.0/24",   # Bingbot
+    "13.66.139.0/24",   # DuckDuckGo
+    "207.46.13.0/24",   # Bingbot
+]
+
+# Duplicate-visitor ring: process-local deque of (monotonic_ts, visitor_key).
+# Duplicates are a heuristic, not ground truth — per-process is fine and keeps
+# the hot path allocation-free-ish.
+_DUP_VISITOR_WINDOW = 600.0   # 10 minutes
+_DUP_VISITOR_CAP = 200_000
+_dup_visitor_log = deque()        # (ts, visitor_key), expiry order
+_dup_visitor_counts: dict = {}    # visitor_key → hits inside the window
+
+
+def _ip_in_cidrs(ip: str, cidrs) -> bool:
+    try:
+        addr = ipaddress.ip_address(str(ip))
+    except ValueError:
+        return False
+    for raw in cidrs or []:
+        raw = str(raw).strip()
+        if not raw:
+            continue
+        try:
+            if addr in ipaddress.ip_network(raw, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _dup_hits_in_window(visitor_key: str) -> int:
+    """Prior hits for this visitor key inside the 10-min window; logs this hit."""
+    now = time.monotonic()
+    while _dup_visitor_log and now - _dup_visitor_log[0][0] > _DUP_VISITOR_WINDOW:
+        _, old_key = _dup_visitor_log.popleft()
+        remaining = _dup_visitor_counts.get(old_key, 0) - 1
+        if remaining > 0:
+            _dup_visitor_counts[old_key] = remaining
+        else:
+            _dup_visitor_counts.pop(old_key, None)
+    count = _dup_visitor_counts.get(visitor_key, 0)
+    if len(_dup_visitor_log) >= _DUP_VISITOR_CAP:
+        _dup_visitor_log.popleft()  # crude cap; counts may drift, heuristic only
+    _dup_visitor_log.append((now, visitor_key))
+    _dup_visitor_counts[visitor_key] = count + 1
+    return count
+
+
+def compute_fraud_score(*, visitor_key: str, ip: str, ua: str, isp: str,
+                        is_bot: bool) -> tuple[int, bool, list]:
+    """Heuristic 0-100 fraud score. Returns (score, verified_crawler, reasons).
+
+    Signals: +50 bot (ua-parser/rules), +30 empty/generic UA, +20 duplicate
+    visitor (process-local 10-min window), +15 hosting/datacenter ISP,
+    +25 IP in the user suspicious-range list, +50 crawler-UA spoof (crawler
+    claimed but not from a verified crawler net). Cap 100.
+    Both CIDR lists are settings-overridable via settings.fraud.
+    """
+    fraud_cfg = _settings_block("fraud")
+    verified_cidrs = fraud_cfg.get("verified_cidrs") or VERIFIED_CRAWLER_CIDRS
+    suspicious_cidrs = fraud_cfg.get("suspicious_cidrs") or []
+    try:
+        dup_threshold = max(int(fraud_cfg.get("duplicate_threshold") or 3), 1)
+    except (TypeError, ValueError):
+        dup_threshold = 3
+
+    # Verified crawler: top score, reported separately, no fraud signals.
+    if ip and _ip_in_cidrs(ip, verified_cidrs):
+        return 100, True, ["verified_crawler"]
+
+    score = 0
+    reasons = []
+    if is_bot:
+        score += 50
+        reasons.append("bot_detected")
+    if not (ua or "").strip() or GENERIC_UA_PATTERN.search(ua or ""):
+        score += 30
+        reasons.append("generic_ua")
+    if visitor_key and _dup_hits_in_window(visitor_key) >= dup_threshold:
+        score += 20
+        reasons.append("duplicate_visitor")
+    if (isp or "") and HOSTING_ISP_PATTERN.search(isp):
+        score += 15
+        reasons.append("hosting_isp")
+    if ip and suspicious_cidrs and _ip_in_cidrs(ip, suspicious_cidrs):
+        score += 25
+        reasons.append("suspicious_ip")
+    if CRAWLER_UA_PATTERN.search(ua or ""):
+        score += 50
+        reasons.append("crawler_spoof")
+    return min(score, 100), False, reasons
+
+
+# ─── Campaign Shield (cloaking) — G32/G34 ──────────────────────────
+BLANK_PAGE_HTML = ("<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+                   "<title></title></head><body></body></html>")
+
+
+def render_blank_html() -> Response:
+    """Shield 'blank' action: minimal 200 page, untracked (like a bot block)."""
+    return Response(content=BLANK_PAGE_HTML, status_code=200, media_type="text/html")
+
+
+def campaign_shield_config(campaign) -> dict:
+    """The optional campaign config 'shield' block ({enabled, whitelists,
+    action, honeypot}), or {} when absent/disabled-shaped."""
+    try:
+        raw = campaign.get("config") if hasattr(campaign, "get") else None
+        cfg = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    shield = (cfg or {}).get("shield")
+    return shield if isinstance(shield, dict) else {}
+
+
+async def evaluate_campaign_shield(request: Request, campaign) -> "str | None":
+    """Campaign Shield evaluator — SINGLE shared decision point for both the
+    redirect path (apply_tracking_gate) and the click-api decision path, so a
+    request can never get different shield decisions per entry point.
+    KEEP IN SYNC: any change here applies to both paths automatically.
+
+    Returns None to proceed normally, or one of:
+      "blank" / "404" — short-circuit the response, never track (untracked);
+      "allow"         — proceed, but the tracked row is forced
+                        fraud_score >= 50 and is_bot (watch mode; sets
+                        request.state.shield_watch, consumed by track_event).
+
+    Whitelists are OR'd: ip CIDR match, referrer substring, UA regex — any
+    match whitelists the request. An empty whitelist matches everything
+    (shield off). Honeypot-flagged visitors can never be whitelisted; with
+    honeypot=true, verified crawlers can't either (the spy-tool case) and
+    always get the shield action.
+    """
+    shield = campaign_shield_config(campaign)
+    if not shield.get("enabled"):
+        return None
+
+    whitelists = shield.get("whitelists") or {}
+    wl_ips = [str(x).strip() for x in (whitelists.get("ips") or []) if str(x).strip()]
+    wl_refs = [str(x) for x in (whitelists.get("referers") or [])]
+    wl_ua = (whitelists.get("ua_regex") or "").strip()
+
+    # Empty whitelist = everything matches = shield off.
+    if not wl_ips and not wl_refs and not wl_ua:
+        return None
+
+    client_ip = resolve_client_ip(request)
+    referer = request.headers.get("referer", "") or ""
+    ua = request.headers.get("user-agent", "") or ""
+
+    fraud_cfg = _settings_block("fraud")
+    verified_cidrs = fraud_cfg.get("verified_cidrs") or VERIFIED_CRAWLER_CIDRS
+    is_verified_crawler = bool(client_ip) and _ip_in_cidrs(client_ip, verified_cidrs)
+
+    whitelisted = False
+    if not getattr(request.state, "honeypot_flagged", False):
+        # Verified crawlers with honeypot on are the adversary here — they
+        # bypass the whitelist entirely and always get the shield action.
+        if not (is_verified_crawler and shield.get("honeypot")):
+            if wl_ips and _ip_in_cidrs(client_ip, wl_ips):
+                whitelisted = True
+            if not whitelisted and wl_refs:
+                # substring containment; an empty referrer matches nothing
+                # unless the list literally contains ""
+                whitelisted = any(sub in referer for sub in wl_refs)
+            if not whitelisted and wl_ua:
+                try:
+                    whitelisted = bool(re.search(wl_ua, ua))
+                except re.error:
+                    whitelisted = False
+
+    if whitelisted:
+        return None
+
+    action = str(shield.get("action") or "allow").strip().lower()
+    if action not in ("blank", "404", "allow"):
+        action = "allow"
+    if action == "allow":
+        # Watch mode: tracked, but flagged (see track_event).
+        request.state.shield_watch = True
+    return action
+
+
+# ─── Honeypot (G33) ────────────────────────────────────────────────
+_honeypot_flag_cache: dict = {}
+_HONEYPOT_FLAG_TTL = 60.0
+
+
+async def honeypot_flagged(visitor_key: str) -> bool:
+    """True when the visitor tripped the /t/hp decoy in the last 24h.
+
+    Lookups are cached in-memory (positives and negatives) for 60s with a
+    process-local dict — same pattern as the settings block cache.
+    """
+    if not visitor_key:
+        return False
+    now = time.monotonic()
+    hit = _honeypot_flag_cache.get(visitor_key)
+    if hit is not None and now < hit[0]:
+        return hit[1]
+    flagged = False
+    try:
+        async with app.state.pg.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT 1 FROM honeypot_hits WHERE visitor_key = $1 "
+                "AND received_at > NOW() - INTERVAL '24 hours' LIMIT 1",
+                visitor_key)
+            flagged = row is not None
+    except Exception as e:
+        log_track(f"Honeypot lookup error: {e}")
+    if len(_honeypot_flag_cache) > 100_000:
+        _honeypot_flag_cache.clear()
+    _honeypot_flag_cache[visitor_key] = (now + _HONEYPOT_FLAG_TTL, flagged)
+    return flagged
+
+
+async def apply_tracking_gate(request: Request, label: str, campaign=None) -> Response | None:
+    """Bot-rule + shield + GDPR opt-out gate shared by every campaign-serving route.
+
+    Returns a Response to short-circuit with (bot-blocked 404 / shield blank /
+    shield 404 — all untracked), or None to proceed. A non-blocking bot rule
+    marks request.state.bot_marked; an opted-out visitor sets request.state.optout —
+    the caller still serves the funnel but stores nothing (do_campaign_execution
+    skips tracking when optout is set).
+
+    Campaign Shield is enforced HERE on the redirect path; the click-api path
+    mirrors it via the same evaluate_campaign_shield helper — keep the two
+    call sites in sync when adding new gate checks.
     """
     rule, blocked = await apply_bot_rules(request)
     if rule:
         request.state.bot_marked = rule.get("type")
         if blocked:
             log_track(f"🤖 Blocked visit to '{label}' by rule '{rule.get('type')}'")
+            return render_404_html()
+
+    # G44 traffic-quality blacklists: "block" → untracked 404 (same as a bot
+    # block); "mark" → bot_marked, track_event flags the row is_bot.
+    bl_action = await apply_blacklists(request, campaign)
+    if bl_action == "block":
+        log_track(f"🚫 Blacklist-blocked visit to '{label}'")
+        return render_404_html()
+
+    # G33 honeypot: visitors that hit the /t/hp decoy are bots (fraud_score=100
+    # in track_event) and can never pass a campaign shield whitelist.
+    if await honeypot_flagged(visitor_key_for(request)):
+        request.state.honeypot_flagged = True
+        if not getattr(request.state, "bot_marked", None):
+            request.state.bot_marked = "honeypot"
+
+    # G32/G34 campaign shield (cloaking) — the click-api path evaluates the
+    # same helper on its synthetic request; keep both call sites in sync.
+    if campaign is not None:
+        shield_action = await evaluate_campaign_shield(request, campaign)
+        if shield_action == "blank":
+            log_track(f"🛡 Shield blanked visit to '{label}'")
+            return render_blank_html()
+        if shield_action == "404":
+            log_track(f"🛡 Shield 404'd visit to '{label}'")
             return render_404_html()
     if request.cookies.get(OPT_OUT_COOKIE):
         request.state.optout = True
@@ -1627,6 +2157,11 @@ async def offer_conversions_today(pg, cache: dict, offer_id) -> int:
 # ─── Visitor stickiness (A/B binding) ─────────────────────────────
 BIND_COOKIE = "aaa_bind"
 BIND_TTL_SECONDS = 30 * 24 * 3600
+# G55 click-date attribution: first-party visitor id, set on the campaign hit
+# and read back on the click-out, so the ClickHouse click row and the Postgres
+# conversion row share one join key.
+VISITOR_COOKIE = "aaa_vid"
+VISITOR_TTL_SECONDS = 180 * 24 * 3600
 
 
 def _load_or_create_bind_secret() -> bytes:
@@ -1680,15 +2215,25 @@ def _b64url_decode(data: str) -> bytes:
 
 def campaign_routing_hash(config: dict, distribution_mode: str) -> str:
     """Hash of the routing-relevant config — editing flows/weights invalidates bindings."""
-    payload = json.dumps(
-        {"flows": config.get("flows", []), "redirect_mode": distribution_mode},
-        sort_keys=True, default=str)
+    payload_obj = {"flows": config.get("flows", []), "redirect_mode": distribution_mode}
+    # G10: funnel mode replaces flows at execution time, so the funnel config
+    # is part of the routing hash too — editing steps/names resets every
+    # bound visitor to step 0 (the step rides in the same bind cookie).
+    funnel_cfg = config.get("funnel")
+    if isinstance(funnel_cfg, dict) and funnel_cfg.get("enabled"):
+        payload_obj["funnel"] = funnel_cfg
+    payload = json.dumps(payload_obj, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def make_bind_cookie(campaign_id: int, flow_index: int, offer, landing, routing_hash: str) -> str:
+def make_bind_cookie(campaign_id: int, flow_index: int, offer, landing, routing_hash: str,
+                     step: int = None) -> str:
     payload = {"cid": int(campaign_id), "fi": int(flow_index), "offer": offer, "landing": landing,
                "exp": int(datetime.utcnow().timestamp()) + BIND_TTL_SECONDS, "h": routing_hash}
+    # G10 funnel campaigns: "st" is the visitor's current step index. Absent on
+    # non-funnel cookies (backward compatible) and on step 0.
+    if step is not None:
+        payload["st"] = int(step)
     raw = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
     sig = hmac.new(_bind_secret(), raw.encode(), hashlib.sha256).hexdigest()
     return f"{raw}.{sig}"
@@ -1809,6 +2354,103 @@ def meta_refresh_redirect(url: str) -> Response:
     return HTMLResponse(html_doc)
 
 
+# ─── Per-flow delivery actions ─────────────────────────────────────
+# Optional flow.action decides HOW the visitor reaches the destination URL:
+#   redirect  — current 302 / meta-refresh behavior (default, backward compatible)
+#   iframe    — full-viewport iframe pointing at the URL
+#   form_post — auto-submitting POST form to the URL
+#   curl      — server-side fetch of the URL, its response served to the visitor
+#   show_html — serve flow.html verbatim (no destination needed)
+#   none      — 200 empty body (pixel-only campaigns)
+# Absent action == redirect. The actions apply at the two destination points:
+# the redirect schema's redirect_url (execute_flow_schema) and the offer
+# click-out /c/{alias}/{offer_id} (campaign_click, flow recovered from the
+# signed aaa_bind cookie's fi). Landing schemas reach the offer URL only at
+# click-out time, so their action naturally takes effect there. The direct
+# schema has no action-aware destination — action is ignored there.
+
+FLOW_ACTIONS = ("redirect", "iframe", "curl", "form_post", "show_html", "none")
+CURL_ACTION_MAX_BYTES = 2 * 1024 * 1024
+
+
+def iframe_action_response(url: str) -> Response:
+    import html as html_module
+    safe_url = html_module.escape(url, quote=True)
+    html_doc = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Loading...</title></head>
+<body style="margin:0">
+<iframe src="{safe_url}" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>
+</body>
+</html>"""
+    return HTMLResponse(html_doc)
+
+
+def form_post_action_response(url: str) -> Response:
+    import html as html_module
+    safe_url = html_module.escape(url, quote=True)
+    # offer.tokens has no token→POST-param mapping on the tracking plane
+    # (substitution happens via {token} placeholders inside the offer URL), so
+    # the already-substituted URL query string is submitted as the POST body.
+    hidden_inputs = "".join(
+        f'<input type="hidden" name="{html_module.escape(k, quote=True)}" '
+        f'value="{html_module.escape(v, quote=True)}">'
+        for k, v in parse_qsl(urlparse(url).query))
+    html_doc = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Loading...</title></head>
+<body>
+<form method="post" action="{safe_url}">
+{hidden_inputs}
+</form>
+<script>document.forms[0].submit()</script>
+</body>
+</html>"""
+    return HTMLResponse(html_doc)
+
+
+async def curl_action_response(url: str, fallback_redirect) -> Response:
+    if not url.startswith(("http://", "https://")):
+        return HTMLResponse(
+            "<h1>400 Bad Request</h1><p>The curl action requires an http(s) destination URL.</p>",
+            status_code=400)
+    try:
+        # v1 serves the fetched body as-is — no HTML rewriting of links/assets.
+        # verify=False: destinations are operator-configured URLs on their own
+        # infra, where self-signed certificates are common.
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10, verify=False) as client:
+            upstream = await client.get(url)
+        body = upstream.content[:CURL_ACTION_MAX_BYTES]
+        media_type = upstream.headers.get("content-type", "text/html; charset=utf-8")
+        return Response(content=body, media_type=media_type)
+    except Exception as e:
+        log_track(f"❌ curl action fetch failed for '{url[:120]}': {e} — falling back to redirect")
+        return fallback_redirect(url)
+
+
+async def flow_action_response(url: str, flow: dict, fallback_redirect) -> Response:
+    """Deliver `url` per the flow's action. Absent/unknown action = redirect.
+
+    `fallback_redirect` builds the legacy redirect response — used for the
+    redirect action itself and as the curl fetch-failure fallback.
+    """
+    action = (flow or {}).get("action") or "redirect"
+    if action == "redirect":
+        return fallback_redirect(url)
+    if action == "iframe":
+        return iframe_action_response(url)
+    if action == "form_post":
+        return form_post_action_response(url)
+    if action == "show_html":
+        return HTMLResponse((flow or {}).get("html") or "ok")
+    if action == "none":
+        return Response(status_code=200)
+    if action == "curl":
+        return await curl_action_response(url, fallback_redirect)
+    # Unknown action — keep the legacy redirect rather than break traffic.
+    return fallback_redirect(url)
+
+
 async def referrer_page_title(referrer: str) -> str:
     """Fetch the referring page and use its <title> as the keyword (cached)."""
     if not referrer or not referrer.startswith(("http://", "https://")):
@@ -1831,6 +2473,108 @@ async def referrer_page_title(referrer: str) -> str:
     if len(_title_cache) > 5000:
         _title_cache.clear()
     return title
+
+
+def funnel_config_steps(config: dict):
+    """G10: the funnel step list when funnel mode is active and valid, else None.
+
+    While enabled, the funnel takes over execution and config.flows is ignored
+    (the campaigns UI shows a warning banner in that state). An enabled funnel
+    with no steps is treated as inactive so a broken config can't brick the
+    campaign into a 404.
+    """
+    funnel = config.get("funnel")
+    if not isinstance(funnel, dict) or not funnel.get("enabled"):
+        return None
+    steps = funnel.get("steps")
+    if not isinstance(steps, list):
+        return None
+    steps = [s for s in steps if isinstance(s, dict)]
+    if not steps:
+        return None
+    return steps
+
+
+async def execute_funnel(campaign, request: Request, config: dict, meta_data: dict,
+                         steps: list, routing_hash: str, stickiness: bool,
+                         depth: int, track: bool) -> Response:
+    """G10: serve the visitor's current funnel step and (re)issue the signed
+    binding cookie carrying the step index ("st" payload key).
+
+    The step advances only on a successful click-out at /c/{alias}/{offer_id}
+    (campaign_click re-issues the cookie with st = min(current + 1, last)).
+    Visitors at/past the last step re-see the last step on every repeat visit.
+    Step state rides in the same bind cookie as flow stickiness, so a config
+    edit (routing_hash change) resets every visitor to step 0 — the same
+    stickiness contract as flows.
+
+    The step is served through execute_flow_schema by mapping the step onto a
+    synthetic flow: landing_only steps keep their schema; steps with offers run
+    as a "multi" flow over the step's landing + offer pool, so landing HTML and
+    the {offer} click-out substitution reuse the exact serving path.
+
+    For funnel campaigns the ClickHouse flow_index IS the step index.
+    """
+    # Step from the binding cookie: absent/invalid "st" = step 0; a step index
+    # at/past the end (steps shrank under a still-valid cookie — only possible
+    # while the routing_hash hasn't changed) serves the last step again.
+    # Unlike flow stickiness, the binding is ALWAYS issued for funnels — the
+    # step cannot advance across visits without it.
+    step_index = 0
+    bound = parse_bind_cookie(request, campaign["id"], routing_hash)
+    if bound is not None:
+        st = bound.get("st")
+        if isinstance(st, int) and not isinstance(st, bool) and st > 0:
+            step_index = min(st, len(steps) - 1)
+
+    step = steps[step_index]
+    landing = step.get("landing")
+    offers = step.get("offers") or []
+    step_schema = step.get("schema") if step.get("schema") in ("landing_offer", "landing_only") \
+        else ("landing_offer" if offers else "landing_only")
+    # multi honors the whole offer pool (random pick + bound stickiness within
+    # the step), which is exactly the landing_offer semantics for N offers.
+    flow = {"name": step.get("name") or f"Step {step_index + 1}",
+            "schema": "multi" if step_schema == "landing_offer" else "landing_only",
+            "landing": landing, "offer": offers[0] if offers else None,
+            "landings": [landing] if landing else [], "offers": offers}
+
+    flow_indexes = getattr(request.state, "flow_indexes", None)
+    if flow_indexes is None:
+        flow_indexes = {}
+        request.state.flow_indexes = flow_indexes
+    flow_indexes[campaign["id"]] = step_index
+
+    if config.get("hide_referrer"):
+        def campaign_redirect(url):
+            return meta_refresh_redirect(url)
+    else:
+        def campaign_redirect(url):
+            return RedirectResponse(url)
+
+    served = {"offer": None, "landing": None}
+    # The parsed binding feeds ONLY the step index — it must not leak into the
+    # schema execution (multi would re-serve the PREVIOUS step's bound
+    # landing/offer). Landing/offer picks always come from the current step's
+    # own pool.
+    response = await execute_flow_schema(
+        campaign, request, config, meta_data, flow, None, served, campaign_redirect,
+        depth=depth)
+
+    # Funnels always (re)issue the step binding cookie — independent of the
+    # campaign's stickiness switch, which only governs flow A/B stickiness.
+    if not getattr(request.state, "optout", False):
+        offer_id = served["offer"] if served["offer"] is not None else flow.get("offer")
+        landing_id = served["landing"] if served["landing"] is not None else landing
+        response.set_cookie(
+            BIND_COOKIE,
+            make_bind_cookie(campaign["id"], 0, offer_id, landing_id, routing_hash,
+                             step=step_index),
+            max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
+
+    if track and not getattr(request.state, "optout", False):
+        await track_event(campaign, request)
+    return response
 
 
 async def do_campaign_execution(campaign, request: Request, depth: int = 0,
@@ -1868,6 +2612,15 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
             meta_data["keyword"] = title
 
     routing_hash = campaign_routing_hash(config, distribution_mode)
+
+    # G10 multi-step funnels: an enabled funnel takes over execution entirely —
+    # config.flows is ignored while funnel mode is on (the campaigns UI shows a
+    # warning banner). Step state rides in the same signed aaa_bind cookie, so
+    # a funnel config edit resets every bound visitor to step 0.
+    funnel_steps = funnel_config_steps(config)
+    if funnel_steps is not None:
+        return await execute_funnel(campaign, request, config, meta_data, funnel_steps,
+                                    routing_hash, stickiness, depth, track)
 
     # Stickiness: a valid binding for THIS campaign with a current config hash
     # wins — the bound flow is served directly without re-filtering.
@@ -1994,6 +2747,15 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
     # this campaign's id). Inner redirect_campaign levels track themselves when
     # they execute; opted-out visitors are never recorded. ClickHouse failures
     # never kill the visitor's response — track_event logs and swallows them.
+    if not getattr(request.state, "optout", False):
+        # G55: maintain the first-party visitor id across hits so the CH click
+        # row and the later conversion row share a join key for click-date
+        # attribution in the conversions log.
+        vid = request.cookies.get(VISITOR_COOKIE) or str(uuid.uuid4())
+        request.state.aaa_vid = vid
+        response.set_cookie(
+            VISITOR_COOKIE, vid,
+            max_age=VISITOR_TTL_SECONDS, path="/", httponly=True, samesite="lax")
     if track and not getattr(request.state, "optout", False):
         await track_event(campaign, request)
     return response
@@ -2092,7 +2854,9 @@ async def execute_flow_schema(campaign, request: Request, config: dict, meta_dat
             redirect_url = merge_query_params(redirect_url, request.query_params)
         if config.get("send_se_referrer") and meta_data.get("referrer"):
             redirect_url = merge_query_params(redirect_url, {"referrer": meta_data["referrer"]})
-        return campaign_redirect(redirect_url)
+        # Per-flow delivery action (iframe/form_post/curl/show_html/none);
+        # absent action = legacy redirect via campaign_redirect.
+        return await flow_action_response(redirect_url, flow, campaign_redirect)
 
     # SCHEMA: redirect_campaign ++++
     elif schema == "redirect_campaign":
@@ -2244,9 +3008,34 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
         if k in VALID_PARAMS:
             result_row[k] = v
 
+    # G55: stamp the visitor id so click-date attribution can join this row
+    # to the conversion recorded at click-out time. Runs after the meta merge
+    # so a stale/empty meta value can't clobber it.
+    vid = getattr(request.state, "aaa_vid", None) or request.cookies.get(VISITOR_COOKIE)
+    if vid and not result_row.get("visitor_id"):
+        result_row["visitor_id"] = str(vid)
+
     # Bot rule with "mark" action — flag the click but keep tracking it
     if getattr(request.state, "bot_marked", None):
         result_row["is_bot"] = True
+
+    # Heuristic fraud score (monitoring-only — nothing is blocked here).
+    score, verified_crawler, reasons = compute_fraud_score(
+        visitor_key=visitor_key_for(request),
+        ip=str(meta_data.get("ip") or ""),
+        ua=str(meta_data.get("user_agent") or ""),
+        isp=str(meta_data.get("isp") or ""),
+        is_bot=bool(meta_data.get("is_bot")) or bool(getattr(request.state, "bot_marked", None)))
+    if getattr(request.state, "honeypot_flagged", False):
+        score, verified_crawler, reasons = 100, False, reasons + ["honeypot"]
+    if getattr(request.state, "shield_watch", False):
+        # Shield "allow" action: watch mode — track but force a high score.
+        score, reasons = max(score, 50), reasons + ["shield_watch"]
+    result_row["fraud_score"] = min(int(score), 100)
+    if verified_crawler or score >= 70 or getattr(request.state, "shield_watch", False):
+        result_row["is_bot"] = True
+    if score >= 30:
+        log_track(f"🕵 Fraud score {score} for '{campaign_alias}': {', '.join(reasons)}")
 
     if click is not None:
         result_row["click"] = bool(click)
@@ -2426,7 +3215,15 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
     (match_flow_filters, schedule_matches, flow_click_counts, cap_exceeded,
     offer_cap_state, get_real_offer_url, merge_query_params) leaves the
     redirect pipeline byte-identical. The trade-off is duplicated selection
-    logic — keep the two in sync when editing either.
+    logic — keep the two in sync when editing either (including the per-flow
+    delivery `action`, mirrored into the decision below so /click-api
+    consumers can wrap the destination URL the same way, and the G10 funnel
+    branch, mirrored by execute_funnel).
+
+    Shield note: the campaign shield is evaluated by the caller BEFORE this
+    function runs (click_api → evaluate_campaign_shield, mirroring
+    apply_tracking_gate on the redirect path) and its "allow" watch mode is
+    applied by track_event — no shield logic lives here.
     """
     config = json.loads(campaign["config"])
     flows = config.get("flows", [])
@@ -2452,6 +3249,44 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
             meta_data["keyword"] = title
 
     routing_hash = campaign_routing_hash(config, distribution_mode)
+
+    # G10 funnels — decision-only mirror of execute_funnel (KEEP IN SYNC with
+    # do_campaign_execution/execute_funnel): funnel campaigns ignore
+    # config.flows, serve the bound step ("st" in the bind cookie, else step 0,
+    # past-the-end clamped to the last step) and stamp flow_index = step.
+    funnel_steps_ = funnel_config_steps(config)
+    if funnel_steps_ is not None:
+        step_index = 0
+        bound_f = parse_bind_cookie(request, campaign["id"], routing_hash) if stickiness else None
+        if bound_f is not None:
+            st = bound_f.get("st")
+            if isinstance(st, int) and not isinstance(st, bool) and st > 0:
+                step_index = min(st, len(funnel_steps_) - 1)
+        flow_indexes = getattr(request.state, "flow_indexes", None)
+        if flow_indexes is None:
+            flow_indexes = {}
+            request.state.flow_indexes = flow_indexes
+        flow_indexes[campaign["id"]] = step_index
+
+        step = funnel_steps_[step_index]
+        offers = step.get("offers") or []
+        decision = {"campaign_id": campaign["id"], "bound": bound_f is not None,
+                    "funnel": True, "step": step_index, "name": step.get("name"),
+                    "schema": step.get("schema") or ("landing_offer" if offers else "landing_only"),
+                    "landing_id": step.get("landing"), "offers": offers,
+                    "landing_url": None, "url": None, "flow_index": step_index,
+                    "action": "redirect"}
+        if step.get("landing"):
+            async with pg.acquire() as conn:
+                row = await conn.fetchrow("SELECT folder FROM landings WHERE id = $1", step["landing"])
+            if row:
+                decision["landing_url"] = f"/l/{row['folder']}"
+                if decision["schema"] != "landing_only" and offers:
+                    decision["url"] = await get_offer_click_url(
+                        campaign['alias'], offers[0], step["landing"],
+                        click_id=click_id or meta_data.get("click_id"),
+                        passthrough=mapped_passthrough_params(config, meta_data))
+        return decision
 
     bound = None
     if stickiness:
@@ -2531,7 +3366,7 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
         fallback_url = (config.get("fallback_url") or "").strip()
         return {**base, "schema": "fallback", "flow_index": 0, "fallback": True,
                 "offer_id": None, "landing_id": None,
-                "url": fallback_url or None}
+                "url": fallback_url or None, "action": "redirect"}
 
     flow = chosen
     if chosen_override is not None:
@@ -2545,7 +3380,8 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
     offer_id = flow.get("offer")
     landing_id = flow.get("landing")
     decision = {**base, "schema": schema, "flow_index": chosen_index,
-                "offer_id": offer_id, "landing_id": landing_id, "url": None}
+                "offer_id": offer_id, "landing_id": landing_id, "url": None,
+                "action": flow.get("action") or "redirect"}
 
     # SCHEMA: direct — resolve the offer URL with click_id substituted
     if schema == "direct":
@@ -2677,20 +3513,49 @@ async def click_api(campaign_alias: str, request: Request) -> Response:
         raise HTTPException(status_code=400, detail="Invalid or missing 'ip'")
 
     ua = str(body.get("user_agent") or "")
+    # Blacklists match on hit meta (sub_id_1..10, geo, device, os, browser) —
+    # expose the body's blacklist-relevant fields as the synthetic query so the
+    # click-api path sees exactly what the redirect path would (KEEP IN SYNC
+    # with apply_tracking_gate).
+    bl_query = urlencode({k: str(v) for k, v in body.items()
+                          if k in BLACKLIST_FIELDS and v is not None})
     synth = _synthetic_request(
         ip=ip, ua=ua,
         referrer=str(body.get("referrer") or ""),
         language=str(body.get("language") or ""),
-        path=f"/click-api/{campaign_alias}", method="POST")
+        path=f"/click-api/{campaign_alias}", method="POST",
+        query_string=bl_query.encode("utf-8"))
 
     rule, blocked = await apply_bot_rules(synth)
     if rule:
         synth.state.bot_marked = rule.get("type")
 
+    # G44 blacklists mirror of apply_tracking_gate.
+    bl_action = await apply_blacklists(synth, campaign)
+    if bl_action == "block":
+        blocked = True
+    elif bl_action == "mark" and not getattr(synth.state, "bot_marked", None):
+        synth.state.bot_marked = "blacklist"
+
+    # Shield + honeypot mirror of apply_tracking_gate (KEEP IN SYNC): both
+    # paths call the same helpers, so decisions are identical per entry point.
+    if await honeypot_flagged(visitor_key_for(synth)):
+        synth.state.honeypot_flagged = True
+        if not getattr(synth.state, "bot_marked", None):
+            synth.state.bot_marked = "honeypot"
+    shield_action = await evaluate_campaign_shield(synth, campaign)
+
     click_id = str(body.get("click_id") or "").strip() or generate_click_id()
     decision = await decide_campaign_flow(campaign, synth, click_id)
     if rule:
         decision["bot_rule"] = rule.get("type")
+    if bl_action:
+        decision["blacklist"] = bl_action
+    if shield_action:
+        decision["shield"] = shield_action
+    shield_blocked = shield_action in ("blank", "404")
+    decision["shield_blocked"] = shield_blocked
+    blocked = blocked or shield_blocked
     decision["bot_blocked"] = bool(blocked)
 
     if not blocked:
@@ -2921,9 +3786,9 @@ async def get_with_campaign_alias(campaign_alias: str, request: Request):
         log_track(msg)
         raise HTTPException(status_code=404, detail=msg)
 
-    # Bot & filter rules + GDPR opt-out (shared gate). Blocked → 404;
+    # Bot & filter rules + shield + GDPR opt-out (shared gate). Blocked → 404;
     # opted-out → funnel still redirects but stores nothing.
-    blocked = await apply_tracking_gate(request, campaign_alias)
+    blocked = await apply_tracking_gate(request, campaign_alias, campaign)
     if blocked is not None:
         return blocked
 
@@ -2974,8 +3839,8 @@ async def post_with_campaign_alias(campaign_alias: str, request: Request):
         log_track(msg)
         raise HTTPException(status_code=404, detail=msg)
 
-    # Bot & filter rules + GDPR opt-out (shared gate)
-    blocked = await apply_tracking_gate(request, campaign_alias)
+    # Bot & filter rules + shield + GDPR opt-out (shared gate)
+    blocked = await apply_tracking_gate(request, campaign_alias, campaign)
     if blocked is not None:
         return blocked
 

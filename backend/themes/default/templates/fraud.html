@@ -1,0 +1,686 @@
+{% raw %}
+<script type="text/x-template" id="fraud-template">
+    <div>
+        <div class="d-flex align-center justify-space-between mb-4">
+            <div>
+                <div class="page-title">Fraud &amp; Cloaking</div>
+                <div class="page-subtitle">Bot traffic, fraud scores and campaign shields — last 24 hours</div>
+            </div>
+            <v-btn color="primary" elevation="0" :loading="loading" @click="loadAll()">
+                <v-icon small class="mr-1">mdi-refresh</v-icon>Refresh
+            </v-btn>
+        </div>
+
+        <!-- Summary cards -->
+        <v-row dense>
+            <v-col v-for="card in summaryCards" :key="card.title" cols="6" sm="4" md="2">
+                <v-card class="pa-4 stat-card">
+                    <template v-if="loading">
+                        <v-skeleton-loader type="text, heading" class="mt-1"></v-skeleton-loader>
+                    </template>
+                    <template v-else>
+                        <div class="d-flex align-center">
+                            <v-avatar :color="card.color + '1f'" size="40" class="mr-3">
+                                <v-icon small :color="card.color">{{ card.icon }}</v-icon>
+                            </v-avatar>
+                            <div class="text-caption grey--text text--darken-1">{{ card.title }}</div>
+                        </div>
+                        <div class="text-h5 font-weight-bold mt-3">{{ card.value }}</div>
+                    </template>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <!-- Live fraud feed -->
+        <v-row class="mt-4">
+            <v-col cols="12">
+                <v-card>
+                    <div class="d-flex align-center pa-4 pb-3">
+                        <div class="font-weight-medium mr-3">Live fraud feed</div>
+                        <span class="live-pulse" title="Live polling active"></span>
+                        <span class="live-count caption grey--text" v-if="feed.length">{{ feed.length }} shown</span>
+                        <v-spacer></v-spacer>
+                        <span class="caption grey--text mr-3">is_bot or fraud score ≥ 50 · polls every 5s</span>
+                    </div>
+                    <v-data-table
+                            :headers="feedHeaders"
+                            :items="feed"
+                            :items-per-page="10"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50, 100] }"
+                            dense
+                    >
+                        <template v-slot:item.received_at="{ item }">
+                            {{ feedTime(item.received_at) }}
+                        </template>
+                        <template v-slot:item.ip="{ item }">
+                            <code class="code-inline">{{ item.ip }}</code>
+                        </template>
+                        <template v-slot:item.fraud_score="{ item }">
+                            <span class="status-chip" :class="scoreChipClass(item.fraud_score)">{{ item.fraud_score || 0 }}</span>
+                        </template>
+                        <template v-slot:item.is_bot="{ item }">
+                            <span v-if="item.is_bot" class="status-chip status-chip--danger">bot</span>
+                            <span v-else class="grey--text">—</span>
+                        </template>
+                        <template v-slot:item.referrer="{ item }">
+                            <span :title="item.referrer">{{ shortRef(item.referrer) }}</span>
+                        </template>
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-shield-check-outline</v-icon>
+                                <div class="mt-2">No fraudulent clicks detected yet</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <!-- Top fraud IPs / UAs -->
+        <v-row class="mt-4">
+            <v-col cols="12" md="6">
+                <v-card>
+                    <div class="font-weight-medium pa-4 pb-0">Top fraud IPs</div>
+                    <v-data-table :headers="ipHeaders" :items="summary.top_ips" :items-per-page="10" dense>
+                        <template v-slot:item.ip="{ item }">
+                            <code class="code-inline">{{ item.ip }}</code>
+                        </template>
+                        <template v-slot:item.avg_score="{ item }">
+                            <span class="status-chip" :class="scoreChipClass(item.avg_score)">{{ item.avg_score }}</span>
+                        </template>
+                        <template v-slot:no-data>
+                            <div class="empty-state"><v-icon>mdi-inbox-outline</v-icon><div class="mt-2">No data</div></div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+            <v-col cols="12" md="6">
+                <v-card>
+                    <div class="font-weight-medium pa-4 pb-0">Top fraud user-agents</div>
+                    <v-data-table :headers="uaHeaders" :items="summary.top_uas" :items-per-page="10" dense>
+                        <template v-slot:item.ua="{ item }">
+                            <span :title="item.ua">{{ (item.ua || '—').slice(0, 48) }}</span>
+                        </template>
+                        <template v-slot:item.avg_score="{ item }">
+                            <span class="status-chip" :class="scoreChipClass(item.avg_score)">{{ item.avg_score }}</span>
+                        </template>
+                        <template v-slot:no-data>
+                            <div class="empty-state"><v-icon>mdi-inbox-outline</v-icon><div class="mt-2">No data</div></div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <!-- Bot lists editor + shield stats -->
+        <v-row class="mt-4">
+            <v-col cols="12" md="6">
+                <v-card class="pa-4">
+                    <div class="d-flex align-center mb-2">
+                        <v-icon color="primary" class="mr-2">mdi-format-list-bulleted</v-icon>
+                        <div class="font-weight-medium">Global bot lists</div>
+                    </div>
+                    <div class="caption grey--text mb-3">
+                        Applied tracker-wide before campaign-level bot rules. IPs accept CIDR
+                        ranges (10.0.0.0/8); UA / referer entries are Python regex patterns.
+                    </div>
+                    <v-combobox
+                            v-model="botLists.ip_cidrs"
+                            label="IP CIDRs"
+                            :items="[]"
+                            multiple chips small-chips deletable-chips outlined dense
+                            hint="Type a CIDR and press Enter"
+                            persistent-hint class="mb-3"
+                    ></v-combobox>
+                    <v-combobox
+                            v-model="botLists.ua_regex"
+                            label="User-Agent regex patterns"
+                            :items="[]"
+                            multiple chips small-chips deletable-chips outlined dense
+                            hint="Type a pattern and press Enter — e.g. bot|crawler|spider"
+                            persistent-hint class="mb-3"
+                    ></v-combobox>
+                    <v-combobox
+                            v-model="botLists.referer_regex"
+                            label="Referer regex patterns"
+                            :items="[]"
+                            multiple chips small-chips deletable-chips outlined dense
+                            hint="Type a pattern and press Enter"
+                            persistent-hint class="mb-3"
+                    ></v-combobox>
+                    <v-alert v-if="botListsError" type="error" dense text class="mb-3">{{ botListsError }}</v-alert>
+                    <v-btn color="primary" elevation="0" :loading="botListsSaving" @click="saveBotLists">
+                        Save bot lists
+                    </v-btn>
+                </v-card>
+            </v-col>
+            <v-col cols="12" md="6">
+                <v-card>
+                    <div class="font-weight-medium pa-4 pb-0">
+                        Active campaign shields
+                        <span class="caption grey--text">— enable per campaign in Campaigns → edit → Shield</span>
+                    </div>
+                    <v-data-table :headers="shieldHeaders" :items="summary.shields" :items-per-page="10" dense>
+                        <template v-slot:item.action="{ item }">
+                            <span class="status-chip" :class="item.action === 'allow' ? 'status-chip--warning' : 'status-chip--danger'">{{ item.action }}</span>
+                        </template>
+                        <template v-slot:item.honeypot="{ item }">
+                            <v-icon v-if="item.honeypot" small color="primary">mdi-check</v-icon>
+                            <span v-else class="grey--text">—</span>
+                        </template>
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-shield-off-outline</v-icon>
+                                <div class="mt-2">No campaign has shield enabled</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <!-- G44: traffic-quality blacklists -->
+        <v-row class="mt-4">
+            <v-col cols="12">
+                <v-card>
+                    <div class="d-flex align-center pa-4 pb-3">
+                        <div class="font-weight-medium mr-3">Blacklists</div>
+                        <span class="caption grey--text">traffic-quality lists — matching hits are marked as bots or blocked (untracked 404)</span>
+                        <v-spacer></v-spacer>
+                        <v-btn color="primary" elevation="0" small @click="openBlacklistDialog()">
+                            <v-icon small class="mr-1">mdi-plus</v-icon>New blacklist
+                        </v-btn>
+                    </div>
+                    <v-data-table :headers="blacklistHeaders" :items="blacklists" :items-per-page="10" dense>
+                        <template v-slot:item.values="{ item }">
+                            {{ (item.values || []).length }}
+                        </template>
+                        <template v-slot:item.scope="{ item }">
+                            <span v-if="item.scope === 'global'">Global</span>
+                            <span v-else>Campaign #{{ item.campaign_id }}</span>
+                        </template>
+                        <template v-slot:item.action="{ item }">
+                            <span class="status-chip" :class="item.action === 'block' ? 'status-chip--danger' : 'status-chip--warning'">{{ item.action }}</span>
+                        </template>
+                        <template v-slot:item.enabled="{ item }">
+                            <v-switch dense hide-details class="mt-0 pt-0"
+                                      :input-value="item.enabled !== false"
+                                      @change="toggleBlacklist(item)"></v-switch>
+                        </template>
+                        <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openBlacklistDialog(item)">
+                                        <v-icon small>mdi-pencil-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Edit</span>
+                            </v-tooltip>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteBlacklist(item)">
+                                        <v-icon small>mdi-trash-can-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Delete</span>
+                            </v-tooltip>
+                        </template>
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-playlist-remove</v-icon>
+                                <div class="mt-2">No blacklists yet</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <!-- G44: blacklist create/edit dialog -->
+        <v-dialog v-model="blacklistDialog" max-width="560px" persistent>
+            <v-card>
+                <v-card-title class="text-h6">{{ blacklistForm.id ? 'Edit blacklist' : 'New blacklist' }}</v-card-title>
+                <v-card-text>
+                    <v-alert v-if="blacklistError" type="error" dense text class="mb-3">{{ blacklistError }}</v-alert>
+                    <v-text-field
+                            label="Name"
+                            v-model="blacklistForm.name"
+                            outlined dense
+                    ></v-text-field>
+                    <v-select
+                            label="Field"
+                            :items="blacklistFields"
+                            v-model="blacklistForm.field"
+                            outlined dense
+                    ></v-select>
+                    <v-textarea
+                            label="Values (one per line)"
+                            v-model="blacklistForm.valuesText"
+                            outlined dense rows="6"
+                            hint="Exact matches on the chosen field. For IP, plain IPs or CIDR ranges (10.0.0.0/8)."
+                            persistent-hint
+                    ></v-textarea>
+                    <v-select
+                            label="Scope"
+                            :items="[{value: 'global', text: 'Global (all campaigns)'}, {value: 'campaign', text: 'Single campaign'}]"
+                            v-model="blacklistForm.scope"
+                            outlined dense
+                    ></v-select>
+                    <v-select
+                            v-if="blacklistForm.scope === 'campaign'"
+                            label="Campaign"
+                            :items="campaignOptions"
+                            v-model="blacklistForm.campaign_id"
+                            outlined dense
+                            item-text="name"
+                            item-value="id"
+                    ></v-select>
+                    <v-select
+                            label="Action"
+                            :items="[{value: 'mark', text: 'Mark as bot (track, flag is_bot)'}, {value: 'block', text: 'Block (untracked 404)'}]"
+                            v-model="blacklistForm.action"
+                            outlined dense
+                    ></v-select>
+                    <v-switch
+                            label="Enabled"
+                            v-model="blacklistForm.enabled"
+                            dense hide-details
+                    ></v-switch>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="blacklistDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="blacklistSaving" @click="saveBlacklist">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <!-- Honeypot hits -->
+        <v-row class="mt-4">
+            <v-col cols="12">
+                <v-card>
+                    <div class="font-weight-medium pa-4 pb-0">
+                        Honeypot hits
+                        <span class="caption grey--text">— scanners and bots that probed the hidden endpoint</span>
+                    </div>
+                    <v-data-table :headers="honeypotHeaders" :items="honeypotHits" :items-per-page="10" dense>
+                        <template v-slot:item.received_at="{ item }">
+                            {{ feedTime(item.received_at) }}
+                        </template>
+                        <template v-slot:item.ua="{ item }">
+                            <span :title="item.ua">{{ (item.ua || '—').slice(0, 64) }}</span>
+                        </template>
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-flower-outline</v-icon>
+                                <div class="mt-2">No honeypot hits yet — enable the honeypot on a shielded campaign</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+    </div>
+</script>
+
+<script type="application/javascript">
+    Vue.component('fraud-component', {
+        template: '#fraud-template',
+        data() {
+            return {
+                loading: false,
+                summary: {
+                    total_clicks: 0, bot_clicks: 0, bot_share_pct: 0,
+                    avg_fraud_score: 0, est_savings: 0, top_ips: [], top_uas: [],
+                    shields: [],
+                },
+                feed: [],
+                feedAfter: null,
+                feedSeen: {},
+                feedSeq: 0,
+                feedTimer: null,
+                honeypotHits: [],
+                botLists: {ua_regex: [], ip_cidrs: [], referer_regex: []},
+                botListsSaving: false,
+                botListsError: '',
+                feedHeaders: [
+                    {text: 'Time', value: 'received_at'},
+                    {text: 'IP', value: 'ip'},
+                    {text: 'Campaign', value: 'campaign_id'},
+                    {text: 'Country', value: 'country'},
+                    {text: 'Device', value: 'device_type'},
+                    {text: 'Browser', value: 'browser'},
+                    {text: 'Referrer', value: 'referrer'},
+                    {text: 'Bot', value: 'is_bot'},
+                    {text: 'Score', value: 'fraud_score'},
+                ],
+                ipHeaders: [
+                    {text: 'IP', value: 'ip'},
+                    {text: 'Hits', value: 'hits', align: 'end'},
+                    {text: 'Avg Score', value: 'avg_score'},
+                    {text: 'Last Seen', value: 'last_seen'},
+                ],
+                uaHeaders: [
+                    {text: 'User-Agent', value: 'ua'},
+                    {text: 'Hits', value: 'hits', align: 'end'},
+                    {text: 'Avg Score', value: 'avg_score'},
+                    {text: 'Last Seen', value: 'last_seen'},
+                ],
+                shieldHeaders: [
+                    {text: 'Campaign', value: 'campaign_name'},
+                    {text: 'Action', value: 'action'},
+                    {text: 'Honeypot', value: 'honeypot'},
+                    {text: 'WL IPs', value: 'whitelist_ips', align: 'end'},
+                    {text: 'WL Referers', value: 'whitelist_referers', align: 'end'},
+                    {text: 'WL UA Regex', value: 'whitelist_ua_regex'},
+                ],
+                honeypotHeaders: [
+                    {text: 'Time', value: 'received_at'},
+                    {text: 'Visitor Key', value: 'visitor_key'},
+                    {text: 'IP', value: 'ip'},
+                    {text: 'Campaign', value: 'campaign_id'},
+                    {text: 'User-Agent', value: 'ua'},
+                ],
+                // G44 blacklists
+                blacklists: [],
+                blacklistDialog: false,
+                blacklistSaving: false,
+                blacklistError: '',
+                campaignOptions: [],
+                blacklistFields: [
+                    'sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5',
+                    'sub_id_6', 'sub_id_7', 'sub_id_8', 'sub_id_9', 'sub_id_10',
+                    'country', 'city', 'device_type', 'os', 'browser', 'ip',
+                ],
+                blacklistHeaders: [
+                    {text: 'Name', value: 'name'},
+                    {text: 'Field', value: 'field'},
+                    {text: 'Values', value: 'values', align: 'end'},
+                    {text: 'Scope', value: 'scope'},
+                    {text: 'Action', value: 'action'},
+                    {text: 'Enabled', value: 'enabled'},
+                    {text: 'Actions', value: 'actions', sortable: false},
+                ],
+                blacklistForm: {id: null, name: '', field: 'sub_id_1', valuesText: '',
+                                scope: 'global', campaign_id: null, action: 'mark', enabled: true},
+            };
+        },
+        computed: {
+            summaryCards() {
+                const s = this.summary;
+                return [
+                    {title: 'Clicks (24h)', value: this.fmtInt(s.total_clicks), color: '#2563eb', icon: 'mdi-cursor-default-click-outline'},
+                    {title: 'Bot clicks', value: this.fmtInt(s.bot_clicks), color: '#dc2626', icon: 'mdi-robot-outline'},
+                    {title: 'Bot share', value: (s.bot_share_pct || 0) + '%', color: '#f59e0b', icon: 'mdi-percent-outline'},
+                    {title: 'Avg fraud score', value: String(s.avg_fraud_score ?? 0), color: '#7c3aed', icon: 'mdi-shield-alert-outline'},
+                    {title: 'Est. savings', value: '$' + this.fmtMoney(s.est_savings), color: '#16a34a', icon: 'mdi-cash-check'},
+                ];
+            },
+        },
+        mounted() {
+            this.loadAll();
+            this.startFeed();
+            this.$root.$on('load-fraud', this.loadAll);
+            document.addEventListener('visibilitychange', this.onVisibility);
+        },
+        beforeDestroy() {
+            this.stopFeed();
+            document.removeEventListener('visibilitychange', this.onVisibility);
+        },
+        methods: {
+            fmtInt(v) {
+                return Number(v || 0).toLocaleString();
+            },
+            fmtMoney(v) {
+                return Number(v || 0).toFixed(2);
+            },
+            feedTime(ts) {
+                const s = String(ts || '');
+                return s.includes('T') ? (s.split('T')[1] || '').slice(0, 8) : s;
+            },
+            shortRef(ref) {
+                if (!ref) return '—';
+                try {
+                    return new URL(ref).host;
+                } catch (e) {
+                    return ref.length > 32 ? ref.slice(0, 32) + '…' : ref;
+                }
+            },
+            scoreChipClass(score) {
+                const s = Number(score) || 0;
+                if (s >= 50) return 'status-chip--danger';
+                if (s >= 25) return 'status-chip--warning';
+                return 'status-chip--neutral';
+            },
+            loadAll() {
+                this.loading = true;
+                fetch('/backend/api/fraud/summary', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        this.summary = data;
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.loading = false;
+                    });
+                fetch('/backend/api/fraud/honeypot-hits', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : {hits: []})
+                    .then(data => {
+                        this.honeypotHits = data.hits || [];
+                    })
+                    .catch(() => {
+                        this.honeypotHits = [];
+                    });
+                this.loadBotLists();
+                this.loadBlacklists();
+            },
+            // --- G44 blacklists ---
+            loadBlacklists() {
+                fetch('/backend/api/fraud/blacklists', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : {blacklists: []})
+                    .then(data => {
+                        this.blacklists = data.blacklists || [];
+                    })
+                    .catch(() => {
+                        this.blacklists = [];
+                    });
+            },
+            loadCampaignOptions() {
+                fetch('/backend/api/campaigns/', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : [])
+                    .then(rows => {
+                        this.campaignOptions = (rows || []).map(c => ({
+                            id: c.id, name: '#' + c.id + ' ' + (c.name || c.alias || ''),
+                        }));
+                    })
+                    .catch(() => {
+                        this.campaignOptions = [];
+                    });
+            },
+            openBlacklistDialog(item) {
+                this.blacklistError = '';
+                if (item) {
+                    this.blacklistForm = {
+                        id: item.id,
+                        name: item.name || '',
+                        field: item.field || 'sub_id_1',
+                        valuesText: (item.values || []).join('\n'),
+                        scope: item.scope || 'global',
+                        campaign_id: item.campaign_id != null ? item.campaign_id : null,
+                        action: item.action || 'mark',
+                        enabled: item.enabled !== false,
+                    };
+                } else {
+                    this.blacklistForm = {id: null, name: '', field: 'sub_id_1', valuesText: '',
+                                          scope: 'global', campaign_id: null, action: 'mark', enabled: true};
+                }
+                if (!this.campaignOptions.length) this.loadCampaignOptions();
+                this.blacklistDialog = true;
+            },
+            saveBlacklist() {
+                this.blacklistError = '';
+                const values = this.blacklistForm.valuesText.split('\n')
+                    .map(v => v.trim()).filter(Boolean);
+                const body = {
+                    name: this.blacklistForm.name,
+                    field: this.blacklistForm.field,
+                    values: values,
+                    scope: this.blacklistForm.scope,
+                    campaign_id: this.blacklistForm.scope === 'campaign' ? this.blacklistForm.campaign_id : null,
+                    action: this.blacklistForm.action,
+                    enabled: this.blacklistForm.enabled,
+                };
+                this.blacklistSaving = true;
+                fetch('/backend/api/fraud/blacklists' + (this.blacklistForm.id ? '/' + this.blacklistForm.id : ''), {
+                    method: this.blacklistForm.id ? 'PUT' : 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body),
+                })
+                    .then(async res => {
+                        if (!res.ok) {
+                            let msg = 'HTTP ' + res.status;
+                            try {
+                                msg = (await res.json()).detail || msg;
+                            } catch (e) {}
+                            throw new Error(msg);
+                        }
+                        return res.json();
+                    })
+                    .then(() => {
+                        this.blacklistDialog = false;
+                        this.$root.$emit('show-message', {type: 'success', text: 'Blacklist saved'});
+                        this.loadBlacklists();
+                    })
+                    .catch(err => {
+                        this.blacklistError = err.message || 'Save failed';
+                        this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.blacklistSaving = false;
+                    });
+            },
+            toggleBlacklist(item) {
+                fetch('/backend/api/fraud/blacklists/' + item.id, {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({enabled: item.enabled === false}),
+                })
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        this.loadBlacklists();
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(err.message)});
+                        this.loadBlacklists();
+                    });
+            },
+            deleteBlacklist(item) {
+                fetch('/backend/api/fraud/blacklists/' + item.id, {
+                    method: 'DELETE',
+                    credentials: 'include',
+                })
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        this.$root.$emit('show-message', {type: 'success', text: 'Blacklist deleted'});
+                        this.loadBlacklists();
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(err.message)});
+                    });
+            },
+            loadBotLists() {
+                fetch('/backend/api/fraud/bot-lists', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : {bot_lists: {}})
+                    .then(data => {
+                        const bl = data.bot_lists || {};
+                        this.botLists = {
+                            ua_regex: bl.ua_regex || [],
+                            ip_cidrs: bl.ip_cidrs || [],
+                            referer_regex: bl.referer_regex || [],
+                        };
+                        this.botListsError = '';
+                    })
+                    .catch(() => {
+                    });
+            },
+            saveBotLists() {
+                this.botListsError = '';
+                this.botListsSaving = true;
+                fetch('/backend/api/fraud/bot-lists', {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({bot_lists: this.botLists}),
+                })
+                    .then(async res => {
+                        if (!res.ok) {
+                            let msg = 'HTTP ' + res.status;
+                            try {
+                                msg = (await res.json()).detail || msg;
+                            } catch (e) {}
+                            throw new Error(msg);
+                        }
+                        return res.json();
+                    })
+                    .then(data => {
+                        this.botLists = data.bot_lists;
+                        this.$root.$emit('show-message', {type: 'success', text: 'Bot lists saved'});
+                    })
+                    .catch(err => {
+                        this.botListsError = err.message || 'Save failed';
+                        this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.botListsSaving = false;
+                    });
+            },
+            // --- live fraud feed (same polling shape as the dashboard feed) ---
+            onVisibility() {
+                if (!document.hidden) this.pollFeed();
+            },
+            startFeed() {
+                this.feed = [];
+                this.feedAfter = null;
+                this.feedSeen = {};
+                this.pollFeed();
+                if (this.feedTimer) clearInterval(this.feedTimer);
+                this.feedTimer = setInterval(this.pollFeed, 5000);
+            },
+            stopFeed() {
+                if (this.feedTimer) {
+                    clearInterval(this.feedTimer);
+                    this.feedTimer = null;
+                }
+            },
+            pollFeed() {
+                if (document.hidden) return;
+                const params = this.feedAfter ? '?after=' + encodeURIComponent(this.feedAfter) : '';
+                fetch('/backend/api/fraud/feed' + params, {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(rows => {
+                        if (!Array.isArray(rows) || !rows.length) return;
+                        const fresh = [];
+                        rows.forEach(r => {
+                            const key = (r.visitor_id || '') + '@' + r.received_at;
+                            if (this.feedSeen[key]) return;
+                            this.feedSeen[key] = true;
+                            this.$set(r, '_key', 'ff-' + (++this.feedSeq));
+                            fresh.push(r);
+                            if (!this.feedAfter || String(r.received_at) > String(this.feedAfter)) {
+                                this.feedAfter = r.received_at;
+                            }
+                        });
+                        if (fresh.length) {
+                            this.feed = [...fresh, ...this.feed].slice(0, 100);
+                        }
+                    })
+                    .catch(err => console.error('fraud feed', err));
+            },
+        },
+    });
+</script>
+{% endraw %}

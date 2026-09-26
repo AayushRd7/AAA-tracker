@@ -384,6 +384,15 @@ body,
   transform: translateY(-1px);
 }
 
+/* Fraud watch strip on the dashboard (links to the fraud page) */
+.fraud-watch-card {
+  cursor: pointer;
+}
+
+.fraud-watch-num {
+  color: var(--text-primary);
+}
+
 /* ---------- Flow builder cards (campaigns) ---------- */
 
 .flow-card {
@@ -433,6 +442,10 @@ body,
 .status-chip--danger { background: var(--status-danger-bg); color: var(--status-danger-text); }
 .status-chip--info { background: var(--status-info-bg); color: var(--status-info-text); }
 .status-chip--neutral { background: var(--status-neutral-bg); color: var(--status-neutral-text); }
+
+/* Standalone switches at the top of settings cards — dense + hide-details
+   collapses their margin so they sit flush against the next field. */
+.v-card__text > .v-input--switch { margin-bottom: var(--space-3); }
 
 /* ---------- Inputs ---------- */
 
@@ -814,6 +827,21 @@ table.cols-free {
   border-color: var(--accent) !important;
   color: #ffffff !important;
 }
+/* Outlined chips carry Vuetify's own `background-color: transparent !important`
+   at specificity (0,4,0) — the selector below must outrank it or the "on" fill
+   silently disappears and the chip renders white text on nothing. */
+body .v-application .v-chip.v-chip.tag-chip--on,
+body .v-application .v-chip.v-chip.tag-chip--on:hover {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #ffffff !important;
+}
+/* Active item inside any select dropdown: Vuetify paints it primary-green text
+   on a 12% green tint — too low contrast. Darker text + semibold instead. */
+.v-application .v-menu__content .v-list-item--active.primary--text {
+  color: var(--accent-hover) !important;
+  font-weight: 600;
+}
 
 /* ---------- Settings page grid ---------- */
 .settings-grid .v-card {
@@ -834,6 +862,54 @@ table.cols-free {
   max-width: calc(100% - 48px);
 }
 
+/* ---------- Traffic sources catalog modal ---------- */
+.catalog-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+.catalog-toolbar .catalog-search {
+  max-width: 320px;
+  min-width: 200px;
+}
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+.catalog-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  padding: var(--space-3);
+  transition: box-shadow var(--t-fast) ease;
+}
+.catalog-card:hover {
+  box-shadow: var(--card-shadow-hover);
+}
+.catalog-card-name {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+.catalog-card-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-height: 20px;
+}
+.catalog-card-nocaps {
+  font-size: var(--fs-11);
+  color: var(--text-secondary);
+}
+
 /* ---------- Dialog width scale ---------- */
 .v-dialog > .v-card.dialog-sm { max-width: 420px; }
 .v-dialog > .v-card.dialog-md { max-width: 560px; }
@@ -841,6 +917,13 @@ table.cols-free {
 .v-dialog > .v-card.dialog-xl { max-width: 960px; }
 /* the .v-dialog wrapper stretches to the overlay width; center the sized card inside it */
 .v-dialog > .v-card[class*="dialog-"] { margin-left: auto; margin-right: auto; }
+/* Vuetify paints its elevation-24 shadow on the .v-dialog WRAPPER, which spans
+   nearly the whole viewport (width:100%) — that is the huge shadow band across
+   the page. The card inside already carries its own shadow (rule above), so
+   drop the wrapper's. */
+.v-dialog__content > .v-dialog { box-shadow: none !important; }
+/* Tall dialogs scroll inside the card instead of overflowing the viewport. */
+.v-dialog > .v-card { max-height: calc(100vh - 48px); overflow-y: auto; }
 .v-dialog--fullscreen > .v-card { border-radius: 0 !important; }
 
 /* ---------- Layout utilities ---------- */
@@ -865,4 +948,112 @@ table.cols-free {
 .hit-icon {
   min-width: 32px;
   min-height: 32px;
+}
+
+/* ---------- Offer Sources Catalog (affiliates page) ---------- */
+.aff-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+.aff-catalog-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.aff-catalog-card:hover {
+  border-color: var(--text-secondary);
+}
+.aff-catalog-logo {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: #fff;
+  overflow: hidden;
+}
+.aff-catalog-logo img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  /* Transparent placeholder from the favicon proxy lets the initial show through */
+}
+.aff-catalog-logo-fallback {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--status-info-bg);
+  color: var(--status-info-text);
+  font-size: var(--fs-12);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.aff-catalog-name {
+  margin-left: var(--space-2);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+  word-break: break-word;
+}
+.aff-catalog-verticals {
+  line-height: 1.9;
+}
+.aff-catalog-vchip--on {
+  background: var(--status-info-bg) !important;
+  color: var(--status-info-text) !important;
+}
+/* Logo next to the network name in the table */
+.aff-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.aff-logo-wrap {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fff;
+}
+.aff-table-logo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  z-index: 1;
+}
+.aff-table-logo-fallback {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--status-info-bg);
+  color: var(--status-info-text);
+  font-size: var(--fs-11);
+  font-weight: 700;
+  text-transform: uppercase;
 }

@@ -1,12 +1,33 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
+import socket
 import subprocess
 from pathlib import Path
 
 import asyncio
 
 router = APIRouter()
+
+
+def _resolve(domain: str) -> list:
+    try:
+        infos = socket.getaddrinfo(domain, 443, type=socket.SOCK_STREAM)
+        return sorted({i[4][0] for i in infos})
+    except OSError:
+        return []
+
+
+def _local_ips() -> set:
+    ips = {"127.0.0.1", "::1"}
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ips.add(s.getsockname()[0])
+        s.close()
+    except OSError:
+        pass
+    return ips
 
 
 @router.get("/domain_ping", response_class=PlainTextResponse)
@@ -37,7 +58,30 @@ async def create_nginx(request: Request, domain_id: int):
                             """, domain_id)
 
     domain = row["domain"]
-    path = await generate_nginx_conf(domain, domain_id)
+
+    # Pre-flight: the Let's Encrypt HTTP-01 challenge is fetched over plain
+    # HTTP at the DOMAIN, so the domain must already route here. Fail with a
+    # clear message instead of a 10-minute certbot timeout.
+    addresses = _resolve(domain)
+    if not addresses:
+        await _mark_ssl_status(pg, domain_id, "error")
+        raise HTTPException(
+            status_code=400,
+            detail=f"{domain} does not resolve yet — create a DNS record "
+                   f"(CNAME to your tracker host, or A record to this server's "
+                   f"public IP), wait for propagation, then retry.")
+    if not (set(addresses) & _local_ips()):
+        await _mark_ssl_status(pg, domain_id, "error")
+        raise HTTPException(
+            status_code=400,
+            detail=f"{domain} resolves to {', '.join(addresses)} which is not "
+                   f"this server — point it at this machine first, then retry.")
+
+    try:
+        path = await generate_nginx_conf(domain, domain_id)
+    except HTTPException:
+        await _mark_ssl_status(pg, domain_id, "error")
+        raise
 
     if path:
         async with pg.acquire() as conn:
@@ -49,6 +93,13 @@ async def create_nginx(request: Request, domain_id: int):
                                 """, domain_id)
 
     return {"status": "ok", "file": str(path)}
+
+
+async def _mark_ssl_status(pg, domain_id: int, status: str):
+    async with pg.acquire() as conn:
+        await conn.execute(
+            "UPDATE domains SET updated_at = NOW(), ssl_status = $2 WHERE id = $1",
+            domain_id, status)
 
 
 async def request_ssl_letsencrypt(domain: str) -> bool:

@@ -35,6 +35,36 @@
             </v-col>
         </v-row>
 
+        <!-- Fraud watch (admin): 24h bot share, bot clicks, est. savings -->
+        <v-row dense v-if="fraudSummary">
+            <v-col cols="12">
+                <v-card class="pa-4 stat-card fraud-watch-card" @click="goToFraud">
+                    <div class="d-flex align-center flex-wrap">
+                        <v-avatar color="#dc26261f" size="40" class="mr-3">
+                            <v-icon small color="#dc2626">mdi-shield-alert-outline</v-icon>
+                        </v-avatar>
+                        <div class="font-weight-medium mr-4">Fraud watch</div>
+                        <span class="caption grey--text mr-4">
+                            Bot share (24h):
+                            <strong class="fraud-watch-num" :class="fraudSummary.bot_share_pct >= 10 ? 'num-neg' : 'num-pos'">{{ fraudSummary.bot_share_pct }}%</strong>
+                        </span>
+                        <span class="caption grey--text mr-4">
+                            Bot clicks:
+                            <strong class="fraud-watch-num">{{ Number(fraudSummary.bot_clicks || 0).toLocaleString() }}</strong>
+                        </span>
+                        <span class="caption grey--text mr-4">
+                            Est. savings:
+                            <strong class="fraud-watch-num num-pos">${{ Number(fraudSummary.est_savings || 0).toFixed(2) }}</strong>
+                        </span>
+                        <v-spacer></v-spacer>
+                        <v-btn text small color="primary" @click.stop="goToFraud">
+                            Open fraud dashboard<v-icon small class="ml-1">mdi-arrow-right</v-icon>
+                        </v-btn>
+                    </div>
+                </v-card>
+            </v-col>
+        </v-row>
+
         <!-- Filters -->
         <v-card class="mt-4 pa-4">
             <div class="filter-bar align-center">
@@ -149,7 +179,7 @@
             <v-col cols="12">
                 <v-card class="live-card">
                     <div class="d-flex align-center pa-4 pb-3">
-                        <div class="font-weight-medium mr-3">Live Clicks</div>
+                        <div class="font-weight-medium mr-3">Live clicks</div>
                         <span v-if="liveMode" class="live-pulse" title="Live polling active"></span>
                         <span class="live-count caption grey--text" v-if="liveClicks.length">{{ liveClicks.length }} shown</span>
                         <v-spacer></v-spacer>
@@ -200,7 +230,7 @@
             <v-col cols="12">
                 <v-card>
                     <div class="d-flex align-center justify-space-between pa-4 pb-0">
-                        <div class="font-weight-medium">Recent Visits</div>
+                        <div class="font-weight-medium">Recent visits</div>
                         <v-btn text small color="primary" :disabled="!visits.length" @click="exportVisitsCsv">
                             <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
                         </v-btn>
@@ -306,6 +336,7 @@
         data() {
             return {
                 loading: false,
+                fraudSummary: null,
                 liveMode: false,
                 liveTimer: null,
                 livePanelOpen: false,
@@ -345,7 +376,7 @@
                 campaigns: [],
                 metrics: [
                     {title: 'Clicks', value: 0, color: DASH_COLORS.info, icon: 'mdi-cursor-default-click-outline'},
-                    {title: 'Unique Clicks', value: 0, color: DASH_COLORS.unique, icon: 'mdi-account-switch-outline'},
+                    {title: 'Unique clicks', value: 0, color: DASH_COLORS.unique, icon: 'mdi-account-switch-outline'},
                     {title: 'Conversions', value: 0, color: DASH_COLORS.accent, icon: 'mdi-check-decagram-outline'},
                     {title: 'Cost', value: '$0', color: DASH_COLORS.danger, icon: 'mdi-cash-minus'},
                     {title: 'Revenue', value: '$0', color: DASH_COLORS.success, icon: 'mdi-cash-plus'},
@@ -354,10 +385,10 @@
                 mainChart: {
                     series: [
                         { name: 'Visits', data: [] },
-                        { name: 'Unique Visits', data: [] },
+                        { name: 'Unique visits', data: [] },
                         { name: 'Clicks', data: [] },
                         { name: 'Conversions', data: [] },
-                        { name: 'Unique Clicks', data: [] },
+                        { name: 'Unique clicks', data: [] },
                     ],
                     chartOptions: {
                         chart: {
@@ -427,6 +458,7 @@
             window.addEventListener('theme-changed', this.applyChartTheme);
             this.loadData();
             this.loadAnnotations();
+            this.loadFraudSummary();
             document.addEventListener('visibilitychange', this.onVisibilityChange);
             this.$root.$on('load-dashboard', this.loadData);
         },
@@ -497,6 +529,20 @@
                     clearInterval(this.liveTimer);
                     this.liveTimer = null;
                 }
+            },
+            // --- fraud watch (admin-only endpoint; silently hidden for others) ---
+            loadFraudSummary() {
+                fetch('/backend/api/fraud/summary', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        this.fraudSummary = data;
+                    })
+                    .catch(() => {
+                        this.fraudSummary = null;
+                    });
+            },
+            goToFraud() {
+                window.location.href = '/backend/fraud';
             },
             // --- G51: live click feed ---
             onVisibilityChange() {
@@ -744,7 +790,7 @@
 
                         this.metrics = [
                             card({title: 'Clicks', value: Number(m.clicks || 0).toLocaleString(), color: DASH_COLORS.info, icon: 'mdi-cursor-default-click-outline'}, m.clicks, pm && pm.clicks),
-                            card({title: 'Unique Clicks', value: Number(m.unique_clicks || 0).toLocaleString(), color: DASH_COLORS.unique, icon: 'mdi-account-switch-outline'}, m.unique_clicks, pm && pm.unique_clicks),
+                            card({title: 'Unique clicks', value: Number(m.unique_clicks || 0).toLocaleString(), color: DASH_COLORS.unique, icon: 'mdi-account-switch-outline'}, m.unique_clicks, pm && pm.unique_clicks),
                             card({title: 'Conversions', value: Number(m.conversions || 0).toLocaleString(), color: DASH_COLORS.accent, icon: 'mdi-check-decagram-outline'}, m.conversions, pm && pm.conversions),
                             card({title: 'Cost', value: '$' + Number(m.cost || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}), color: DASH_COLORS.danger, icon: 'mdi-cash-minus'}, m.cost, pm && pm.cost),
                             card({title: 'Revenue', value: '$' + Number(m.revenue || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}), color: DASH_COLORS.success, icon: 'mdi-cash-plus'}, m.revenue, pm && pm.revenue),
@@ -759,7 +805,7 @@
                                 data: categories.map((label, i) => ({x: label, y: data.chart.visits[i] || 0}))
                             },
                             {
-                                name: 'Unique Visits',
+                                name: 'Unique visits',
                                 data: categories.map((label, i) => ({x: label, y: data.chart.unique_visits[i] || 0}))
                             },
                             {
@@ -771,7 +817,7 @@
                                 data: categories.map((label, i) => ({x: label, y: data.chart.conversions[i] || 0}))
                             },
                             {
-                                name: 'Unique Clicks',
+                                name: 'Unique clicks',
                                 data: categories.map((label, i) => ({
                                     x: label,
                                     y: data.chart.unique_clicks[i] || 0

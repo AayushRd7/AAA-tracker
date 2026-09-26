@@ -1,0 +1,291 @@
+{% raw %}
+<script type="text/x-template" id="optimizer-template">
+    <div>
+        <div class="d-flex align-center justify-space-between mb-4">
+            <div>
+                <div class="page-title">Auto Optimizer</div>
+                <div class="page-subtitle">
+                    Reweights flow traffic from real performance — every {{ intervalMin }} min
+                    <template v-if="loopLastRun">· last sweep {{ fmtTime(loopLastRun) }}</template>
+                </div>
+            </div>
+            <v-btn color="primary" elevation="0" :loading="loading" @click="loadAll()">
+                <v-icon small class="mr-1">mdi-refresh</v-icon>Refresh
+            </v-btn>
+        </div>
+
+        <v-alert type="info" dense text class="mb-4">
+            Only <strong>weight</strong>-mode campaigns with the optimizer enabled are reweighted.
+            Forced, default, disabled and monitor-disabled flows are never touched; a single pass
+            can shift any flow's weight by at most its max-shift cap.
+        </v-alert>
+
+        <v-card>
+            <v-data-table
+                    :headers="headers"
+                    :items="campaigns"
+                    :expanded.sync="expanded"
+                    show-expand
+                    single-expand
+                    :items-per-page="25"
+                    dense
+            >
+                <template v-slot:item.name="{ item }">
+                    <div class="font-weight-medium">{{ item.name }}</div>
+                    <div class="caption grey--text">#{{ item.id }}</div>
+                </template>
+                <template v-slot:item.redirect_mode="{ item }">
+                    <span v-if="item.supported" class="status-chip status-chip--neutral">weight</span>
+                    <span v-else class="status-chip status-chip--warning" title="Position-mode campaigns are routed by priority, not weight — the optimizer cannot help here.">position · not supported</span>
+                </template>
+                <template v-slot:item.enabled="{ item }">
+                    <v-switch dense hide-details class="mt-0 pt-0"
+                              :input-value="item.optimizer.enabled"
+                              :disabled="!item.supported || saving[item.id]"
+                              @change="v => save(item, {enabled: !!v})"></v-switch>
+                </template>
+                <template v-slot:item.metric="{ item }">
+                    <v-select dense hide-details outlined style="max-width:110px"
+                              :items="metricItems"
+                              :value="item.optimizer.metric"
+                              :disabled="!item.supported || saving[item.id]"
+                              @change="v => save(item, {metric: v})"></v-select>
+                </template>
+                <template v-slot:item.lookback_hours="{ item }">
+                    <v-text-field dense hide-details outlined type="number" min="1" max="720"
+                                  style="max-width:110px" :value="item.optimizer.lookback_hours"
+                                  :disabled="!item.supported || saving[item.id]"
+                                  @change="v => save(item, {lookback_hours: v})"></v-text-field>
+                </template>
+                <template v-slot:item.min_clicks="{ item }">
+                    <v-text-field dense hide-details outlined type="number" min="1"
+                                  style="max-width:110px" :value="item.optimizer.min_clicks"
+                                  :disabled="!item.supported || saving[item.id]"
+                                  @change="v => save(item, {min_clicks: v})"></v-text-field>
+                </template>
+                <template v-slot:item.max_shift_pct="{ item }">
+                    <v-text-field dense hide-details outlined type="number" min="10" max="95"
+                                  style="max-width:110px" :value="item.optimizer.max_shift_pct"
+                                  :disabled="!item.supported || saving[item.id]"
+                                  @change="v => save(item, {max_shift_pct: v})"></v-text-field>
+                </template>
+                <template v-slot:item.last_run="{ item }">
+                    <template v-if="lastRun(item)">
+                        <div>{{ fmtTime(lastRun(item).at) }}</div>
+                        <div class="caption grey--text">{{ summarizeRun(lastRun(item)) }}</div>
+                    </template>
+                    <span v-else class="grey--text">never</span>
+                </template>
+                <template v-slot:item.actions="{ item }">
+                    <v-btn small color="primary" elevation="0"
+                           :loading="running[item.id]"
+                           :disabled="!item.supported || !item.optimizer.enabled"
+                           @click="runNow(item)">
+                        Run now
+                    </v-btn>
+                </template>
+                <template v-slot:expanded-item="{ headers, item }">
+                    <td :colspan="headers.length" class="pa-3">
+                        <div class="font-weight-medium mb-2">Live per-flow metrics ({{ item.optimizer.lookback_hours }}h lookback)</div>
+                        <v-data-table :headers="flowHeaders" :items="item.flows" dense hide-default-footer
+                                      :items-per-page="-1">
+                            <template v-slot:item.name="{ item: f }">
+                                {{ f.name }}
+                                <span v-if="f.type !== 'regular'" class="status-chip status-chip--neutral ml-1">{{ f.type }}</span>
+                                <span v-if="!f.enabled" class="status-chip status-chip--danger ml-1">off</span>
+                                <span v-else-if="f.disabled_by_monitor" class="status-chip status-chip--warning ml-1">monitor</span>
+                            </template>
+                            <template v-slot:item.weight="{ item: f }">
+                                <span class="status-chip" :class="f.touched_by_optimizer ? 'status-chip--neutral' : 'status-chip--warning'">{{ f.weight }}</span>
+                            </template>
+                            <template v-slot:item.clicks="{ item: f }">{{ fmtInt(f.clicks) }}</template>
+                            <template v-slot:item.convs="{ item: f }">{{ fmtInt(f.convs) }}</template>
+                            <template v-slot:item.value="{ item: f }">{{ fmtMetric(f.value, item.optimizer.metric) }}</template>
+                            <template v-slot:item.profit="{ item: f }">{{ fmtMoney(f.profit) }}</template>
+                            <template v-slot:item.revenue="{ item: f }">{{ fmtMoney(f.revenue) }}</template>
+                            <template v-slot:no-data>
+                                <div class="empty-state pa-2"><v-icon>mdi-inbox-outline</v-icon><div class="mt-1">No flow data in the lookback window</div></div>
+                            </template>
+                        </v-data-table>
+
+                        <div class="font-weight-medium mt-4 mb-2">Recent runs</div>
+                        <div v-if="!(item.last_runs || []).length" class="caption grey--text mb-2">No optimization runs yet.</div>
+                        <div v-for="(run, i) in (item.last_runs || []).slice().reverse()" :key="i" class="caption mb-1">
+                            <strong>{{ fmtTime(run.at) }}</strong> — {{ run.reason }}
+                            <template v-if="run.shifts">
+                                · <span v-for="(s, name) in run.shifts" :key="name" class="mr-2">
+                                    {{ name }}: {{ s.old }} → <strong>{{ s.new }}</strong>
+                                </span>
+                            </template>
+                        </div>
+                    </td>
+                </template>
+                <template v-slot:no-data>
+                    <div class="empty-state">
+                        <v-icon>mdi-auto-fix</v-icon>
+                        <div class="mt-2">No campaigns yet</div>
+                    </div>
+                </template>
+            </v-data-table>
+        </v-card>
+    </div>
+</script>
+
+<script type="application/javascript">
+    Vue.component('optimizer-component', {
+        template: '#optimizer-template',
+        data() {
+            return {
+                loading: false,
+                status: null,
+                campaigns: [],
+                expanded: [],
+                saving: {},
+                running: {},
+                metricItems: [
+                    {text: 'EPC (profit / click)', value: 'epc'},
+                    {text: 'CR (conv. rate)', value: 'cr'},
+                    {text: 'Profit', value: 'profit'},
+                    {text: 'Revenue', value: 'revenue'},
+                ],
+                headers: [
+                    {text: 'Campaign', value: 'name'},
+                    {text: 'Mode', value: 'redirect_mode'},
+                    {text: 'Enabled', value: 'enabled'},
+                    {text: 'Metric', value: 'metric'},
+                    {text: 'Lookback (h)', value: 'lookback_hours'},
+                    {text: 'Min clicks', value: 'min_clicks'},
+                    {text: 'Max shift %', value: 'max_shift_pct'},
+                    {text: 'Last run', value: 'last_run'},
+                    {text: '', value: 'actions', sortable: false},
+                ],
+                flowHeaders: [
+                    {text: 'Flow', value: 'name'},
+                    {text: 'Weight', value: 'weight'},
+                    {text: 'Clicks', value: 'clicks', align: 'end'},
+                    {text: 'Convs', value: 'convs', align: 'end'},
+                    {text: 'Value', value: 'value', align: 'end'},
+                    {text: 'Profit', value: 'profit', align: 'end'},
+                    {text: 'Revenue', value: 'revenue', align: 'end'},
+                ],
+            };
+        },
+        computed: {
+            intervalMin() {
+                return 15;
+            },
+            loopLastRun() {
+                return this.status && this.status.loop_last_run;
+            },
+        },
+        mounted() {
+            this.loadAll();
+            this.$root.$on('load-optimizer', this.loadAll);
+        },
+        methods: {
+            fmtInt(v) {
+                return Number(v || 0).toLocaleString();
+            },
+            fmtMoney(v) {
+                return '$' + Number(v || 0).toFixed(2);
+            },
+            fmtMetric(v, metric) {
+                v = Number(v) || 0;
+                if (metric === 'cr') return (v * 100).toFixed(2) + '%';
+                return '$' + v.toFixed(4);
+            },
+            fmtTime(ts) {
+                const s = String(ts || '');
+                if (!s) return '—';
+                const d = new Date(s.includes('Z') || s.includes('+') ? s : s + 'Z');
+                if (isNaN(d)) return s.includes('T') ? s.replace('T', ' ').slice(0, 19) : s;
+                return d.toLocaleString();
+            },
+            lastRun(item) {
+                const runs = item.last_runs || [];
+                return runs.length ? runs[runs.length - 1] : null;
+            },
+            summarizeRun(run) {
+                const shifts = run.shifts || {};
+                const names = Object.keys(shifts);
+                if (!names.length) return 'no weight changes';
+                return names.map(n => `${n}: ${shifts[n].old}→${shifts[n].new}`).join(', ');
+            },
+            loadAll() {
+                this.loading = true;
+                fetch('/backend/api/optimizer/status', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        this.status = data;
+                        this.campaigns = data.campaigns || [];
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.loading = false;
+                    });
+            },
+            save(item, fields) {
+                this.$set(this.saving, item.id, true);
+                fetch('/backend/api/optimizer/' + item.id, {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(fields),
+                })
+                    .then(async res => {
+                        if (!res.ok) {
+                            let msg = 'HTTP ' + res.status;
+                            try {
+                                msg = (await res.json()).detail || msg;
+                            } catch (e) {}
+                            throw new Error(msg);
+                        }
+                        return res.json();
+                    })
+                    .then(data => {
+                        this.$set(item, 'optimizer', data.optimizer);
+                        this.$root.$emit('show-message', {type: 'success', text: 'Optimizer settings saved'});
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(err.message)});
+                        this.loadAll();
+                    })
+                    .finally(() => {
+                        this.$set(this.saving, item.id, false);
+                    });
+            },
+            runNow(item) {
+                this.$set(this.running, item.id, true);
+                fetch('/backend/api/optimizer/' + item.id + '/run', {
+                    method: 'POST', credentials: 'include',
+                })
+                    .then(async res => {
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                        return data;
+                    })
+                    .then(result => {
+                        if (result.changed) {
+                            this.$root.$emit('show-message', {
+                                type: 'success',
+                                text: 'Reweighted: ' + Object.entries(result.shifts || {})
+                                    .map(([n, s]) => `${n} ${s.old}→${s.new}`).join(', '),
+                            });
+                        } else {
+                            this.$root.$emit('show-message', {type: 'info', text: 'No changes — ' + (result.reason || 'skipped')});
+                        }
+                        this.loadAll();
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.$set(this.running, item.id, false);
+                    });
+            },
+        },
+    });
+</script>
+{% endraw %}

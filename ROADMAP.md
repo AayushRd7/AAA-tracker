@@ -32,9 +32,9 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 ## ⚙️ Production Hardening
 
 - [x] **17. Remove `--reload` / add uvicorn workers** — `docker-compose.prod.yml` override: uvicorn with 2 workers, no reload, ClickHouse memory cap. Dev compose stays hot-reload. Run with `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`.
-- [x] **18. Automated tests** — `backend/tests/api_smoke.py`: 421-check live suite covering auth/2FA/permissions, campaign CRUD/clone/bulk/CSV, routing rules (filters/stickiness/caps/schedules), tracking plane (direct JS/pixel/impressions/Click API/simulation), conversion economics (LTV/custom events/clickless/import), reporting depth, and the security audit regressions. 421/421 passing.
+- [x] **18. Automated tests** — `backend/tests/api_smoke.py`: 526-check live suite covering auth/2FA/permissions, campaign CRUD/clone/bulk/CSV, routing rules (filters/stickiness/caps/schedules), tracking plane (direct JS/pixel/impressions/Click API/simulation), conversion economics (LTV/custom events/clickless/import), reporting depth, fraud/cloaking, flow actions, optimizer, funnels, and the security audit regressions. 526/526 passing.
 - [x] **19. CI** — GitHub Actions: compileall over backend+frontend and compose YAML sanity on push/PR.
-- [ ] **20. HTTPS/Certbot automation check** — certbot scaffolding exists but the auto-renewal flow is unverified.
+- [ ] **20. HTTPS/Certbot automation check** — Domains page now guides DNS setup (A record / CNAME instructions, per-domain "Check DNS" button) and the cert flow fails fast with a clear message when the domain doesn't route to the server yet; the auto-renewal cron flow itself is still unverified.
 
 ## 🎨 UI Polish (smaller)
 
@@ -42,3 +42,28 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 - [x] **22. Bulk actions on lists** — select multiple campaigns: Activate / Pause / Delete (with confirm).
 - [x] **23. Global search** — app-bar search across campaigns/offers/landings/domains/sources/affiliates/conversions (incl. tags + click IDs), permission-filtered, grouped autocomplete.
 - [x] **24. Dark mode toggle** — full `[data-theme="dark"]` token layer, Vuetify dark sync, chart re-theming, Settings → General switch, persisted.
+
+## 🚀 Wave 7 — Fraud suite, flow actions, optimizer, funnels (2026-09-27)
+
+- [x] **25. Fraud/cloaking suite** — 0–100 heuristic fraud_score on every click (UA/ISP/duplicate/crawler-spoof signals, verified-crawler ranges), per-campaign Shield (IP/referrer/UA whitelist + blank/404/watch actions), honeypot trap (`/t/hp` + decoy JS), global bot-list editor, live fraud feed page, Bot Clicks/Cost columns in reports, fraud-watch dashboard card.
+- [x] **26. Flow delivery actions** — per-flow action: 302 redirect (default), iFrame, Form POST, Serve Content (server-side CURL), Show HTML, Do Nothing; applied at redirect-schema destination and offer click-out.
+- [x] **27. AI auto-optimizer** — per-campaign enable, 15-min loop reweights flows toward the best performer (CR/EPC/profit/revenue) with exploration floor and young-flow protection; flow-level conversion attribution (`conversions_data.flow_index`); admin page with live metrics, run-now, weight history; audit-logged.
+- [x] **28. Multi-step funnels** — ordered steps per campaign (landing+offers per step), visitor advances via signed bind cookie, per-step visits/click-outs/conversions/revenue/drop-off report (Reports → Funnel view).
+- [x] **29. Click/conversion-date basis fix** — conversions-log click-date basis was joining mismatched keys and always returned empty; now joined through the first-party `aaa_vid` visitor cookie stamped on both the ClickHouse click row and the conversion row. Legacy rows with no link fall back to their own conversion date for the window.
+
+## 🗂 Wave 8 — Catalogs, blacklists, status, grabber (2026-09-27)
+
+- [x] **30. Traffic sources catalog** — 187 presets (full RedTrack channel list) with API-integration capability badges (cost update / campaign pause / blacklist placement / pause creative); searchable card-grid picker modal; seeding backfills missing presets on existing installs.
+- [x] **31. Affiliate networks catalog** — 125 presets with verticals (Dating, Gambling, Nutra…) as filter chips; brand logos via a server-side favicon proxy with initial-letter fallback; logos also shown in the networks table.
+- [x] **32. Blacklist workflow (G44)** — named blacklists on sub_id_1..10 / country / city / device / os / browser / ip (CIDR ok), global or per-campaign, mark-as-bot or block; managed on the Fraud page; enforced on the redirect path AND the Click API.
+- [x] **33. System status (G78)** — admin System status tab: version, Postgres/ClickHouse health + latency, 24h click/conversion counts, background-loop heartbeats (monitor/rules/optimizer), 15s auto-poll.
+- [x] **34. Lander grabber (G73)** — grab any URL into a local landing with asset-URL rewriting, SSRF guards (private-IP rejection, redirect re-validation), size/type caps, operator opt-in for internal targets.
+- [x] **35. Domains DNS guidance** — per-domain "Check DNS" chips (points here / resolves elsewhere / no DNS), A-record/CNAME instruction banner with detected server IP, and fail-fast cert requests with human-readable errors instead of 10-minute certbot timeouts.
+
+### Bug log (wave 7)
+
+- Fixed: Vuetify's elevation-24 shadow painted on the full-width `.v-dialog` wrapper — every dialog showed a giant shadow band across the page.
+- Fixed: Create-campaign dialog was `fullscreen` and wobbled/overflowed horizontally — now a centered 960px dialog with internal scroll.
+- Fixed: selected tag chips rendered white text on transparent background (Vuetify `v-chip--outlined` transparent-`!important` outranked our fill); select-dropdown active items were green-on-green (now dark green, semibold).
+- Fixed: smoke-suite timezone flake near local midnight — "today" now derived from UTC.
+- Known: historical clicks/conversions have empty `visitor_id`, so pre-wave-7 data still won't appear under click-date basis.

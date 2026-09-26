@@ -21,6 +21,7 @@
                     <v-tab><v-icon small left>mdi-earth</v-icon>Domains</v-tab>
                     <v-tab><v-icon small left>mdi-cog-outline</v-icon>Settings</v-tab>
                     <v-tab><v-icon small left>mdi-account-group-outline</v-icon>Users</v-tab>
+                    <v-tab><v-icon small left>mdi-pulse</v-icon>System status</v-tab>
                     {% endif %}
                 </v-tabs>
                 </v-card>
@@ -33,7 +34,7 @@
                         <div class="about-heading">Logs</div>
                         <p>
                             AAA Tracker Logs links
-                            <a href="/_aaa_tracker_debug" target="_blank">View Logs</a>
+                            <a href="/_aaa_tracker_debug" target="_blank">View logs</a>
                         </p>
                     </v-tab-item>
                     <v-tab-item>
@@ -132,6 +133,49 @@
                             Manage access to your tracker. Create users, assign roles, and control login access.
                         </p>
                     </v-tab-item>
+
+                    <v-tab-item>
+                        <div class="about-heading">System status</div>
+                        {% raw %}
+                        <div v-if="status" class="mt-2">
+                            <v-row dense>
+                                <v-col cols="6" sm="3" v-for="card in statusCards" :key="card.title">
+                                    <v-card class="pa-3 stat-card">
+                                        <div class="text-caption grey--text text--darken-1">{{ card.title }}</div>
+                                        <div class="text-h6 font-weight-bold mt-2" :class="card.colorClass">{{ card.value }}</div>
+                                        <div v-if="card.hint" class="caption grey--text mt-1">{{ card.hint }}</div>
+                                    </v-card>
+                                </v-col>
+                            </v-row>
+
+                            <div class="about-heading mt-6">Background loops</div>
+                            <v-simple-table dense>
+                                <thead>
+                                <tr><th>Loop</th><th>Last run</th></tr>
+                                </thead>
+                                <tbody>
+                                <tr v-for="(ts, name) in status.loops" :key="name">
+                                    <td class="text-capitalize">{{ name }}</td>
+                                    <td>
+                                        <span v-if="ts">{{ $formatDate(ts) }}</span>
+                                        <span v-else class="grey--text">not yet</span>
+                                    </td>
+                                </tr>
+                                </tbody>
+                            </v-simple-table>
+
+                            <div class="caption grey--text mt-4">
+                                App version {{ status.version }} · polls every 15s
+                                <template v-if="status.landings_disk">
+                                    · landings disk {{ status.landings_disk.used_gb }}/{{ status.landings_disk.total_gb }} GB free
+                                </template>
+                            </div>
+                        </div>
+                        <div v-else class="mt-4 grey--text">
+                            {{ statusError || 'Loading status…' }}
+                        </div>
+                        {% endraw %}
+                    </v-tab-item>
                     {% endif %}
 
                 </v-tabs-items>
@@ -147,12 +191,59 @@
         template: '#about-template',
         data() {
             return {
-                tabAbout: 0
+                tabAbout: 0,
+                status: null,
+                statusError: '',
+                statusTimer: null,
             }
+        },
+        computed: {
+            statusCards() {
+                if (!this.status) return [];
+                const s = this.status;
+                const dbCard = (name, db) => ({
+                    title: name,
+                    value: db.ok ? 'Up' : 'Down',
+                    colorClass: db.ok ? 'success--text' : 'red--text',
+                    hint: db.ok && db.latency_ms != null ? db.latency_ms + ' ms' : '',
+                });
+                return [
+                    {title: 'Version', value: s.version || '—', colorClass: '', hint: ''},
+                    dbCard('Postgres', s.postgres || {}),
+                    dbCard('ClickHouse', s.clickhouse || {}),
+                    {title: 'Clicks (24h)', value: Number(s.clicks_24h || 0).toLocaleString(), colorClass: '', hint: ''},
+                    {title: 'Conversions (24h)', value: Number(s.conversions_24h || 0).toLocaleString(), colorClass: '', hint: ''},
+                ];
+            },
         },
         mounted() {
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
-        }
+            if (this.$root.roleLabel === 'admin') {
+                this.loadStatus();
+                this.statusTimer = setInterval(this.loadStatus, 15000);
+            }
+        },
+        beforeDestroy() {
+            if (this.statusTimer) clearInterval(this.statusTimer);
+        },
+        methods: {
+            loadStatus() {
+                if (this.$root.roleLabel !== 'admin') return;
+                fetch('/backend/api/status', {credentials: 'include'})
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        return res.json();
+                    })
+                    .then(data => {
+                        this.status = data;
+                        this.statusError = '';
+                    })
+                    .catch(err => {
+                        this.status = null;
+                        this.statusError = 'Status unavailable (' + err.message + ')';
+                    });
+            },
+        },
     });
 </script>
 
