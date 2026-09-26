@@ -41,11 +41,15 @@ AAA Tracker is a free, open-source traffic tracker:
 - **Frontend:** Vue 2 + Vuetify — a Material Design UI framework for Vue.js.
 
 Key features:
-- Collecting metric data from different sources with deep analytics.
-- Landing pages storage with PHP support.
+- **Campaign routing engine** — rule-based flow filters (AND/OR groups, IS-NOT, regex, CIDR, 20+ fields: geo, device, OS/browser+version, ISP, connection, referrer, keyword, sub-IDs, bot status), weighted % splits, visitor stickiness, dayparting/schedules, click caps, offer conversion caps with overflow, fallback URLs, referrer hiding.
+- **Every tracking method** — redirect links, direct/no-redirect JS tracking (`/t.js`), client-side conversion pixel (`/p`), clean URLs, impression tracking, server-side Click API for apps/webviews.
+- **Conversion management** — S2S postbacks with secret-key/IP protection and dedupe, custom event types, LTV/rebill accumulation with per-click event history, clickless attribution, manual CSV import, post-conversion editing.
+- **ClickHouse analytics** — multi-dimension drill-down report builder (up to 5 levels) with saved reports and shareable public links, custom formula metrics, period comparison, live click feed, per-report email schedules, date-basis toggle, annotations, 24 dimensions, CSV export everywhere.
+- **Platform** — TOTP 2FA with backup codes, per-section permissions, audit log, archive/restore, bulk edit + CSV import/export, flow monitoring with dead-offer auto-disable, auto-rules engine, global search, GDPR opt-out + IP anonymization, dark mode.
+- Landing pages storage with PHP support + built-in code editor.
 - Ability to make custom routes for different domains and countries.
-- Telegram conversion notifications and scheduled daily email reports.
-- Built-in affiliate network presets with ready-made postback templates.
+- Telegram conversion notifications and scheduled email reports.
+- Built-in affiliate network presets (79) with ready-made postback templates.
 
 ---
 
@@ -157,7 +161,7 @@ frontend/
 
 ## ⚙ Testing:
 
-A live API smoke test suite exists at `backend/tests/api_smoke.py`. It runs against a running instance (dev or prod), exercises auth, 401 protection, campaign CRUD/clone, weighted redirect, fallback, hide-referrer, reports, and cleanup, and cleans up the temporary data it creates. Exits non-zero on the first failure.
+A live API smoke test suite exists at `backend/tests/api_smoke.py` — **421 checks** running against a running instance (dev or prod): auth + 2FA + permissions, campaign CRUD/clone/bulk/CSV, routing rules (filters/stickiness/caps/schedules), the tracking plane (direct JS tracking, pixel, impressions, Click API, simulation, GDPR), conversion economics (LTV, custom events, clickless, import), reporting depth, and security-regression checks. It cleans up all temporary data it creates. Exits non-zero on the first failure.
 
 ```bash
 TEST_BASE_URL=https://localhost TEST_INSECURE=1 \
@@ -170,6 +174,20 @@ Environment variables:
 - `TEST_BASE_URL` — base URL of the running instance (default: `http://localhost`).
 - `TEST_INSECURE=1` — skip TLS certificate verification (needed for the self-signed local cert).
 - `TEST_USER` / `TEST_PASS` — login credentials (default: `tracker_admin` / `admin`).
+
+## 🩹 Security & bug-fix log
+
+2026-09-26 full-codebase audit (two review passes, 58 findings — all criticals/highs fixed, most mediums/lows fixed, remainder documented inline). The significant ones:
+
+- **IP spoofing closed** — client IP now resolved X-Real-IP-first; nginx rewrites `X-Forwarded-For`; postback IP allowlist and bot IP rules use the same resolution.
+- **Atomic conversion upsert** — concurrent postbacks can no longer double-count LTV (single guarded UPDATE with server-side event append).
+- **Visitor PII no longer leaks into click-out URLs** — only the click ID and mapped passthrough params.
+- **Paused campaigns stop tracking**; redirect chains capped at 3 levels with per-level ClickHouse attribution.
+- **Event-loop blocking removed** — Telegram notifications, landing fetches, and per-hit config loads no longer stall the tracker; ClickHouse client pool bounded.
+- **Auth hardening** — TOTP tokens burn after 3 failures and reject replay (single-use jti), session cookie `Secure`, constant-time secret compares, login + TOTP rate limiting.
+- **XSS/CSV hardening** — report emails HTML-escape all values, CSV exports neutralize spreadsheet formula injection.
+- **Authorization** — `campaigns:'own'` enforced on every mutation (not just listing); archive/restore requires write; global search respects section permissions.
+- Ops: `/simulate` and the debug log are admin-gated and secret-redacted; GDPR opt-out honored on every tracking endpoint.
 
 ## 🧰 Contribution Guidelines
 
