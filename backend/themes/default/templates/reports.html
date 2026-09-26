@@ -26,19 +26,7 @@
 
         <!-- Report builder controls -->
         <v-card class="pa-4 mb-4">
-            <div class="d-flex flex-wrap align-center">
-                <v-select
-                        v-model="dimension"
-                        :items="dimensionItems"
-                        item-text="label"
-                        item-value="key"
-                        label="Break down by"
-                        outlined
-                        dense
-                        hide-details
-                        style="max-width: 220px;"
-                        class="mr-2"
-                ></v-select>
+            <div class="filter-bar align-center">
                 <v-menu v-model="dateMenu" :close-on-content-click="false" transition="scale-transition" offset-y min-width="auto">
                     <template v-slot:activator="{ on, attrs }">
                         <v-text-field
@@ -51,8 +39,7 @@
                                 outlined
                                 dense
                                 hide-details
-                                style="max-width: 240px;"
-                                class="mr-2"
+                                class="range-field"
                         ></v-text-field>
                     </template>
                     <v-date-picker v-model="dateRange" range @input="dateMenu = false"></v-date-picker>
@@ -69,8 +56,12 @@
                         multiple
                         chips
                         small-chips
-                        style="max-width: 240px;"
+                        class="campaigns-select"
                 ></v-select>
+                <v-btn-toggle v-model="dateBasis" dense class="basis-toggle" mandatory>
+                    <v-btn value="click_date" small>Click date</v-btn>
+                    <v-btn value="conversion_date" small>Conversion date</v-btn>
+                </v-btn-toggle>
             </div>
             <div class="mt-2">
                 <v-chip v-for="preset in datePresets" :key="preset.label"
@@ -82,19 +73,152 @@
                     {{ preset.label }}
                 </v-chip>
             </div>
+
+            <!-- Dimension pipeline: ordered drill-down, up to 5 -->
+            <div class="mt-4">
+                <div class="builder-label">Breakdown pipeline <span class="builder-hint">click a row in the table to expand the next level</span></div>
+                <div class="dim-pipeline">
+                    <template v-for="(dim, i) in dimensions">
+                        <v-chip :key="'dim-' + i" small label class="dim-chip" close
+                                @click:close="removeDimension(i)">
+                            <span class="dim-chip__order">{{ i + 1 }}</span>
+                            {{ dimLabel(dim) }}
+                            <v-icon small class="dim-chip__move" :disabled="i === 0" @click.stop="moveDimension(i, -1)">mdi-chevron-left</v-icon>
+                            <v-icon small class="dim-chip__move" :disabled="i === dimensions.length - 1" @click.stop="moveDimension(i, 1)">mdi-chevron-right</v-icon>
+                        </v-chip>
+                        <v-icon v-if="i < dimensions.length - 1" :key="'sep-' + i" small class="dim-sep">mdi-chevron-right</v-icon>
+                    </template>
+                    <v-select
+                            v-if="dimensions.length < 5"
+                            :items="availableDimensions"
+                            item-text="label"
+                            item-value="key"
+                            label="+ Add dimension"
+                            outlined
+                            dense
+                            hide-details
+                            class="dim-add"
+                            @input="addDimension"
+                    ></v-select>
+                    <span v-else class="builder-hint ml-2">maximum 5 dimensions</span>
+                </div>
+                <!-- G58: one-click roll-up presets -->
+                <div class="mt-3">
+                    <span class="builder-hint mr-1">Presets:</span>
+                    <v-chip v-for="preset in dimensionPresets" :key="preset.label" small label outlined
+                            class="mr-1 preset-chip" @click="applyDimensionPreset(preset)">
+                        <v-icon small class="mr-1">{{ preset.icon }}</v-icon>{{ preset.label }}
+                    </v-chip>
+                </div>
+            </div>
+
+            <!-- Columns / sorting / saved reports -->
+            <div class="filter-bar align-center mt-3">
+                <v-select
+                        v-model="selectedColumns"
+                        :items="columnOptions"
+                        label="Columns"
+                        outlined
+                        dense
+                        hide-details
+                        multiple
+                        chips
+                        small-chips
+                        class="columns-select"
+                ></v-select>
+                <v-select
+                        v-model="sortBy"
+                        :items="sortOptions"
+                        label="Sort by"
+                        outlined
+                        dense
+                        hide-details
+                        class="sort-select"
+                ></v-select>
+                <v-btn small outlined :color="sortDir === 'asc' ? 'primary' : 'grey'" class="mr-2" @click="sortDir = sortDir === 'asc' ? 'desc' : 'asc'">
+                    <v-icon small>{{ sortDir === 'asc' ? 'mdi-sort-ascending' : 'mdi-sort-descending' }}</v-icon>
+                </v-btn>
+                <v-btn small outlined class="mr-2" @click="customMetricDialog = true">
+                    <v-icon small class="mr-1">mdi-calculator</v-icon>
+                    Custom metrics<template v-if="customMetrics.length"> ({{ customMetrics.length }})</template>
+                </v-btn>
+                <v-select
+                        v-model="savedReportId"
+                        :items="savedReports"
+                        item-text="name"
+                        item-value="id"
+                        label="Saved reports"
+                        outlined
+                        dense
+                        hide-details
+                        clearable
+                        class="saved-select"
+                        @change="loadSavedReport"
+                ></v-select>
+                <v-btn small outlined class="mr-1" @click="openSaveDialog">
+                    <v-icon small>mdi-content-save-outline</v-icon>
+                </v-btn>
+                <v-btn small outlined class="mr-1" :disabled="!savedReportId" @click="openShareDialog">
+                    <v-icon small>mdi-share-variant-outline</v-icon>
+                </v-btn>
+                <v-btn small outlined class="mr-1" :disabled="!savedReportId" @click="openEmailScheduleDialog">
+                    <v-icon small>mdi-email-outline</v-icon>
+                </v-btn>
+                <v-btn small outlined color="error" :disabled="!savedReportId" @click="deleteSavedReport">
+                    <v-icon small>mdi-trash-can-outline</v-icon>
+                </v-btn>
+                <v-spacer></v-spacer>
+                <v-btn
+                        outlined
+                        elevation="0"
+                        class="mr-2"
+                        :disabled="!reportRows.length"
+                        @click="exportReportCsv"
+                >
+                    <v-icon small class="mr-1">mdi-download</v-icon>
+                    Export CSV
+                </v-btn>
+                <v-btn color="primary" elevation="0" :loading="loading" @click="runReport">
+                    <v-icon small class="mr-1">mdi-play</v-icon>
+                    Run Report
+                </v-btn>
+            </div>
+            <div v-if="basisNote" class="basis-note mt-2">
+                <v-icon small class="mr-1">mdi-information-outline</v-icon>{{ basisNote }}
+            </div>
+            <!-- Drill breadcrumb: click a segment to collapse everything below it -->
+            <div v-if="reportRows.length" class="drill-path mt-3">
+                <span class="builder-label mr-2">Levels</span>
+                <v-chip v-for="(dim, i) in dimensions" :key="'bc-' + i"
+                        small label outlined class="mr-1 drill-path__chip"
+                        @click="collapseBelow(i)">
+                    {{ i + 1 }}. {{ dimLabel(dim) }}
+                </v-chip>
+            </div>
         </v-card>
 
         <!-- Breakdown table -->
+        <div :key="'rep-table-' + loading" class="section-enter">
         <v-card>
-            <v-data-table v-col-resize:reports-conversions="headers" v-col-resize:reports-clicklog="clickLogHeaders" v-col-resize:reports-breakdown="reportHeaders"
+            <v-data-table v-col-resize:reports-breakdown="reportHeaders"
                     :headers="reportHeaders"
-                    :items="reportRows"
+                    :items="visibleRows"
                     dense
-                    :items-per-page="15"
+                    :items-per-page="25"
                     :footer-props="{ 'items-per-page-options': [15, 25, 50, 100] }"
                     :loading="loading"
                     :item-class="perfRowClass"
             >
+                <template v-slot:item.dimension="{ item }">
+                    <div class="dim-cell" :style="{ paddingLeft: ((item.level - 1) * 18) + 'px' }">
+                        <v-btn v-if="hasChildren(item)" icon x-small class="dim-cell__toggle" tabindex="-1"
+                               @click.stop="toggleRow(item)">
+                            <v-icon small>{{ isExpanded(item) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
+                        </v-btn>
+                        <span v-else class="dim-cell__leaf"></span>
+                        <span class="dim-value" role="button" @click="toggleRow(item)">{{ item.value || '(empty)' }}</span>
+                    </div>
+                </template>
                 <template v-slot:item.visits="{ item }">
                     <span>{{ Number(item.visits || 0).toLocaleString() }}</span>
                 </template>
@@ -134,21 +258,34 @@
                 <template v-slot:item.roi="{ item }">
                     <span :class="signClass(item.roi)">{{ formatPct(item.roi) }}</span>
                 </template>
+                <template v-slot:item.rejected_rate="{ item }">
+                    <span :class="signClass(-Math.abs(item.rejected_rate || 0))">{{ formatPct(item.rejected_rate) }}</span>
+                </template>
+                <template v-slot:item.click_through_rate="{ item }">
+                    <span>{{ formatPct(item.click_through_rate) }}</span>
+                </template>
+                <template v-for="cm in customMetrics" v-slot:[customSlot(cm)]="{ item }">
+                    <span :key="cm.name + '-' + rowKey(item)">{{ formatCustom(item[cm.name]) }}</span>
+                </template>
                 <template v-slot:body.append="{ headers }">
                     <tr class="perf-totals-row" v-if="reportRows.length">
                         <td>Total</td>
                         <td v-for="h in headers.slice(1)" :key="h.value" :class="h.align === 'end' ? 'text-end' : ''">
                             <template v-if="['visits','unique_visits','clicks','unique_clicks','leads','conversions','rejected'].includes(h.value)">
-                                {{ Number(totals[h.value] || 0).toLocaleString() }}
+                                {{ Number(reportTotals[h.value] || 0).toLocaleString() }}
                             </template>
                             <template v-else-if="['cost','revenue','profit'].includes(h.value)">
-                                <span :class="h.value === 'profit' ? signClass(totals.profit) : ''">{{ formatMoney(totals[h.value]) }}</span>
+                                <span :class="h.value === 'profit' ? signClass(reportTotals.profit) : ''">{{ formatMoney(reportTotals[h.value]) }}</span>
                             </template>
-                            <template v-else-if="h.value === 'cr'">{{ formatPct(totals.cr) }}</template>
-                            <template v-else-if="h.value === 'epc'">{{ formatEpc(totals.epc) }}</template>
+                            <template v-else-if="h.value === 'cr'">{{ formatPct(reportTotals.cr) }}</template>
+                            <template v-else-if="h.value === 'epc'">{{ formatEpc(reportTotals.epc) }}</template>
                             <template v-else-if="h.value === 'roi'">
-                                <span :class="signClass(totals.roi)">{{ formatPct(totals.roi) }}</span>
+                                <span :class="signClass(reportTotals.roi)">{{ formatPct(reportTotals.roi) }}</span>
                             </template>
+                            <template v-else-if="h.value === 'rejected_rate' || h.value === 'click_through_rate'">
+                                {{ formatPct(reportTotals[h.value]) }}
+                            </template>
+                            <template v-else-if="customMetricNames.includes(h.value)">{{ formatCustom(reportTotals[h.value]) }}</template>
                             <template v-else>&nbsp;</template>
                         </td>
                     </tr>
@@ -161,6 +298,138 @@
                 </template>
             </v-data-table>
         </v-card>
+        </div>
+
+        <!-- Save report dialog -->
+        <v-dialog v-model="saveDialog" max-width="420">
+            <v-card>
+                <v-card-title class="text-h6">Save Report</v-card-title>
+                <v-card-text>
+                    <v-text-field v-model="saveName" label="Report name" outlined dense autofocus
+                                  @keyup.enter="saveReport"></v-text-field>
+                    <div class="caption grey--text">Saves dimensions, columns, custom metrics, date basis and filters.</div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="saveDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" :loading="saveLoading" @click="saveReport">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <!-- Custom metrics dialog (G49) -->
+        <v-dialog v-model="customMetricDialog" max-width="560">
+            <v-card>
+                <v-card-title class="text-h6">Custom Metrics</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-3">
+                        Formula references built-in metrics by key with <code>+ - * / ( )</code>, e.g.
+                        <code>conversions*100/clicks</code>. Divide by zero yields an empty cell.
+                    </div>
+                    <div v-for="(cm, i) in customMetrics" :key="'cm-' + i" class="d-flex align-center mb-2">
+                        <v-chip small label class="mr-2">{{ cm.name }}</v-chip>
+                        <code class="cm-formula">{{ cm.formula }}</code>
+                        <v-spacer></v-spacer>
+                        <v-btn icon x-small color="error" @click="removeCustomMetric(i)">
+                            <v-icon small>mdi-trash-can-outline</v-icon>
+                        </v-btn>
+                    </div>
+                    <v-divider v-if="customMetrics.length" class="my-3"></v-divider>
+                    <v-row dense>
+                        <v-col cols="4">
+                            <v-text-field v-model="newMetricName" label="Name" outlined dense hide-details placeholder="uCR"></v-text-field>
+                        </v-col>
+                        <v-col cols="8">
+                            <v-text-field v-model="newMetricFormula" label="Formula" outlined dense hide-details
+                                          placeholder="conversions*100/clicks"
+                                          @keyup.enter="addCustomMetric"></v-text-field>
+                        </v-col>
+                    </v-row>
+                    <div v-if="metricError" class="caption error--text mt-1">{{ metricError }}</div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="customMetricDialog = false">Close</v-btn>
+                    <v-btn color="primary" @click="addCustomMetric">Add metric</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <!-- G52: share dialog -->
+        <v-dialog v-model="shareDialog" max-width="560">
+            <v-card>
+                <v-card-title class="text-h6">Share Report</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-3">
+                        Anyone with this link can view a read-only copy of <b>{{ shareReportName }}</b> — no login needed.
+                        Revoking instantly invalidates the link.
+                    </div>
+                    <template v-if="shareUrl">
+                        <v-text-field :value="shareUrl" label="Public link" readonly outlined dense hide-details
+                                      id="share-url-field">
+                            <template v-slot:append>
+                                <v-btn small text color="primary" @click="copyShareUrl">
+                                    <v-icon small class="mr-1">mdi-content-copy</v-icon>Copy
+                                </v-btn>
+                            </template>
+                        </v-text-field>
+                        <div class="caption grey--text mt-2">
+                            <v-icon small class="mr-1">mdi-shield-outline</v-icon>
+                            Shared {{ shareCreatedAt ? new Date(shareCreatedAt * 1000).toLocaleString() : '' }}
+                        </div>
+                    </template>
+                    <div v-else class="caption grey--text">This report is not shared yet.</div>
+                    <div v-if="shareError" class="caption error--text mt-2">{{ shareError }}</div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn v-if="shareUrl" color="error" text :loading="shareLoading" @click="revokeShare">Revoke link</v-btn>
+                    <v-btn color="primary" :loading="shareLoading" @click="createShare">
+                        {{ shareUrl ? 'Re-create link' : 'Create link' }}
+                    </v-btn>
+                    <v-btn text @click="shareDialog = false">Close</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <!-- G53: email schedule dialog -->
+        <v-dialog v-model="emailScheduleDialog" max-width="520">
+            <v-card>
+                <v-card-title class="text-h6">Email Schedule</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-3">
+                        Email a snapshot of <b>{{ emailScheduleReportName }}</b> on a schedule.
+                        Sending uses the Brevo/SMTP credentials from Settings → Email reports.
+                    </div>
+                    <v-text-field v-model="emailSchedule.recipients" label="Recipients (comma-separated)" outlined dense
+                                  placeholder="ops@example.com, boss@example.com"></v-text-field>
+                    <v-row dense>
+                        <v-col cols="6">
+                            <v-select v-model="emailSchedule.hour_utc" :items="emailHourOptions" label="Hour (UTC)"
+                                      outlined dense hide-details></v-select>
+                        </v-col>
+                        <v-col cols="6">
+                            <v-select v-model="emailSchedule.frequency" :items="[{text: 'Daily', value: 'daily'}, {text: 'Weekly', value: 'weekly'}]"
+                                      label="Frequency" outlined dense hide-details></v-select>
+                        </v-col>
+                    </v-row>
+                    <div v-if="emailScheduleSaved && emailScheduleSaved.last_sent" class="caption grey--text mt-2">
+                        Last sent: {{ emailScheduleSaved.last_sent }}
+                        <span v-if="emailScheduleSaved.due" class="status-chip status-chip--warning ml-1">due</span>
+                    </div>
+                    <div v-if="emailScheduleError" class="caption error--text mt-2">{{ emailScheduleError }}</div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn v-if="emailScheduleSaved" color="error" text :loading="emailScheduleLoading" @click="deleteEmailSchedule">Remove schedule</v-btn>
+                    <v-btn text :loading="emailScheduleTesting" :disabled="emailScheduleLoading" @click="testEmailSchedule">
+                        <v-icon small class="mr-1">mdi-send-outline</v-icon>Test send
+                    </v-btn>
+                    <v-btn color="primary" :loading="emailScheduleLoading" :disabled="emailScheduleTesting" @click="saveEmailSchedule">Save</v-btn>
+                    <v-btn text @click="emailScheduleDialog = false">Close</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
 
         <!-- Click log drill-down -->
         <div class="d-flex align-center justify-space-between mt-6 mb-2">
@@ -173,43 +442,38 @@
             </v-btn>
         </div>
         <v-card class="pa-4 mb-4">
-            <div class="d-flex flex-wrap align-center">
+            <div class="filter-bar align-center">
                 <v-text-field
                         v-model="logFilters.country"
                         label="Country"
                         outlined dense hide-details clearable
-                        style="max-width: 110px;"
-                        class="mr-2"
+                        class="log-filter-sm"
                 ></v-text-field>
                 <v-text-field
                         v-model="logFilters.device_type"
                         label="Device"
                         outlined dense hide-details clearable
-                        style="max-width: 110px;"
-                        class="mr-2"
+                        class="log-filter-sm"
                 ></v-text-field>
                 <v-text-field
                         v-model="logFilters.os"
                         label="OS"
                         outlined dense hide-details clearable
-                        style="max-width: 110px;"
-                        class="mr-2"
+                        class="log-filter-sm"
                 ></v-text-field>
                 <v-select
                         v-model="logFilters.status"
                         :items="['', 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash']"
                         label="Status"
                         outlined dense hide-details clearable
-                        style="max-width: 130px;"
-                        class="mr-2"
+                        class="log-filter-status"
                 ></v-select>
                 <v-text-field
                         v-model="logFilters.search"
                         label="Search (url, referrer, ip, visitor id)"
                         prepend-inner-icon="mdi-magnify"
                         outlined dense hide-details clearable
-                        style="max-width: 280px;"
-                        class="mr-2"
+                        class="log-filter-search"
                         @keyup.enter="loadClickLog"
                 ></v-text-field>
                 <v-btn color="primary" elevation="0" :loading="logLoading" @click="loadClickLog">
@@ -217,8 +481,9 @@
                 </v-btn>
             </div>
         </v-card>
+        <div :key="'log-table-' + logLoading" class="section-enter">
         <v-card>
-            <v-data-table
+            <v-data-table v-col-resize:reports-clicklog="clickLogHeaders"
                     :headers="clickLogHeaders"
                     :items="clickLog"
                     dense
@@ -226,22 +491,34 @@
                     :footer-props="{ 'items-per-page-options': [15, 25, 50, 100] }"
                     :loading="logLoading"
             >
+                <template v-slot:item.received_at="{ item }">
+                    <span class="click-time">
+                        <span class="click-time__date">{{ String(item.received_at || '').split('T')[0] }}</span>
+                        <span class="click-time__time">{{ String(item.received_at || '').split('T')[1] || '' }}</span>
+                    </span>
+                </template>
                 <template v-slot:item.is_bot="{ item }">
-                    <v-chip v-if="item.is_bot" x-small label color="error" text-color="white">bot</v-chip>
+                    <span v-if="item.is_bot" class="status-chip status-chip--danger">Bot</span>
                     <span v-else class="grey--text">—</span>
                 </template>
                 <template v-slot:item.status="{ item }">
-                    <span v-if="item.status" class="font-weight-medium">{{ item.status }}</span>
+                    <span v-if="item.status" class="status-chip" :class="statusChipClass(item.status)">{{ item.status }}</span>
                     <span v-else class="grey--text">—</span>
                 </template>
                 <template v-slot:no-data>
-                    <div class="empty-state">
+                    <div class="empty-state" v-if="logFiltersActive">
+                        <v-icon>mdi-filter-off-outline</v-icon>
+                        <div class="mt-2">No clicks match these filters</div>
+                        <v-btn small text color="primary" class="mt-2" @click="clearLogFilters">Clear filters</v-btn>
+                    </div>
+                    <div class="empty-state" v-else>
                         <v-icon>mdi-inbox-outline</v-icon>
-                        <div class="mt-2">No clicks match the filters</div>
+                        <div class="mt-2">No clicks recorded in this date range</div>
                     </div>
                 </template>
             </v-data-table>
         </v-card>
+        </div>
 
         <!-- Conversion log -->
         <div class="d-flex align-center justify-space-between mt-6 mb-2">
@@ -249,7 +526,14 @@
                 <div class="font-weight-medium">Conversion Log</div>
                 <div class="page-subtitle">Every conversion received via postback — edit status, payout or delete</div>
             </div>
-            <div>
+            <div class="d-flex align-center">
+                <v-btn-toggle v-model="convDateBasis" dense mandatory class="basis-toggle mr-3">
+                    <v-btn value="click_date" small>Click date</v-btn>
+                    <v-btn value="conversion_date" small>Conversion date</v-btn>
+                </v-btn-toggle>
+                <v-btn text small color="primary" class="mr-2" @click="openImport">
+                    <v-icon small class="mr-1">mdi-upload</v-icon>Import
+                </v-btn>
                 <v-btn text small color="primary" class="mr-2" :disabled="!conversions || !conversions.length" @click="exportCsv">
                     <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
                 </v-btn>
@@ -259,22 +543,20 @@
             </div>
         </div>
         <v-card class="pa-4 mb-2">
-            <div class="d-flex flex-wrap align-center">
+            <div class="filter-bar align-center">
                 <v-select
                         v-model="convFilters.status"
-                        :items="['', 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash']"
+                        :items="statusOptions"
                         label="Status"
                         outlined dense hide-details clearable
-                        style="max-width: 130px;"
-                        class="mr-2"
+                        class="log-filter-status"
                 ></v-select>
                 <v-text-field
                         v-model="convFilters.search"
                         label="Search (click id, external id, transaction id, visitor id)"
                         prepend-inner-icon="mdi-magnify"
                         outlined dense hide-details clearable
-                        style="max-width: 320px;"
-                        class="mr-2"
+                        class="conv-filter-search"
                         @keyup.enter="loadReports"
                 ></v-text-field>
                 <v-btn color="primary" elevation="0" :loading="convLoading" @click="loadReports">
@@ -282,10 +564,11 @@
                 </v-btn>
             </div>
         </v-card>
+        <div :key="'conv-table-' + convLoading" class="section-enter">
         <v-row dense>
             <v-col>
                 <v-card>
-                    <v-data-table
+                    <v-data-table v-col-resize:reports-conversions="headers"
                             :headers="headers"
                             :items="conversions"
                             dense
@@ -294,9 +577,12 @@
                             :loading="convLoading"
                     >
                         <template v-slot:item.status="{ item }">
-                            <v-chip x-small label outlined :color="statusColor(item.status)" class="font-weight-medium">
-                                {{ item.status || '—' }}
-                            </v-chip>
+                            <span v-if="item.status" class="status-chip" :class="statusChipClass(item.status)">{{ item.status }}</span>
+                            <span v-else class="grey--text">—</span>
+                        </template>
+                        <template v-slot:item.click_id="{ item }">
+                            <code v-if="item.click_id && item.click_id !== 'none'">{{ item.click_id }}</code>
+                            <span v-else class="grey--text">—</span>
                         </template>
                         <template v-slot:item.payout="{ item }">
                             <span>{{ formatMoney(item.payout) }}</span>
@@ -331,19 +617,25 @@
                             </v-tooltip>
                         </template>
                         <template v-slot:no-data>
-                            <div class="empty-state">
+                            <div class="empty-state" v-if="convFiltersActive">
+                                <v-icon>mdi-filter-off-outline</v-icon>
+                                <div class="mt-2">No conversions match these filters</div>
+                                <v-btn small text color="primary" class="mt-2" @click="clearConvFilters">Clear filters</v-btn>
+                            </div>
+                            <div class="empty-state" v-else>
                                 <v-icon>mdi-inbox-outline</v-icon>
-                                <div class="mt-2">No data yet</div>
+                                <div class="mt-2">No conversions recorded yet</div>
                             </div>
                         </template>
                     </v-data-table>
                 </v-card>
             </v-col>
         </v-row>
+        </div>
 
         <!-- Edit conversion dialog -->
-        <v-dialog v-model="editDialog" max-width="520px">
-            <v-card>
+        <v-dialog v-model="editDialog">
+            <v-card class="dialog-md">
                 <v-card-title class="text-h6">Edit Conversion</v-card-title>
                 <v-card-text>
                     <div class="caption grey--text mb-3">
@@ -352,7 +644,7 @@
                     </div>
                     <v-select
                             v-model="editItem.status"
-                            :items="['lead', 'sale', 'upsale', 'rejected', 'hold', 'trash']"
+                            :items="statusOptions"
                             label="Status"
                             outlined
                             dense
@@ -372,6 +664,39 @@
                     <v-spacer></v-spacer>
                     <v-btn text @click="editDialog = false">Cancel</v-btn>
                     <v-btn color="primary" :loading="editSaving" @click="saveConversion">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <!-- Import conversions dialog (G25) -->
+        <v-dialog v-model="importDialog" max-width="640">
+            <v-card>
+                <v-card-title class="text-h6">Import Conversions</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-2">
+                        One conversion per line: <code>click_id,payout,transaction_id,status</code>.
+                        Existing click ids accumulate onto their conversion (LTV); unknown ids create
+                        unattributed rows. Status may be a built-in or custom status.
+                    </div>
+                    <v-textarea
+                            v-model="importText"
+                            outlined
+                            dense
+                            rows="8"
+                            placeholder="click_id,payout,transaction_id,status"
+                    ></v-textarea>
+                    <div v-if="importResults.length" class="import-results mt-2">
+                        <div v-for="(r, i) in importResults" :key="i"
+                             class="caption"
+                             :class="r.ok ? 'success--text' : 'error--text'">
+                            Line {{ r.line }}: {{ r.ok ? 'imported' : 'failed' }} — {{ r.detail }}
+                        </div>
+                    </div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="importDialog = false">Close</v-btn>
+                    <v-btn color="primary" :loading="importing" @click="runImport">Import</v-btn>
                 </v-card-actions>
             </v-card>
         </v-dialog>
@@ -399,6 +724,43 @@
                     new Date().toISOString().split('T')[0]
                 ],
                 dimension: 'country',
+                dimensions: ['country'],
+                expanded: {},
+                dateBasis: 'click_date',
+                convDateBasis: 'click_date',
+                basisNote: null,
+                selectedColumns: ['visits', 'clicks', 'conversions', 'cost', 'revenue', 'profit', 'cr', 'epc', 'roi'],
+                sortBy: 'visits',
+                sortDir: 'desc',
+                customMetrics: [],
+                customMetricDialog: false,
+                newMetricName: '',
+                newMetricFormula: '',
+                metricError: '',
+                savedReports: [],
+                savedReportId: null,
+                saveDialog: false,
+                saveName: '',
+                saveLoading: false,
+                shareDialog: false,
+                shareUrl: '',
+                shareCreatedAt: null,
+                shareLoading: false,
+                shareError: '',
+                emailScheduleDialog: false,
+                emailSchedule: {recipients: '', hour_utc: 9, frequency: 'daily'},
+                emailScheduleSaved: null,
+                emailScheduleLoading: false,
+                emailScheduleTesting: false,
+                emailScheduleError: '',
+                dimensionPresets: [
+                    { label: 'SubID chain', icon: 'mdi-numeric', dims: ['sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5'] },
+                    { label: 'Geo chain', icon: 'mdi-earth', dims: ['country', 'region', 'city'] },
+                    { label: 'Traffic chain', icon: 'mdi-traffic-light', dims: ['utm_source', 'utm_medium', 'utm_campaign', 'keyword'] },
+                    { label: 'Funnel', icon: 'mdi-filter-outline', dims: ['campaign_id', 'offer_id', 'landing_id'] },
+                ],
+                emailHourOptions: Array.from({length: 24}, (_, h) => ({text: String(h).padStart(2, '0') + ':00', value: h})),
+                reportTotals: {},
                 dimensionItems: [
                     { key: 'date', label: 'Date' },
                     { key: 'hour', label: 'Hour' },
@@ -414,9 +776,15 @@
                     { key: 'language', label: 'Language' },
                     { key: 'traffic_source_name', label: 'Traffic Source' },
                     { key: 'utm_source', label: 'UTM Source' },
+                    { key: 'utm_medium', label: 'UTM Medium' },
                     { key: 'utm_campaign', label: 'UTM Campaign' },
                     { key: 'utm_creative', label: 'UTM Creative' },
                     { key: 'keyword', label: 'Keyword' },
+                    { key: 'sub_id_1', label: 'Sub ID 1' },
+                    { key: 'sub_id_2', label: 'Sub ID 2' },
+                    { key: 'sub_id_3', label: 'Sub ID 3' },
+                    { key: 'sub_id_4', label: 'Sub ID 4' },
+                    { key: 'sub_id_5', label: 'Sub ID 5' },
                     { key: 'isp', label: 'ISP' },
                     { key: 'connection_type', label: 'Connection Type' },
                     { key: 'status', label: 'Conversion Status' },
@@ -439,6 +807,8 @@
                     {text: 'CR %', value: 'cr', align: 'end'},
                     {text: 'EPC', value: 'epc', align: 'end'},
                     {text: 'ROI %', value: 'roi', align: 'end'},
+                    {text: 'Rejected Rate %', value: 'rejected_rate', align: 'end'},
+                    {text: 'Click-through Rate %', value: 'click_through_rate', align: 'end'},
                 ],
                 reportRows: [],
                 headers: [
@@ -462,6 +832,11 @@
                     status: '',
                     search: '',
                 },
+                customStatuses: [],
+                importDialog: false,
+                importText: '',
+                importResults: [],
+                importing: false,
                 editDialog: false,
                 editSaving: false,
                 editItem: {},
@@ -496,40 +871,372 @@
             dateRangeText() {
                 return this.dateRange.join(' ~ ');
             },
-            reportHeaders() {
-                const dimLabel = (this.dimensionItems.find(d => d.key === this.dimension) || {}).label || 'Dimension';
-                return [{text: dimLabel, value: 'dimension'}, ...this.reportHeadersBase];
+            columnOptions() {
+                return this.reportHeadersBase.map(h => ({ text: h.text, value: h.value }));
             },
-            totals() {
-                const rows = this.reportRows;
-                const sum = f => rows.reduce((a, r) => a + (parseFloat(r[f]) || 0), 0);
-                const clicks = sum('clicks');
-                const cost = sum('cost');
-                const revenue = sum('revenue');
-                const conversions = sum('conversions');
-                const profit = sum('profit');
-                return {
-                    visits: sum('visits'),
-                    unique_visits: sum('unique_visits'),
-                    clicks,
-                    unique_clicks: sum('unique_clicks'),
-                    leads: sum('leads'),
-                    conversions,
-                    rejected: sum('rejected'),
-                    cost, revenue, profit,
-                    cr: clicks ? (conversions / clicks) * 100 : 0,
-                    epc: clicks ? revenue / clicks : 0,
-                    roi: cost ? (profit / cost) * 100 : 0,
-                };
+            customMetricNames() {
+                return this.customMetrics.map(m => m.name);
+            },
+            shareReportName() {
+                const r = this.savedReports.find(x => x.id === this.savedReportId);
+                return r ? r.name : '';
+            },
+            emailScheduleReportName() {
+                const r = this.savedReports.find(x => x.id === this.savedReportId);
+                return r ? r.name : '';
+            },
+            sortOptions() {
+                return [...this.columnOptions, ...this.customMetrics.map(m => ({ text: m.name, value: m.name }))];
+            },
+            availableDimensions() {
+                return this.dimensionItems.filter(d => !this.dimensions.includes(d.key));
+            },
+            reportHeaders() {
+                const first = this.dimensions[0] || 'country';
+                const dimLabel = (this.dimensionItems.find(d => d.key === first) || {}).label || 'Dimension';
+                const byKey = {};
+                this.reportHeadersBase.forEach(h => { byKey[h.value] = h; });
+                const cols = this.selectedColumns
+                    .map(key => byKey[key] || { text: key, value: key, align: 'end' })
+                    .map(h => ({ ...h, sortable: false }));
+                return [{ text: dimLabel, value: 'dimension', sortable: false }, ...cols];
+            },
+            visibleRows() {
+                const SEP = '\u001f';
+                return this.reportRows.filter(r => {
+                    if (!r.parent_key) return true;
+                    const parts = r.parent_key.split(SEP);
+                    for (let i = 1; i <= parts.length; i++) {
+                        if (!this.expanded[parts.slice(0, i).join(SEP)]) return false;
+                    }
+                    return true;
+                });
+            },
+            logFiltersActive() {
+                const f = this.logFilters;
+                return !!(f.country || f.device_type || f.os || f.status || f.search);
+            },
+            convFiltersActive() {
+                const f = this.convFilters;
+                return !!(f.status || f.search);
+            },
+            statusOptions() {
+                return ['', 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash', ...this.customStatuses];
             },
         },
         mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadCampaigns();
             this.loadReports();
             this.loadClickLog();
+            this.loadCustomStatuses();
+            this.loadSavedReports();
             this.$root.$on('load-reports', () => { this.loadCampaigns(); this.loadReports(); this.loadClickLog(); });
         },
         methods: {
+            // --- report builder: dimension pipeline (G47) ---
+            dimLabel(key) {
+                return (this.dimensionItems.find(d => d.key === key) || {}).label || key;
+            },
+            addDimension(key) {
+                if (key && this.dimensions.length < 5 && !this.dimensions.includes(key)) {
+                    this.dimensions.push(key);
+                }
+            },
+            removeDimension(i) {
+                this.dimensions.splice(i, 1);
+            },
+            moveDimension(i, dir) {
+                const j = i + dir;
+                if (j < 0 || j >= this.dimensions.length) return;
+                const dims = this.dimensions.slice();
+                [dims[i], dims[j]] = [dims[j], dims[i]];
+                this.dimensions = dims;
+            },
+            // --- drill-down tree (rows are preloaded flattened; expand in place) ---
+            rowKey(row) {
+                return row.parent_key ? row.parent_key + '\u001f' + row.value : row.value;
+            },
+            hasChildren(row) {
+                const key = this.rowKey(row);
+                return this.reportRows.some(r => r.parent_key === key);
+            },
+            isExpanded(row) {
+                return !!this.expanded[this.rowKey(row)];
+            },
+            toggleRow(row) {
+                if (!this.hasChildren(row)) return;
+                const key = this.rowKey(row);
+                if (this.expanded[key]) {
+                    const expanded = {};
+                    Object.keys(this.expanded).forEach(k => {
+                        if (k !== key && !k.startsWith(key + '\u001f')) expanded[k] = true;
+                    });
+                    this.expanded = expanded;
+                } else {
+                    this.expanded = { ...this.expanded, [key]: true };
+                }
+            },
+            collapseBelow(dimIdx) {
+                const expanded = {};
+                Object.keys(this.expanded).forEach(k => {
+                    if (k.split('\u001f').length <= dimIdx) expanded[k] = true;
+                });
+                this.expanded = expanded;
+            },
+            customSlot(cm) {
+                return 'item.' + cm.name;
+            },
+            formatCustom(v) {
+                if (v == null || isNaN(parseFloat(v))) return '—';
+                const n = parseFloat(v);
+                return n.toLocaleString('en-US', { maximumFractionDigits: 4 });
+            },
+            // --- custom metrics (G49) ---
+            addCustomMetric() {
+                const name = this.newMetricName.trim();
+                const formula = this.newMetricFormula.trim();
+                this.metricError = '';
+                if (!name) { this.metricError = 'Name is required'; return; }
+                if (!formula) { this.metricError = 'Formula is required'; return; }
+                if (this.customMetricNames.includes(name) || this.reportHeadersBase.some(h => h.value === name)) {
+                    this.metricError = 'Name is already in use'; return;
+                }
+                if (!/^[\d\sA-Za-z_+\-*/().]+$/.test(formula)) {
+                    this.metricError = 'Formula may only contain numbers, metric keys and + - * / ( )'; return;
+                }
+                this.customMetrics.push({ name, formula });
+                if (!this.selectedColumns.includes(name)) this.selectedColumns.push(name);
+                this.newMetricName = '';
+                this.newMetricFormula = '';
+            },
+            removeCustomMetric(i) {
+                const name = this.customMetrics[i].name;
+                this.customMetrics.splice(i, 1);
+                this.selectedColumns = this.selectedColumns.filter(c => c !== name);
+            },
+            // --- saved reports (persisted via the settings API) ---
+            loadSavedReports() {
+                fetch('/backend/api/settings/saved-reports', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => { this.savedReports = data.reports || []; })
+                    .catch(() => { this.savedReports = []; });
+            },
+            openSaveDialog() {
+                this.saveName = '';
+                this.saveDialog = true;
+            },
+            saveReport() {
+                const name = this.saveName.trim();
+                if (!name) return;
+                this.saveLoading = true;
+                const config = {
+                    dimensions: this.dimensions,
+                    columns: this.selectedColumns,
+                    customMetrics: this.customMetrics,
+                    dateBasis: this.dateBasis,
+                    dateRange: this.dateRange,
+                    campaigns: this.selectedCampaigns,
+                    sortBy: this.sortBy,
+                    sortDir: this.sortDir,
+                };
+                fetch('/backend/api/settings/saved-reports', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({name, config})
+                })
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        this.saveDialog = false;
+                        this.loadSavedReports();
+                        this.savedReportId = (data.report || {}).id || null;
+                        this.$root.$emit('show-message', {type: 'success', text: 'Report saved'});
+                    })
+                    .catch(err => this.$root.$emit('show-message', {type: 'error', text: 'Save failed: ' + sanitizeToastMessage(err.message)}))
+                    .finally(() => { this.saveLoading = false; });
+            },
+            loadSavedReport(id) {
+                const report = this.savedReports.find(r => r.id === id);
+                if (!report) return;
+                const cfg = report.config || {};
+                if (Array.isArray(cfg.dimensions) && cfg.dimensions.length) this.dimensions = cfg.dimensions.slice(0, 5);
+                if (Array.isArray(cfg.columns) && cfg.columns.length) this.selectedColumns = cfg.columns.slice();
+                if (Array.isArray(cfg.customMetrics)) this.customMetrics = cfg.customMetrics.slice();
+                if (cfg.dateBasis) this.dateBasis = cfg.dateBasis;
+                if (Array.isArray(cfg.dateRange) && cfg.dateRange.length === 2) this.dateRange = cfg.dateRange.slice();
+                if (Array.isArray(cfg.campaigns)) this.selectedCampaigns = cfg.campaigns.slice();
+                if (cfg.sortBy) this.sortBy = cfg.sortBy;
+                if (cfg.sortDir) this.sortDir = cfg.sortDir;
+                this.expanded = {};
+                this.runReport();
+            },
+            deleteSavedReport() {
+                if (!this.savedReportId) return;
+                fetch('/backend/api/settings/saved-reports/' + this.savedReportId, {method: 'DELETE', credentials: 'include'})
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        this.savedReportId = null;
+                        this.loadSavedReports();
+                        this.$root.$emit('show-message', {type: 'success', text: 'Saved report deleted'});
+                    })
+                    .catch(err => this.$root.$emit('show-message', {type: 'error', text: 'Delete failed: ' + sanitizeToastMessage(err.message)}));
+            },
+            // --- G58: dimension roll-up presets ---
+            applyDimensionPreset(preset) {
+                const known = new Set(this.dimensionItems.map(d => d.key));
+                const dims = (preset.dims || []).filter(d => known.has(d)).slice(0, 5);
+                if (!dims.length) return;
+                this.dimensions = dims;
+                this.expanded = {};
+                this.runReport();
+            },
+            // --- G52: sharing ---
+            currentSavedReport() {
+                return this.savedReports.find(r => r.id === this.savedReportId) || null;
+            },
+            shareUrlFor(token) {
+                return location.origin + '/backend/public-report?t=' + encodeURIComponent(token);
+            },
+            openShareDialog() {
+                const report = this.currentSavedReport();
+                if (!report) return;
+                this.shareError = '';
+                const share = report.share || null;
+                this.shareUrl = share ? this.shareUrlFor(share.token) : '';
+                this.shareCreatedAt = share ? share.created_at : null;
+                this.shareDialog = true;
+            },
+            createShare() {
+                if (!this.savedReportId) return;
+                this.shareLoading = true;
+                this.shareError = '';
+                fetch('/backend/api/settings/saved-reports/' + this.savedReportId + '/share', {
+                    method: 'POST', credentials: 'include'
+                })
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        const share = (data.report || data).share || data.share || {};
+                        this.shareUrl = share.token ? this.shareUrlFor(share.token) : '';
+                        this.shareCreatedAt = share.created_at || null;
+                        this.loadSavedReports();
+                        this.$root.$emit('show-message', {type: 'success', text: 'Share link created'});
+                    })
+                    .catch(err => { this.shareError = sanitizeToastMessage(err.message); })
+                    .finally(() => { this.shareLoading = false; });
+            },
+            revokeShare() {
+                if (!this.savedReportId) return;
+                this.shareLoading = true;
+                fetch('/backend/api/settings/saved-reports/' + this.savedReportId + '/share', {
+                    method: 'DELETE', credentials: 'include'
+                })
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        this.shareUrl = '';
+                        this.shareCreatedAt = null;
+                        this.loadSavedReports();
+                        this.$root.$emit('show-message', {type: 'success', text: 'Share link revoked'});
+                    })
+                    .catch(err => { this.shareError = sanitizeToastMessage(err.message); })
+                    .finally(() => { this.shareLoading = false; });
+            },
+            copyShareUrl() {
+                const done = () => this.$root.$emit('show-message', {type: 'success', text: 'Link copied'});
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(this.shareUrl).then(done, done);
+                } else {
+                    const el = document.getElementById('share-url-field');
+                    if (el) { el.select && el.select(); }
+                    done();
+                }
+            },
+            // --- G53: per-report email schedules ---
+            openEmailScheduleDialog() {
+                const report = this.currentSavedReport();
+                if (!report) return;
+                this.emailScheduleError = '';
+                this.emailSchedule = {recipients: '', hour_utc: 9, frequency: 'daily'};
+                this.emailScheduleSaved = null;
+                fetch('/backend/api/settings/report-email-schedules', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        const found = (data.schedules || []).find(s => s.report_id === this.savedReportId);
+                        if (found) {
+                            this.emailScheduleSaved = found;
+                            this.emailSchedule = {
+                                recipients: found.recipients || '',
+                                hour_utc: found.hour_utc == null ? 9 : found.hour_utc,
+                                frequency: found.frequency || 'daily',
+                            };
+                        }
+                    })
+                    .catch(() => {});
+                this.emailScheduleDialog = true;
+            },
+            saveEmailSchedule() {
+                if (!this.savedReportId) return;
+                this.emailScheduleLoading = true;
+                this.emailScheduleError = '';
+                fetch('/backend/api/settings/report-email-schedules', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        report_id: this.savedReportId,
+                        recipients: this.emailSchedule.recipients,
+                        hour_utc: this.emailSchedule.hour_utc,
+                        frequency: this.emailSchedule.frequency,
+                    })
+                })
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        this.emailScheduleSaved = data.schedule || null;
+                        this.$root.$emit('show-message', {type: 'success', text: 'Schedule saved'});
+                    })
+                    .catch(err => {
+                        try {
+                            err.json && err.json().then(d => { this.emailScheduleError = d.detail || err.message; });
+                        } catch (e) {}
+                        this.emailScheduleError = this.emailScheduleError || sanitizeToastMessage(err.message);
+                    })
+                    .finally(() => { this.emailScheduleLoading = false; });
+            },
+            deleteEmailSchedule() {
+                if (!this.savedReportId) return;
+                this.emailScheduleLoading = true;
+                fetch('/backend/api/settings/report-email-schedules/' + this.savedReportId, {
+                    method: 'DELETE', credentials: 'include'
+                })
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        this.emailScheduleSaved = null;
+                        this.emailSchedule = {recipients: '', hour_utc: 9, frequency: 'daily'};
+                        this.$root.$emit('show-message', {type: 'success', text: 'Schedule removed'});
+                    })
+                    .catch(err => { this.emailScheduleError = sanitizeToastMessage(err.message); })
+                    .finally(() => { this.emailScheduleLoading = false; });
+            },
+            testEmailSchedule() {
+                if (!this.savedReportId) return;
+                this.emailScheduleTesting = true;
+                this.emailScheduleError = '';
+                fetch('/backend/api/settings/report-email-schedules/' + this.savedReportId + '/test', {
+                    method: 'POST', credentials: 'include'
+                })
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(() => this.$root.$emit('show-message', {type: 'success', text: 'Test report sent'}))
+                    .catch(err => { this.emailScheduleError = sanitizeToastMessage(err.message); })
+                    .finally(() => { this.emailScheduleTesting = false; });
+            },
+            clearLogFilters() {
+                this.logFilters = {country: '', device_type: '', os: '', status: '', search: ''};
+                this.loadClickLog();
+            },
+            clearConvFilters() {
+                this.convFilters = {status: '', search: ''};
+                this.loadReports();
+            },
             roiClass(roi) {
                 const v = parseFloat(roi);
                 if (isNaN(v) || v === 0) return 'grey--text';
@@ -593,53 +1300,69 @@
             },
             runReport() {
                 this.loading = true;
+                this.expanded = {};
                 const payload = {
-                    dimension: this.dimension,
+                    dimensions: this.dimensions,
                     filters: {
                         date_from: this.dateRange[0],
                         date_to: this.dateRange[1],
                         campaigns: this.selectedCampaigns,
                     },
+                    date_basis: this.dateBasis,
+                    custom_metrics: this.customMetrics,
+                    sort_by: this.sortBy,
+                    sort_dir: this.sortDir,
+                    limit: 1000,
                 };
                 fetch('/backend/api/dashboard/breakdown', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 })
-                    .then(res => res.json())
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
                     .then(data => {
                         this.reportRows = data.rows || [];
+                        this.reportTotals = data.totals || {};
+                        this.basisNote = data.fallback_note || null;
+                        if (data.date_basis && data.date_basis !== this.dateBasis) this.dateBasis = data.date_basis;
                         this.loading = false;
                     })
                     .catch(err => {
                         this.loading = false;
-                        this.$root.$emit('show-message', {type: 'error', text: 'Report failed: ' + err.message});
+                        this.$root.$emit('show-message', {type: 'error', text: 'Report failed: ' + sanitizeToastMessage(err.message)});
                     });
             },
-            exportReportCsv() {
-                const headers = this.reportHeaders.map(h => h.text);
-                const rows = this.reportRows.map(it => this.reportHeaders.map(h => it[h.value]));
+            downloadCsv(headers, rows, filename) {
                 const csv = [headers, ...rows].map(r => r.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(',')).join('\n');
                 const blob = new Blob([csv], {type: 'text/csv'});
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
-                a.download = 'report_' + this.dimension + '.csv';
+                a.download = filename;
                 a.click();
                 URL.revokeObjectURL(a.href);
             },
+            exportReportCsv() {
+                const SEP = '\u001f';
+                const chain = row => {
+                    const parts = row.parent_key ? row.parent_key.split(SEP) : [];
+                    parts.push(row.value);
+                    return parts;
+                };
+                const maxLevel = this.reportRows.reduce((m, r) => Math.max(m, r.level), 0);
+                const head = [];
+                for (let i = 0; i < maxLevel; i++) head.push(this.dimLabel(this.dimensions[i] || ''));
+                this.downloadCsv(
+                    [...head, ...this.reportHeaders.slice(1).map(h => h.text)],
+                    this.reportRows.map(r => [...chain(r), ...this.reportHeaders.slice(1).map(h => r[h.value])]),
+                    'report_' + this.dimensions.join('_') + '.csv'
+                );
+            },
             exportCsv() {
-                const headers = this.headers.map(h => h.text);
-                const rows = this.conversions.map(it => this.headers.map(h => {
-                    const v = it[h.value];
-                    return v == null ? '' : String(v);
-                }));
-                const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
-                const blob = new Blob([csv], {type: 'text/csv'});
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = 'conversions.csv';
-                a.click();
-                URL.revokeObjectURL(a.href);
+                this.downloadCsv(
+                    this.headers.map(h => h.text),
+                    this.conversions.map(it => this.headers.map(h => it[h.value])),
+                    'conversions.csv'
+                );
             },
             loadClickLog() {
                 this.logLoading = true;
@@ -667,29 +1390,88 @@
                     })
                     .catch(err => {
                         this.logLoading = false;
-                        this.$root.$emit('show-message', {type: 'error', text: 'Click log failed: ' + err.message});
+                        this.$root.$emit('show-message', {type: 'error', text: 'Click log failed: ' + sanitizeToastMessage(err.message)});
                     });
             },
             exportClickLogCsv() {
-                const headers = this.clickLogHeaders.map(h => h.text);
-                const rows = this.clickLog.map(it => this.clickLogHeaders.map(h => it[h.value]));
-                const csv = [headers, ...rows].map(r => r.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(',')).join('\n');
-                const blob = new Blob([csv], {type: 'text/csv'});
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = 'click_log.csv';
-                a.click();
-                URL.revokeObjectURL(a.href);
+                this.downloadCsv(
+                    this.clickLogHeaders.map(h => h.text),
+                    this.clickLog.map(it => this.clickLogHeaders.map(h => it[h.value])),
+                    'click_log.csv'
+                );
             },
             reloadReports() {
                 this.loadReports();
                 this.$root.$emit("show-message", {type: "success", text: 'Conversions reloaded successfully!'});
+            },
+            loadCustomStatuses() {
+                fetch('/backend/api/settings/', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        const customs = (data.settings && data.settings.custom_statuses) || [];
+                        this.customStatuses = customs
+                            .map(s => this.slugifyStatus(s && s.name))
+                            .filter(Boolean);
+                    })
+                    .catch(() => { this.customStatuses = []; });
+            },
+            slugifyStatus(name) {
+                return String(name || '').trim().toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+            },
+            statusChipClass(status) {
+                const map = {sale: 'status-chip--success', upsale: 'status-chip--success', lead: 'status-chip--info', rejected: 'status-chip--danger', hold: 'status-chip--warning', trash: 'status-chip--neutral'};
+                if (map[status]) return map[status];
+                // custom statuses cycle through the existing chip modifiers
+                const idx = this.customStatuses.indexOf(status);
+                if (idx > -1) {
+                    const palette = ['status-chip--info', 'status-chip--success',
+                        'status-chip--warning', 'status-chip--danger', 'status-chip--neutral'];
+                    return palette[idx % palette.length];
+                }
+                return 'status-chip--neutral';
+            },
+            openImport() {
+                this.importText = '';
+                this.importResults = [];
+                this.importDialog = true;
+            },
+            async runImport() {
+                if (!this.importText.trim()) {
+                    this.$root.$emit("show-message", {type: "error", text: "Paste at least one conversion line"});
+                    return;
+                }
+                this.importing = true;
+                try {
+                    const res = await fetch('/backend/api/reports/import', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify({lines: this.importText})
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Import failed');
+                    this.importResults = data.results || [];
+                    const failed = (data.results || []).filter(r => !r.ok).length;
+                    this.$root.$emit("show-message", {
+                        type: failed ? "warning" : "success",
+                        text: `Imported ${data.imported || 0} conversion(s)` + (failed ? `, ${failed} failed` : '')
+                    });
+                    this.loadReports();
+                } catch (err) {
+                    this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                } finally {
+                    this.importing = false;
+                }
             },
             loadReports() {
                 this.convLoading = true;
                 const params = new URLSearchParams();
                 if (this.convFilters.status) params.set('status', this.convFilters.status);
                 if (this.convFilters.search) params.set('search', this.convFilters.search);
+                params.set('date_from', this.dateRange[0]);
+                params.set('date_to', this.dateRange[1]);
+                params.set('date_basis', this.convDateBasis);
                 fetch('/backend/api/reports/?' + params.toString())
                     .then(response => response.ok ? response.json() : Promise.reject(new Error('HTTP ' + response.status)))
                     .then(data => {
@@ -699,12 +1481,8 @@
                     .catch(err => {
                         this.convLoading = false;
                         console.error("Failed to load conversions:", err)
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
-            },
-            statusColor(status) {
-                const map = {sale: 'success', lead: 'info', upsale: 'success', rejected: 'error', hold: 'warning', trash: 'grey'};
-                return map[status] || 'grey';
             },
             openEdit(item) {
                 this.editItem = Object.assign({}, item);
@@ -731,7 +1509,7 @@
                     this.$root.$emit("show-message", {type: "success", text: 'Conversion updated'});
                     this.loadReports();
                 } catch (err) {
-                    this.$root.$emit("show-message", {type: "error", text: err.message});
+                    this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                 } finally {
                     this.editSaving = false;
                 }
@@ -750,10 +1528,183 @@
                     this.$root.$emit("show-message", {type: "success", text: 'Conversion deleted'});
                     this.loadReports();
                 } catch (err) {
-                    this.$root.$emit("show-message", {type: "error", text: err.message});
+                    this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                 }
             },
         },
     });
 </script>
+
+<style>
+    .dimension-select {
+        min-width: 200px;
+    }
+    .range-field {
+        min-width: 260px;
+    }
+    .campaigns-select {
+        min-width: 220px;
+    }
+    .columns-select {
+        min-width: 300px;
+    }
+    .sort-select {
+        max-width: 160px;
+    }
+    .saved-select {
+        min-width: 200px;
+    }
+    .basis-toggle {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+    }
+    .builder-label {
+        font-size: var(--fs-12, 12px);
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 6px;
+    }
+    .builder-hint {
+        font-size: var(--fs-11, 11px);
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: normal;
+        color: var(--text-secondary);
+        opacity: 0.8;
+    }
+    .dim-pipeline {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+    .dim-chip {
+        background: var(--accent-soft) !important;
+        color: var(--text-primary) !important;
+    }
+    .dim-chip__order {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        margin-right: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: var(--fs-11, 11px);
+        font-weight: 700;
+    }
+    .dim-chip__move {
+        margin-left: 4px;
+        opacity: 0.65;
+    }
+    .dim-chip__move:hover {
+        opacity: 1;
+    }
+    .dim-sep {
+        color: var(--text-secondary);
+        opacity: 0.6;
+    }
+    .dim-add {
+        max-width: 190px;
+    }
+    .drill-path__chip {
+        cursor: pointer;
+    }
+    .preset-chip {
+        cursor: pointer;
+        transition: background var(--t-fast, 0.15s);
+    }
+    .preset-chip:hover {
+        background: var(--accent-soft);
+        color: var(--text-primary);
+    }
+    .basis-note {
+        display: flex;
+        align-items: center;
+        font-size: var(--fs-12, 12px);
+        color: var(--status-warning-text);
+        background: var(--status-warning-bg);
+        border-radius: var(--radius-sm);
+        padding: 6px 10px;
+    }
+    .dim-cell {
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
+    }
+    .dim-cell__toggle {
+        width: 20px;
+        height: 20px;
+        margin-right: 2px;
+    }
+    .dim-cell__leaf {
+        display: inline-block;
+        width: 22px;
+    }
+    .dim-value {
+        cursor: pointer;
+        font-variant-numeric: tabular-nums;
+    }
+    .dim-value:hover {
+        color: var(--accent);
+    }
+    .cm-formula {
+        font-size: var(--fs-12, 12px);
+        color: var(--text-secondary);
+    }
+    .log-filter-sm {
+        max-width: 120px;
+    }
+    .log-filter-status {
+        max-width: 140px;
+    }
+    .log-filter-search {
+        min-width: 260px;
+    }
+    .conv-filter-search {
+        min-width: 320px;
+    }
+    .click-time {
+        display: inline-block;
+        line-height: 1.25;
+        white-space: nowrap;
+        min-width: 118px;
+    }
+    .click-time__date {
+        display: block;
+        font-size: var(--fs-11, 11px);
+        color: var(--text-secondary, #667085);
+        white-space: nowrap;
+    }
+    .click-time__time {
+        display: block;
+        font-size: var(--fs-12, 12px);
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+    .section-enter {
+        animation: rep-fade-up var(--t-med, 240ms) ease-out;
+    }
+    @keyframes rep-fade-up {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: none; }
+    }
+    /* Perf row tints in dark mode (light hexes live in the global sheet) */
+    [data-theme="dark"] .v-data-table tr.perf-win-1 > td { background: #16241c !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-2 > td { background: var(--status-success-bg) !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-3 > td { background: #1a3526 !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-1 > td { background: #2a1a18 !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-2 > td { background: var(--status-danger-bg) !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-3 > td { background: #3a201d !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-1:hover > td,
+    [data-theme="dark"] .v-data-table tr.perf-win-2:hover > td,
+    [data-theme="dark"] .v-data-table tr.perf-win-3:hover > td { background: #1d3a2a !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-1:hover > td,
+    [data-theme="dark"] .v-data-table tr.perf-loss-2:hover > td,
+    [data-theme="dark"] .v-data-table tr.perf-loss-3:hover > td { background: #452622 !important; }
+</style>
 {% endraw %}

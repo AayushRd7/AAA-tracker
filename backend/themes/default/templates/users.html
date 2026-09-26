@@ -14,8 +14,8 @@
             </v-col>
         </v-row>
 
-        <v-dialog v-model="dialog" max-width="500px">
-            <v-card>
+        <v-dialog v-model="dialog">
+            <v-card class="dialog-md">
                 <v-card-title>
                     <span class="text-h6">{{ isEdit ? 'Edit User' : 'Add User' }}</span>
                 </v-card-title>
@@ -43,7 +43,7 @@
                             type="password"
                             outlined
                             dense
-                            :rules="[v => !isEdit || v.length > 0 || 'Password is required']"
+                            :rules="[v => !isEdit || (v && v.length > 0) || 'Password is required']"
                             :hint="isEdit ? 'Leave blank to keep existing password' : ''"
                     ></v-text-field>
 
@@ -64,6 +64,46 @@
                             dense
                     ></v-switch>
 
+                    <v-divider class="my-3"></v-divider>
+                    <div class="subtitle-2 mb-1 d-flex align-center">
+                        <v-icon small class="mr-1">mdi-tune-variant</v-icon>Permissions
+                        <v-spacer></v-spacer>
+                        <v-btn v-if="form.customPermissions" small text color="primary" @click="resetPermissions">Reset to defaults</v-btn>
+                        <v-switch
+                                v-else
+                                label="Custom"
+                                v-model="form.customPermissions"
+                                inset
+                                dense
+                                hide-details
+                                class="mt-0"
+                        ></v-switch>
+                    </div>
+                    <template v-if="form.customPermissions">
+                        <v-row dense>
+                            <v-col cols="6" sm="4" v-for="s in permSections" :key="s">
+                                <v-checkbox
+                                        v-model="form.permissions.sections[s]"
+                                        :label="s.charAt(0).toUpperCase() + s.slice(1)"
+                                        dense
+                                        hide-details
+                                        class="mt-0"
+                                ></v-checkbox>
+                            </v-col>
+                        </v-row>
+                        <v-switch
+                                label="Allow editing (write access)"
+                                v-model="form.permissions.write"
+                                inset
+                                dense
+                                hide-details
+                                class="mt-2"
+                        ></v-switch>
+                        <div class="caption grey--text mt-1">
+                            Defaults: admins have everything; regular users get all non-admin sections with write access. Admin sections (Users, Settings, Domains) are off unless explicitly granted.
+                        </div>
+                    </template>
+
                 </v-card-text>
 
                 <v-card-actions>
@@ -83,10 +123,20 @@
                             :headers="headers"
                             :items="users"
                             dense
+                            :loading="loadingUsers"
                             :items-per-page="10"
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
                     >
 
+                        <template v-slot:item.active="{ item }">
+                            <span class="status-chip" :class="item.active ? 'status-chip--success' : 'status-chip--neutral'">{{ item.active ? 'Yes' : 'No' }}</span>
+                        </template>
+                        <template v-slot:item.is_admin="{ item }">
+                            <span class="status-chip" :class="item.is_admin ? 'status-chip--success' : 'status-chip--neutral'">{{ item.is_admin ? 'Yes' : 'No' }}</span>
+                        </template>
+                        <template v-slot:item.totp_enabled="{ item }">
+                            <span class="status-chip" :class="item.totp_enabled ? 'status-chip--success' : 'status-chip--neutral'">{{ item.totp_enabled ? 'On' : 'Off' }}</span>
+                        </template>
                         <template v-slot:item.created_at="{ item }">
                             {{ $formatDate(item.created_at) }}
                         </template>
@@ -102,6 +152,14 @@
                                     </v-btn>
                                 </template>
                                 <span>Edit</span>
+                            </v-tooltip>
+                            <v-tooltip bottom v-if="item.totp_enabled">
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="orange" v-bind="attrs" v-on="on" @click="resetTotp(item)">
+                                        <v-icon small>mdi-shield-off-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Reset 2FA</span>
                             </v-tooltip>
                             <v-tooltip bottom v-if="item.username !== 'tracker_admin'">
                                 <template v-slot:activator="{ on, attrs }">
@@ -142,16 +200,22 @@
                     {text: 'Updated', value: 'updated_at'},
                     {text: 'Is Active', value: 'active'},
                     {text: 'Is Admin', value: 'is_admin'},
+                    {text: '2FA', value: 'totp_enabled'},
                     {text: 'Actions', value: 'actions', sortable: false},
                 ],
                 users: [],
+                loadingUsers: false,
+                permSections: ['dashboard', 'campaigns', 'landings', 'affiliates', 'offers',
+                    'sources', 'reports', 'domains', 'settings', 'users'],
                 form: {
                     id: null,
                     username: '',
                     email: '',
                     password: '',
                     confirmPassword: '',
-                    active: true
+                    active: true,
+                    customPermissions: false,
+                    permissions: null
                 }
 
             }
@@ -162,6 +226,7 @@
             },
         },
         mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadUsers();
             this.$root.$on('load-users', this.loadUsers);
         },
@@ -178,7 +243,7 @@
                     })
                     .catch(err => {
                         console.error(err);
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     })
                     .finally(() => {
                         this.loadingUsers = false;
@@ -193,8 +258,19 @@
                     username: '',
                     email: '',
                     password: '',
-                    active: true
+                    active: true,
+                    customPermissions: false,
+                    permissions: null
                 };
+            },
+
+            defaultPermissions() {
+                const sections = {};
+                this.permSections.forEach(s => { sections[s] = true; });
+                sections.domains = false;
+                sections.settings = false;
+                sections.users = false;
+                return {sections: sections, write: true};
             },
 
             openEdit(user) {
@@ -205,20 +281,22 @@
                     username: user.username,
                     email: user.email,
                     password: '',
-                    active: user.active
+                    active: user.active,
+                    customPermissions: !!user.permissions,
+                    permissions: user.permissions
+                        ? JSON.parse(JSON.stringify(user.permissions))
+                        : this.defaultPermissions()
                 };
+            },
+
+            resetPermissions() {
+                this.form.customPermissions = false;
+                this.form.permissions = null;
             },
 
             save() {
                 if (!this.form.username || (!this.isEdit && !this.form.password)) {
                     this.$root.$emit("show-message", {type: "error", text: "Username and password are required."});
-                    return;
-                }
-                if (!this.form.username || (!this.isEdit && !this.form.password)) {
-                    this.$root.$emit("show-message", {
-                        type: "error",
-                        text: "Username and password are required."
-                    });
                     return;
                 }
 
@@ -235,6 +313,12 @@
                     email: this.form.email,
                     active: this.form.active
                 };
+
+                if (this.form.customPermissions && this.form.permissions) {
+                    payload.permissions = this.form.permissions;
+                } else if (this.isEdit) {
+                    payload.clear_permissions = true;  // back to role defaults
+                }
 
                 if (this.form.password) {
                     payload.password = this.form.password;
@@ -271,7 +355,7 @@
                         this.loadUsers();
                     })
                     .catch(err => {
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
             },
 
@@ -302,7 +386,28 @@
                         this.loadUsers();
                     })
                     .catch(err => {
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    });
+            },
+
+            async resetTotp(user) {
+                const ok = await this.$refs.confirm.open('Reset 2FA', `Disable two-factor authentication for ${user.username}? They will be able to log in with just their password.`, 'Reset');
+                if (!ok) return;
+
+                fetch(`/backend/api/users/${user.id}/totp/reset`, {
+                    method: "POST",
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        if (!res.ok) {
+                            const data = await res.json().catch(() => ({}));
+                            throw new Error(data.detail || 'Reset failed');
+                        }
+                        this.$root.$emit("show-message", {type: "success", text: `2FA reset for ${user.username}`});
+                        this.loadUsers();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
             },
 

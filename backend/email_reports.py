@@ -15,6 +15,7 @@ Configuration lives in the `settings` row under the `email_reports` key:
 }
 """
 import asyncio
+import html
 import json
 import smtplib
 import ssl
@@ -23,10 +24,11 @@ from email.mime.text import MIMEText
 from email.utils import formataddr
 
 from db import SessionLocal
+from sqlalchemy import text
 from models.settings import SettingsORM
 from models.campaigns import CampaignORM
 from schemas import Filters
-from clickHouse import get_metrics_series, get_report_breakdown
+from clickHouse import get_metrics_series, get_report_breakdown, get_report_breakdown_multi, sum_rows
 
 ALL_STATUSES_METRICS = ("visits", "unique_visits", "clicks", "unique_clicks", "conversions")
 
@@ -43,13 +45,18 @@ def _load_email_config(db):
 
 
 def _save_email_config(cfg):
+    """Merge the email_reports block into the settings row under a row lock —
+    a plain read-modify-write clobbers concurrent saves of other keys."""
     db = SessionLocal()
     try:
-        row = db.query(SettingsORM).filter_by(name="settings").first()
-        if row and row.value:
-            merged = json.loads(row.value) or {}
+        row = db.execute(
+            text("SELECT value FROM settings WHERE name = 'settings' FOR UPDATE")
+        ).fetchone()
+        if row and row[0]:
+            merged = json.loads(row[0]) or {}
             merged["email_reports"] = cfg
-            row.value = json.dumps(merged)
+            db.execute(text("UPDATE settings SET value = :v WHERE name = 'settings'"),
+                       {"v": json.dumps(merged)})
             db.commit()
     finally:
         db.close()
@@ -109,7 +116,7 @@ def build_daily_report_html(ch, db, day: datetime) -> str:
         camp_rows += (
             "<tr>"
             f"<td style='padding:10px 14px;border-bottom:1px solid #eef1f5;color:#101828;font-weight:500;'>"
-            f"{names.get(int(r['dimension']) if r['dimension'].lstrip('-').isdigit() else -1, r['dimension'])}</td>"
+            f"{html.escape(str(names.get(int(r['dimension']) if r['dimension'].lstrip('-').isdigit() else -1, r['dimension'])))}</td>"
             f"<td style='padding:10px 14px;border-bottom:1px solid #eef1f5;text-align:right;color:#475467;'>{r['visits']:,}</td>"
             f"<td style='padding:10px 14px;border-bottom:1px solid #eef1f5;text-align:right;color:#475467;'>{r['clicks']:,}</td>"
             f"<td style='padding:10px 14px;border-bottom:1px solid #eef1f5;text-align:right;color:#475467;'>{r['conversions']:,}</td>"
@@ -273,8 +280,197 @@ def send_daily_report(ch, cfg, day: datetime = None):
         db.close()
 
 
+# ---------------------------------------------------------------------------
+# G53: per-report scheduled emails — a saved report's breakdown mailed on a
+# daily/weekly cadence. Schedules live under 'report_email_schedules'.
+# ---------------------------------------------------------------------------
+
+def schedule_due(schedule: dict, now: datetime) -> bool:
+    """True when the schedule should fire at ``now`` (UTC).
+
+    Fires once per day at hour_utc; weekly additionally requires 7+ days
+    since the last send (or never sent). last_sent holds a YYYY-MM-DD date.
+    """
+    if now.hour != int(schedule.get("hour_utc", 9) or 9):
+        return False
+    last = (schedule.get("last_sent") or "").strip()
+    today = now.strftime("%Y-%m-%d")
+    if last == today:
+        return False
+    if (schedule.get("frequency") or "daily") == "weekly":
+        if not last:
+            return True
+        try:
+            last_dt = datetime.strptime(last, "%Y-%m-%d")
+        except ValueError:
+            return True
+        return (now - last_dt).days >= 7
+    return True
+
+
+def build_saved_report_html(ch, saved_report: dict) -> str:
+    """Compact HTML table of a saved report's breakdown (level-1 rows)."""
+    from clickHouse import REPORT_DIMENSIONS
+
+    cfg = saved_report.get("config") or {}
+    dimensions = [d for d in (cfg.get("dimensions") or []) if d in REPORT_DIMENSIONS][:5] or ["campaign_id"]
+    date_range = cfg.get("date_range") or []
+    filters = {
+        "date_from": date_range[0] if len(date_range) > 0 else None,
+        "date_to": date_range[1] if len(date_range) > 1 else None,
+        "campaigns": cfg.get("campaigns") or [],
+    }
+    rows = get_report_breakdown_multi(
+        ch, filters, dimensions,
+        sort_by=cfg.get("sortBy"), sort_dir=cfg.get("sortDir") or "desc",
+    )
+    totals = sum_rows(rows)
+
+    dim_labels = [d.replace("_", " ").title() for d in dimensions]
+    cols = (cfg.get("columns") or ["visits", "clicks", "conversions", "revenue", "cr", "epc", "roi"])
+    cols = [c for c in cols if c in REPORT_BREAKDOWN_EXPORTABLE] or ["visits", "clicks", "conversions", "revenue", "roi"]
+
+    head = "".join(
+        f"<th style='padding:8px 12px;text-align:left;font-size:10px;letter-spacing:0.07em;"
+        f"text-transform:uppercase;color:#667085;font-weight:600;'>{d}</th>" for d in dim_labels)
+    head += "".join(
+        f"<th style='padding:8px 12px;text-align:right;font-size:10px;letter-spacing:0.07em;"
+        f"text-transform:uppercase;color:#667085;font-weight:600;'>{REPORT_BREAKDOWN_EXPORTABLE[c]}</th>"
+        for c in cols)
+
+    def cell(v, c):
+        if c in ("cost", "revenue", "profit"):
+            return f"${float(v or 0):,.2f}"
+        if c in ("cr", "roi", "rejected_rate", "click_through_rate"):
+            return _fmt(float(v or 0), "%")
+        if c == "epc":
+            return f"{float(v or 0):.5f}"
+        return _fmt(v)
+
+    body = ""
+    for r in rows:
+        chain = ((r.get("parent_key") or "").split("\x1f") if r.get("parent_key") else []) + [r.get("value") or "(empty)"]
+        body += "<tr>"
+        for i in range(len(dimensions)):
+            v = chain[i] if i < len(chain) else ""
+            body += (f"<td style='padding:8px 12px;border-bottom:1px solid #eef1f5;"
+                     f"color:#101828;'>{html.escape(str(v))}</td>")
+        for c in cols:
+            v = r.get(c)
+            style = "padding:8px 12px;border-bottom:1px solid #eef1f5;text-align:right;color:#475467;"
+            if c == "profit":
+                style += f"font-weight:600;color:{'#059669' if (v or 0) >= 0 else '#dc2626'};"
+            if c == "roi":
+                style += f"font-weight:600;color:{'#059669' if (v or 0) >= 0 else '#dc2626'};"
+            body += f"<td style='{style}'>{cell(v, c)}</td>"
+        body += "</tr>"
+    if not body:
+        body = (f"<tr><td colspan='{len(dimensions) + len(cols)}' style='padding:16px;text-align:center;"
+                f"color:#98a2b3;font-size:13px;'>No data for this report's date range</td></tr>")
+
+    totals_row = ""
+    for i in range(len(dimensions)):
+        totals_row += "<td style='padding:8px 12px;font-weight:700;color:#101828;'>Total</td>" if i == 0 \
+            else "<td style='padding:8px 12px;'></td>"
+    for c in cols:
+        totals_row += (f"<td style='padding:8px 12px;text-align:right;font-weight:700;color:#101828;'>"
+                       f"{cell(totals.get(c), c)}</td>")
+
+    date_note = " — ".join(x for x in (filters["date_from"], filters["date_to"]) if x) or "all time"
+    name = html.escape(str(saved_report.get("name") or "Saved report"))
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f5f6f8;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;padding:24px 12px;">
+<tr><td align="center">
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;">
+  <tr><td style="background:#1a2332;border-radius:12px 12px 0 0;padding:18px 24px;">
+    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;letter-spacing:0.12em;color:#ffffff;">AAA&nbsp;TRACKER</div>
+    <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#8ea0b5;margin-top:2px;">Scheduled report · {name} · {date_note} (UTC)</div>
+  </td></tr>
+  <tr><td style="background:#ffffff;padding:20px 24px;border:1px solid #e4e7ec;border-top:none;border-radius:0 0 12px 12px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eef1f5;border-collapse:separate;">
+      <tr style="background:#f9fafb;">{head}</tr>
+      {body}
+      <tr style="background:#f9fafb;">{totals_row}</tr>
+    </table>
+    <div style="border-top:1px solid #eef1f5;margin-top:20px;padding-top:12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#98a2b3;">
+      Sent automatically by AAA Tracker · generated {datetime.utcnow().strftime('%d %b %Y %H:%M UTC')}
+    </div>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+
+# breakdown columns allowed in the emailed table (key -> header label)
+REPORT_BREAKDOWN_EXPORTABLE = {
+    "visits": "Visits", "unique_visits": "Unique", "clicks": "Clicks",
+    "unique_clicks": "Unique Clicks", "leads": "Leads", "conversions": "Conv.",
+    "rejected": "Rejected", "cost": "Cost", "revenue": "Revenue", "profit": "Profit",
+    "cr": "CR %", "epc": "EPC", "roi": "ROI %",
+    "rejected_rate": "Rej. %", "click_through_rate": "CTR %",
+}
+
+
+def send_scheduled_report(ch, email_cfg: dict, schedule: dict) -> tuple:
+    """Build + send one scheduled saved report; returns (ok, detail)."""
+    recipients = [r.strip() for r in (schedule.get("recipients") or "").split(",") if r.strip()]
+    if not recipients:
+        return False, "No recipients configured for this schedule"
+    if not (email_cfg.get("api_key") or "").strip() and not all(
+            (email_cfg.get(f) or "").strip() for f in ("smtp_host", "smtp_login", "smtp_password")):
+        return False, "Email is not configured — set a Brevo API key or SMTP credentials in Settings first"
+
+    db = SessionLocal()
+    try:
+        row = db.query(SettingsORM).filter_by(name="saved_reports").first()
+        reports = []
+        if row and row.value:
+            try:
+                reports = json.loads(row.value) or []
+            except Exception:
+                reports = []
+        report = next((r for r in reports if r.get("id") == schedule.get("report_id")), None)
+        if not report:
+            return False, "Saved report no longer exists"
+        html = build_saved_report_html(ch, report)
+        subject = f"AAA Tracker Report — {report.get('name')} — {datetime.utcnow().strftime('%Y-%m-%d')}"
+        send_email(email_cfg, subject, html, recipients)
+        return True, f"Report sent to {', '.join(recipients)}"
+    except Exception as e:
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def _mark_schedule_sent(db, report_id: str, today: str):
+    row = db.execute(
+        text("SELECT value FROM settings WHERE name = 'report_email_schedules' FOR UPDATE")
+    ).fetchone()
+    if not row or not row[0]:
+        return
+    try:
+        schedules = json.loads(row[0]) or []
+    except Exception:
+        return
+    changed = False
+    for s in schedules:
+        if s.get("report_id") == report_id:
+            s["last_sent"] = today
+            changed = True
+    if changed:
+        db.execute(text("UPDATE settings SET value = :v WHERE name = 'report_email_schedules'"),
+                   {"v": json.dumps(schedules)})
+        db.commit()
+
+
 async def email_report_loop():
-    """Background scheduler: sends the daily report at the configured UTC hour."""
+    """Background scheduler: sends the daily report at the configured UTC hour,
+    plus any due per-report schedules (G53)."""
     from clickHouse import get_clickhouse_client
     while True:
         try:
@@ -282,26 +478,49 @@ async def email_report_loop():
             db = SessionLocal()
             try:
                 cfg = _load_email_config(db)
-                if not cfg.get("enabled"):
-                    continue
-                recipients = [r.strip() for r in (cfg.get("recipients") or "").split(",") if r.strip()]
-                if not recipients:
-                    continue
                 now = datetime.utcnow()
                 today = now.strftime("%Y-%m-%d")
-                hour = int(cfg.get("hour", 9) or 9)
-                if now.hour != hour or cfg.get("last_sent") == today:
-                    continue
-                ch = get_clickhouse_client()
-                try:
-                    ok, detail = send_daily_report(
-                        ch, cfg, now - timedelta(days=1))
-                finally:
-                    ch.close()
-                print(f"Email report ({today}): ok={ok} {detail}")
-                if ok:
-                    cfg["last_sent"] = today
-                    _save_email_config(cfg)
+
+                # Global daily report (unchanged behavior)
+                if cfg.get("enabled"):
+                    recipients = [r.strip() for r in (cfg.get("recipients") or "").split(",") if r.strip()]
+                    if recipients:
+                        hour = int(cfg.get("hour", 9) or 9)
+                        if now.hour == hour and cfg.get("last_sent") != today:
+                            ch = get_clickhouse_client()
+                            try:
+                                ok, detail = await asyncio.to_thread(
+                                    send_daily_report, ch, cfg, now - timedelta(days=1))
+                            finally:
+                                ch.close()
+                            print(f"Email report ({today}): ok={ok} {detail}")
+                            if ok:
+                                cfg["last_sent"] = today
+                                _save_email_config(cfg)
+
+                # G53: per-report schedules — send each due report
+                sched_row = db.query(SettingsORM).filter_by(name="report_email_schedules").first()
+                schedules = []
+                if sched_row and sched_row.value:
+                    try:
+                        schedules = json.loads(sched_row.value) or []
+                    except Exception:
+                        schedules = []
+                for schedule in schedules:
+                    try:
+                        if not schedule_due(schedule, now):
+                            continue
+                        ch = get_clickhouse_client()
+                        try:
+                            ok, detail = await asyncio.to_thread(
+                                send_scheduled_report, ch, cfg, schedule)
+                        finally:
+                            ch.close()
+                        print(f"Email scheduled report {schedule.get('report_id')} ({today}): ok={ok} {detail}")
+                        if ok:
+                            _mark_schedule_sent(db, schedule.get("report_id"), today)
+                    except Exception as e:
+                        print("Email scheduled report error:", e)
             finally:
                 db.close()
         except Exception as e:

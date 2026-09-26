@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from enum import Enum
 from pydantic import BaseModel
 from typing import Optional, List
@@ -58,7 +58,8 @@ async def get_domains(db: Session = Depends(get_db)):
 
 # ====== POST /domains ======
 @router.post("/")
-async def create_domain(domain: DomainCreateUpdate, db: Session = Depends(get_db)):
+async def create_domain(domain: DomainCreateUpdate, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
     try:
         new_domain = DomainORM(
             domain=domain.domain,
@@ -71,6 +72,11 @@ async def create_domain(domain: DomainCreateUpdate, db: Session = Depends(get_db
         db.add(new_domain)
         db.commit()
         db.refresh(new_domain)
+        from auth import get_caller
+        caller, _ = get_caller(request)
+        audit_event(caller or "api_token", "create", "domains", str(new_domain.id),
+                    {"domain": new_domain.domain},
+                    request.client.host if request.client else "")
         return {"message": "Domain created", "id": new_domain.id}
     except IntegrityError as e:
         db.rollback()
@@ -81,28 +87,42 @@ async def create_domain(domain: DomainCreateUpdate, db: Session = Depends(get_db
 
 # ====== PATCH /domains/{domain_id} ======
 @router.put("/{domain_id}")
-async def update_domain(domain_id: int, domain: DomainCreateUpdate, db: Session = Depends(get_db)):
+async def update_domain(domain_id: int, domain: DomainCreateUpdate, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
     domain_obj = db.query(DomainORM).filter(DomainORM.id == domain_id).first()
     if not domain_obj:
         raise HTTPException(status_code=404, detail="Domain not found")
 
+    changed = []
     for key, value in domain.dict(exclude_unset=True).items():
+        if getattr(domain_obj, key, None) != value:
+            changed.append(key)
         setattr(domain_obj, key, value)
 
     db.commit()
     db.refresh(domain_obj)
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "domains", str(domain_id),
+                {"fields": changed}, request.client.host if request.client else "")
     return {"message": f"Domain {domain_id} updated"}
 
 
 # ====== DELETE /domains/{domain_id} ======
 @router.delete("/{domain_id}")
-async def delete_domain(domain_id: int, db: Session = Depends(get_db)):
+async def delete_domain(domain_id: int, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
     domain_obj = db.query(DomainORM).filter(DomainORM.id == domain_id).first()
     if not domain_obj:
         raise HTTPException(status_code=404, detail="Domain not found")
 
     db.delete(domain_obj)
     db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "delete", "domains", str(domain_id),
+                {"domain": domain_obj.domain},
+                request.client.host if request.client else "")
 
     # delete from nginx
     # /var/www/nginx/domains/domain_id_ file

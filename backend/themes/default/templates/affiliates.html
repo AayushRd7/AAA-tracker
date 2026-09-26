@@ -14,8 +14,8 @@
             </v-col>
         </v-row>
 
-        <v-dialog v-model="dialog" max-width="600px">
-            <v-card>
+        <v-dialog v-model="dialog">
+            <v-card class="dialog-md">
                 <v-card-title>
                     <span class="text-h6">{{ isEdit ? 'Edit Affiliate Network' : 'Add Affiliate Network' }}</span>
                 </v-card-title>
@@ -62,6 +62,7 @@
                             :headers="headers"
                             :items="affiliateNetworks"
                             dense
+                            :loading="loading"
                             :items-per-page="10"
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
                     >
@@ -87,7 +88,7 @@
                         </template>
 
                         <template v-slot:item.s2s_postback="{ item }">
-                            <span v-if="item.s2s_postback" class="text-truncate" style="max-width: 260px; display: inline-block;">
+                            <span v-if="item.s2s_postback" class="text-truncate postback-cell">
                                 {{ item.s2s_postback }}
                             </span>
                             <span v-else>-</span>
@@ -172,10 +173,12 @@
                     {text: 'Actions', value: 'actions', sortable: false}
                 ],
                 affiliateNetworks: [],
+                loading: false,
 
             }
         },
         mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadAffiliateNetworks();
             // Postback security key (when enabled) so copied URLs include it
             fetch('/backend/api/settings/', {credentials: 'include'})
@@ -199,7 +202,7 @@
                     })
                     .catch(err => {
                         console.error(err);
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     })
                     .finally(() => {
                         this.loading = false;
@@ -294,7 +297,7 @@
                         this.loadAffiliateNetworks();
                     })
                     .catch(err => {
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
             },
 
@@ -325,7 +328,7 @@
                         this.loadAffiliateNetworks();
                     })
                     .catch(err => {
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
             },
 
@@ -336,4 +339,11 @@
 
     });
 </script>
+
+<style>
+    .postback-cell {
+        max-width: 260px;
+        display: inline-block;
+    }
+</style>
 {% endraw %}

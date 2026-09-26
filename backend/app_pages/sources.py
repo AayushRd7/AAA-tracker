@@ -1,5 +1,5 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from db import get_db
@@ -230,6 +230,360 @@ SOURCE_PRESETS = [
         _param("Cost", "cost", "{cost}"),
         _param("External ID", "external_id", "{click}"),
     ]},
+    {"name": "Snapchat Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Site", "utm_source", "{publisher_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{snap_id}"),
+    ]},
+    {"name": "Pinterest Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Keyword", "keyword", "{keyword}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Twitter / X Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Keyword", "keyword", "{keyword}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{twclid}"),
+    ]},
+    {"name": "LinkedIn Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{li_fat_id}"),
+    ]},
+    {"name": "Reddit Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{ad_id}"),
+        _param("Site", "utm_source", "{subreddit}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Quora Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{ad_id}"),
+        _param("Keyword", "keyword", "{keyword}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Spotify Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Twitch Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Hotstar Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "JioAds", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "AdRoll", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{ad_id}"),
+        _param("Site", "utm_source", "{source}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Criteo", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Site", "utm_source", "{publisher_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "TripleLift", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Site", "utm_source", "{publisher_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "The Trade Desk", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Site", "utm_source", "{publisher_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{ttd_id}"),
+    ]},
+    {"name": "DV360 (Display & Video 360)", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Site", "utm_source", "{site}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Verizon Media / Yahoo", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Keyword", "keyword", "{keyword}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "StackAdapt", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Site", "utm_source", "{publisher_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Adform", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{banner_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "PopCash", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaignid}"),
+        _param("Sub id 1", "sub_id_1", "{zoneid}"),
+        _param("Sub id 2", "sub_id_2", "{siteid}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{visitor_id}"),
+    ]},
+    {"name": "RichPush", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{zone_id}"),
+        _param("Sub id 2", "sub_id_2", "{subscriber_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "MegaPush", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{feed_id}"),
+        _param("Sub id 2", "sub_id_2", "{widget_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "DaoPush", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{zone_id}"),
+        _param("Sub id 2", "sub_id_2", "{site_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Ezmob", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{zone_id}"),
+        _param("Sub id 2", "sub_id_2", "{site_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Airpush", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{zone_id}"),
+        _param("Sub id 2", "sub_id_2", "{creative_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "InMobi", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Site", "utm_source", "{site_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Vungle", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Unity Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "AppLovin", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Mintegral", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "ironSource", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Chartboost", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Digital Turbine", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Huawei Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Yandex Direct", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{ad_id}"),
+        _param("Keyword", "keyword", "{keyword}"),
+        _param("Device", "device", "{device_type}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{yclid}"),
+    ]},
+    {"name": "MyTarget", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Baidu", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Keyword", "keyword", "{keyword}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{bd_vid}"),
+    ]},
+    {"name": "Naver", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{ad_id}"),
+        _param("Keyword", "keyword", "{keyword}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Daum / Kakao", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Buzzoola", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{creative_id}"),
+        _param("Site", "utm_source", "{site_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Engageya", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{widget_id}"),
+        _param("Site", "utm_source", "{publisher_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "AdNow", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{teaser_id}"),
+        _param("Site", "utm_source", "{widget_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Content.ad", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{ad_id}"),
+        _param("Site", "utm_source", "{widget_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "VK Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{ad_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Apple Search Ads", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Keyword", "keyword", "{keyword}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{attribution_token}"),
+    ]},
+    {"name": "MobiAds", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaignid}"),
+        _param("Sub id 1", "sub_id_1", "{zoneid}"),
+        _param("Sub id 2", "sub_id_2", "{siteid}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{clickid}"),
+    ]},
+    {"name": "ActiveRevenue", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{zone_id}"),
+        _param("Sub id 2", "sub_id_2", "{site_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "AdOperator", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{zone_id}"),
+        _param("Sub id 2", "sub_id_2", "{site_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "RollerAds", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{zone_id}"),
+        _param("Sub id 2", "sub_id_2", "{subscriber_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Toro Advertising", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{zone_id}"),
+        _param("Sub id 2", "sub_id_2", "{site_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Adblade", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Creative ID", "utm_creative", "{ad_id}"),
+        _param("Site", "utm_source", "{site_id}"),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Plugrush", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaignid}"),
+        _param("Sub id 1", "sub_id_1", "{zoneid}"),
+        _param("Sub id 2", "sub_id_2", "{siteid}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{visitor_id}"),
+    ]},
+    {"name": "AdCash", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{zone_id}"),
+        _param("Sub id 2", "sub_id_2", "{site_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
+    {"name": "Adnium", "settings": [
+        _param("AD Campaign ID", "utm_campaign", "{campaign_id}"),
+        _param("Sub id 1", "sub_id_1", "{zone_id}"),
+        _param("Sub id 2", "sub_id_2", "{site_id}", True),
+        _param("Cost", "cost", "{cost}"),
+        _param("External ID", "external_id", "{click_id}"),
+    ]},
 ]
 
 
@@ -271,12 +625,18 @@ def get_sources(db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=SourceOut)
-def create_source(payload: SourceIn, db: Session = Depends(get_db)):
+def create_source(payload: SourceIn, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
     source = SourceORM(**payload.dict())
     db.add(source)
     try:
         db.commit()
         db.refresh(source)
+        from auth import get_caller
+        caller, _ = get_caller(request)
+        audit_event(caller or "api_token", "create", "sources", str(source.id),
+                    {"name": source.name},
+                    request.client.host if request.client else "")
         return source
     except IntegrityError:
         db.rollback()
@@ -284,25 +644,38 @@ def create_source(payload: SourceIn, db: Session = Depends(get_db)):
 
 
 @router.patch("/{source_id}", response_model=SourceOut)
-def update_source(source_id: int, payload: SourceIn, db: Session = Depends(get_db)):
+def update_source(source_id: int, payload: SourceIn, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
     source = db.query(SourceORM).filter(SourceORM.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
+    changed = []
     for key, value in payload.dict(exclude_unset=True).items():
+        if getattr(source, key, None) != value:
+            changed.append(key)
         setattr(source, key, value)
 
     db.commit()
     db.refresh(source)
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "sources", str(source_id),
+                {"fields": changed}, request.client.host if request.client else "")
     return source
 
 
 @router.delete("/{source_id}")
-def delete_source(source_id: int, db: Session = Depends(get_db)):
+def delete_source(source_id: int, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
     source = db.query(SourceORM).filter(SourceORM.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
     db.delete(source)
     db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "delete", "sources", str(source_id),
+                {"name": source.name}, request.client.host if request.client else "")
     return {"message": "Source deleted"}

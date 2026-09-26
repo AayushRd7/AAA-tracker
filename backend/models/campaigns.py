@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime,
+    Column, Integer, String, Text, DateTime, Boolean,
     ForeignKey, Enum as SQLAEnum
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -33,6 +33,10 @@ class CampaignORM(Base):
     redirect_mode = Column(SQLAEnum(RedirectMode), nullable=False, default=RedirectMode.position)
     domain_id = Column(Integer, ForeignKey("domains.id"), nullable=True)
     traffic_source_id = Column(Integer, ForeignKey("sources.id"), nullable=True)
+    # D1c — owning user for the campaigns:'own' permission scope
+    owner_id = Column(Integer, nullable=True)
+    # G66 — soft-delete flag (archive without purging)
+    archived = Column(Boolean, nullable=False, default=False)
     notes = Column(Text, nullable=True)
     tags = Column(JSONB, nullable=True, default=list)
     config = Column(JSONB, nullable=True)

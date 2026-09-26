@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Shared Report — AAA Tracker</title>
+    <style>
+        :root {
+            --font-stack: 'Inter', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --mono-stack: 'SFMono-Regular', ui-monospace, Menlo, Consolas, monospace;
+            --content-bg: #f5f6f8;
+            --card-bg: #ffffff;
+            --surface: #f9fafb;
+            --border: #e4e7ec;
+            --border-soft: #eef1f5;
+            --text-primary: #101828;
+            --text-secondary: #667085;
+            --accent: #16a34a;
+            --accent-soft: rgba(22, 163, 74, 0.12);
+            --status-success-bg: #e2f5ea;
+            --status-success-text: #15803d;
+            --status-danger-bg: #fce4e2;
+            --status-danger-text: #b42318;
+            --status-info-bg: #dbeafe;
+            --status-info-text: #1d4ed8;
+            --status-warning-bg: #fef3c7;
+            --status-warning-text: #92400e;
+            --status-neutral-bg: #eef1f5;
+            --status-neutral-text: #667085;
+            --radius: 12px;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --content-bg: #0f1722;
+                --card-bg: #16202e;
+                --surface: #131c29;
+                --border: #243147;
+                --border-soft: #1c2635;
+                --text-primary: #e6eaf2;
+                --text-secondary: #94a1b7;
+                --accent-soft: rgba(22, 163, 74, 0.2);
+                --status-success-bg: #12291c;
+                --status-success-text: #4ade80;
+                --status-danger-bg: #2e1614;
+                --status-danger-text: #f87171;
+                --status-info-bg: #16233d;
+                --status-info-text: #60a5fa;
+                --status-warning-bg: #2a2113;
+                --status-warning-text: #fbbf24;
+                --status-neutral-bg: #1c2635;
+                --status-neutral-text: #94a1b7;
+            }
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--content-bg);
+            color: var(--text-primary);
+            font-family: var(--font-stack);
+            font-size: 14px;
+            line-height: 1.45;
+        }
+        .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 16px 64px; }
+        .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .brand { display: flex; align-items: center; gap: 10px; }
+        .brand__mark {
+            width: 34px; height: 34px; border-radius: 9px; background: var(--accent);
+            color: #fff; font-weight: 800; font-size: 16px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .brand__name { font-weight: 700; letter-spacing: 0.12em; font-size: 13px; }
+        .brand__sub { color: var(--text-secondary); font-size: 11px; margin-top: 1px; }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+            overflow: hidden;
+        }
+        .card__head { padding: 16px 20px; border-bottom: 1px solid var(--border-soft); }
+        .card__title { font-size: 16px; font-weight: 700; }
+        .card__meta { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
+        .scroll { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+        th, td { padding: 9px 14px; text-align: right; white-space: nowrap; font-size: 13px; }
+        th:first-child, td:first-child { text-align: left; }
+        thead th {
+            background: var(--surface);
+            font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase;
+            color: var(--text-secondary); font-weight: 600;
+            border-bottom: 1px solid var(--border-soft);
+        }
+        tbody td { border-bottom: 1px solid var(--border-soft); color: var(--text-primary); }
+        tbody tr:last-child td { border-bottom: none; }
+        tbody tr:hover td { background: var(--surface); }
+        tfoot td {
+            border-top: 1px solid var(--border);
+            font-weight: 700; background: var(--surface);
+        }
+        .dim-sub { color: var(--text-secondary); font-size: 11px; display: block; }
+        .num-pos { color: var(--status-success-text); }
+        .num-neg { color: var(--status-danger-text); }
+        .state { padding: 40px 20px; text-align: center; color: var(--text-secondary); }
+        .state__title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; }
+        .foot { margin-top: 18px; text-align: center; color: var(--text-secondary); font-size: 11px; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="head">
+        <div class="brand">
+            <div class="brand__mark">A</div>
+            <div>
+                <div class="brand__name">AAA TRACKER</div>
+                <div class="brand__sub">Shared report · read-only</div>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card__head">
+            <div class="card__title" id="rpt-name">Loading…</div>
+            <div class="card__meta" id="rpt-meta"></div>
+        </div>
+        <div class="scroll">
+            <table id="rpt-table" style="display:none">
+                <thead><tr id="rpt-head"></tr></thead>
+                <tbody id="rpt-body"></tbody>
+                <tfoot><tr id="rpt-totals"></tr></tfoot>
+            </table>
+            <div class="state" id="rpt-state">Loading report…</div>
+        </div>
+    </div>
+    <div class="foot">Data refreshes on page load only · generated by AAA Tracker</div>
+</div>
+<script>
+(function () {
+    var token = new URLSearchParams(location.search).get('t') || '';
+    var stateEl = document.getElementById('rpt-state');
+    var tableEl = document.getElementById('rpt-table');
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+        });
+    }
+    function fmt(v, kind) {
+        var n = parseFloat(v);
+        if (isNaN(n)) return '—';
+        if (kind === 'money') return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        if (kind === 'pct') return n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%';
+        if (kind === 'epc') return '$' + n.toFixed(5);
+        if (Math.abs(n % 1) > 0.000001) return n.toLocaleString('en-US', {maximumFractionDigits: 4});
+        return n.toLocaleString('en-US');
+    }
+    var MONEY = {cost: 1, revenue: 1, profit: 1};
+    var PCT = {cr: 1, roi: 1, rejected_rate: 1, click_through_rate: 1};
+
+    function cellHtml(v, key) {
+        var cls = '';
+        if (key === 'profit' || key === 'roi') cls = (parseFloat(v) || 0) >= 0 ? ' class="num-pos"' : ' class="num-neg"';
+        return '<td' + cls + '>' + fmt(v, MONEY[key] ? 'money' : (PCT[key] ? 'pct' : (key === 'epc' ? 'epc' : ''))) + '</td>';
+    }
+
+    function fail(msg) {
+        tableEl.style.display = 'none';
+        stateEl.style.display = '';
+        stateEl.innerHTML = '<div class="state__title">' + esc(msg.title) + '</div>' + esc(msg.text);
+    }
+
+    if (!token) {
+        fail({title: 'Missing link', text: 'This shared-report link has no token.'});
+        return;
+    }
+
+    fetch('/backend/api/dashboard/public/report/' + encodeURIComponent(token), {method: 'POST'})
+        .then(function (res) {
+            if (res.status === 404) throw {title: 'Link revoked or expired', text: 'Ask the report owner to share it again.'};
+            if (res.status === 429) throw {title: 'Too many requests', text: 'This report is being refreshed too often — wait a minute.'};
+            if (!res.ok) throw {title: 'Could not load report', text: 'Server error (' + res.status + ').'};
+            return res.json();
+        })
+        .then(function (data) {
+            var dims = data.dimensions || [];
+            var rows = data.rows || [];
+            var totals = data.totals || {};
+            document.getElementById('rpt-name').textContent = data.name || 'Shared report';
+            document.getElementById('rpt-meta').textContent =
+                dims.map(function (d) { return d.replace(/_/g, ' '); }).join(' → ') +
+                ' · ' + rows.length + ' rows';
+
+            var metricKeys = [];
+            Object.keys(rows[0] || {}).forEach(function (k) {
+                if (['level', 'dim', 'value', 'parent_key'].indexOf(k) === -1) metricKeys.push(k);
+            });
+
+            var head = '';
+            dims.forEach(function (d) {
+                head += '<th>' + esc(d.replace(/_/g, ' ')) + '</th>';
+            });
+            metricKeys.forEach(function (k) {
+                head += '<th>' + esc(k.replace(/_/g, ' ')) + '</th>';
+            });
+            document.getElementById('rpt-head').innerHTML = head;
+
+            var body = '';
+            rows.forEach(function (r) {
+                var chain = r.parent_key ? r.parent_key.split('\u001f') : [];
+                chain.push(r.value);
+                body += '<tr>';
+                dims.forEach(function (d, i) {
+                    var v = chain[i] != null && chain[i] !== '' ? chain[i] : '(empty)';
+                    var sub = i === chain.length - 1 ? '' : '<span class="dim-sub">' + esc(d.replace(/_/g, ' ')) + '</span>';
+                    body += '<td>' + esc(v) + sub + '</td>';
+                });
+                metricKeys.forEach(function (k) { body += cellHtml(r[k], k); });
+                body += '</tr>';
+            });
+            document.getElementById('rpt-body').innerHTML = body || '<tr><td colspan="99" style="text-align:center;color:var(--text-secondary)">No data in this report\'s date range</td></tr>';
+
+            var foot = '';
+            dims.forEach(function (d, i) {
+                foot += '<td>' + (i === 0 ? 'Total' : '') + '</td>';
+            });
+            metricKeys.forEach(function (k) { foot += cellHtml(totals[k], k); });
+            document.getElementById('rpt-totals').innerHTML = foot;
+
+            stateEl.style.display = 'none';
+            tableEl.style.display = '';
+        })
+        .catch(function (err) {
+            fail(err && err.title ? err : {title: 'Could not load report', text: 'Network error.'});
+        });
+})();
+</script>
+</body>
+</html>

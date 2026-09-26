@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import List
 from pydantic import BaseModel
 from typing import Optional
@@ -75,12 +75,17 @@ def get_networks(db: Session = Depends(get_db)):
 
 
 @router.post("/")
-def create_network(data: AffiliateNetworkIn, db: Session = Depends(get_db)):
+def create_network(data: AffiliateNetworkIn, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
     new = AffiliateNetworkORM(**data.dict())
     db.add(new)
     try:
         db.commit()
         db.refresh(new)
+        from auth import get_caller
+        caller, _ = get_caller(request)
+        audit_event(caller or "api_token", "create", "affiliate_networks", str(new.id),
+                    {"name": new.name}, request.client.host if request.client else "")
         return {"message": "Affiliate network created", "id": new.id}
     except IntegrityError:
         db.rollback()
@@ -88,20 +93,29 @@ def create_network(data: AffiliateNetworkIn, db: Session = Depends(get_db)):
 
 
 @router.patch("/{network_id}")
-def update_network(network_id: int, data: AffiliateNetworkIn, db: Session = Depends(get_db)):
+def update_network(network_id: int, data: AffiliateNetworkIn, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
     net = db.query(AffiliateNetworkORM).filter_by(id=network_id).first()
     if not net:
         raise HTTPException(status_code=404, detail="Affiliate network not found")
 
+    changed = []
     for key, value in data.dict().items():
+        if getattr(net, key, None) != value:
+            changed.append(key)
         setattr(net, key, value)
 
     db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "affiliate_networks", str(network_id),
+                {"fields": changed}, request.client.host if request.client else "")
     return {"message": "Affiliate network updated"}
 
 
 @router.delete("/{network_id}")
-def delete_network(network_id: int, db: Session = Depends(get_db)):
+def delete_network(network_id: int, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
     # Find the network
     net = db.query(AffiliateNetworkORM).filter_by(id=network_id).first()
     if not net:
@@ -117,5 +131,9 @@ def delete_network(network_id: int, db: Session = Depends(get_db)):
 
     db.delete(net)
     db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "delete", "affiliate_networks", str(network_id),
+                {"name": net.name}, request.client.host if request.client else "")
     return {"message": "Affiliate network deleted"}
 

@@ -7,9 +7,10 @@
                 <div class="page-subtitle">Manage traffic campaigns and their flows</div>
             </div>
             <v-col class="d-flex justify-end align-center">
+                <div class="filter-bar align-center">
                 <v-menu v-model="colMenu" offset-y :close-on-content-click="false">
                     <template v-slot:activator="{ on, attrs }">
-                        <v-btn small outlined class="mr-3" v-bind="attrs" v-on="on">
+                        <v-btn small outlined v-bind="attrs" v-on="on">
                             <v-icon small class="mr-1">mdi-view-column-outline</v-icon>Columns
                         </v-btn>
                     </template>
@@ -46,8 +47,7 @@
                         dense
                         hide-details
                         label="Tags"
-                        style="max-width: 200px;"
-                        class="mr-3"
+                        class="tags-filter"
                 ></v-select>
                 <v-select
                         v-model="metricsPeriod"
@@ -56,13 +56,27 @@
                         outlined
                         dense
                         hide-details
-                        style="max-width: 170px;"
-                        class="mr-3"
+                        class="period-filter"
                         @change="metricsPeriodChanged"
                 ></v-select>
+                <v-switch
+                        v-model="showArchived"
+                        label="Show archived"
+                        inset
+                        dense
+                        hide-details
+                        class="ml-3 mt-0 archived-switch"
+                ></v-switch>
+                <v-btn small outlined class="mr-2" @click="exportCsv" :loading="exporting">
+                    <v-icon small class="mr-1">mdi-file-download-outline</v-icon>Export
+                </v-btn>
+                <v-btn small outlined class="mr-2" @click="openImport">
+                    <v-icon small class="mr-1">mdi-file-upload-outline</v-icon>Import
+                </v-btn>
                 <v-btn color="primary" elevation="0" @click="openCreate">
                     <v-icon small class="mr-1">mdi-plus</v-icon>Create Campaign
                 </v-btn>
+                </div>
             </v-col>
         </div>
 
@@ -74,14 +88,6 @@
                         <v-row dense class="mt-2">
                             <v-col cols="12" md="6">
                                 <h3>{{ isEdit ? 'Edit Campaign' : 'New Campaign' }}</h3>
-                            </v-col>
-                            <v-col cols="12" md="6" class="align-end">
-                                <v-card-actions>
-                                    <v-spacer></v-spacer>
-                                    <v-btn text color="grey" @click="confirmCancel">Cancel</v-btn>
-                                    <v-btn text color="primary" @click="update">Update</v-btn>
-                                    <v-btn color="primary" elevation="0" @click="save" class="mr-5">Save</v-btn>
-                                </v-card-actions>
                             </v-col>
                         </v-row>
                         <v-row dense class="mt-2">
@@ -172,6 +178,17 @@
                                                                 outlined
                                                                 dense
                                                         ></v-text-field>
+                                                    </v-col>
+
+                                                    <v-col cols="12">
+                                                        <v-switch
+                                                                label="Visitor stickiness (bind visitors to their flow)"
+                                                                v-model="form.stickiness"
+                                                                inset
+                                                                dense
+                                                                hint="Returning visitors keep the flow/offer they were first assigned to — makes weight-based A/B splits stable. Stored in a signed 30-day aaa_bind cookie; editing the flow list invalidates bindings."
+                                                                persistent-hint
+                                                        ></v-switch>
                                                     </v-col>
 
                                                 </v-row>
@@ -287,6 +304,51 @@
                                                         >
                                                         </v-textarea>
                                                     </v-col>
+                                                    <v-col cols="12" class="direct-tracking-head">
+                                                        <div class="direct-tracking-title">Direct Tracking (no-redirect)</div>
+                                                        <div class="direct-tracking-hint">
+                                                            First-party tracking without any redirect: the script records the
+                                                            visit, stores the click id in a cookie, and your offer links plus the
+                                                            conversion pixel reuse it — landing URLs stay clean. Put the script on
+                                                            the landing page, point offer links through
+                                                            <code>/c/{{ form.alias || 'ALIAS' }}/{offer}?click_id=...</code> (or
+                                                            <code>aaaTrack.clickThrough(url)</code>), and fire the pixel on the
+                                                            thank-you page.
+                                                        </div>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-textarea
+                                                                label="Direct Tracking Script"
+                                                                :value="directTrackingScript"
+                                                                readonly
+                                                                outlined
+                                                                dense
+                                                                append-icon="mdi-content-copy"
+                                                                @click:append="copyText(directTrackingScript)"
+                                                        ></v-textarea>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-textarea
+                                                                label="Conversion Pixel (img — noscript / cross-domain safe)"
+                                                                :value="conversionPixelImg"
+                                                                readonly
+                                                                outlined
+                                                                dense
+                                                                append-icon="mdi-content-copy"
+                                                                @click:append="copyText(conversionPixelImg)"
+                                                        ></v-textarea>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-textarea
+                                                                label="Conversion Pixel (fetch — from the tracked page)"
+                                                                :value="conversionPixelFetch"
+                                                                readonly
+                                                                outlined
+                                                                dense
+                                                                append-icon="mdi-content-copy"
+                                                                @click:append="copyText(conversionPixelFetch)"
+                                                        ></v-textarea>
+                                                    </v-col>
                                                 </v-row>
                                             </v-container>
                                         </v-card>
@@ -302,7 +364,7 @@
                                                     </v-col>
                                                 </v-row>
 
-                                                <v-row align="center">
+                                                <v-row align="center" class="param-header">
                                                     <v-col cols="3">
                                                         Name
                                                     </v-col>
@@ -403,7 +465,6 @@
                                                 </v-row>
 
                                                 <v-divider class="my-4"></v-divider>
-                                                <v-divider class="my-4"></v-divider>
                                                 <h3>Add New</h3>
 
                                                 <!-- Adding a new one -->
@@ -502,7 +563,7 @@
                                                            :disabled="index === form.flows.length - 1">
                                                         <v-icon>mdi-arrow-down</v-icon>
                                                     </v-btn>
-                                                    {{ flow.enabled==true ? 'ON' : 'OFF' }}
+                                                    <span class="status-chip ml-1" :class="flow.enabled ? 'status-chip--success' : 'status-chip--neutral'">{{ flow.enabled ? 'On' : 'Off' }}</span>
                                                 </v-col>
                                                 <v-col cols="7">
                                                     <strong>{{ flow.name }}</strong>
@@ -534,15 +595,18 @@
                                                       </span>
                                                 </div>
                                                 <div>
-                                                  <span v-if="Array.isArray(flow.filters) && flow.filters.length" class="d-block mt-2">
+                                                  <span v-if="flowFiltersSummary(flow).length" class="d-block mt-2">
                                                     Filters:
                                                     <ul class="pl-4 mb-0">
-                                                      <li v-for="(f, i) in flow.filters" :key="i">
-                                                        <b>{{ f.condition ? f.condition.toUpperCase() : '' }}</b>
-                                                        <span>{{ f.key }} {{ f.operator }} <b>{{ f.value }}</b></span>
-                                                      </li>
+                                                      <li v-for="(line, i) in flowFiltersSummary(flow)" :key="i">{{ line }}</li>
                                                     </ul>
                                                   </span>
+                                                </div>
+                                                <div v-if="flow.schedule">
+                                                  <span class="mr-3">Schedule: <b>{{ flowScheduleSummary(flow.schedule) }}</b></span>
+                                                </div>
+                                                <div v-if="flow.caps && (flow.caps.per_hour || flow.caps.per_day || flow.caps.total)">
+                                                  <span class="mr-3">Caps: <b>{{ flowCapsSummary(flow.caps) }}</b></span>
                                                 </div>
                                                 <div v-if="flow.notes">
                                                   <span class="mr-3">
@@ -570,8 +634,8 @@
             </v-card>
         </v-dialog>
 
-        <v-dialog v-if="form.type=='campaign'" v-model="flowDialog" max-width="1200px" persistent>
-            <v-card>
+        <v-dialog v-if="form.type=='campaign'" v-model="flowDialog" persistent>
+            <v-card class="dialog-xl">
                 <v-card-title>
                     <span class="text-h6">{{ isEditingFlow ? 'Edit Flow' : 'New Flow' }}</span>
                 </v-card-title>
@@ -641,6 +705,98 @@
                               dense
                             ></v-switch>
                           </v-col>
+
+                          <!-- Schedule + caps (optional, per flow) -->
+                          <v-col cols="12">
+                            <v-expansion-panels flat accordion multiple class="flow-extra-panels">
+                              <v-expansion-panel>
+                                <v-expansion-panel-header class="px-4">
+                                  <span>
+                                    <v-icon small class="mr-2">mdi-clock-outline</v-icon>Schedule (dayparting)
+                                    <span v-if="scheduleSummary" class="grey--text caption ml-2">{{ scheduleSummary }}</span>
+                                  </span>
+                                </v-expansion-panel-header>
+                                <v-expansion-panel-content class="px-2">
+                                  <v-row dense align="center">
+                                    <v-col cols="12" md="4">
+                                      <v-select
+                                              v-model="flowForm.schedule.timezone"
+                                              :items="timezones"
+                                              label="Timezone"
+                                              dense outlined hide-details
+                                      ></v-select>
+                                    </v-col>
+                                    <v-col cols="12" md="8">
+                                      <div class="caption grey--text mb-1">Days</div>
+                                      <v-chip v-for="d in daysOfWeek" :key="d.value"
+                                              small outlined class="mr-1 day-chip"
+                                              :color="(flowForm.schedule.days || []).includes(d.value) ? 'primary' : ''"
+                                              :class="(flowForm.schedule.days || []).includes(d.value) ? 'day-chip--on' : ''"
+                                              @click="toggleScheduleDay(d.value)">
+                                        {{ d.text }}
+                                      </v-chip>
+                                    </v-col>
+                                    <v-col cols="6" md="2">
+                                      <v-text-field
+                                              v-model.number="flowForm.schedule.hoursFrom"
+                                              type="number" min="0" max="23"
+                                              label="Hour from"
+                                              dense outlined hide-details
+                                      ></v-text-field>
+                                    </v-col>
+                                    <v-col cols="6" md="2">
+                                      <v-text-field
+                                              v-model.number="flowForm.schedule.hoursTo"
+                                              type="number" min="0" max="23"
+                                              label="Hour to"
+                                              dense outlined hide-details
+                                      ></v-text-field>
+                                    </v-col>
+                                    <v-col cols="12" md="8">
+                                      <v-btn small text color="grey" @click="clearSchedule">Clear schedule</v-btn>
+                                    </v-col>
+                                  </v-row>
+                                </v-expansion-panel-content>
+                              </v-expansion-panel>
+
+                              <v-expansion-panel>
+                                <v-expansion-panel-header class="px-4">
+                                  <span>
+                                    <v-icon small class="mr-2">mdi-counter</v-icon>Click caps
+                                    <span v-if="capsSummary" class="grey--text caption ml-2">{{ capsSummary }}</span>
+                                  </span>
+                                </v-expansion-panel-header>
+                                <v-expansion-panel-content class="px-2">
+                                  <v-row dense>
+                                    <v-col cols="12" md="4">
+                                      <v-text-field
+                                              v-model.number="flowForm.caps.per_hour"
+                                              type="number" min="0"
+                                              label="Per hour (0 = unlimited)"
+                                              dense outlined hide-details
+                                      ></v-text-field>
+                                    </v-col>
+                                    <v-col cols="12" md="4">
+                                      <v-text-field
+                                              v-model.number="flowForm.caps.per_day"
+                                              type="number" min="0"
+                                              label="Per day (0 = unlimited)"
+                                              dense outlined hide-details
+                                      ></v-text-field>
+                                    </v-col>
+                                    <v-col cols="12" md="4">
+                                      <v-text-field
+                                              v-model.number="flowForm.caps.total"
+                                              type="number" min="0"
+                                              label="Total (0 = unlimited)"
+                                              dense outlined hide-details
+                                      ></v-text-field>
+                                    </v-col>
+                                  </v-row>
+                                </v-expansion-panel-content>
+                              </v-expansion-panel>
+                            </v-expansion-panels>
+                          </v-col>
                         </v-row>
                       </v-container>
                     </v-tab-item>
@@ -648,51 +804,104 @@
                         <!-- FILTERS TAB -->
                         <v-tab-item v-if="flowForm.type !== 'default'">
                             <v-container>
-                                <v-row v-for="(filter, index) in flowForm.filters" :key="index" dense align="center">
-                                    <v-col cols="2">
+                                <v-row dense align="center">
+                                    <v-col cols="12" md="4">
                                         <v-select
-                                                :items="filterFields"
-                                                v-model="filter.key"
-                                                label="Field"
-                                                dense outlined
+                                                :items="[{text: 'ALL groups must match', value: 'and'}, {text: 'ANY group must match', value: 'or'}]"
+                                                v-model="filtersModel.combinator"
+                                                label="Groups"
+                                                dense outlined hide-details
                                         ></v-select>
                                     </v-col>
-
-                                    <v-col cols="2">
-                                        <v-select
-                                                :items="operators"
-                                                v-model="filter.operator"
-                                                label="Operator"
-                                                dense outlined
-                                        ></v-select>
-                                    </v-col>
-
-                                    <v-col cols="3">
-                                        <v-text-field
-                                                v-model="filter.value"
-                                                label="Value"
-                                                dense outlined
-                                        ></v-text-field>
-                                    </v-col>
-
-                                    <v-col cols="2">
-                                        <v-select
-                                                :items="conditions"
-                                                v-model="filter.condition"
-                                                label="Condition"
-                                                dense outlined
-                                                :disabled="index === 0"
-                                        ></v-select>
-                                    </v-col>
-
-                                    <v-col cols="1">
-                                        <v-btn icon color="red" @click="removeFilter(index)">
-                                            <v-icon>mdi-delete</v-icon>
+                                    <v-col cols="12" md="8" class="text-md-right">
+                                        <v-btn small color="primary" outlined @click="addFilterGroup">
+                                            <v-icon small class="mr-1">mdi-plus</v-icon>Add Group
                                         </v-btn>
                                     </v-col>
                                 </v-row>
 
-                                <v-btn color="primary" @click="addFilter">+ Add Filter</v-btn>
+                                <v-card v-for="(group, gi) in filtersModel.groups" :key="'fg_' + gi"
+                                        outlined class="mb-3 mt-2 filter-group-card">
+                                    <v-card-text class="pb-2">
+                                        <v-row dense align="center">
+                                            <v-col cols="6" md="3">
+                                                <v-select
+                                                        :items="[{text: 'AND', value: 'and'}, {text: 'OR', value: 'or'}]"
+                                                        v-model="group.logic"
+                                                        label="Match in group"
+                                                        dense outlined hide-details
+                                                ></v-select>
+                                            </v-col>
+                                            <v-col cols="6" md="7" class="grey--text caption">
+                                                Group {{ gi + 1 }} of {{ filtersModel.groups.length }}
+                                            </v-col>
+                                            <v-col cols="12" md="2" class="text-right">
+                                                <v-btn icon small color="red" @click="removeFilterGroup(gi)">
+                                                    <v-icon>mdi-delete</v-icon>
+                                                </v-btn>
+                                            </v-col>
+                                        </v-row>
+
+                                        <v-row v-for="(cond, ci) in group.conditions" :key="'fc_' + gi + '_' + ci"
+                                               dense align="center">
+                                            <v-col cols="12" md="3">
+                                                <v-select
+                                                        :items="filterFieldItems"
+                                                        v-model="cond.field"
+                                                        label="Field"
+                                                        dense outlined hide-details
+                                                ></v-select>
+                                            </v-col>
+                                            <v-col cols="6" md="2">
+                                                <v-select
+                                                        :items="operatorsForField(cond.field)"
+                                                        v-model="cond.operator"
+                                                        label="Operator"
+                                                        dense outlined hide-details
+                                                ></v-select>
+                                            </v-col>
+                                            <v-col cols="12" md="4" v-if="isListOperator(cond.operator)">
+                                                <v-combobox
+                                                        v-model="cond.valueList"
+                                                        label="Values (press Enter to add)"
+                                                        multiple small-chips deletable-chips
+                                                        dense outlined hide-details
+                                                ></v-combobox>
+                                            </v-col>
+                                            <v-col cols="12" md="4" v-else-if="!isExistenceOperator(cond.operator)">
+                                                <v-text-field
+                                                        v-model="cond.value"
+                                                        :label="cond.operator === 'cidr' ? 'CIDR (e.g. 10.0.0.0/8, comma list)' : 'Value'"
+                                                        dense outlined hide-details
+                                                ></v-text-field>
+                                            </v-col>
+                                            <v-col cols="12" md="4" v-else>
+                                                <span class="grey--text caption">—</span>
+                                            </v-col>
+                                            <v-col cols="6" md="2">
+                                                <v-checkbox
+                                                        v-model="cond.invert"
+                                                        label="IS NOT"
+                                                        dense hide-details
+                                                        class="mt-0"
+                                                ></v-checkbox>
+                                            </v-col>
+                                            <v-col cols="6" md="1" class="text-right">
+                                                <v-btn icon small color="red" @click="removeCondition(gi, ci)">
+                                                    <v-icon>mdi-delete</v-icon>
+                                                </v-btn>
+                                            </v-col>
+                                        </v-row>
+
+                                        <v-btn small text color="primary" class="mt-1" @click="addCondition(gi)">
+                                            <v-icon small class="mr-1">mdi-plus</v-icon>Add Condition
+                                        </v-btn>
+                                    </v-card-text>
+                                </v-card>
+
+                                <v-alert v-if="!filtersModel.groups.length" type="info" text dense class="mt-2">
+                                    No filters — this flow matches all visitors.
+                                </v-alert>
                             </v-container>
                         </v-tab-item>
 
@@ -862,8 +1071,8 @@
             </v-card>
         </v-dialog>
 
-        <v-dialog v-model="postbackEditorDialog" max-width="800px" persistent>
-            <v-card>
+        <v-dialog v-model="postbackEditorDialog" persistent>
+            <v-card class="dialog-lg">
                 <v-card-title>
                     <span class="text-h6">Edit Postback URL</span>
                 </v-card-title>
@@ -888,7 +1097,7 @@
                                 class="ma-1"
                                 small
                                 outlined
-                                :text-color="isMacroInUrl(macro) ? 'purple' : ''"
+                                :class="isMacroInUrl(macro) ? 'primary--text' : ''"
                                 @click="insertMacro(macro)"
                         >
                             {{"{"}}{{macro}}{{"}"}}
@@ -903,8 +1112,8 @@
             </v-card>
         </v-dialog>
 
-        <v-dialog v-model="tagEditor.open" max-width="440px" persistent>
-            <v-card>
+        <v-dialog v-model="tagEditor.open" persistent>
+            <v-card class="dialog-sm">
                 <v-card-title class="text-h6">Tags — {{ tagEditor.name }}</v-card-title>
                 <v-card-text>
                     <v-combobox
@@ -929,8 +1138,93 @@
             </v-card>
         </v-dialog>
 
-        <v-dialog v-model="bulkTagDialog" max-width="440px" persistent>
+        <v-dialog v-model="importDialog" persistent max-width="640px">
             <v-card>
+                <v-card-title class="text-h6">Import campaigns (CSV)</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-2">
+                        Paste CSV with the export header
+                        <code>id,name,alias,type,status,redirect_mode,domain_id,traffic_source_id,tags,notes</code> —
+                        rows with a matching id or name are updated, the rest are created. Tags are ;-separated.
+                    </div>
+                    <v-textarea
+                            v-model="importText"
+                            outlined
+                            dense
+                            rows="8"
+                            placeholder="id,name,alias,type,status,redirect_mode,domain_id,traffic_source_id,tags,notes"
+                            :disabled="importLoading"
+                    ></v-textarea>
+                    <div v-if="importResults.length" class="import-results">
+                        <div v-for="r in importResults" :key="r.line" class="caption import-result-line"
+                             :class="r.ok ? 'import-ok' : 'import-fail'">
+                            <v-icon x-small class="mr-1">{{ r.ok ? 'mdi-check' : 'mdi-close' }}</v-icon>
+                            Line {{ r.line }}: {{ r.detail }}
+                        </div>
+                    </div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="closeImport">Close</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="importLoading" :disabled="!importText.trim()"
+                           @click="runImport">Import</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="simulateDialog" max-width="560px">
+            <v-card>
+                <v-card-title class="text-h6">
+                    Simulate — {{ simulateData.campaign || '…' }}
+                    <v-spacer></v-spacer>
+                    <v-btn small outlined :loading="simulateLoading" @click="runSimulate">
+                        <v-icon small class="mr-1">mdi-refresh</v-icon>Re-run
+                    </v-btn>
+                </v-card-title>
+                <v-card-text v-if="simulateData.stats">
+                    <div class="caption grey--text mb-2">
+                        {{ simulateData.count }} synthetic visitors through the routing pipeline (no side effects).
+                        <span v-if="simulateData.stats.rejected_by_filters">Rejected by filters: {{ simulateData.stats.rejected_by_filters }}.</span>
+                        <span v-if="simulateData.stats.fallback">Fallback URL: {{ simulateData.stats.fallback }}.</span>
+                        <span v-if="simulateData.stats.capped">Capped: {{ simulateData.stats.capped }}.</span>
+                    </div>
+                    <div class="subtitle-2 mb-1">Flow distribution</div>
+                    <div v-for="(n, idx) in simulateData.stats.flow_distribution" :key="'f' + idx" class="sim-row">
+                        <span class="sim-label">{{ simulateFlowName(idx) }}</span>
+                        <div class="sim-bar-track">
+                            <div class="sim-bar" :style="{width: simulateBarWidth(n), background: simColor(idx)}"></div>
+                        </div>
+                        <span class="sim-count">{{ n }}</span>
+                    </div>
+                    <div class="subtitle-2 mt-3 mb-1">Schema distribution</div>
+                    <div v-for="(n, sch) in simulateData.stats.schema_distribution" :key="'s' + sch" class="sim-row">
+                        <span class="sim-label">{{ sch }}</span>
+                        <div class="sim-bar-track">
+                            <div class="sim-bar sim-bar--schema" :style="{width: simulateBarWidth(n)}"></div>
+                        </div>
+                        <span class="sim-count">{{ n }}</span>
+                    </div>
+                    <div class="subtitle-2 mt-3 mb-1">Offer distribution</div>
+                    <div v-for="(n, oid) in simulateData.stats.offer_distribution" :key="'o' + oid" class="sim-row">
+                        <span class="sim-label">{{ offerMap[oid] || ('Offer #' + oid) }}</span>
+                        <div class="sim-bar-track">
+                            <div class="sim-bar sim-bar--offer" :style="{width: simulateBarWidth(n)}"></div>
+                        </div>
+                        <span class="sim-count">{{ n }}</span>
+                    </div>
+                </v-card-text>
+                <v-card-text v-else-if="simulateLoading">
+                    <div class="pa-4 text-center grey--text">Running simulation…</div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="simulateDialog = false">Close</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="bulkTagDialog" persistent>
+            <v-card class="dialog-sm">
                 <v-card-title class="text-h6">Tag {{ selected.length }} campaigns</v-card-title>
                 <v-card-text>
                     <v-select
@@ -961,8 +1255,8 @@
             </v-card>
         </v-dialog>
 
-        <v-dialog v-model="metricsCustomDialog" max-width="380px" persistent>
-            <v-card>
+        <v-dialog v-model="metricsCustomDialog" persistent>
+            <v-card class="dialog-sm">
                 <v-card-title class="text-h6">Custom stats period</v-card-title>
                 <v-card-text>
                     <v-date-picker v-model="customRange" range no-title :first-day-of-week="1" full-width></v-date-picker>
@@ -978,9 +1272,10 @@
 
         <v-row dense class="mt-4">
             <v-col>
+                <div :key="'camp-table-' + loading" class="section-enter">
                 <v-card>
                     <!-- Bulk actions bar -->
-                    <div v-if="selected.length" class="d-flex align-center pa-2 pl-4" style="background: #f0fdf4; border-bottom: 1px solid #e3e8ef; border-radius: 12px 12px 0 0;">
+                    <div v-if="selected.length" class="d-flex align-center pa-2 pl-4 bulk-bar">
                         <span class="text-body-2 font-weight-medium mr-4">{{ selected.length }} selected</span>
                         <v-btn small color="primary" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkSetStatus('active')">
                             <v-icon small class="mr-1">mdi-play</v-icon>Activate
@@ -991,23 +1286,31 @@
                         <v-btn small color="secondary" elevation="0" class="mr-2 ml-2" @click="openBulkTags">
                             <v-icon small class="mr-1">mdi-tag-multiple-outline</v-icon>Tag
                         </v-btn>
+                        <v-btn small color="secondary" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkArchive">
+                            <v-icon small class="mr-1">mdi-archive-arrow-down-outline</v-icon>Archive
+                        </v-btn>
                         <v-btn small color="red" elevation="0" class="ml-2" :loading="bulkLoading" @click="bulkDelete">
                             <v-icon small class="mr-1">mdi-trash-can-outline</v-icon>Delete
                         </v-btn>
                         <v-spacer></v-spacer>
                         <v-btn small text @click="selected = []">Clear selection</v-btn>
                     </div>
-                    <v-data-table v-col-resize:campaigns="visibleHeaders"
+                    <div class="campaigns-table-wrap">
+                    <v-data-table v-col-resize:campaigns="visibleHeaders" class="campaigns-table"
                             v-model="selected"
                             :headers="visibleHeaders"
                             :items="filteredCampaigns"
                             show-select
                             item-key="id"
-                            :item-class="perfRowClass"
+                            :item-class="rowClass"
                             :items-per-page="10"
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            :loading="loading"
                             dense
                     >
+                        <template v-slot:item.name="{ item }">
+                            <span class="clamp-2 campaign-name">{{ item.name }}</span>
+                        </template>
                         <template v-slot:item.clicks="{ item }">
                             {{ (metricsMap[item.id] || {}).clicks != null ? Number(metricsMap[item.id].clicks).toLocaleString() : '—' }}
                         </template>
@@ -1058,7 +1361,12 @@
                             {{ sourceMap[item.traffic_source_id] || '—' }}
                         </template>
                         <template v-slot:no-data>
-                            <div class="empty-state">
+                            <div class="empty-state" v-if="campaigns.length && !filteredCampaigns.length">
+                                <v-icon>mdi-filter-off-outline</v-icon>
+                                <div class="mt-2">No campaigns match the selected tags</div>
+                                <v-btn small text color="primary" class="mt-2" @click="tagFilter = []">Clear tag filter</v-btn>
+                            </div>
+                            <div class="empty-state" v-else>
                                 <v-icon>mdi-sitemap</v-icon>
                                 <div class="mt-2">No campaigns yet — create your first one</div>
                             </div>
@@ -1084,9 +1392,8 @@
                         </template>
 
                         <template v-slot:item.status="{ item }">
-                            <v-chip x-small label color="success" text-color="white" v-if="item.status === 'active'">{{ item.status }}</v-chip>
-                            <v-chip x-small label color="warning" text-color="white" v-else-if="item.status === 'paused'">{{ item.status }}</v-chip>
-                            <v-chip x-small label color="grey" text-color="white" v-else>{{ item.status }}</v-chip>
+                            <span class="status-chip"
+                                  :class="item.status === 'active' ? 'status-chip--success' : (item.status === 'paused' ? 'status-chip--warning' : 'status-chip--neutral')">{{ item.status }}</span>
                         </template>
 
                         <template v-slot:item.redirect_mode="{ item }">
@@ -1101,6 +1408,22 @@
                             {{ $formatDate(item.updated_at) }}
                         </template>
                         <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="success" v-bind="attrs" v-on="on" @click="openSimulate(item)">
+                                        <v-icon small>mdi-test-tube</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Simulate traffic (dry run)</span>
+                            </v-tooltip>
+                            <v-tooltip bottom v-if="isArchived(item)">
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="success" v-bind="attrs" v-on="on" @click="restoreCampaign(item)">
+                                        <v-icon small>mdi-archive-arrow-up-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Restore from archive</span>
+                            </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
                                     <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
@@ -1127,7 +1450,9 @@
                             </v-tooltip>
                         </template>
                     </v-data-table>
+                    </div>
                 </v-card>
+                </div>
             </v-col>
         </v-row>
 
@@ -1143,6 +1468,21 @@
                 trackingScript: '',
                 selected: [],
                 bulkLoading: false,
+                loading: false,
+                // G67/D1b — bulk CSV + archive visibility
+                exporting: false,
+                showArchived: false,
+                archivedIds: [],
+                importDialog: false,
+                importText: '',
+                importResults: [],
+                importLoading: false,
+                // D1f — traffic simulation dialog
+                simulateDialog: false,
+                simulateData: {},
+                simulateItem: null,
+                simulateLoading: false,
+                simPalette: ['#16a34a', '#2563eb', '#d97706', '#dc2626', '#7c3aed', '#0891b2'],
                 headers: [
                     {text: 'Name', value: 'name'},
                     {text: 'Tags', value: 'tags', sortable: false},
@@ -1198,15 +1538,64 @@
                 metricsCustomDialog: false,
                 customRange: [],
 
-                filterFields: ["country", "city", "device", "os", "browser", "ip", 'ad_campaign_id', 'browser',
-                    'campaign_id', 'connection_type', 'currency',
-                    'cost', 'utm_creative', 'utm_campaign', 'utm_source', 'device_type', 'external_id',
-                    'is_bot', 'is_using_proxy', 'isp', 'keyword', 'landing_id', 'language', 'offer_id',
-                    'profit', 'referrer', 'region', 'revenue', 'status', 'sub_id_1', 'sub_id_2', 'sub_id_3',
-                    'sub_id_4', 'sub_id_5', 'sub_id_6', 'sub_id_7', 'sub_id_8', 'sub_id_9', 'sub_id_10',
-                    'traffic_source_name', 'url', 'visitor_id'],
-                operators: ["equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with"],
-                conditions: ["and", "or"],
+                filterFieldItems: [
+                    {header: 'Geo'},
+                    {text: 'country', value: 'country'},
+                    {text: 'region', value: 'region'},
+                    {text: 'city', value: 'city'},
+                    {header: 'Device'},
+                    {text: 'device_type', value: 'device_type'},
+                    {text: 'device_brand', value: 'device_brand'},
+                    {text: 'device_model', value: 'device_model'},
+                    {text: 'os', value: 'os'},
+                    {text: 'os_version', value: 'os_version'},
+                    {text: 'browser', value: 'browser'},
+                    {text: 'browser_version', value: 'browser_version'},
+                    {text: 'language', value: 'language'},
+                    {header: 'Traffic'},
+                    {text: 'ip', value: 'ip'},
+                    {text: 'isp', value: 'isp'},
+                    {text: 'connection_type', value: 'connection_type'},
+                    {text: 'referrer', value: 'referrer'},
+                    {text: 'keyword', value: 'keyword'},
+                    {text: 'source / traffic_source_name', value: 'traffic_source_name'},
+                    {text: 'campaign_id', value: 'campaign_id'},
+                    {text: 'external_id', value: 'external_id'},
+                    {text: 'ad_campaign_id', value: 'ad_campaign_id'},
+                    {text: 'is_bot', value: 'is_bot'},
+                    {text: 'is_using_proxy', value: 'is_using_proxy'},
+                    {header: 'SubIDs & UTM'},
+                    {text: 'sub_id_1', value: 'sub_id_1'},
+                    {text: 'sub_id_2', value: 'sub_id_2'},
+                    {text: 'sub_id_3', value: 'sub_id_3'},
+                    {text: 'sub_id_4', value: 'sub_id_4'},
+                    {text: 'sub_id_5', value: 'sub_id_5'},
+                    {text: 'sub_id_6', value: 'sub_id_6'},
+                    {text: 'sub_id_7', value: 'sub_id_7'},
+                    {text: 'sub_id_8', value: 'sub_id_8'},
+                    {text: 'sub_id_9', value: 'sub_id_9'},
+                    {text: 'sub_id_10', value: 'sub_id_10'},
+                    {text: 'utm_source', value: 'utm_source'},
+                    {text: 'utm_medium', value: 'utm_medium'},
+                    {text: 'utm_campaign', value: 'utm_campaign'},
+                    {text: 'utm_term', value: 'utm_term'},
+                    {text: 'utm_content', value: 'utm_content'},
+                    {header: 'Time'},
+                    {text: 'hour_of_day', value: 'hour_of_day'},
+                    {text: 'day_of_week', value: 'day_of_week'},
+                ],
+                allOperators: ["equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with",
+                    "regex", "greater", "less", "greater_eq", "less_eq", "in", "not_in", "exists", "not_exists", "cidr"],
+                numericFilterFields: ["hour_of_day"],
+                timezones: ['UTC', 'Europe/London', 'Europe/Berlin', 'Europe/Moscow', 'America/New_York',
+                    'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Asia/Dubai', 'Asia/Shanghai',
+                    'Asia/Tokyo', 'Australia/Sydney'],
+                daysOfWeek: [
+                    {text: 'Mon', value: 'mon'}, {text: 'Tue', value: 'tue'}, {text: 'Wed', value: 'wed'},
+                    {text: 'Thu', value: 'thu'}, {text: 'Fri', value: 'fri'}, {text: 'Sat', value: 'sat'},
+                    {text: 'Sun', value: 'sun'}
+                ],
+                filtersModel: {combinator: 'and', groups: []},
                 campaigns: [],
                 dialog: false,
                 isEdit: false,
@@ -1259,6 +1648,8 @@
                         'active',                 // 'active' | 'paused' | 'archived'
                     bind_ttl_hours:
                         24,
+                    stickiness:
+                        false,
 
                     cost_model:
                         'cpc',               // 'cpc' | 'cpuc' | 'cpm' | 'cpa' | 'cps' | 'revshare' | 'auto'
@@ -1329,13 +1720,15 @@
                         offer: null,
                         offers: [],
                         filters: [],
+                        schedule: {timezone: 'UTC', days: [], hoursFrom: 0, hoursTo: 23},
+                        caps: {per_hour: 0, per_day: 0, total: 0},
                         notes: '',
                         redirect_url: '',
                         redirect_campaign_url: ''
                     }
                 ,
                 editedFlowIndex: null,
-                postbackStatusKeys: ['lead', 'sale', 'rejected', 'upsale', 'pending'],
+                postbackStatusKeys: ['lead', 'sale', 'rejected', 'upsale', 'hold'],
                 newPostback:
                     {
                         url: '',
@@ -1346,7 +1739,7 @@
                                 sale: true,
                                 rejected: false,
                                 upsale: false,
-                                pending: false
+                                hold: false
                             }
                     }
                 ,
@@ -1401,8 +1794,13 @@
                 return [...set].sort();
             },
             filteredCampaigns() {
-                if (!this.tagFilter.length) return this.campaigns;
-                return this.campaigns.filter(c => (c.tags || []).some(t => this.tagFilter.includes(t)));
+                let rows = this.campaigns;
+                // D1b archived rows are hidden unless "Show archived" is on
+                if (!this.showArchived) {
+                    rows = rows.filter(c => !this.isArchived(c));
+                }
+                if (!this.tagFilter.length) return rows;
+                return rows.filter(c => (c.tags || []).some(t => this.tagFilter.includes(t)));
             },
             metricsTotals() {
                 // Blended totals across every campaign in the (filtered) table
@@ -1435,6 +1833,32 @@
                     const serverIp = window.location.hostname;
                     return `https://${serverIp}/${this.form.alias}`;
                 }
+            },
+            trackerHost() {
+                if (this.form.domain_id) {
+                    const domain = this.domains.find(d => d.id === this.form.domain_id);
+                    if (domain) return domain.domain;
+                }
+                return window.location.hostname;
+            },
+            directTrackingScript() {
+                const ref = this.form.id || this.form.alias || 'CAMPAIGN_ID';
+                return `<script async src="https://${this.trackerHost}/t.js?c=${ref}"><\/script>`;
+            },
+            conversionPixelImg() {
+                const alias = this.form.alias || 'CAMPAIGN_ALIAS';
+                return `<img src="https://${this.trackerHost}/p/${alias}?status=sale&payout=XX" width="1" height="1" style="display:none" alt="">`;
+            },
+            conversionPixelFetch() {
+                const alias = this.form.alias || 'CAMPAIGN_ALIAS';
+                return `<script>fetch("https://${this.trackerHost}/p/${alias}?status=sale&payout=XX&fmt=json",{mode:"no-cors"});<\/script>`;
+            },
+            scheduleSummary() {
+                return this.flowScheduleSummary(this.buildSchedule(this.flowForm.schedule));
+            },
+            capsSummary() {
+                const caps = this.flowForm.caps || {};
+                return this.flowCapsSummary(caps);
             }
         },
         watch: {
@@ -1444,6 +1868,7 @@
             }
         },
         mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             // Out of the box show the dense working set; the Columns picker
             // reveals the rest. Persisted per browser in localStorage.
             const defaultHidden = ['domain', 'alias', 'link', 'type', 'redirect_mode', 'leads', 'notes', 'created_at', 'updated_at'];
@@ -1462,6 +1887,150 @@
             this.loadSettings();
         },
         methods: {
+            isArchived(item) {
+                return this.archivedIds.indexOf(item.id) >= 0;
+            },
+            rowClass(item) {
+                const perf = this.perfRowClass(item);
+                return (this.isArchived(item) ? 'archived-row ' : '') + perf;
+            },
+            async loadArchivedIds() {
+                try {
+                    const res = await fetch('/backend/api/archive/', {credentials: 'include'});
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    this.archivedIds = data.campaigns || [];
+                } catch (e) { /* non-critical */ }
+            },
+            async restoreCampaign(item) {
+                try {
+                    const res = await fetch(`/backend/api/archive/campaigns/${item.id}/restore`, {
+                        method: 'POST', credentials: 'include'});
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.$root.$emit('show-message', {type: 'success',
+                        text: `Campaign "${item.name}" restored`});
+                    this.loadCampaigns();
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Restore failed: ' + sanitizeToastMessage(err.message)});
+                }
+            },
+            async bulkArchive() {
+                const ok = await this.$refs.confirm.open(
+                    'Archive Campaigns',
+                    `Archive ${this.selected.length} campaign(s)? They disappear from the lists but can be restored.`,
+                    'Archive');
+                if (!ok) return;
+                this.bulkLoading = true;
+                try {
+                    const res = await fetch('/backend/api/campaigns/bulk', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids: this.selected.map(c => c.id), action: 'archive'})
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.selected = [];
+                    this.loadCampaigns();
+                    this.$root.$emit('show-message', {type: 'success', text: 'Campaigns archived'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Bulk archive failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.bulkLoading = false;
+                }
+            },
+            async exportCsv() {
+                this.exporting = true;
+                try {
+                    const res = await fetch('/backend/api/campaigns/export', {credentials: 'include'});
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const blob = await res.blob();
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'campaigns.csv';
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Export failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.exporting = false;
+                }
+            },
+            openImport() {
+                this.importText = '';
+                this.importResults = [];
+                this.importDialog = true;
+            },
+            closeImport() {
+                if (this.importResults.length) this.loadCampaigns();
+                this.importDialog = false;
+            },
+            async runImport() {
+                this.importLoading = true;
+                try {
+                    const res = await fetch('/backend/api/campaigns/import', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({lines: this.importText})
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    this.importResults = data.results || [];
+                    this.$root.$emit('show-message', {type: 'success',
+                        text: `Import done: ${data.imported} ok, ${data.failed} failed`});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Import failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.importLoading = false;
+                }
+            },
+            // --- D1f traffic simulation (dry run, served by the tracking plane) ---
+            openSimulate(item) {
+                this.simulateItem = item;
+                this.simulateData = {};
+                this.simulateDialog = true;
+                this.runSimulate();
+            },
+            async runSimulate() {
+                if (!this.simulateItem) return;
+                this.simulateLoading = true;
+                try {
+                    const res = await fetch('/simulate/' + this.simulateItem.alias, {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({count: 100, seed: 42})
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    this.simulateData = data;
+                } catch (err) {
+                    this.simulateDialog = false;
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Simulation failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.simulateLoading = false;
+                }
+            },
+            simulateFlowName(idx) {
+                const flows = ((this.simulateItem || {}).config || {}).flows || [];
+                const sorted = flows.slice().sort((a, b) =>
+                    (a.type === 'forced' ? 0 : 1) - (b.type === 'forced' ? 0 : 1)
+                    || (a.position || 9999) - (b.position || 9999));
+                const f = sorted[parseInt(idx, 10)];
+                return (f && (f.name || f.schema)) || ('Flow #' + idx);
+            },
+            simulateBarWidth(n) {
+                const total = (this.simulateData.count || 0);
+                return Math.max(2, Math.round((n / (total || 1)) * 100)) + '%';
+            },
+            simColor(idx) {
+                return this.simPalette[parseInt(idx, 10) % this.simPalette.length];
+            },
             loadSettings() { // todo: make it global
                 fetch("/backend/api/settings/", {
                     credentials: "include"
@@ -1474,20 +2043,6 @@
                         }
                     });
             },
-            addFilter() {
-                if(!Array.isArray(this.flowForm.filters)) {
-                    this.flowForm.filters = [];
-                }
-                this.flowForm.filters.push({
-                    key: "",
-                    operator: "equals",
-                    value: "",
-                    condition: this.flowForm.filters.length > 0 ? "or" : ""
-                });
-            },
-            removeFilter(index) {
-                this.flowForm.filters.splice(index, 1);
-            },
             addParameter() {
                 this.form.paramsIdMapping.push({
                     name: '',
@@ -1498,6 +2053,198 @@
             },
             removeParameter(index) {
                 this.form.paramsIdMapping.splice(index, 1);
+            },
+            // ─── Rule group editor (filters) ─────────────────────────
+            loadFiltersModel(filters) {
+                // Migrate any stored format into the editor model:
+                //  - group dict {combinator, groups} → as-is
+                //  - list of group dicts → with optional leading {combinator} marker
+                //  - legacy flat [{key/parameter, operator, value, condition}] → one AND group
+                const model = {combinator: 'and', groups: []};
+                if (!filters || (Array.isArray(filters) && !filters.length)) return model;
+                let rawGroups = null;
+                if (Array.isArray(filters)) {
+                    const looksGrouped = filters.some(f => f && typeof f === 'object' && 'conditions' in f);
+                    if (looksGrouped) {
+                        rawGroups = [];
+                        filters.forEach(f => {
+                            if (f && typeof f === 'object' && Object.keys(f).length === 1 && 'combinator' in f) {
+                                model.combinator = f.combinator === 'or' ? 'or' : 'and';
+                            } else if (f) {
+                                rawGroups.push(f);
+                            }
+                        });
+                    } else {
+                        rawGroups = [{
+                            logic: 'and',
+                            conditions: filters.map(f => ({
+                                field: (f && (f.key || f.parameter || f.field)) || '',
+                                operator: (f && f.operator) || 'equals',
+                                value: f && f.value !== undefined && f.value !== null ? String(f.value) : '',
+                                invert: false
+                            }))
+                        }];
+                    }
+                } else if (typeof filters === 'object') {
+                    model.combinator = filters.combinator === 'or' ? 'or' : 'and';
+                    rawGroups = filters.groups || [];
+                }
+                model.groups = (rawGroups || []).map(g => ({
+                    logic: g.logic === 'or' ? 'or' : 'and',
+                    conditions: (g.conditions || []).map(c => {
+                        const op = c.operator || 'equals';
+                        const value = c.value !== undefined && c.value !== null ? String(c.value) : '';
+                        return {
+                            field: c.field || c.key || c.parameter || '',
+                            operator: op,
+                            value: value,
+                            invert: !!c.invert,
+                            valueList: (op === 'in' || op === 'not_in')
+                                ? value.split(',').map(s => s.trim()).filter(Boolean)
+                                : []
+                        };
+                    })
+                }));
+                return model;
+            },
+            saveFiltersModel(model) {
+                // Serialize the editor model back to the stored group format.
+                // No filters → plain [] (matches everything, same as before).
+                const groups = (model.groups || [])
+                    .map(g => ({
+                        logic: g.logic === 'or' ? 'or' : 'and',
+                        conditions: (g.conditions || [])
+                            .filter(c => c.field)
+                            .map(c => ({
+                                field: c.field,
+                                operator: c.operator || 'equals',
+                                value: (c.operator === 'in' || c.operator === 'not_in')
+                                    ? (c.valueList || []).join(',')
+                                    : (c.value !== undefined && c.value !== null ? String(c.value) : ''),
+                                invert: !!c.invert
+                            }))
+                    }))
+                    .filter(g => g.conditions.length);
+                if (!groups.length) return [];
+                return {combinator: model.combinator === 'or' ? 'or' : 'and', groups};
+            },
+            addFilterGroup() {
+                this.filtersModel.groups.push({logic: 'and', conditions: []});
+                this.addCondition(this.filtersModel.groups.length - 1);
+            },
+            removeFilterGroup(gi) {
+                this.filtersModel.groups.splice(gi, 1);
+            },
+            addCondition(gi) {
+                const group = this.filtersModel.groups[gi];
+                if (!group) return;
+                group.conditions.push({field: 'country', operator: 'equals', value: '', invert: false, valueList: []});
+            },
+            removeCondition(gi, ci) {
+                const group = this.filtersModel.groups[gi];
+                if (group) group.conditions.splice(ci, 1);
+            },
+            operatorsForField(field) {
+                if (field === 'ip') return this.allOperators.slice();
+                if (this.numericFilterFields.includes(field)) {
+                    return this.allOperators.filter(o =>
+                        ['equals', 'not_equals', 'greater', 'less', 'greater_eq', 'less_eq', 'in', 'not_in', 'exists', 'not_exists'].includes(o));
+                }
+                return this.allOperators.filter(o => o !== 'cidr');
+            },
+            isListOperator(op) {
+                return op === 'in' || op === 'not_in';
+            },
+            isExistenceOperator(op) {
+                return op === 'exists' || op === 'not_exists';
+            },
+            // ─── Schedule / caps helpers ─────────────────────────────
+            parseSchedule(schedule) {
+                const model = {timezone: 'UTC', days: [], hoursFrom: 0, hoursTo: 23};
+                if (!schedule || typeof schedule !== 'object') return model;
+                model.timezone = schedule.timezone || 'UTC';
+                model.days = (schedule.days || []).map(d => String(d).toLowerCase().slice(0, 3));
+                const hours = schedule.hours;
+                if (Array.isArray(hours) && hours.length) {
+                    model.hoursFrom = Math.min(...hours.map(Number));
+                    model.hoursTo = Math.max(...hours.map(Number));
+                } else if (hours && typeof hours === 'object') {
+                    model.hoursFrom = hours.from !== undefined ? Number(hours.from) : 0;
+                    model.hoursTo = hours.to !== undefined ? Number(hours.to) : 23;
+                }
+                return model;
+            },
+            buildSchedule(s) {
+                if (!s) return null;
+                const from = s.hoursFrom === '' || s.hoursFrom === null || s.hoursFrom === undefined ? 0 : Number(s.hoursFrom);
+                const to = s.hoursTo === '' || s.hoursTo === null || s.hoursTo === undefined ? 23 : Number(s.hoursTo);
+                const days = (s.days || []).slice();
+                const hasDays = days.length > 0;
+                const hasHours = !(from === 0 && to === 23);
+                if (!hasDays && !hasHours) return null;
+                const schedule = {};
+                if (s.timezone) schedule.timezone = s.timezone;
+                if (hasDays) schedule.days = days;
+                if (hasHours) schedule.hours = {from, to};
+                return schedule;
+            },
+            toggleScheduleDay(day) {
+                const days = this.flowForm.schedule.days || (this.flowForm.schedule.days = []);
+                const i = days.indexOf(day);
+                if (i >= 0) days.splice(i, 1);
+                else days.push(day);
+            },
+            clearSchedule() {
+                this.flowForm.schedule = {timezone: 'UTC', days: [], hoursFrom: 0, hoursTo: 23};
+            },
+            flowScheduleSummary(schedule) {
+                if (!schedule) return '';
+                const parts = [];
+                if (schedule.timezone) parts.push(schedule.timezone);
+                if (schedule.days && schedule.days.length) parts.push(schedule.days.join(','));
+                if (schedule.hours) {
+                    parts.push(typeof schedule.hours === 'object' && !Array.isArray(schedule.hours)
+                        ? `hours ${schedule.hours.from}-${schedule.hours.to}`
+                        : `hours ${schedule.hours.join(',')}`);
+                }
+                return parts.join(' · ') || '—';
+            },
+            flowCapsSummary(caps) {
+                const parts = [];
+                if (caps.per_hour) parts.push(`${caps.per_hour}/hour`);
+                if (caps.per_day) parts.push(`${caps.per_day}/day`);
+                if (caps.total) parts.push(`${caps.total} total`);
+                return parts.join(', ') || '—';
+            },
+            flowFiltersSummary(flow) {
+                const f = flow.filters;
+                if (!f || (Array.isArray(f) && !f.length)) return [];
+                const lines = [];
+                const describe = c => `${c.invert ? 'NOT ' : ''}${c.field || c.key || c.parameter} ${c.operator} ${c.value}`;
+                if (Array.isArray(f)) {
+                    const looksGrouped = f.some(x => x && typeof x === 'object' && 'conditions' in x);
+                    if (!looksGrouped) {
+                        // legacy flat list
+                        f.forEach((c, i) => {
+                            const glue = i === 0 ? '' : ((c.condition || 'and').toUpperCase() + ' ');
+                            lines.push(glue + describe(c));
+                        });
+                        return lines;
+                    }
+                    f.forEach((g, gi) => {
+                        if (g && g.conditions) {
+                            lines.push(`Group ${gi + 1} (${g.logic || 'and'}): ` + g.conditions.map(describe).join(`, ${g.logic === 'or' ? 'or' : 'and'} `));
+                        }
+                    });
+                    return lines;
+                }
+                if (typeof f === 'object') {
+                    const comb = f.combinator === 'or' ? 'ANY' : 'ALL';
+                    (f.groups || []).forEach((g, gi) => {
+                        lines.push(`${comb} · Group ${gi + 1} (${g.logic || 'and'}): ` + (g.conditions || []).map(describe).join(`, ${g.logic === 'or' ? 'or' : 'and'} `));
+                    });
+                }
+                return lines;
             },
             async generateTrackingScript() {
                 if (this.form.integration_method === null) {
@@ -1577,7 +2324,7 @@
 
                               // 5. Method for conversions
                               window.trackConversion = async (eventType, cost = 0) => {
-                                if (!['lead', 'sale', 'rejected', 'upsale', 'pending'].includes(eventType)) return;
+                                if (!['lead', 'sale', 'rejected', 'upsale', 'hold'].includes(eventType)) return;
                                 try {
                                   await fetch(TRACKING_URL, {
                                     method: 'POST',
@@ -1709,6 +2456,18 @@
                     };
                     this.editedFlowIndex = null;
                 }
+                // normalize the optional per-flow blocks for the editor
+                if (!this.flowForm.schedule || typeof this.flowForm.schedule !== 'object') {
+                    this.flowForm.schedule = {timezone: 'UTC', days: [], hoursFrom: 0, hoursTo: 23};
+                } else {
+                    this.flowForm.schedule = this.parseSchedule(this.flowForm.schedule);
+                }
+                if (!this.flowForm.caps || typeof this.flowForm.caps !== 'object') {
+                    this.flowForm.caps = {per_hour: 0, per_day: 0, total: 0};
+                } else {
+                    this.flowForm.caps = {per_hour: 0, per_day: 0, total: 0, ...this.flowForm.caps};
+                }
+                this.filtersModel = this.loadFiltersModel(this.flowForm.filters);
             },
 
 
@@ -1728,6 +2487,16 @@
                     return;
                 }
 
+                // serialize filters (group format), schedule and caps into the flow
+                this.flowForm.filters = this.saveFiltersModel(this.filtersModel);
+                this.flowForm.schedule = this.buildSchedule(this.flowForm.schedule);
+                const caps = {
+                    per_hour: Number(this.flowForm.caps && this.flowForm.caps.per_hour) || 0,
+                    per_day: Number(this.flowForm.caps && this.flowForm.caps.per_day) || 0,
+                    total: Number(this.flowForm.caps && this.flowForm.caps.total) || 0
+                };
+                this.flowForm.caps = (caps.per_hour || caps.per_day || caps.total) ? caps : null;
+
                 if(this.flowForm.type == 'default') {
                     this.flowForm.filters = [];
                 }
@@ -1741,7 +2510,6 @@
 
                 this.flowDialog = false;
                 this.editedFlowIndex = null;
-                // this.form.flows.sort((a, b) => a.position - b.position);
                 this.form.flows.sort((a, b) => {
                     const getPriority = (flow) => {
                         if (flow.type === 'forced') return 0;   // above everything
@@ -1795,6 +2563,7 @@
                         use_title_as_keyword: this.form.use_title_as_keyword,
                         send_query_params: this.form.send_query_params,
                         bind_ttl_hours: this.form.bind_ttl_hours,
+                        stickiness: !!this.form.stickiness,
                         cost_model: this.form.cost_model,
                         traffic_loss_percent: this.form.traffic_loss_percent,
                         cost: this.form.cost,
@@ -1848,7 +2617,7 @@
                     .catch(err => {
                         this.$root.$emit('show-message', {
                             type: 'error',
-                            text: `Save failed: ${err.message}`
+                            text: `Save failed: ${sanitizeToastMessage(err.message)}`
                         });
                     });
             },
@@ -1886,6 +2655,7 @@
                     use_title_as_keyword: item.config?.use_title_as_keyword ?? true,
                     send_query_params: item.config?.send_query_params ?? true,
                     bind_ttl_hours: item.config?.bind_ttl_hours ?? 24,
+                    stickiness: item.config?.stickiness ?? false,
                     cost_model: item.config?.cost_model || 'cpc',
                     traffic_loss_percent: item.config?.traffic_loss_percent ?? 0,
                     cost: item.config?.cost ?? 0,
@@ -1900,7 +2670,9 @@
 
             },
             loadCampaigns() {
+                this.loading = true;
                 this.preloadData();
+                this.loadArchivedIds();
                 fetch("/backend/api/campaigns/", {
                     credentials: "include"
                 })
@@ -1912,8 +2684,11 @@
                         console.error(err);
                         this.$root.$emit("show-message", {
                             type: "error",
-                            text: err.message
+                            text: sanitizeToastMessage(err.message)
                         });
+                    })
+                    .finally(() => {
+                        this.loading = false;
                     });
                 this.loadCampaignMetrics();
             },
@@ -2022,7 +2797,7 @@
                     this.tagEditor.open = false;
                     this.$root.$emit('show-message', {type: 'success', text: 'Tags saved'});
                 } catch (err) {
-                    this.$root.$emit('show-message', {type: 'error', text: 'Failed to save tags: ' + err.message});
+                    this.$root.$emit('show-message', {type: 'error', text: 'Failed to save tags: ' + sanitizeToastMessage(err.message)});
                 }
             },
             openBulkTags() {
@@ -2050,7 +2825,7 @@
                     this.loadCampaigns();
                     this.$root.$emit('show-message', {type: 'success', text: 'Tags applied'});
                 } catch (err) {
-                    this.$root.$emit('show-message', {type: 'error', text: 'Bulk tagging failed: ' + err.message});
+                    this.$root.$emit('show-message', {type: 'error', text: 'Bulk tagging failed: ' + sanitizeToastMessage(err.message)});
                 } finally {
                     this.bulkLoading = false;
                 }
@@ -2077,15 +2852,19 @@
                 const m = this.metricsMap[item.id];
                 if (!m) return '';
                 const profit = parseFloat(m.profit) || 0;
-                const cost = parseFloat(m.cost) || 0;
+                const cost = Math.abs(parseFloat(m.cost) || 0);
                 const roi = parseFloat(m.roi) || 0;
-                // ROI first; fall back to profit/cost when cost is 0
-                const score = roi !== 0 ? roi : (cost > 0 ? profit / cost * 100 : (profit > 0 ? 1000 : (profit < 0 ? -1000 : 0)));
-                if (score >= 50) return 'perf-win-2';
+                // ROI first; fall back to profit/cost when ROI is 0
+                let score = null;
+                if (roi !== 0) score = roi;
+                else if (profit !== 0) score = cost ? (profit / cost) * 100 : (profit > 0 ? 100 : -100);
+                if (score === null || score === 0) return '';
+                if (score >= 50) return 'perf-win-3';
+                if (score >= 10) return 'perf-win-2';
                 if (score > 0) return 'perf-win-1';
-                if (score <= -50) return 'perf-loss-2';
-                if (score < 0) return 'perf-loss-1';
-                return '';
+                if (score <= -50) return 'perf-loss-3';
+                if (score <= -10) return 'perf-loss-2';
+                return 'perf-loss-1';
             },
             signClass(v) {
                 const n = parseFloat(v) || 0;
@@ -2135,7 +2914,7 @@
                     .catch(err => {
                         this.$root.$emit('show-message', {
                             type: 'error',
-                            text: `Failed to delete campaign: ${err.message}`
+                            text: `Failed to delete campaign: ${sanitizeToastMessage(err.message)}`
                         });
                     });
             },
@@ -2181,7 +2960,7 @@
                     .catch(err => {
                         this.$root.$emit('show-message', {
                             type: 'error',
-                            text: `Failed to duplicate campaign: ${err.message}`
+                            text: `Failed to duplicate campaign: ${sanitizeToastMessage(err.message)}`
                         });
                     });
             },
@@ -2276,7 +3055,7 @@
                         sale: true,
                         rejected: false,
                         upsale: false,
-                        pending: false
+                        hold: false
                     }
                 };
             },
@@ -2349,6 +3128,7 @@
                     use_title_as_keyword: true,
                     send_query_params: true,
                     bind_ttl_hours: 24,
+                    stickiness: false,
                     cost_model: 'cpc',
                     traffic_loss_percent: 0,
                     cost: 0,
@@ -2364,4 +3144,141 @@
         }
     });
 </script>
+
+<style>
+    .bulk-bar {
+        background: var(--status-success-bg, #f0fdf4);
+        border-bottom: 1px solid var(--border-soft, #e3e8ef);
+        border-radius: var(--radius-md, 12px) var(--radius-md, 12px) 0 0;
+    }
+    /* D1b — archived rows stay visible but clearly dormant */
+    .v-data-table tr.archived-row > td {
+        opacity: 0.45;
+    }
+    .archived-switch {
+        max-width: 140px;
+    }
+    .import-results {
+        max-height: 180px;
+        overflow-y: auto;
+        border: 1px solid var(--border-soft, #e3e8ef);
+        border-radius: var(--radius-md, 12px);
+        padding: 8px 12px;
+    }
+    .import-ok { color: var(--status-success, #16a34a); }
+    .import-fail { color: var(--status-danger, #dc2626); }
+    /* D1f — simulation distribution bars */
+    .sim-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2, 8px);
+        margin-bottom: 6px;
+    }
+    .sim-label {
+        width: 160px;
+        flex-shrink: 0;
+        font-size: var(--fs-12, 12px);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .sim-bar-track {
+        flex: 1;
+        height: 14px;
+        background: var(--surface-raised, #eef1f5);
+        border-radius: var(--radius-sm, 8px);
+        overflow: hidden;
+    }
+    .sim-bar {
+        height: 100%;
+        border-radius: var(--radius-sm, 8px);
+        transition: width var(--t-med, 240ms) ease-out;
+    }
+    .sim-bar--schema { background: #2563eb; }
+    .sim-bar--offer { background: #d97706; }
+    .sim-count {
+        width: 44px;
+        text-align: right;
+        font-size: var(--fs-12, 12px);
+        font-weight: 600;
+    }
+    .campaigns-table-wrap {
+        overflow-x: auto;
+    }
+    .campaigns-table {
+        min-width: 1100px;
+    }
+    .campaign-name {
+        display: block;
+        min-width: 160px;
+        max-width: 280px;
+        word-break: normal;
+    }
+    .param-header {
+        font-size: var(--fs-11, 11px);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary, #667085);
+        border-bottom: 1px solid var(--border-soft, #e3e8ef);
+    }
+    .direct-tracking-head {
+        border-top: 1px solid var(--border-soft, #e3e8ef);
+        margin-top: 8px;
+        padding-top: 16px;
+    }
+    .direct-tracking-title {
+        font-size: var(--fs-13, 13px);
+        font-weight: 600;
+        letter-spacing: 0.02em;
+    }
+    .direct-tracking-hint {
+        margin-top: 4px;
+        font-size: var(--fs-12, 12px);
+        line-height: 1.5;
+        color: var(--text-secondary, #667085);
+    }
+    .filter-group-card {
+        border: 1px solid var(--border-soft, #e3e8ef) !important;
+        border-radius: var(--radius-md, 12px);
+        background: var(--surface-raised, transparent);
+    }
+    .flow-extra-panels .v-expansion-panel {
+        border: 1px solid var(--border-soft, #e3e8ef);
+        border-radius: var(--radius-md, 12px) !important;
+        margin-bottom: 8px;
+    }
+    .flow-extra-panels .v-expansion-panel::before {
+        box-shadow: none;
+    }
+    .day-chip--on {
+        font-weight: 600;
+    }
+    .tags-filter {
+        max-width: 200px;
+    }
+    .period-filter {
+        max-width: 170px;
+    }
+    .section-enter {
+        animation: camp-fade-up var(--t-med, 240ms) ease-out;
+    }
+    @keyframes camp-fade-up {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: none; }
+    }
+    /* Perf row tints in dark mode (light hexes live in the global sheet) */
+    [data-theme="dark"] .v-data-table tr.perf-win-1 > td { background: #16241c !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-2 > td { background: var(--status-success-bg) !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-3 > td { background: #1a3526 !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-1 > td { background: #2a1a18 !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-2 > td { background: var(--status-danger-bg) !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-3 > td { background: #3a201d !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-1:hover > td,
+    [data-theme="dark"] .v-data-table tr.perf-win-2:hover > td,
+    [data-theme="dark"] .v-data-table tr.perf-win-3:hover > td { background: #1d3a2a !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-1:hover > td,
+    [data-theme="dark"] .v-data-table tr.perf-loss-2:hover > td,
+    [data-theme="dark"] .v-data-table tr.perf-loss-3:hover > td { background: #452622 !important; }
+</style>
 {% endraw %}

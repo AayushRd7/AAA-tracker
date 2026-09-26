@@ -13,7 +13,7 @@
 
         <!-- Stat cards -->
         <v-row dense>
-            <v-col v-for="metric in metrics" :key="metric.title" cols="12" sm="6" md="2">
+            <v-col v-for="metric in metrics" :key="metric.title" cols="6" sm="4" md="2">
                 <v-card class="pa-4 stat-card">
                     <template v-if="loading">
                         <v-skeleton-loader type="text, heading" class="mt-1"></v-skeleton-loader>
@@ -26,6 +26,10 @@
                             <div class="text-caption grey--text text--darken-1">{{ metric.title }}</div>
                         </div>
                         <div class="text-h5 font-weight-bold mt-3" :class="metric.title === 'ROI' ? (String(metric.value).startsWith('-') ? 'num-neg' : 'num-pos') : ''">{{ metric.value }}</div>
+                        <div v-if="metric.delta" class="text-caption compare-delta mt-1" :class="metric.deltaClass">
+                            <v-icon x-small>{{ metric.deltaIcon }}</v-icon>
+                            {{ metric.delta }} vs previous period
+                        </div>
                     </template>
                 </v-card>
             </v-col>
@@ -33,8 +37,8 @@
 
         <!-- Filters -->
         <v-card class="mt-4 pa-4">
-            <div class="d-flex flex-wrap align-center">
-                <div class="mr-2 mb-2">
+            <div class="filter-bar align-center">
+                <div>
                     <v-chip v-for="preset in datePresets" :key="preset.label"
                             small label outlined
                             :color="activePreset === preset.label ? 'primary' : 'grey'"
@@ -57,8 +61,7 @@
                                 outlined
                                 dense
                                 hide-details
-                                style="max-width: 240px;"
-                                class="mr-2"
+                                class="range-field"
                         ></v-text-field>
                     </template>
                     <v-card>
@@ -72,13 +75,12 @@
                 </v-menu>
                 <v-select
                         :items="['Hours', 'Days', 'Weeks', 'Months']"
-                        label="Detalization"
+                        label="Granularity"
                         v-model="filters.detailLevel"
                         outlined
                         dense
                         hide-details
-                        style="max-width: 140px;"
-                        class="mr-2"
+                        class="detail-select"
                 ></v-select>
                 <v-select
                         :items="campaigns"
@@ -92,18 +94,30 @@
                         multiple
                         chips
                         small-chips
-                        style="max-width: 240px;"
+                        class="campaigns-select"
                 ></v-select>
                 <v-switch
-                        v-model="liveMode"
-                        label="Live"
-                        class="ml-2 mt-0"
+                        v-model="compareMode"
+                        label="Compare"
                         hide-details
                         dense
                         color="primary"
+                        class="mt-0 ml-1"
+                ></v-switch>
+                <v-switch
+                        v-model="liveMode"
+                        label="Live"
+                        hide-details
+                        dense
+                        color="primary"
+                        class="mt-0 ml-1"
                 ></v-switch>
             </div>
         </v-card>
+
+        <!-- Main chart + tables: keyed by loading so the block re-enters with a
+             soft fade+rise each time fresh data lands -->
+        <div :key="'dash-main-' + loading" class="section-enter">
 
         <!-- Main chart -->
         <v-row class="mt-4">
@@ -111,9 +125,14 @@
                 <v-card class="pa-4">
                     <div class="d-flex align-center justify-space-between mb-2">
                         <div class="font-weight-medium">Performance over time</div>
-                        <v-btn text small color="primary" :disabled="!chartHasData" @click="exportChartCsv">
-                            <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
-                        </v-btn>
+                        <div class="d-flex align-center">
+                            <v-btn text small color="primary" :disabled="!chartHasData" @click="exportChartCsv">
+                                <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
+                            </v-btn>
+                            <v-btn text small color="primary" @click="openAnnotations">
+                                <v-icon small class="mr-1">mdi-bookmark-outline</v-icon>Annotations<template v-if="annotations.length"> ({{ annotations.length }})</template>
+                            </v-btn>
+                        </div>
                     </div>
                     <apexchart
                             height="400"
@@ -125,9 +144,60 @@
             </v-col>
         </v-row>
 
+        <!-- G51: live click feed (Binom-style raw feed; polls every 5s while Live is on) -->
+        <v-row>
+            <v-col cols="12">
+                <v-card class="live-card">
+                    <div class="d-flex align-center pa-4 pb-3">
+                        <div class="font-weight-medium mr-3">Live Clicks</div>
+                        <span v-if="liveMode" class="live-pulse" title="Live polling active"></span>
+                        <span class="live-count caption grey--text" v-if="liveClicks.length">{{ liveClicks.length }} shown</span>
+                        <v-spacer></v-spacer>
+                        <v-btn icon small @click="livePanelOpen = !livePanelOpen" :aria-label="livePanelOpen ? 'Collapse live feed' : 'Expand live feed'">
+                            <v-icon small>{{ livePanelOpen ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+                        </v-btn>
+                    </div>
+                    <v-expand-transition>
+                        <div v-show="livePanelOpen" class="live-panel">
+                            <div v-if="!liveClicks.length" class="live-empty grey--text">
+                                <template v-if="liveMode">Waiting for clicks…</template>
+                                <template v-else>Turn the Live switch on to stream incoming clicks</template>
+                            </div>
+                            <table v-else class="live-table">
+                                <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Campaign</th>
+                                    <th>Country</th>
+                                    <th>Device</th>
+                                    <th>Referrer</th>
+                                    <th>Status</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                <tr v-for="row in liveClicks" :key="row._key" :class="{ 'live-flash': row._flash }">
+                                    <td class="live-time">{{ liveTime(row.received_at) }}</td>
+                                    <td>{{ campaignName(row.campaign_id) }}</td>
+                                    <td>{{ row.country || '—' }}</td>
+                                    <td>{{ row.device_type || '—' }}</td>
+                                    <td class="live-ref" :title="row.referrer">{{ liveReferrer(row.referrer) }}</td>
+                                    <td>
+                                        <span v-if="row.status" class="status-chip" :class="liveStatusClass(row.status)">{{ row.status }}</span>
+                                        <span v-else-if="row.click" class="status-chip status-chip--info">click</span>
+                                        <span v-else class="grey--text">visit</span>
+                                    </td>
+                                </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </v-expand-transition>
+                </v-card>
+            </v-col>
+        </v-row>
+
         <!-- Tables -->
         <v-row>
-            <v-col cols="8">
+            <v-col cols="12">
                 <v-card>
                     <div class="d-flex align-center justify-space-between pa-4 pb-0">
                         <div class="font-weight-medium">Recent Visits</div>
@@ -135,35 +205,12 @@
                             <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
                         </v-btn>
                     </div>
-                    <v-data-table v-col-resize:dash-conversions="headers2" v-col-resize:dash-visits="headers"
+                    <v-data-table v-col-resize:dash-visits="headers"
                             :headers="headers"
                             :items="visits"
                             :items-per-page="10"
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
-                            dense
-                    >
-                        <template v-slot:no-data>
-                            <div class="empty-state">
-                                <v-icon>mdi-inbox-outline</v-icon>
-                                <div class="mt-2">No data yet</div>
-                            </div>
-                        </template>
-                    </v-data-table>
-                </v-card>
-            </v-col>
-            <v-col cols="4">
-                <v-card>
-                    <div class="d-flex align-center justify-space-between pa-4 pb-0">
-                        <div class="font-weight-medium">Latest Hits</div>
-                        <v-btn text small color="primary" :disabled="!visits.length" @click="exportVisitsCsv2">
-                            <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
-                        </v-btn>
-                    </div>
-                    <v-data-table
-                            :headers="headers2"
-                            :items="visits"
-                            :items-per-page="10"
-                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            :loading="loading"
                             dense
                     >
                         <template v-slot:no-data>
@@ -176,10 +223,84 @@
                 </v-card>
             </v-col>
         </v-row>
+
+        </div>
+
+        <!-- G57: annotations manage dialog -->
+        <v-dialog v-model="annotationDialog" max-width="520">
+            <v-card>
+                <v-card-title class="text-h6">Annotations</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-3">Vertical markers on the dashboard chart — shared across all campaigns.</div>
+                    <div v-for="a in annotations" :key="a.id" class="d-flex align-center mb-2">
+                        <span class="annotation-dot" :style="{ background: annotationColor(a.color) }"></span>
+                        <span class="annotation-date">{{ a.date }}</span>
+                        <span class="annotation-text">{{ a.text }}</span>
+                        <v-spacer></v-spacer>
+                        <v-btn icon x-small color="error" @click="deleteAnnotation(a)">
+                            <v-icon small>mdi-trash-can-outline</v-icon>
+                        </v-btn>
+                    </div>
+                    <v-divider v-if="annotations.length" class="my-3"></v-divider>
+                    <v-row dense>
+                        <v-col cols="4">
+                            <v-menu v-model="annotationDateMenu" :close-on-content-click="false" offset-y min-width="auto">
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-text-field v-model="newAnnotation.date" label="Date" readonly outlined dense hide-details
+                                                  prepend-icon="mdi-calendar" v-bind="attrs" v-on="on"></v-text-field>
+                                </template>
+                                <v-date-picker v-model="newAnnotation.date" no-title :first-day-of-week="1"
+                                               @input="annotationDateMenu = false"></v-date-picker>
+                            </v-menu>
+                        </v-col>
+                        <v-col cols="8">
+                            <v-text-field v-model="newAnnotation.text" label="Note" outlined dense hide-details
+                                          placeholder="e.g. Switched landing page" @keyup.enter="addAnnotation"></v-text-field>
+                        </v-col>
+                    </v-row>
+                    <v-select v-model="newAnnotation.color" :items="annotationColorOptions" label="Color"
+                              outlined dense hide-details class="mt-3"></v-select>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="annotationDialog = false">Close</v-btn>
+                    <v-btn color="primary" :disabled="!newAnnotation.date || !newAnnotation.text.trim()" @click="addAnnotation">Add</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
     </div>
 </script>
 
 <script type="application/javascript">
+    const DASH_CHART_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f59e0b', '#0ea5e9'];
+    const DASH_COLORS = {
+        info: '#2563eb',
+        unique: '#0ea5e9',
+        accent: '#7c3aed',
+        danger: '#dc2626',
+        success: '#16a34a',
+        warning: '#f59e0b',
+    };
+
+    // Toast helper shared by every section (all templates load in one shell):
+    // cap length and never surface raw SQL/HTML error bodies.
+    function sanitizeToastMessage(msg) {
+        let text = String(msg == null ? 'Something went wrong' : msg).trim();
+        if (text.indexOf('<') !== -1) text = 'Server error — check logs';
+        if (text.length > 120) text = text.slice(0, 120) + '…';
+        return text;
+    }
+
+    // Notify when the theme flips so charts and other canvas/pinned colors can re-color.
+    if (!window.__themePatched && window.setTheme) {
+        window.__themePatched = true;
+        const __origSetTheme = window.setTheme;
+        window.setTheme = function (t) {
+            __origSetTheme(t);
+            window.dispatchEvent(new CustomEvent('theme-changed', {detail: t}));
+        };
+    }
+
     Vue.component('dashboard-component', {
         template: '#dashboard-template',
         data() {
@@ -187,6 +308,23 @@
                 loading: false,
                 liveMode: false,
                 liveTimer: null,
+                livePanelOpen: false,
+                liveClicks: [],
+                liveAfter: null,
+                liveSeen: {},
+                liveSeq: 0,
+                annotationDialog: false,
+                annotationDateMenu: false,
+                annotations: [],
+                newAnnotation: { date: new Date().toISOString().split('T')[0], text: '', color: 'info' },
+                annotationColorOptions: [
+                    { text: 'Info (blue)', value: 'info' },
+                    { text: 'Success (green)', value: 'success' },
+                    { text: 'Warning (amber)', value: 'warning' },
+                    { text: 'Danger (red)', value: 'danger' },
+                ],
+                compareMode: false,
+                previous: null,
                 date_menu2: false,
                 dateRangeBackup: null,
                 activePreset: 'Last 30 days',
@@ -206,12 +344,12 @@
                 },
                 campaigns: [],
                 metrics: [
-                    {title: 'Clicks', value: 0, color: '#2196f3', icon: 'mdi-cursor-default-click-outline'},
-                    {title: 'Unique Clicks', value: 0, color: '#3f51b5', icon: 'mdi-account-switch-outline'},
-                    {title: 'Conversions', value: 0, color: '#673ab7', icon: 'mdi-check-decagram-outline'},
-                    {title: 'Cost', value: '$0', color: '#ef4444', icon: 'mdi-cash-minus'},
-                    {title: 'Revenue', value: '$0', color: '#16a34a', icon: 'mdi-cash-plus'},
-                    {title: 'ROI', value: '0%', color: '#009688', icon: 'mdi-trending-up'},
+                    {title: 'Clicks', value: 0, color: DASH_COLORS.info, icon: 'mdi-cursor-default-click-outline'},
+                    {title: 'Unique Clicks', value: 0, color: DASH_COLORS.unique, icon: 'mdi-account-switch-outline'},
+                    {title: 'Conversions', value: 0, color: DASH_COLORS.accent, icon: 'mdi-check-decagram-outline'},
+                    {title: 'Cost', value: '$0', color: DASH_COLORS.danger, icon: 'mdi-cash-minus'},
+                    {title: 'Revenue', value: '$0', color: DASH_COLORS.success, icon: 'mdi-cash-plus'},
+                    {title: 'ROI', value: '0%', color: DASH_COLORS.warning, icon: 'mdi-trending-up'},
                 ],
                 mainChart: {
                     series: [
@@ -234,7 +372,7 @@
                             curve: 'monotoneCubic'
                         },
                         theme: { mode: 'light' },
-                        colors: ['#2563eb', '#7c3aed', '#16a34a', '#f59e0b', '#0ea5e9'],
+                        colors: DASH_CHART_COLORS,
                         xaxis: {
                             type: 'category',
                             labels: {
@@ -264,12 +402,6 @@
                     {text: 'Referrer', value: 'referrer'},
                     {text: 'Time', value: 'received_at'},
                 ],
-                headers2: [
-                    {text: 'IP', value: 'ip'},
-                    {text: 'Country', value: 'country'},
-                    {text: 'Referrer', value: 'referrer'},
-                    {text: 'Time', value: 'received_at'},
-                ],
                 visits: [],
             }
         },
@@ -290,11 +422,19 @@
             },
         },
         mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
+            this.applyChartTheme();
+            window.addEventListener('theme-changed', this.applyChartTheme);
             this.loadData();
+            this.loadAnnotations();
+            document.addEventListener('visibilitychange', this.onVisibilityChange);
             this.$root.$on('load-dashboard', this.loadData);
         },
         beforeDestroy() {
+            window.removeEventListener('theme-changed', this.applyChartTheme);
+            document.removeEventListener('visibilitychange', this.onVisibilityChange);
             this.stopLiveFeed();
+            this.stopLiveClicks();
         },
         watch: {
             date_menu2(open) {
@@ -302,14 +442,44 @@
             },
             liveMode(on) {
                 if (on) {
+                    this.livePanelOpen = true;
                     this.loadVisits();
                     this.liveTimer = setInterval(this.loadVisits, 10000);
+                    this.startLiveClicks();
                 } else {
                     this.stopLiveFeed();
+                    this.stopLiveClicks();
                 }
+            },
+            compareMode() {
+                this.loadData();
             },
         },
         methods: {
+            applyChartTheme() {
+                const css = getComputedStyle(document.documentElement);
+                const val = n => (css.getPropertyValue(n) || '').trim();
+                const dark = document.documentElement.dataset.theme === 'dark';
+                const o = this.mainChart.chartOptions || {};
+                const chart = o.chart || {};
+                const grid = o.grid || {};
+                const tooltip = o.tooltip || {};
+                const legend = o.legend || {};
+                const xaxis = o.xaxis || {};
+                const yaxis = o.yaxis || {};
+                const xlabels = xaxis.labels || {};
+                const ylabels = yaxis.labels || {};
+                this.mainChart.chartOptions = {
+                    ...o,
+                    theme: {mode: dark ? 'dark' : 'light'},
+                    chart: {...chart, background: 'transparent'},
+                    grid: {...grid, borderColor: val('--border') || '#e4e7ec'},
+                    tooltip: {...tooltip, theme: dark ? 'dark' : 'light'},
+                    legend: {...legend, labels: {...(legend.labels || {}), colors: [val('--text-primary') || '#101828']}},
+                    xaxis: {...xaxis, labels: {...xlabels, style: {...(xlabels.style || {}), colors: val('--text-secondary') || '#667085'}}},
+                    yaxis: {...yaxis, labels: {...ylabels, style: {...(ylabels.style || {}), colors: val('--text-secondary') || '#667085'}}},
+                };
+            },
             loadVisits() {
                 fetch('/backend/api/dashboard/visits', {
                     method: 'POST',
@@ -327,6 +497,140 @@
                     clearInterval(this.liveTimer);
                     this.liveTimer = null;
                 }
+            },
+            // --- G51: live click feed ---
+            onVisibilityChange() {
+                // Resume immediately when the tab becomes visible again
+                if (!document.hidden && this.liveMode && this.liveClicksTimer) {
+                    this.pollLiveClicks();
+                }
+            },
+            startLiveClicks() {
+                this.liveClicks = [];
+                this.liveAfter = null;
+                this.liveSeen = {};
+                this.pollLiveClicks();
+                if (this.liveClicksTimer) clearInterval(this.liveClicksTimer);
+                this.liveClicksTimer = setInterval(this.pollLiveClicks, 5000);
+            },
+            stopLiveClicks() {
+                if (this.liveClicksTimer) {
+                    clearInterval(this.liveClicksTimer);
+                    this.liveClicksTimer = null;
+                }
+            },
+            pollLiveClicks() {
+                if (document.hidden) return;  // pause while the tab is in the background
+                const params = this.liveAfter ? '?after=' + encodeURIComponent(this.liveAfter) : '';
+                fetch('/backend/api/dashboard/live-clicks' + params)
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(rows => {
+                        if (!Array.isArray(rows) || !rows.length) return;
+                        const fresh = [];
+                        rows.forEach(r => {
+                            const key = (r.visitor_id || '') + '@' + r.received_at;
+                            if (this.liveSeen[key]) return;
+                            this.liveSeen[key] = true;
+                            this.$set(r, '_key', 'lc-' + (++this.liveSeq));
+                            this.$set(r, '_flash', !!this.liveAfter);
+                            fresh.push(r);
+                            if (!this.liveAfter || String(r.received_at) > String(this.liveAfter)) {
+                                this.liveAfter = r.received_at;
+                            }
+                        });
+                        if (fresh.length) {
+                            // rows arrive newest-first — keep that order on top of the feed
+                            this.liveClicks = [...fresh, ...this.liveClicks].slice(0, 60);
+                            this.$nextTick(() => {
+                                fresh.forEach(r => setTimeout(() => { r._flash = false; }, 1600));
+                            });
+                        }
+                    })
+                    .catch(err => console.error('live-clicks', err));
+            },
+            liveTime(ts) {
+                const s = String(ts || '');
+                return s.includes('T') ? (s.split('T')[1] || '').slice(0, 8) : s;
+            },
+            campaignName(id) {
+                const c = this.campaigns.find(x => x.id === id);
+                return c ? c.name : (id == null ? '—' : '#' + id);
+            },
+            liveReferrer(ref) {
+                if (!ref) return '—';
+                try {
+                    return new URL(ref).host;
+                } catch (e) {
+                    return ref.length > 32 ? ref.slice(0, 32) + '…' : ref;
+                }
+            },
+            liveStatusClass(status) {
+                const map = {sale: 'status-chip--success', upsale: 'status-chip--success', lead: 'status-chip--info', rejected: 'status-chip--danger', hold: 'status-chip--warning', trash: 'status-chip--neutral'};
+                return map[status] || 'status-chip--neutral';
+            },
+            // --- G57: annotations ---
+            annotationColor(color) {
+                const map = {success: '#16a34a', warning: '#f59e0b', danger: '#dc2626', info: '#2563eb'};
+                return map[color] || map.info;
+            },
+            openAnnotations() {
+                this.newAnnotation = { date: new Date().toISOString().split('T')[0], text: '', color: 'info' };
+                this.annotationDialog = true;
+            },
+            loadAnnotations() {
+                fetch('/backend/api/settings/annotations', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        this.annotations = data.annotations || [];
+                        this.applyChartAnnotations();
+                    })
+                    .catch(() => { this.annotations = []; });
+            },
+            addAnnotation() {
+                const payload = { date: this.newAnnotation.date, text: this.newAnnotation.text.trim(), color: this.newAnnotation.color };
+                if (!payload.date || !payload.text) return;
+                fetch('/backend/api/settings/annotations', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify(payload)
+                })
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(() => {
+                        this.newAnnotation.text = '';
+                        this.loadAnnotations();
+                        this.$root.$emit('show-message', {type: 'success', text: 'Annotation added'});
+                    })
+                    .catch(err => this.$root.$emit('show-message', {type: 'error', text: 'Annotation failed: ' + sanitizeToastMessage(err.message)}));
+            },
+            deleteAnnotation(a) {
+                fetch('/backend/api/settings/annotations/' + a.id, {method: 'DELETE', credentials: 'include'})
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        this.loadAnnotations();
+                    })
+                    .catch(err => this.$root.$emit('show-message', {type: 'error', text: 'Delete failed: ' + sanitizeToastMessage(err.message)}));
+            },
+            applyChartAnnotations() {
+                const o = this.mainChart.chartOptions || {};
+                const inRange = new Set((this.mainChart.series[0] ? this.mainChart.series[0].data : []).map(p => String(p.x)));
+                const markers = this.annotations
+                    .filter(a => !inRange.size || inRange.has(a.date))
+                    .map(a => ({
+                        x: a.date,
+                        strokeDashArray: 0,
+                        borderColor: this.annotationColor(a.color),
+                        label: {
+                            text: a.text,
+                            style: {color: '#fff', background: this.annotationColor(a.color), fontSize: '11px'},
+                            orientation: 'vertical',
+                            position: 'top',
+                        },
+                    }));
+                this.mainChart.chartOptions = {
+                    ...o,
+                    annotations: markers.length ? {xaxis: markers} : {xaxis: []},
+                };
             },
             applyPreset(preset) {
                 this.activePreset = preset.label;
@@ -376,13 +680,6 @@
                     'recent_visits.csv'
                 );
             },
-            exportVisitsCsv2() {
-                this.downloadCsv(
-                    this.headers2.map(h => h.text),
-                    this.visits.map(it => this.headers2.map(h => it[h.value])),
-                    'latest_hits.csv'
-                );
-            },
             exportChartCsv() {
                 const names = this.mainChart.series.map(s => s.name);
                 const rows = this.mainChart.series[0].data.map((point, i) =>
@@ -410,7 +707,8 @@
                     campaigns: this.filters.campaigns,
                     date_from: this.filters.date_range[0],
                     date_to: this.filters.date_range[1],
-                    detail_level: this.filters.detailLevel
+                    detail_level: this.filters.detailLevel,
+                    compare: this.compareMode
                 };
 
                 this.loadVisits();
@@ -424,13 +722,32 @@
                     .then(data => {
                         const m = data.metrics;
                         const roiNum = parseFloat(m.roi) || 0;
-                        const roiColor = roiNum > 0 ? '#16a34a' : (roiNum < 0 ? '#dc2626' : '#009688');
+                        const roiColor = roiNum > 0 ? DASH_COLORS.success : (roiNum < 0 ? DASH_COLORS.danger : DASH_COLORS.warning);
+                        this.previous = this.compareMode ? (data.previous || null) : null;
+
+                        // G50: delta vs the immediately-preceding period of the same length
+                        const pm = this.previous ? this.previous.metrics : null;
+                        const deltaFor = (cur, prev) => {
+                            if (!pm || prev == null || isNaN(parseFloat(prev))) return null;
+                            cur = parseFloat(cur) || 0;
+                            prev = parseFloat(prev) || 0;
+                            if (prev === 0) return cur > 0 ? '+100%' : null;
+                            const pct = (cur - prev) / Math.abs(prev) * 100;
+                            return (pct > 0 ? '+' : '') + pct.toLocaleString('en-US', {maximumFractionDigits: 1}) + '%';
+                        };
+                        const deltaMeta = (txt) => {
+                            if (!txt) return {delta: null};
+                            const up = !txt.startsWith('-');
+                            return {delta: txt, deltaIcon: up ? 'mdi-arrow-up-bold' : 'mdi-arrow-down-bold', deltaClass: up ? 'num-pos' : 'num-neg'};
+                        };
+                        const card = (base, cur, prev) => Object.assign({}, base, deltaMeta(deltaFor(cur, prev)));
+
                         this.metrics = [
-                            {title: 'Clicks', value: Number(m.clicks || 0).toLocaleString(), color: '#2196f3', icon: 'mdi-cursor-default-click-outline'},
-                            {title: 'Unique Clicks', value: Number(m.unique_clicks || 0).toLocaleString(), color: '#3f51b5', icon: 'mdi-account-switch-outline'},
-                            {title: 'Conversions', value: Number(m.conversions || 0).toLocaleString(), color: '#673ab7', icon: 'mdi-check-decagram-outline'},
-                            {title: 'Cost', value: '$' + Number(m.cost || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}), color: '#ef4444', icon: 'mdi-cash-minus'},
-                            {title: 'Revenue', value: '$' + Number(m.revenue || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}), color: '#16a34a', icon: 'mdi-cash-plus'},
+                            card({title: 'Clicks', value: Number(m.clicks || 0).toLocaleString(), color: DASH_COLORS.info, icon: 'mdi-cursor-default-click-outline'}, m.clicks, pm && pm.clicks),
+                            card({title: 'Unique Clicks', value: Number(m.unique_clicks || 0).toLocaleString(), color: DASH_COLORS.unique, icon: 'mdi-account-switch-outline'}, m.unique_clicks, pm && pm.unique_clicks),
+                            card({title: 'Conversions', value: Number(m.conversions || 0).toLocaleString(), color: DASH_COLORS.accent, icon: 'mdi-check-decagram-outline'}, m.conversions, pm && pm.conversions),
+                            card({title: 'Cost', value: '$' + Number(m.cost || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}), color: DASH_COLORS.danger, icon: 'mdi-cash-minus'}, m.cost, pm && pm.cost),
+                            card({title: 'Revenue', value: '$' + Number(m.revenue || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}), color: DASH_COLORS.success, icon: 'mdi-cash-plus'}, m.revenue, pm && pm.revenue),
                             {title: 'ROI', value: (roiNum < 0 ? '' : '+') + (Number(roiNum).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})) + '%', color: roiColor, icon: roiNum < 0 ? 'mdi-trending-down' : 'mdi-trending-up'},
                         ];
 
@@ -462,9 +779,28 @@
                             }
                         ];
 
+                        // G50: overlay the previous period as dashed trend lines
+                        if (this.previous && this.previous.chart) {
+                            const prevChart = this.previous.chart;
+                            this.mainChart.series.push({
+                                name: 'Visits (prev)',
+                                data: categories.map((label, i) => ({x: label, y: (prevChart.visits[i] || 0)}))
+                            });
+                            this.mainChart.series.push({
+                                name: 'Conversions (prev)',
+                                data: categories.map((label, i) => ({x: label, y: (prevChart.conversions[i] || 0)}))
+                            });
+                        }
+                        this.mainChart.chartOptions.stroke = {
+                            ...(this.mainChart.chartOptions.stroke || {}),
+                            dashArray: this.mainChart.series.map(s => s.name.endsWith('(prev)') ? 6 : 0),
+                        };
+
                         this.mainChart.chartOptions.xaxis.type = 'category';
                         delete this.mainChart.chartOptions.xaxis.categories;
 
+                        this.applyChartTheme();
+                        this.applyChartAnnotations();
                         this.loading = false;
                         this.$root.$emit('hide-overlay');
                     }).catch(() => {
@@ -477,4 +813,149 @@
         }
     });
 </script>
+
+<style>
+    .compare-delta {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        font-variant-numeric: tabular-nums;
+    }
+    /* G51: live click feed — dense mono-ish raw feed */
+    .live-card {
+        overflow: hidden;
+    }
+    .live-panel {
+        max-height: 340px;
+        overflow-y: auto;
+        border-top: 1px solid var(--border-soft);
+    }
+    .live-empty {
+        padding: var(--space-5, 24px);
+        text-align: center;
+        font-size: var(--fs-12, 12px);
+    }
+    .live-count {
+        font-variant-numeric: tabular-nums;
+    }
+    .live-pulse {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--status-success, #16a34a);
+        animation: live-pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes live-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.35; transform: scale(0.8); }
+    }
+    .live-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: var(--mono-stack, 'SFMono-Regular', ui-monospace, Menlo, Consolas, monospace);
+        font-size: var(--fs-12, 12px);
+        font-variant-numeric: tabular-nums;
+    }
+    .live-table th {
+        position: sticky;
+        top: 0;
+        background: var(--surface);
+        color: var(--text-secondary);
+        text-align: left;
+        font-size: 10px;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        font-weight: 600;
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--border-soft);
+        font-family: var(--font-stack);
+    }
+    .live-table td {
+        padding: 6px 12px;
+        border-bottom: 1px solid var(--border-soft);
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 220px;
+    }
+    .live-table tbody tr:hover td {
+        background: var(--surface-hover);
+    }
+    .live-time {
+        color: var(--text-secondary);
+    }
+    .live-ref {
+        color: var(--text-secondary);
+        max-width: 260px;
+    }
+    /* subtle flash on freshly streamed rows */
+    .live-table tr.live-flash td {
+        animation: live-row-flash 1.4s ease-out;
+    }
+    @keyframes live-row-flash {
+        0% { background: var(--accent-soft); }
+        100% { background: transparent; }
+    }
+    /* G57: annotations dialog */
+    .annotation-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 10px;
+        flex: 0 0 auto;
+    }
+    .annotation-date {
+        font-family: var(--mono-stack, monospace);
+        font-size: var(--fs-12, 12px);
+        color: var(--text-secondary);
+        margin-right: 10px;
+        flex: 0 0 auto;
+    }
+    .annotation-text {
+        font-size: var(--fs-13, 13px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .range-field {
+        min-width: 260px;
+    }
+    .detail-select {
+        min-width: 140px;
+    }
+    .campaigns-select {
+        min-width: 220px;
+    }
+    .section-enter {
+        animation: dash-fade-up var(--t-med, 240ms) ease-out;
+    }
+    @keyframes dash-fade-up {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: none; }
+    }
+    /* ApexCharts chrome in dark mode */
+    [data-theme="dark"] .apexcharts-toolbar svg {
+        fill: var(--text-secondary);
+    }
+    [data-theme="dark"] .apexcharts-menu {
+        background: var(--surface);
+        border: 1px solid var(--border);
+    }
+    [data-theme="dark"] .apexcharts-menu-item:hover {
+        background: var(--surface-hover);
+    }
+    [data-theme="dark"] .apexcharts-tooltip.apexcharts-theme-dark {
+        background: var(--chrome-2) !important;
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+    [data-theme="dark"] .apexcharts-tooltip-title {
+        background: var(--surface-hover) !important;
+        border-bottom: 1px solid var(--border);
+    }
+    [data-theme="dark"] .apexcharts-legend-text {
+        color: var(--text-primary) !important;
+    }
+</style>
 {% endraw %}

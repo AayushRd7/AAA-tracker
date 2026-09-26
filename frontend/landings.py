@@ -310,7 +310,8 @@ def delete_landing(landing_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Landing not found")
 
     folder_path = landing_path(landing.folder)
-    if landing.type == 'local_file' and os.path.exists(folder_path):
+    # Landing.type is a LandingMood enum — compare the value, not the member
+    if getattr(landing.type, "value", landing.type) == 'local_file' and os.path.exists(folder_path):
         shutil.rmtree(folder_path)
 
     db.delete(landing)

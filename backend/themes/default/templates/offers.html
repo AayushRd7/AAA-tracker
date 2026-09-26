@@ -6,7 +6,21 @@
                 <div class="page-title">Offers</div>
                 <div class="page-subtitle">Manage your offers</div>
             </v-col>
-            <v-col class="d-flex justify-end" cols="auto">
+            <v-col class="d-flex justify-end align-center" cols="auto">
+                <v-switch
+                        v-model="showArchived"
+                        label="Show archived"
+                        inset
+                        dense
+                        hide-details
+                        class="mr-4 mt-0 archived-switch"
+                ></v-switch>
+                <v-btn small outlined class="mr-2" @click="exportCsv" :loading="exporting">
+                    <v-icon small class="mr-1">mdi-file-download-outline</v-icon>Export
+                </v-btn>
+                <v-btn small outlined class="mr-2" @click="openImport">
+                    <v-icon small class="mr-1">mdi-file-upload-outline</v-icon>Import
+                </v-btn>
                 <v-btn color="primary" elevation="0" @click="openCreate">
                     <v-icon small class="mr-1">mdi-plus</v-icon>
                     Create Offer
@@ -14,8 +28,8 @@
             </v-col>
         </v-row>
 
-        <v-dialog v-model="dialog" max-width="700px">
-            <v-card>
+        <v-dialog v-model="dialog">
+            <v-card class="dialog-lg">
                 <v-card-title>
                     <span class="text-h6">{{ isEdit ? 'Edit Offer' : 'Add Offer' }}</span>
                 </v-card-title>
@@ -51,8 +65,8 @@
                     ></v-select>
 
                     <!-- Quick create affiliate network, inline from the offer form -->
-                    <v-dialog v-model="networkDialog" max-width="480px">
-                        <v-card>
+                    <v-dialog v-model="networkDialog">
+                        <v-card class="dialog-sm">
                             <v-card-title class="text-h6">Add Affiliate Network</v-card-title>
                             <v-card-text>
                                 <v-text-field label="Name" v-model="networkForm.name" outlined dense></v-text-field>
@@ -90,7 +104,8 @@
                             :items="countryOptions"
                             item-text="code"
                             item-value="code"
-                            hint="Enter ISO codes (US, CA, etc)"
+                            :filter="countryFilter"
+                            hint="Pick from the list or type to search by name / ISO code (US, CA, …)"
                             persistent-hint
                     ></v-combobox>
 
@@ -106,7 +121,7 @@
                     <v-select
                             label="Currency"
                             v-model="form.currency"
-                            :items="['USD', 'EUR', 'GBP']"
+                            :items="['USD', 'EUR', 'GBP', 'JPY']"
                             outlined
                             dense
                     ></v-select>
@@ -117,6 +132,31 @@
                             :items="['active', 'paused', 'archived']"
                             outlined
                             dense
+                    ></v-select>
+
+                    <v-text-field
+                            label="Daily Conversions Cap"
+                            v-model="form.daily_conversions_cap"
+                            type="number"
+                            min="0"
+                            clearable
+                            outlined
+                            dense
+                            hint="Max sale/upsale conversions per day — leave empty for no cap"
+                            persistent-hint
+                    ></v-text-field>
+
+                    <v-select
+                            label="Overflow Offer"
+                            v-model="form.overflow_offer_id"
+                            :items="overflowOptions"
+                            item-text="name"
+                            item-value="id"
+                            clearable
+                            outlined
+                            dense
+                            hint="Offer used when the daily cap is reached — empty means the flow is skipped"
+                            persistent-hint
                     ></v-select>
 
                     <v-textarea
@@ -150,13 +190,99 @@
         </v-dialog>
 
 
+        <v-dialog v-model="importDialog" persistent max-width="640px">
+            <v-card>
+                <v-card-title class="text-h6">Import offers (CSV)</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-2">
+                        Paste CSV with the export header
+                        <code>id,name,url,affiliate_network_id,countries,payout,currency,status,tags,daily_conversions_cap,overflow_offer_id,notes</code> —
+                        rows with a matching id or name are updated, the rest are created.
+                        Tags and countries are ;-separated.
+                    </div>
+                    <v-textarea
+                            v-model="importText"
+                            outlined
+                            dense
+                            rows="8"
+                            :disabled="importLoading"
+                    ></v-textarea>
+                    <div v-if="importResults.length" class="import-results">
+                        <div v-for="r in importResults" :key="r.line" class="caption import-result-line"
+                             :class="r.ok ? 'import-ok' : 'import-fail'">
+                            <v-icon x-small class="mr-1">{{ r.ok ? 'mdi-check' : 'mdi-close' }}</v-icon>
+                            Line {{ r.line }}: {{ r.detail }}
+                        </div>
+                    </div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="closeImport">Close</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="importLoading" :disabled="!importText.trim()"
+                           @click="runImport">Import</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="bulkTagDialog" persistent max-width="440px">
+            <v-card>
+                <v-card-title class="text-h6">Tags — {{ selected.length }} offers</v-card-title>
+                <v-card-text>
+                    <v-select
+                            label="Mode"
+                            v-model="bulkTagMode"
+                            :items="[{text: 'Add tags', value: 'tags_add'}, {text: 'Remove tags', value: 'tags_remove'}]"
+                            outlined
+                            dense
+                    ></v-select>
+                    <v-combobox
+                            v-model="bulkTagInput"
+                            label="Tags"
+                            multiple
+                            chips
+                            small-chips
+                            deletable-chips
+                            outlined
+                            dense
+                            hint="Type a tag and press Enter"
+                            persistent-hint
+                    ></v-combobox>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="bulkTagDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="bulkLoading" @click="applyBulkTags">Apply</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+
         <v-row dense class="mt-4">
             <v-col>
                 <v-card>
+                    <!-- G67 bulk actions bar -->
+                    <div v-if="selected.length" class="d-flex align-center pa-2 pl-4 bulk-bar">
+                        <span class="text-body-2 font-weight-medium mr-4">{{ selected.length }} selected</span>
+                        <v-btn small color="secondary" elevation="0" class="mr-2" @click="openBulkTags">
+                            <v-icon small class="mr-1">mdi-tag-multiple-outline</v-icon>Tags
+                        </v-btn>
+                        <v-btn small color="secondary" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkArchive">
+                            <v-icon small class="mr-1">mdi-archive-arrow-down-outline</v-icon>Archive
+                        </v-btn>
+                        <v-btn small color="red" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkDelete">
+                            <v-icon small class="mr-1">mdi-trash-can-outline</v-icon>Delete
+                        </v-btn>
+                        <v-spacer></v-spacer>
+                        <v-btn small text @click="selected = []">Clear selection</v-btn>
+                    </div>
                     <v-data-table v-col-resize:offers="headers"
+                            v-model="selected"
+                            show-select
+                            :item-class="rowClass"
                             :headers="headers"
-                            :items="offers"
+                            :items="filteredOffers"
                             dense
+                            :loading="loadingOffers"
                             :items-per-page="10"
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
                     >
@@ -165,7 +291,8 @@
                         </template>
 
                         <template v-slot:item.tags="{ item }">
-                            {{ item.tags?.join(', ') || '-' }}
+                            <v-chip v-for="t in (item.tags || [])" :key="t" x-small outlined class="mr-1 tag-chip">{{ t }}</v-chip>
+                            <span v-if="!(item.tags || []).length" class="grey--text">-</span>
                         </template>
 
                         <template v-slot:item.created_at="{ item }">
@@ -177,6 +304,14 @@
                         </template>
 
                         <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom v-if="isArchived(item)">
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="success" v-bind="attrs" v-on="on" @click="restoreOffer(item)">
+                                        <v-icon small>mdi-archive-arrow-up-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Restore from archive</span>
+                            </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
                                     <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
@@ -230,6 +365,18 @@
                     {text: 'Actions', value: 'actions', sortable: false}
                 ],
                 offers: [],
+                selected: [],
+                bulkLoading: false,
+                bulkTagDialog: false,
+                bulkTagMode: 'tags_add',
+                bulkTagInput: [],
+                exporting: false,
+                showArchived: false,
+                archivedIds: [],
+                importDialog: false,
+                importText: '',
+                importResults: [],
+                importLoading: false,
                 dialog: false,
                 isEdit: false,
                 loadingOffers: false,
@@ -252,11 +399,102 @@
                     status: 'active',
                     tokens: {},
                     notes: '',
-                    tags: []
+                    tags: [],
+                    daily_conversions_cap: null,
+                    overflow_offer_id: null
                 },
                 countryOptions: [
-                    {code: 'US'}, {code: 'CA'}, {code: 'GB'},
-                    {code: 'DE'}, {code: 'FR'}, {code: 'AU'}
+                    {code: 'AF', name: 'Afghanistan'}, {code: 'AX', name: 'Aland Islands'}, {code: 'AL', name: 'Albania'},
+                    {code: 'DZ', name: 'Algeria'}, {code: 'AS', name: 'American Samoa'}, {code: 'AD', name: 'Andorra'},
+                    {code: 'AO', name: 'Angola'}, {code: 'AI', name: 'Anguilla'}, {code: 'AQ', name: 'Antarctica'},
+                    {code: 'AG', name: 'Antigua and Barbuda'}, {code: 'AR', name: 'Argentina'}, {code: 'AM', name: 'Armenia'},
+                    {code: 'AW', name: 'Aruba'}, {code: 'AU', name: 'Australia'}, {code: 'AT', name: 'Austria'},
+                    {code: 'AZ', name: 'Azerbaijan'}, {code: 'BS', name: 'Bahamas'}, {code: 'BH', name: 'Bahrain'},
+                    {code: 'BD', name: 'Bangladesh'}, {code: 'BB', name: 'Barbados'}, {code: 'BY', name: 'Belarus'},
+                    {code: 'BE', name: 'Belgium'}, {code: 'BZ', name: 'Belize'}, {code: 'BJ', name: 'Benin'},
+                    {code: 'BM', name: 'Bermuda'}, {code: 'BT', name: 'Bhutan'}, {code: 'BO', name: 'Bolivia'},
+                    {code: 'BQ', name: 'Bonaire, Sint Eustatius and Saba'}, {code: 'BA', name: 'Bosnia and Herzegovina'},
+                    {code: 'BW', name: 'Botswana'}, {code: 'BV', name: 'Bouvet Island'}, {code: 'BR', name: 'Brazil'},
+                    {code: 'IO', name: 'British Indian Ocean Territory'}, {code: 'BN', name: 'Brunei Darussalam'},
+                    {code: 'BG', name: 'Bulgaria'}, {code: 'BF', name: 'Burkina Faso'}, {code: 'BI', name: 'Burundi'},
+                    {code: 'CV', name: 'Cabo Verde'}, {code: 'KH', name: 'Cambodia'}, {code: 'CM', name: 'Cameroon'},
+                    {code: 'CA', name: 'Canada'}, {code: 'KY', name: 'Cayman Islands'},
+                    {code: 'CF', name: 'Central African Republic'}, {code: 'TD', name: 'Chad'}, {code: 'CL', name: 'Chile'},
+                    {code: 'CN', name: 'China'}, {code: 'CX', name: 'Christmas Island'}, {code: 'CC', name: 'Cocos (Keeling) Islands'},
+                    {code: 'CO', name: 'Colombia'}, {code: 'KM', name: 'Comoros'}, {code: 'CG', name: 'Congo'},
+                    {code: 'CD', name: 'Congo (Democratic Republic)'}, {code: 'CK', name: 'Cook Islands'},
+                    {code: 'CR', name: 'Costa Rica'}, {code: 'CI', name: "Cote d'Ivoire"}, {code: 'HR', name: 'Croatia'},
+                    {code: 'CU', name: 'Cuba'}, {code: 'CW', name: 'Curacao'}, {code: 'CY', name: 'Cyprus'},
+                    {code: 'CZ', name: 'Czechia'}, {code: 'DK', name: 'Denmark'}, {code: 'DJ', name: 'Djibouti'},
+                    {code: 'DM', name: 'Dominica'}, {code: 'DO', name: 'Dominican Republic'}, {code: 'EC', name: 'Ecuador'},
+                    {code: 'EG', name: 'Egypt'}, {code: 'SV', name: 'El Salvador'}, {code: 'GQ', name: 'Equatorial Guinea'},
+                    {code: 'ER', name: 'Eritrea'}, {code: 'EE', name: 'Estonia'}, {code: 'SZ', name: 'Eswatini'},
+                    {code: 'ET', name: 'Ethiopia'}, {code: 'FK', name: 'Falkland Islands (Malvinas)'}, {code: 'FO', name: 'Faroe Islands'},
+                    {code: 'FJ', name: 'Fiji'}, {code: 'FI', name: 'Finland'}, {code: 'FR', name: 'France'},
+                    {code: 'GF', name: 'French Guiana'}, {code: 'PF', name: 'French Polynesia'},
+                    {code: 'TF', name: 'French Southern Territories'}, {code: 'GA', name: 'Gabon'}, {code: 'GM', name: 'Gambia'},
+                    {code: 'GE', name: 'Georgia'}, {code: 'DE', name: 'Germany'}, {code: 'GH', name: 'Ghana'},
+                    {code: 'GI', name: 'Gibraltar'}, {code: 'GR', name: 'Greece'}, {code: 'GL', name: 'Greenland'},
+                    {code: 'GD', name: 'Grenada'}, {code: 'GP', name: 'Guadeloupe'}, {code: 'GU', name: 'Guam'},
+                    {code: 'GT', name: 'Guatemala'}, {code: 'GG', name: 'Guernsey'}, {code: 'GN', name: 'Guinea'},
+                    {code: 'GW', name: 'Guinea-Bissau'}, {code: 'GY', name: 'Guyana'}, {code: 'HT', name: 'Haiti'},
+                    {code: 'HM', name: 'Heard Island and McDonald Islands'}, {code: 'HN', name: 'Honduras'},
+                    {code: 'HK', name: 'Hong Kong'}, {code: 'HU', name: 'Hungary'}, {code: 'IS', name: 'Iceland'},
+                    {code: 'IN', name: 'India'}, {code: 'ID', name: 'Indonesia'}, {code: 'IR', name: 'Iran'},
+                    {code: 'IQ', name: 'Iraq'}, {code: 'IE', name: 'Ireland'}, {code: 'IM', name: 'Isle of Man'},
+                    {code: 'IL', name: 'Israel'}, {code: 'IT', name: 'Italy'}, {code: 'JM', name: 'Jamaica'},
+                    {code: 'JP', name: 'Japan'}, {code: 'JE', name: 'Jersey'}, {code: 'JO', name: 'Jordan'},
+                    {code: 'KZ', name: 'Kazakhstan'}, {code: 'KE', name: 'Kenya'}, {code: 'KI', name: 'Kiribati'},
+                    {code: 'KP', name: "Korea (Democratic People's Republic)"}, {code: 'KR', name: 'Korea (Republic)'},
+                    {code: 'KW', name: 'Kuwait'}, {code: 'KG', name: 'Kyrgyzstan'}, {code: 'LA', name: "Lao People's Democratic Republic"},
+                    {code: 'LV', name: 'Latvia'}, {code: 'LB', name: 'Lebanon'}, {code: 'LS', name: 'Lesotho'},
+                    {code: 'LR', name: 'Liberia'}, {code: 'LY', name: 'Libya'}, {code: 'LI', name: 'Liechtenstein'},
+                    {code: 'LT', name: 'Lithuania'}, {code: 'LU', name: 'Luxembourg'}, {code: 'MO', name: 'Macao'},
+                    {code: 'MG', name: 'Madagascar'}, {code: 'MW', name: 'Malawi'}, {code: 'MY', name: 'Malaysia'},
+                    {code: 'MV', name: 'Maldives'}, {code: 'ML', name: 'Mali'}, {code: 'MT', name: 'Malta'},
+                    {code: 'MH', name: 'Marshall Islands'}, {code: 'MQ', name: 'Martinique'}, {code: 'MR', name: 'Mauritania'},
+                    {code: 'MU', name: 'Mauritius'}, {code: 'YT', name: 'Mayotte'}, {code: 'MX', name: 'Mexico'},
+                    {code: 'FM', name: 'Micronesia (Federated States)'}, {code: 'MD', name: 'Moldova'}, {code: 'MC', name: 'Monaco'},
+                    {code: 'MN', name: 'Mongolia'}, {code: 'ME', name: 'Montenegro'}, {code: 'MS', name: 'Montserrat'},
+                    {code: 'MA', name: 'Morocco'}, {code: 'MZ', name: 'Mozambique'}, {code: 'MM', name: 'Myanmar'},
+                    {code: 'NA', name: 'Namibia'}, {code: 'NR', name: 'Nauru'}, {code: 'NP', name: 'Nepal'},
+                    {code: 'NL', name: 'Netherlands'}, {code: 'NC', name: 'New Caledonia'}, {code: 'NZ', name: 'New Zealand'},
+                    {code: 'NI', name: 'Nicaragua'}, {code: 'NE', name: 'Niger'}, {code: 'NG', name: 'Nigeria'},
+                    {code: 'NU', name: 'Niue'}, {code: 'NF', name: 'Norfolk Island'},
+                    {code: 'MK', name: 'North Macedonia'}, {code: 'MP', name: 'Northern Mariana Islands'},
+                    {code: 'NO', name: 'Norway'}, {code: 'OM', name: 'Oman'}, {code: 'PK', name: 'Pakistan'},
+                    {code: 'PW', name: 'Palau'}, {code: 'PS', name: 'Palestine, State of'}, {code: 'PA', name: 'Panama'},
+                    {code: 'PG', name: 'Papua New Guinea'}, {code: 'PY', name: 'Paraguay'}, {code: 'PE', name: 'Peru'},
+                    {code: 'PH', name: 'Philippines'}, {code: 'PN', name: 'Pitcairn'}, {code: 'PL', name: 'Poland'},
+                    {code: 'PT', name: 'Portugal'}, {code: 'PR', name: 'Puerto Rico'}, {code: 'QA', name: 'Qatar'},
+                    {code: 'RE', name: 'Reunion'}, {code: 'RO', name: 'Romania'}, {code: 'RU', name: 'Russian Federation'},
+                    {code: 'RW', name: 'Rwanda'}, {code: 'BL', name: 'Saint Barthelemy'},
+                    {code: 'SH', name: 'Saint Helena, Ascension and Tristan da Cunha'},
+                    {code: 'KN', name: 'Saint Kitts and Nevis'}, {code: 'LC', name: 'Saint Lucia'},
+                    {code: 'MF', name: 'Saint Martin (French part)'}, {code: 'PM', name: 'Saint Pierre and Miquelon'},
+                    {code: 'VC', name: 'Saint Vincent and the Grenadines'}, {code: 'WS', name: 'Samoa'},
+                    {code: 'SM', name: 'San Marino'}, {code: 'ST', name: 'Sao Tome and Principe'}, {code: 'SA', name: 'Saudi Arabia'},
+                    {code: 'SN', name: 'Senegal'}, {code: 'RS', name: 'Serbia'}, {code: 'SC', name: 'Seychelles'},
+                    {code: 'SL', name: 'Sierra Leone'}, {code: 'SG', name: 'Singapore'}, {code: 'SX', name: 'Sint Maarten (Dutch part)'},
+                    {code: 'SK', name: 'Slovakia'}, {code: 'SI', name: 'Slovenia'}, {code: 'SB', name: 'Solomon Islands'},
+                    {code: 'SO', name: 'Somalia'}, {code: 'ZA', name: 'South Africa'},
+                    {code: 'GS', name: 'South Georgia and the South Sandwich Islands'}, {code: 'SS', name: 'South Sudan'},
+                    {code: 'ES', name: 'Spain'}, {code: 'LK', name: 'Sri Lanka'}, {code: 'SD', name: 'Sudan'},
+                    {code: 'SR', name: 'Suriname'}, {code: 'SJ', name: 'Svalbard and Jan Mayen'}, {code: 'SE', name: 'Sweden'},
+                    {code: 'CH', name: 'Switzerland'}, {code: 'SY', name: 'Syrian Arab Republic'}, {code: 'TW', name: 'Taiwan'},
+                    {code: 'TJ', name: 'Tajikistan'}, {code: 'TZ', name: 'Tanzania, United Republic of'},
+                    {code: 'TH', name: 'Thailand'}, {code: 'TL', name: 'Timor-Leste'}, {code: 'TG', name: 'Togo'},
+                    {code: 'TK', name: 'Tokelau'}, {code: 'TO', name: 'Tonga'}, {code: 'TT', name: 'Trinidad and Tobago'},
+                    {code: 'TN', name: 'Tunisia'}, {code: 'TR', name: 'Turkey'}, {code: 'TM', name: 'Turkmenistan'},
+                    {code: 'TC', name: 'Turks and Caicos Islands'}, {code: 'TV', name: 'Tuvalu'}, {code: 'UG', name: 'Uganda'},
+                    {code: 'UA', name: 'Ukraine'}, {code: 'AE', name: 'United Arab Emirates'},
+                    {code: 'GB', name: 'United Kingdom of Great Britain and Northern Ireland'},
+                    {code: 'US', name: 'United States of America'}, {code: 'UM', name: 'United States Minor Outlying Islands'},
+                    {code: 'UY', name: 'Uruguay'}, {code: 'UZ', name: 'Uzbekistan'}, {code: 'VU', name: 'Vanuatu'},
+                    {code: 'VE', name: 'Venezuela (Bolivarian Republic)'}, {code: 'VN', name: 'Viet Nam'},
+                    {code: 'VG', name: 'Virgin Islands (British)'}, {code: 'VI', name: 'Virgin Islands (U.S.)'},
+                    {code: 'WF', name: 'Wallis and Futuna'}, {code: 'EH', name: 'Western Sahara'}, {code: 'YE', name: 'Yemen'},
+                    {code: 'ZM', name: 'Zambia'}, {code: 'ZW', name: 'Zimbabwe'}
                 ]
             }
         },
@@ -266,13 +504,176 @@
                     return this.date_range.join(' ~ ')
                 }
                 ,
+                overflowOptions() {
+                    return this.offers.filter(o => o.id !== this.form.id);
+                }
+                ,
+                filteredOffers() {
+                    if (this.showArchived) return this.offers;
+                    return this.offers.filter(o => !this.isArchived(o));
+                }
+                ,
             }
         ,
         mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadOffers();
             this.$root.$on('load-offers', this.loadOffers);
         },
+        mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
+            this.loadOffers();
+            this.loadArchivedIds();
+            this.$root.$on('load-offers', this.loadOffers);
+        },
         methods: {
+            isArchived(item) {
+                return this.archivedIds.indexOf(item.id) >= 0;
+            },
+            rowClass(item) {
+                return this.isArchived(item) ? 'archived-row' : '';
+            },
+            async loadArchivedIds() {
+                try {
+                    const res = await fetch('/backend/api/archive/', {credentials: 'include'});
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    this.archivedIds = data.offers || [];
+                } catch (e) { /* non-critical */ }
+            },
+            async restoreOffer(item) {
+                try {
+                    const res = await fetch(`/backend/api/archive/offers/${item.id}/restore`, {
+                        method: 'POST', credentials: 'include'});
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.$root.$emit('show-message', {type: 'success',
+                        text: `Offer "${item.name}" restored`});
+                    this.loadOffers();
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Restore failed: ' + sanitizeToastMessage(err.message)});
+                }
+            },
+            openBulkTags() {
+                this.bulkTagInput = [];
+                this.bulkTagMode = 'tags_add';
+                this.bulkTagDialog = true;
+            },
+            async applyBulkTags() {
+                const tags = (this.bulkTagInput || []).map(t => String(t).trim()).filter(Boolean);
+                if (!tags.length) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Add at least one tag first.'});
+                    return;
+                }
+                this.bulkLoading = true;
+                try {
+                    const res = await fetch('/backend/api/offers/bulk', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids: this.selected.map(o => o.id),
+                                              action: this.bulkTagMode, tags})
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.bulkTagDialog = false;
+                    this.selected = [];
+                    this.loadOffers();
+                    this.$root.$emit('show-message', {type: 'success', text: 'Tags applied'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Bulk tagging failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.bulkLoading = false;
+                }
+            },
+            async bulkArchive() {
+                const ok = await this.$refs.confirm.open(
+                    'Archive Offers',
+                    `Archive ${this.selected.length} offer(s)? They disappear from the lists but can be restored.`,
+                    'Archive');
+                if (!ok) return;
+                await this.runBulk('archive');
+            },
+            async bulkDelete() {
+                const ok = await this.$refs.confirm.open(
+                    'Delete Offers',
+                    `Permanently delete ${this.selected.length} offer(s)? This cannot be undone.`,
+                    'Delete');
+                if (!ok) return;
+                await this.runBulk('delete');
+            },
+            async runBulk(action) {
+                this.bulkLoading = true;
+                try {
+                    const res = await fetch('/backend/api/offers/bulk', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids: this.selected.map(o => o.id), action})
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.selected = [];
+                    this.loadOffers();
+                    this.$root.$emit('show-message', {type: 'success', text: `Bulk ${action} done`});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: `Bulk ${action} failed: ` + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.bulkLoading = false;
+                }
+            },
+            async exportCsv() {
+                this.exporting = true;
+                try {
+                    const res = await fetch('/backend/api/offers/export', {credentials: 'include'});
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const blob = await res.blob();
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'offers.csv';
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Export failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.exporting = false;
+                }
+            },
+            openImport() {
+                this.importText = '';
+                this.importResults = [];
+                this.importDialog = true;
+            },
+            closeImport() {
+                if (this.importResults.length) this.loadOffers();
+                this.importDialog = false;
+            },
+            async runImport() {
+                this.importLoading = true;
+                try {
+                    const res = await fetch('/backend/api/offers/import', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({lines: this.importText})
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    this.importResults = data.results || [];
+                    this.$root.$emit('show-message', {type: 'success',
+                        text: `Import done: ${data.imported} ok, ${data.failed} failed`});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Import failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.importLoading = false;
+                }
+            },
+            countryFilter(item, queryText) {
+                const q = (queryText || '').toLowerCase();
+                return item.code.toLowerCase().indexOf(q) > -1 || item.name.toLowerCase().indexOf(q) > -1;
+            },
             openNetworkDialog() {
                 this.networkForm = {name: '', offer_parameters: '', s2s_postback: ''};
                 this.networkDialog = true;
@@ -298,7 +699,7 @@
                     this.form.affiliate_network_id = data.id;
                     this.$root.$emit("show-message", {type: "success", text: "Affiliate network created"});
                 } catch (err) {
-                    this.$root.$emit("show-message", {type: "error", text: err.message});
+                    this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                 } finally {
                     this.networkSaving = false;
                 }
@@ -330,7 +731,7 @@
                         this.offers = data;
                     })
                     .catch(err => {
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     })
                     .finally(() => {
                         this.loadingOffers = false;
@@ -352,7 +753,9 @@
                     status: 'active',
                     tokens: {},
                     notes: '',
-                    tags: []
+                    tags: [],
+                    daily_conversions_cap: null,
+                    overflow_offer_id: null
                 };
             },
 
@@ -371,7 +774,9 @@
                     status: offer.status || 'active',
                     tokens: offer.tokens || {},
                     notes: offer.notes || '',
-                    tags: offer.tags || []
+                    tags: offer.tags || [],
+                    daily_conversions_cap: offer.daily_conversions_cap || null,
+                    overflow_offer_id: offer.overflow_offer_id || null
                 };
             },
 
@@ -394,7 +799,9 @@
                     status: this.form.status,
                     tokens: this.form.tokens,
                     notes: this.form.notes,
-                    tags: this.form.tags
+                    tags: this.form.tags,
+                    daily_conversions_cap: this.form.daily_conversions_cap || null,
+                    overflow_offer_id: this.form.overflow_offer_id || null
                 };
 
                 const method = this.isEdit ? "PATCH" : "POST";
@@ -427,7 +834,7 @@
                         this.loadOffers();
                     })
                     .catch(err => {
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
             },
 
@@ -457,7 +864,7 @@
                         this.loadOffers();
                     })
                     .catch(err => {
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
             },
 
@@ -469,4 +876,28 @@
     })
     ;
 </script>
+
+<style>
+    .bulk-bar {
+        background: var(--status-success-bg, #f0fdf4);
+        border-bottom: 1px solid var(--border-soft, #e3e8ef);
+        border-radius: var(--radius-md, 12px) var(--radius-md, 12px) 0 0;
+    }
+    /* D1b — archived rows stay visible but clearly dormant */
+    .v-data-table tr.archived-row > td {
+        opacity: 0.45;
+    }
+    .archived-switch {
+        max-width: 140px;
+    }
+    .import-results {
+        max-height: 180px;
+        overflow-y: auto;
+        border: 1px solid var(--border-soft, #e3e8ef);
+        border-radius: var(--radius-md, 12px);
+        padding: 8px 12px;
+    }
+    .import-ok { color: var(--status-success, #16a34a); }
+    .import-fail { color: var(--status-danger, #dc2626); }
+</style>
 {% endraw %}
