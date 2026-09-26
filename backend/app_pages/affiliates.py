@@ -158,6 +158,17 @@ NETWORK_PRESETS = [
     _p("Zorka.Network", "sub_id={click_id}", ["Gambling", "Installs", "Games", "Mobile Apps"], "zorka.network"),
 ]
 
+# Curated full-logo overrides (favicons are tiny; some brands deserve better).
+_NETWORK_LOGO_URLS = {
+    "Adcombo": "https://www.adcombo.com/source/images/logo.svg",
+    "Ad2games": "https://files.startupranking.com/startup/thumb/59015_fc7ff7df388c24b028de73095f314dc93eac6179_ad2games_l.png",
+    "3snet": "https://3snet.co/wp-content/themes/3snet/img/logo.png",
+    "MyLead": "https://mylead.global/images/svg/logo_ml.svg",
+}
+for _preset in NETWORK_PRESETS:
+    if _preset["name"] in _NETWORK_LOGO_URLS:
+        _preset["logo_url"] = _NETWORK_LOGO_URLS[_preset["name"]]
+
 
 def seed_network_presets(db: Session):
     """Seed built-in affiliate network presets exactly once (marker in settings),
@@ -193,7 +204,7 @@ class AffiliateNetworkOut(AffiliateNetworkIn):
 def get_presets():
     presets = [
         {"name": p["name"], "verticals": p["verticals"], "logo_domain": p["logo_domain"],
-         "offer_parameters": p["offer_parameters"]}
+         "logo_url": p.get("logo_url"), "offer_parameters": p["offer_parameters"]}
         for p in sorted(NETWORK_PRESETS, key=lambda x: x["name"].lower())
     ]
     return {"presets": presets}

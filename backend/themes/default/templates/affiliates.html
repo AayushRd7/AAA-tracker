@@ -98,9 +98,10 @@
                         <div v-for="p in filteredPresets" :key="p.name" class="aff-catalog-card">
                             <div class="d-flex align-center">
                                 <div class="aff-catalog-logo">
-                                    <div class="aff-catalog-logo-fallback">{{ p.name.charAt(0) }}</div>
-                                    <img :src="'/backend/api/affiliate-networks/favicon/' + encodeURIComponent(p.logo_domain)"
-                                         width="48" height="48" alt="">
+                                    <div v-if="!showLogo(p)" class="aff-catalog-logo-fallback">{{ p.name.charAt(0) }}</div>
+                                    <img v-if="showLogo(p)" :src="logoSrc(p)"
+                                         width="48" height="48" alt=""
+                                         @load="logoLoaded(p, $event)" @error="$set(p, '_logoBroken', true)">
                                 </div>
                                 <div class="aff-catalog-name">{{ p.name }}</div>
                             </div>
@@ -143,11 +144,13 @@
                     >
                         <template v-slot:item.name="{ item }">
                             <div class="aff-name-cell">
-                                <div v-if="presetLogo(item.name)" class="aff-logo-wrap">
-                                    <div class="aff-table-logo-fallback">{{ item.name.charAt(0) }}</div>
-                                    <img :src="'/backend/api/affiliate-networks/favicon/' + encodeURIComponent(presetLogo(item.name))"
-                                         width="20" height="20" alt="" class="aff-table-logo">
+                                <div v-if="showLogo(item)" class="aff-logo-wrap">
+                                    <div v-if="item._logoBroken" class="aff-table-logo-fallback">{{ item.name.charAt(0) }}</div>
+                                    <img v-if="!item._logoBroken" :src="logoSrc(item)"
+                                         width="20" height="20" alt="" class="aff-table-logo"
+                                         @load="logoLoaded(item, $event)" @error="$set(item, '_logoBroken', true)">
                                 </div>
+                                <span v-else class="aff-table-logo-fallback aff-table-logo-solo">{{ item.name.charAt(0) }}</span>
                                 <span>{{ item.name }}</span>
                             </div>
                             <v-tooltip bottom v-if="presetNames.includes(item.name)">
@@ -318,9 +321,18 @@
                 if (!this.presets.length) this.loadPresets();
             },
 
-            presetLogo(name) {
-                const p = this.presetByName[name];
-                return p ? p.logo_domain : '';
+            showLogo(x) {
+                const p = (x.logo_domain !== undefined) ? x : this.presetByName[x.name];
+                return !!(p && (p.logo_url || p.logo_domain)) && !x._logoBroken;
+            },
+            logoSrc(x) {
+                const p = (x.logo_domain !== undefined) ? x : this.presetByName[x.name];
+                return p.logo_url || ('/backend/api/affiliate-networks/favicon/' + encodeURIComponent(p.logo_domain));
+            },
+            // The favicon proxy returns a 1×1 transparent PNG for missing
+            // favicons (HTTP 200, so @error never fires) — treat that as broken.
+            logoLoaded(x, e) {
+                if (e.target.naturalWidth <= 1) this.$set(x, '_logoBroken', true);
             },
 
             addFromPreset(p) {

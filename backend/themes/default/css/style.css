@@ -1057,3 +1057,8 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
   font-weight: 700;
   text-transform: uppercase;
 }
+/* Initial-letter avatar used WITHOUT the logo wrap (presets that have no logo at all) */
+.aff-table-logo-solo {
+  position: static;
+  flex: none;
+}

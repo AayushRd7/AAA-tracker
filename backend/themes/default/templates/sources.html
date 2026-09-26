@@ -206,10 +206,10 @@
                     <div class="catalog-grid" v-if="catalogPresets.length">
                         <div class="catalog-card" v-for="preset in catalogPresets" :key="preset.name">
                             <div class="aff-catalog-logo">
-                                <div class="aff-catalog-logo-fallback">{{ preset.name.charAt(0) }}</div>
-                                <img v-if="preset.logo_url || preset.logo_domain"
-                                     :src="preset.logo_url || ('/backend/api/sources/favicon/' + encodeURIComponent(preset.logo_domain))"
-                                     width="48" height="48" alt="">
+                                <div v-if="!showLogo(preset)" class="aff-catalog-logo-fallback">{{ preset.name.charAt(0) }}</div>
+                                <img v-if="showLogo(preset)" :src="logoSrc(preset)"
+                                     width="48" height="48" alt=""
+                                     @load="logoLoaded(preset, $event)" @error="$set(preset, '_logoBroken', true)">
                             </div>
                             <div class="catalog-card-name">{{ preset.name }}</div>
                             <div class="catalog-card-caps">
@@ -469,6 +469,18 @@
 
             capChipClass(cap) {
                 return (cap === 'cost' || cap === 'pause_campaign') ? 'status-chip--info' : 'status-chip--neutral';
+            },
+
+            showLogo(p) {
+                return !!(p.logo_url || p.logo_domain) && !p._logoBroken;
+            },
+            logoSrc(p) {
+                return p.logo_url || ('/backend/api/sources/favicon/' + encodeURIComponent(p.logo_domain));
+            },
+            // The favicon proxy returns a 1×1 transparent PNG for missing
+            // favicons (HTTP 200, so @error never fires) — treat that as broken.
+            logoLoaded(p, e) {
+                if (e.target.naturalWidth <= 1) this.$set(p, '_logoBroken', true);
             },
 
             addPreset(preset) {
