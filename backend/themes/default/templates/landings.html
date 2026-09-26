@@ -14,40 +14,48 @@
             </v-col>
         </v-row>
 
-        <v-dialog v-model="dialog" max-width="500px">
-            <v-card>
+        <v-dialog v-model="dialog">
+            <v-card class="dialog-md">
                 <v-card-title>
                     <span class="text-h6">{{ isEdit ? 'Edit Landing' : 'Create Landing' }}</span>
                 </v-card-title>
 
                 <v-card-text>
                     <v-text-field
-                            label="Folder name (english and allowed only a-z0-9_ 250 max)"
+                            label="Folder name"
                             v-model="form.folder"
                             :disabled="isEdit"
                             outlined
                             dense
+                            hint="Lowercase letters, numbers and underscores only — max 250 chars"
+                            persistent-hint
                     ></v-text-field>
 
                     <v-text-field
-                            label="Name (For internal dashboard 250 max)"
+                            label="Name"
                             v-model="form.name"
                             outlined
                             dense
+                            hint="Internal dashboard name — max 250 chars"
+                            persistent-hint
                     ></v-text-field>
 
                     <v-text-field
-                            label="Tags (comma separated like #main, #test 250 max)"
+                            label="Tags"
                             v-model="form.tags"
                             outlined
                             dense
+                            hint="Comma separated, e.g. #main, #test — max 250 chars"
+                            persistent-hint
                     ></v-text-field>
 
                     <v-text-field
-                            label="Link (landing URL if redirect or mirroring 250 max)"
+                            label="Link"
                             v-model="form.link"
                             outlined
                             dense
+                            hint="Landing URL if redirect or mirroring — max 250 chars"
+                            persistent-hint
                     ></v-text-field>
 
                     <v-select
@@ -179,15 +187,6 @@
                     folder: '',
                     name: '',
                     tags: '',
-                },
-                // Mock up the existing landing for editing
-                mockLanding: {
-                    folder: 'example_folder',
-                    name: 'Example Landing',
-                    tags: 'test,example',
-                    link: '',
-                    type: 0,
-                    file: null,
                 }
             }
         },
@@ -241,7 +240,7 @@
                     .catch((error) => {
                         this.$root.$emit('show-message', {
                             type: 'error',
-                            text: error.message
+                            text: sanitizeToastMessage(error.message)
                         });
                     })
                     .finally(() => {
@@ -339,7 +338,7 @@
                     .catch((error) => {
                         this.$root.$emit('show-message', {
                             type: 'error',
-                            text: error.message
+                            text: sanitizeToastMessage(error.message)
                         });
                     });
             },
@@ -391,13 +390,14 @@
                     .catch((error) => {
                         this.$root.$emit('show-message', {
                             type: 'error',
-                            text: error.message
+                            text: sanitizeToastMessage(error.message)
                         });
                     });
             },
 
         },
         mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadLandings();
             this.$root.$on('load-landings', this.loadLandings);
         },

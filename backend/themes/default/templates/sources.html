@@ -14,8 +14,8 @@
             </v-col>
         </v-row>
 
-        <v-dialog v-model="dialog" max-width="800px">
-            <v-card>
+        <v-dialog v-model="dialog">
+            <v-card class="dialog-lg">
                 <v-card-title>
                     <span class="text-h6">{{ isEdit ? 'Edit Source' : 'Add Source' }}</span>
                 </v-card-title>
@@ -58,9 +58,6 @@
 
                     <div class="d-flex align-center mt-2">
                         <v-subheader class="pl-0">Additional Settings (API keys, etc.)</v-subheader>
-                        <v-btn x-small icon color="primary" @click="addAdditionalSetting">
-                            <v-icon>mdi-plus</v-icon>
-                        </v-btn>
                     </div>
                     <v-row
                             v-for="(extra, index) in form.additionalSettingsList"
@@ -87,18 +84,25 @@
                             ></v-text-field>
                         </v-col>
                         <v-col cols="2" class="d-flex justify-center">
-                            <v-icon small color="red" @click="removeAdditionalSetting(index)">mdi-delete-outline</v-icon>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon x-small v-bind="attrs" v-on="on" @click="removeAdditionalSetting(index)">
+                                        <v-icon small color="red">mdi-delete-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Remove setting</span>
+                            </v-tooltip>
                         </v-col>
                     </v-row>
 
                     <v-btn
                             small
+                            outlined
                             color="primary"
-                            elevation="0"
                             class="mt-2"
-                            @click="addSetting"
+                            @click="addAdditionalSetting"
                     >
-                        Add Parameter
+                        <v-icon small class="mr-1">mdi-plus</v-icon>Add Setting
                     </v-btn>
 
                     <v-subheader class="pl-0">Settings Mapping</v-subheader>
@@ -135,10 +139,26 @@
                             ></v-text-field>
                         </v-col>
                         <v-col cols="2" class="d-flex align-center justify-center">
-                            <v-icon v-if="setting.editable_name" @click="removeSetting(index)" color="red">mdi-delete
-                            </v-icon>
+                            <v-tooltip bottom v-if="setting.editable_name">
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon x-small v-bind="attrs" v-on="on" @click="removeSetting(index)">
+                                        <v-icon small color="red">mdi-delete</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Remove parameter</span>
+                            </v-tooltip>
                         </v-col>
                     </v-row>
+
+                    <v-btn
+                            small
+                            outlined
+                            color="primary"
+                            class="mt-2"
+                            @click="addSetting"
+                    >
+                        <v-icon small class="mr-1">mdi-plus</v-icon>Add Parameter
+                    </v-btn>
 
                 </v-card-text>
 
@@ -158,6 +178,7 @@
                             :headers="headers"
                             :items="sources"
                             dense
+                            :loading="loadingSources"
                             :items-per-page="10"
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
                     >
@@ -243,6 +264,7 @@
             }
         },
         mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadSources();
             this.$root.$on('load-sources', this.loadSources);
         },
@@ -260,7 +282,6 @@
                         token: '{{campaign.name}}',
                         editable_name: false
                     },
-                    {name: 'Keyword', parameter: 'keyword', token: '', editable_name: false},
                     {name: 'Site', parameter: 'utm_source', token: '{{site_source_name}}', editable_name: false},
                     {name: 'Sub id 1', parameter: 'sub_id_1', token: '', editable_name: true},
                     {name: 'Sub id 2', parameter: 'sub_id_2', token: '', editable_name: true},
@@ -315,7 +336,7 @@
                     })
                     .catch(err => {
                         console.error(err);
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     })
                     .finally(() => {
                         this.loadingSources = false;
@@ -403,7 +424,7 @@
                         this.loadSources();
                     })
                     .catch(err => {
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
             },
 
@@ -433,7 +454,7 @@
                         this.loadSources();
                     })
                     .catch(err => {
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
             },
 

@@ -14,29 +14,42 @@
     .CodeMirror {
         height: 70vh;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 13px;
-        background: #ffffff;
-        color: #000000;
-        border: 1px solid #e3e8ef;
-        border-radius: 8px;
+        font-size: var(--fs-13);
+        background: var(--card-bg);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
     }
 
     .CodeMirror-gutters {
-        background: #f5f5f5;
-        border-right: 1px solid #ccc;
-        color: #999;
+        background: var(--surface);
+        border-right: 1px solid var(--border);
+        color: var(--text-secondary);
     }
 
     /* Scoped overrides — must not leak into the dashboard theme */
     .editor-page .v-card-title {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 14px;
-        background-color: #f8fafc;
-        border-bottom: 1px solid #e3e8ef;
+        font-size: var(--fs-14);
+        background-color: var(--surface-hover);
+        border-bottom: 1px solid var(--border);
     }
 
     .editor-page h2 {
         font-family: inherit;
+    }
+
+    /* Stack the file tree above the editor on narrow screens */
+    @media (max-width: 960px) {
+        .editor-page .row {
+            flex-direction: column;
+        }
+        .editor-page .row > .col {
+            flex: 0 0 100% !important;
+            max-width: 100% !important;
+            padding-top: var(--space-3);
+            padding-bottom: var(--space-3);
+        }
     }
 </style>
 

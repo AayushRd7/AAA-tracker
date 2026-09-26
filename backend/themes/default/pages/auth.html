@@ -3,34 +3,66 @@
     <v-col cols="12" sm="8" md="4">
       <div class="text-center mb-4">
         <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo brand-logo--lg mx-auto">
-        <div class="text-h5 font-weight-bold mt-3" style="letter-spacing: 0.4px;">AAA TRACKER</div>
+        <div class="text-h5 font-weight-bold mt-3">AAA TRACKER</div>
         <div class="page-subtitle">Sign in to your account</div>
       </div>
       <v-card class="pa-6" elevation="2">
-        <v-form @submit.prevent="login">
-          <v-text-field
-            label="Username"
-            v-model="username"
-            prepend-inner-icon="mdi-account-outline"
-            outlined
-            dense
-            required
-          ></v-text-field>
+        <v-form @submit.prevent="submit">
+          <template v-if="!totpRequired">
+            <v-text-field
+              label="Username"
+              v-model="username"
+              prepend-inner-icon="mdi-account-outline"
+              outlined
+              dense
+              required
+            ></v-text-field>
 
-          <v-text-field
-            label="Password"
-            v-model="password"
-            :type="showPassword ? 'text' : 'password'"
-            prepend-inner-icon="mdi-lock-outline"
-            :append-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
-            @click:append="showPassword = !showPassword"
-            outlined
-            dense
-            required
-          ></v-text-field>
+            <v-text-field
+              label="Password"
+              v-model="password"
+              :type="showPassword ? 'text' : 'password'"
+              prepend-inner-icon="mdi-lock-outline"
+              :append-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
+              @click:append="showPassword = !showPassword"
+              outlined
+              dense
+              required
+            ></v-text-field>
+          </template>
 
-          <v-btn color="primary" class="mt-2" block elevation="0" large type="submit" :loading="loading">
+          <template v-else>
+            <div class="d-flex align-center mb-3">
+              <v-icon color="primary" class="mr-2">mdi-shield-key-outline</v-icon>
+              <div>
+                <div class="subtitle-1 font-weight-medium">Two-factor authentication</div>
+                <div class="caption grey--text">Enter the 6-digit code from your authenticator app — or a one-time backup code.</div>
+              </div>
+            </div>
+            <v-text-field
+              label="Code or backup code"
+              v-model="totpCode"
+              prepend-inner-icon="mdi-shield-key-outline"
+              outlined
+              dense
+              maxlength="8"
+              autocomplete="one-time-code"
+              hint="6-digit authenticator code, or an 8-character backup code"
+              persistent-hint
+              @keyup.enter="submit"
+            ></v-text-field>
+            <div class="d-flex justify-end mt-2">
+              <v-btn small text @click="backToPassword">
+                <v-icon small class="mr-1">mdi-arrow-left</v-icon>Back to password
+              </v-btn>
+            </div>
+          </template>
+
+          <v-btn v-if="!totpRequired" color="primary" class="mt-2" block elevation="0" large type="submit" :loading="loading">
             Login
+          </v-btn>
+          <v-btn v-else color="primary" class="mt-4" block elevation="0" large :loading="loading" @click="submit">
+            Verify &amp; Sign In
           </v-btn>
         </v-form>
       </v-card>
@@ -50,34 +82,72 @@ Vue.component('auth-page-component', {
       password: '',
       showPassword: false,
       loading: false,
+      // D1a — TOTP second step: shown when login answers {requires_totp}
+      totpRequired: false,
+      totpToken: '',
+      totpCode: '',
     };
   },
   methods: {
-    async login() {
+    backToPassword() {
+      this.totpRequired = false;
+      this.totpToken = '';
+      this.totpCode = '';
+      this.password = '';
+    },
+    async submit() {
       this.loading = true;
       try {
-        const response = await fetch('/backend/api/login', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            username: this.username,
-            password: this.password
-          }),
-          credentials: 'include'
-        });
+        if (!this.totpRequired) {
+          const response = await fetch('/backend/api/login', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              username: this.username,
+              password: this.password
+            }),
+            credentials: 'include'
+          });
 
-        if (!response.ok) {
-          throw new Error('Login failed');
+          if (!response.ok) {
+            throw new Error('Login failed');
+          }
+
+          const data = await response.json();
+          if (data.requires_totp) {
+            this.totpToken = data.totp_token;
+            this.totpRequired = true;
+            this.totpCode = '';
+            return;
+          }
+          window.location.href = '/backend/dashboard';
+        } else {
+          // backup codes are 8 chars — pad/truncate through the same field
+          const code = (this.totpCode || '').trim();
+          const response = await fetch('/backend/api/login/totp', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              totp_token: this.totpToken,
+              code: code
+            }),
+            credentials: 'include'
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            this.totpCode = '';
+            throw new Error(data.detail || 'Verification failed');
+          }
+          window.location.href = '/backend/dashboard';
         }
-
-        window.location.href = '/backend/dashboard';
-
       } catch (error) {
         this.$root.$emit('show-message', {
           type: 'error',
-          text: 'Wrong username or password!'
+          text: this.totpRequired ? (error.message || 'Invalid code — try again') : 'Wrong username or password!'
         });
       } finally {
         this.loading = false;

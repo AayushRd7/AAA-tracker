@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Numeric, TIMESTAMP, func, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Numeric, TIMESTAMP, func, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY
 from models.base import Base
 
@@ -16,5 +16,9 @@ class OfferORM(Base):
     tokens = Column(JSONB)
     notes = Column(Text)
     tags = Column(ARRAY(String))
+    daily_conversions_cap = Column(Integer)
+    overflow_offer_id = Column(Integer)
+    # G66 — soft-delete flag (archive without purging)
+    archived = Column(Boolean, nullable=False, default=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

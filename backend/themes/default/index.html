@@ -32,7 +32,24 @@
 
     <script src="https://cdn.jsdelivr.net/npm/terser@5.30.2/dist/bundle.min.js"></script>
 
-    <link href="/backend/backend/css/style.css?v=8" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=10" rel="stylesheet">
+
+    <!-- Theme toggle helper: reads localStorage('theme'), exposes window.setTheme(t) -->
+    <script>
+        (function () {
+            function applyTheme(t) {
+                if (t !== 'dark' && t !== 'light') t = 'light';
+                document.documentElement.dataset.theme = t;
+                try { localStorage.setItem('theme', t); } catch (e) {}
+            }
+            var saved = null;
+            try { saved = localStorage.getItem('theme'); } catch (e) {}
+            if (saved === 'dark' || saved === 'light') {
+                document.documentElement.dataset.theme = saved;
+            }
+            window.setTheme = applyTheme;
+        })();
+    </script>
 </head>
 <body>
 {% raw %}
@@ -234,7 +251,7 @@
     <v-app>
         {% if page == 'dashboard' and is_authenticated_user_type %}
         {% raw %}
-        <v-app-bar app color="#151d2b" dark elevation="0" height="40" class="topnav-bar">
+        <v-app-bar app dark elevation="0" height="40" class="topnav-bar">
             <div class="d-flex align-center mr-6 brand-block-top">
                 <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo mr-2">
                 <div class="brand-name">AAA TRACKER</div>
@@ -251,6 +268,45 @@
                 >{{ item.title }}</v-btn>
             </nav>
             <v-spacer></v-spacer>
+            <!-- G75 global search: debounced, grouped, jumps to the section -->
+            <v-menu v-model="searchMenu" offset-y bottom nudge-bottom="6"
+                    :close-on-content-click="false" max-width="440" min-width="380">
+                <template v-slot:activator="{ on, attrs }">
+                    <v-text-field
+                            v-model="searchQuery"
+                            dense
+                            hide-details
+                            flat
+                            solo-inverted
+                            prepend-inner-icon="mdi-magnify"
+                            placeholder="Search…"
+                            class="topnav-search d-none d-md-block"
+                            v-bind="attrs"
+                            v-on="on"
+                            @input="searchInput"
+                            @keyup.enter="searchGoFirst"
+                    ></v-text-field>
+                </template>
+                <v-card class="search-menu-card">
+                    <v-list dense v-if="searchGroups.length">
+                        <template v-for="g in searchGroups">
+                            <v-subheader :key="g.key" class="search-group-header">{{ g.key }}</v-subheader>
+                            <v-list-item v-for="r in g.items" :key="g.key + '-' + r.id" link
+                                         @click="searchGo(g.key, r)">
+                                <v-list-item-content>
+                                    <v-list-item-title class="search-hit-name">{{ r.name }}</v-list-item-title>
+                                    <v-list-item-subtitle class="search-hit-snippet">{{ r.snippet }}</v-list-item-subtitle>
+                                </v-list-item-content>
+                                <v-list-item-icon class="ml-2">
+                                    <v-icon small>mdi-arrow-top-left</v-icon>
+                                </v-list-item-icon>
+                            </v-list-item>
+                        </template>
+                    </v-list>
+                    <div v-else-if="searchQuery.trim().length >= 2" class="pa-3 caption grey--text">No matches</div>
+                    <div v-else class="pa-3 caption grey--text">Type at least 2 characters to search campaigns, offers, landings, domains, sources, networks and conversions.</div>
+                </v-card>
+            </v-menu>
             <!-- Mobile: all sections in a dropdown -->
             <v-menu offset-y bottom nudge-bottom="6">
                 <template v-slot:activator="{ on, attrs }">
@@ -287,6 +343,10 @@
                     <v-list-item link @click="openPasswordDialog">
                         <v-list-item-icon class="mr-2"><v-icon small>mdi-key-change</v-icon></v-list-item-icon>
                         <v-list-item-title>Change password</v-list-item-title>
+                    </v-list-item>
+                    <v-list-item link @click="openTotpDialog">
+                        <v-list-item-icon class="mr-2"><v-icon small>mdi-shield-key-outline</v-icon></v-list-item-icon>
+                        <v-list-item-title>Two-factor authentication</v-list-item-title>
                     </v-list-item>
                     <v-list-item link @click="logout">
                         <v-list-item-icon class="mr-2"><v-icon small>mdi-logout</v-icon></v-list-item-icon>
@@ -334,6 +394,69 @@
                 </v-card-actions>
             </v-card>
         </v-dialog>
+
+        <v-dialog v-model="totpDialog" max-width="480px" persistent>
+            <v-card>
+                <v-card-title class="text-h6">Two-Factor Authentication</v-card-title>
+                <v-card-text>
+                    <template v-if="totpEnabled && !totpSetup">
+                        <div class="d-flex align-center mb-3">
+                            <v-icon color="success" class="mr-2">mdi-shield-check-outline</v-icon>
+                            <span>Two-factor authentication is <strong>enabled</strong> for your account.</span>
+                        </div>
+                        <div class="caption grey--text mb-3">Sign-in requires a code from your authenticator app or a one-time backup code.</div>
+                        <v-text-field
+                                label="Your password (to confirm disable)"
+                                v-model="totpDisablePassword"
+                                type="password"
+                                outlined
+                                dense
+                        ></v-text-field>
+                    </template>
+                    <template v-else-if="totpSetup">
+                        <div class="subtitle-2 mb-2">1. Scan this QR code (or enter the secret manually)</div>
+                        <div class="d-flex justify-center my-3">
+                            <img v-if="totpSetup.qr" :src="totpSetup.qr" alt="TOTP QR code" style="max-width:180px">
+                        </div>
+                        <div class="d-flex align-center code-row mb-2">
+                            <code class="code-inline">{{ totpSetup.secret }}</code>
+                            <v-btn icon small color="primary" @click="copyText(totpSetup.secret)">
+                                <v-icon small>mdi-content-copy</v-icon>
+                            </v-btn>
+                        </div>
+                        <div class="subtitle-2 mt-4 mb-2">2. Enter the 6-digit code from your app to activate</div>
+                        <v-text-field
+                                label="Verification code"
+                                v-model="totpEnableCode"
+                                outlined
+                                dense
+                                maxlength="6"
+                        ></v-text-field>
+                    </template>
+                    <template v-else>
+                        <div class="caption grey--text">Add a second layer of security: after your password, sign-in will ask for a code from an authenticator app (Google Authenticator, Authy, …).</div>
+                    </template>
+
+                    <template v-if="totpBackupCodes.length">
+                        <v-divider class="my-3"></v-divider>
+                        <div class="subtitle-2 mb-1">Backup codes — save them now, they are shown only once</div>
+                        <div class="caption grey--text mb-2">Each code works once, in place of a TOTP code.</div>
+                        <v-row dense>
+                            <v-col cols="6" v-for="c in totpBackupCodes" :key="c">
+                                <code>{{ c }}</code>
+                            </v-col>
+                        </v-row>
+                    </template>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="closeTotpDialog">Close</v-btn>
+                    <v-btn v-if="totpEnabled && !totpSetup" color="red" :loading="totpSaving" @click="disableTotp">Disable 2FA</v-btn>
+                    <v-btn v-else-if="totpSetup" color="primary" :loading="totpSaving" @click="enableTotp">Enable 2FA</v-btn>
+                    <v-btn v-else color="primary" :loading="totpSaving" @click="startTotpSetup">Set Up 2FA</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
         {% endraw %}
         {% endif %}
 
@@ -355,8 +478,13 @@
                 themes: {
                     light: {
                         primary: '#16a34a',
-                        secondary: '#1a2332',
-                        background: '#f4f6f8',
+                        secondary: '#151d2b',
+                        background: '#f5f6f8',
+                    },
+                    dark: {
+                        primary: '#16a34a',
+                        secondary: '#0d1420',
+                        background: '#0f1722',
                     }
                 }
             }
@@ -368,6 +496,20 @@
                 passwordDialog: false,
                 pwSaving: false,
                 pwForm: {current: '', new1: '', new2: ''},
+                totpDialog: false,
+                totpSaving: false,
+                totpEnabled: false,
+                totpSetup: null,
+                totpEnableCode: '',
+                totpDisablePassword: '',
+                totpBackupCodes: [],
+                // G75 global search state
+                searchQuery: '',
+                searchMenu: false,
+                searchResults: {groups: {}},
+                searchTimer: null,
+                // G63: effective permission map from the server (null for anonymous)
+                userPerms: {{ (permissions if permissions else {"sections": {}, "write": True}) | tojson }},
                 dashboardShell: {{ 'true' if page == 'dashboard' and is_authenticated_user_type else 'false' }},
                 roleLabel: '{{ is_authenticated_user_type if is_authenticated_user_type else "" }}',
                 navItems: [
@@ -387,7 +529,15 @@
         },
         computed: {
             visibleNavItems() {
-                return this.navItems.filter(i => !i.admin || this.roleLabel === 'admin');
+                const isAdmin = this.roleLabel === 'admin';
+                return this.navItems.filter(i =>
+                    (!i.admin || isAdmin) && (isAdmin || this.userPerms.sections[i.key] !== false));
+            },
+            searchGroups() {
+                const order = ['campaigns', 'offers', 'landings', 'domains', 'sources', 'affiliates', 'conversions'];
+                const groups = this.searchResults.groups || {};
+                return order.filter(k => groups[k] && groups[k].length)
+                    .map(k => ({key: k, items: groups[k]}));
             },
             pageTitle() {
                 const titles = {
@@ -420,9 +570,21 @@
         },
         mounted() {
             if (!this.dashboardShell) return;
-            // Non-admins landing on an admin-only section URL fall back to dashboard
+            // D1a: an expired/revoked session bounces any API fetch to the login page
+            const origFetch = window.fetch;
+            window.fetch = function (...args) {
+                return origFetch.apply(this, args).then(resp => {
+                    const url = String(args[0] || '');
+                    if (resp.status === 401 && !url.includes('/api/login')
+                        && window.location.pathname.indexOf('/backend/auth') !== 0) {
+                        window.location.href = '/backend/auth';
+                    }
+                    return resp;
+                });
+            };
+            // Users landing on a section they cannot read fall back to dashboard
             const initial = this.navItems.find(i => i.key === this.activeSection);
-            if (!initial || (initial.admin && this.roleLabel !== 'admin')) {
+            if (!initial || !this.canReadSection(initial)) {
                 this.activeSection = 'dashboard';
             }
             // A bare /backend/dashboard URL restores the last visited section;
@@ -438,7 +600,7 @@
                         this.activeSection = saved;
                     }
                     const restored = this.navItems.find(i => i.key === this.activeSection);
-                    if (!restored || (restored.admin && this.roleLabel !== 'admin')) this.activeSection = 'dashboard';
+                    if (!restored || !this.canReadSection(restored)) this.activeSection = 'dashboard';
                 }
             }
             history.replaceState({section: this.activeSection}, '', '/backend/' + this.activeSection);
@@ -446,12 +608,141 @@
             window.addEventListener('popstate', () => {
                 const key = (window.location.pathname.replace(/^\/backend\/?/, '') || 'dashboard').replace(/\/+$/, '');
                 const item = this.navItems.find(i => i.key === key);
-                if (item && (!item.admin || this.roleLabel === 'admin')) {
+                if (item && this.canReadSection(item)) {
                     this.activeSection = key;
                 }
             });
         },
         methods: {
+            canReadSection(item) {
+                if (item.admin && this.roleLabel !== 'admin') return false;
+                return this.roleLabel === 'admin' || this.userPerms.sections[item.key] !== false;
+            },
+            // --- G75 global search ---
+            searchInput() {
+                clearTimeout(this.searchTimer);
+                const q = this.searchQuery.trim();
+                if (q.length < 2) {
+                    this.searchResults = {groups: {}};
+                    return;
+                }
+                this.searchTimer = setTimeout(this.runSearch, 300);
+            },
+            runSearch() {
+                const q = this.searchQuery.trim();
+                if (q.length < 2) return;
+                fetch('/backend/api/search/?q=' + encodeURIComponent(q), {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {groups: {}})
+                    .then(data => {
+                        this.searchResults = data;
+                        this.searchMenu = true;
+                    })
+                    .catch(() => {});
+            },
+            searchSectionFor(group) {
+                return {campaigns: 'campaigns', offers: 'offers', landings: 'landings',
+                        domains: 'domains', sources: 'sources', affiliates: 'affiliates',
+                        conversions: 'reports'}[group] || 'dashboard';
+            },
+            searchGo(group, item) {
+                const section = this.searchSectionFor(group);
+                const nav = this.navItems.find(i => i.key === section);
+                if (nav && this.canReadSection(nav)) {
+                    this.activeSection = section;
+                    this.$emit('load-' + section);
+                } else {
+                    this.$root.$emit('show-message', {type: 'info', text: 'No access to the "' + section + '" section'});
+                }
+                this.searchMenu = false;
+            },
+            searchGoFirst() {
+                const groups = this.searchGroups;
+                if (groups.length) {
+                    this.searchGo(groups[0].key, groups[0].items[0]);
+                }
+            },
+            copyText(text) {
+                navigator.clipboard.writeText(text).then(() => {
+                    this.$root.$emit('show-message', {type: 'success', text: 'Copied to clipboard'});
+                });
+            },
+            openTotpDialog() {
+                this.totpSetup = null;
+                this.totpEnableCode = '';
+                this.totpDisablePassword = '';
+                this.totpBackupCodes = [];
+                this.totpDialog = true;
+                fetch('/backend/api/users/me', {credentials: 'include'})
+                    .then(r => r.json())
+                    .then(d => { this.totpEnabled = !!d.totp_enabled; })
+                    .catch(() => {});
+            },
+            closeTotpDialog() {
+                this.totpDialog = false;
+                this.totpSetup = null;
+                this.totpEnableCode = '';
+                this.totpBackupCodes = [];
+            },
+            async startTotpSetup() {
+                this.totpSaving = true;
+                try {
+                    const res = await fetch('/backend/api/users/me/totp/setup', {method: 'POST', credentials: 'include'});
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Setup failed');
+                    this.totpSetup = data;
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error', text: err.message});
+                } finally {
+                    this.totpSaving = false;
+                }
+            },
+            async enableTotp() {
+                if (!this.totpEnableCode || this.totpEnableCode.length < 6) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Enter the 6-digit code from your app.'});
+                    return;
+                }
+                this.totpSaving = true;
+                try {
+                    const res = await fetch('/backend/api/users/me/totp/enable', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify({code: this.totpEnableCode})
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Enable failed');
+                    this.totpEnabled = true;
+                    this.totpBackupCodes = data.backup_codes || [];
+                    this.totpSetup = null;
+                    this.totpEnableCode = '';
+                    this.$root.$emit('show-message', {type: 'success', text: 'Two-factor authentication enabled'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error', text: err.message});
+                } finally {
+                    this.totpSaving = false;
+                }
+            },
+            async disableTotp() {
+                this.totpSaving = true;
+                try {
+                    const res = await fetch('/backend/api/users/me/totp/disable', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify({password: this.totpDisablePassword})
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Disable failed');
+                    this.totpEnabled = false;
+                    this.totpDisablePassword = '';
+                    this.totpDialog = false;
+                    this.$root.$emit('show-message', {type: 'success', text: 'Two-factor authentication disabled'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error', text: err.message});
+                } finally {
+                    this.totpSaving = false;
+                }
+            },
             openPasswordDialog() {
                 this.pwForm = {current: '', new1: '', new2: ''};
                 this.passwordDialog = true;
@@ -491,6 +782,37 @@
     });
 
 </script>
+
+<style>
+    .topnav-search {
+        max-width: 260px;
+        margin-top: 6px;
+        margin-bottom: 6px;
+        font-size: var(--fs-13, 13px);
+    }
+    .search-menu-card {
+        max-height: 420px;
+        overflow-y: auto;
+    }
+    .search-group-header {
+        font-size: var(--fs-11, 11px);
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-secondary, #667085);
+        height: 32px;
+    }
+    .search-hit-name {
+        font-size: var(--fs-13, 13px);
+        font-weight: 500;
+    }
+    .search-hit-snippet {
+        font-size: var(--fs-12, 12px);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+</style>
 
 </body>
 </html>

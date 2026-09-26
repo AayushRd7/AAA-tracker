@@ -18,7 +18,7 @@
 
             <v-row class="mb-2">
                 <v-col cols="12">
-                    <v-card flat class="pa-2">
+                    <v-card class="pa-4">
                         <v-card-title>Postback URLs</v-card-title>
                         <v-card-text>
                             <div class="caption grey--text mb-2">Accepts GET requests — statuses can only be: 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'</div>
@@ -34,7 +34,7 @@
                                 </v-tooltip>
                             </div>
                             <div class="d-flex align-center code-row mt-2">
-                                <span class="caption grey--text mr-2" style="min-width: 42px;">Demo</span>
+                                <span class="caption grey--text mr-2 demo-label">Demo</span>
                                 <code class="code-inline">{{ postbackUrlDemo }}</code>
                                 <v-tooltip bottom>
                                     <template v-slot:activator="{ on, attrs }">
@@ -51,9 +51,20 @@
             </v-row>
             <v-row>
                 <v-col cols="12" md="6">
-                    <v-card flat class="pa-2">
+                    <v-card class="pa-4">
                         <v-card-title>General Settings</v-card-title>
                         <v-card-text>
+                            <v-switch
+                                    v-model="darkMode"
+                                    label="Dark mode"
+                                    inset
+                                    dense
+                                    hide-details
+                                    hint="Switches the whole dashboard between light and dark"
+                                    persistent-hint
+                                    class="mb-3"
+                            ></v-switch>
+
                             <v-text-field
                                     label="Tracker Domain"
                                     v-model="settings.domain"
@@ -82,7 +93,7 @@
                 </v-col>
 
                 <v-col cols="12" md="6">
-                    <v-card flat class="pa-2">
+                    <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-telegram</v-icon>
                             Telegram Notifications
@@ -138,7 +149,7 @@
                 </v-col>
 
                 <v-col cols="12" md="6">
-                    <v-card flat class="pa-2">
+                    <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-email-outline</v-icon>
                             Daily Email Reports
@@ -257,7 +268,7 @@
                 </v-col>
 
                 <v-col cols="12" md="6">
-                    <v-card flat class="pa-2">
+                    <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-shield-lock-outline</v-icon>
                             Postback Security
@@ -303,7 +314,7 @@
                 </v-col>
 
                 <v-col cols="12" md="6">
-                    <v-card flat class="pa-2">
+                    <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-database-refresh-outline</v-icon>
                             Data Retention
@@ -332,7 +343,7 @@
                 </v-col>
 
                 <v-col cols="12" md="6">
-                    <v-card flat class="pa-2">
+                    <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-robot-outline</v-icon>
                             Bot &amp; Filter Rules
@@ -347,14 +358,14 @@
                             ></v-switch>
 
                             <div v-for="(rule, i) in settings.bot_rules.rules" :key="i"
-                                 class="d-flex align-center" style="gap: 8px;">
+                                 class="d-flex align-center bot-rule-row">
                                 <v-select
                                         v-model="rule.type"
                                         :items="botRuleTypes"
                                         outlined
                                         dense
                                         hide-details
-                                        style="max-width: 170px;"
+                                        class="bot-rule-type"
                                         @change="rule.value = ['empty_referer','duplicate_visitor'].includes(rule.type) ? '' : rule.value"
                                 ></v-select>
                                 <v-text-field
@@ -365,14 +376,14 @@
                                         dense
                                         hide-details
                                 ></v-text-field>
-                                <span v-else class="caption grey--text" style="flex: 1;">no value needed</span>
+                                <span v-else class="caption grey--text bot-rule-grow">no value needed</span>
                                 <v-select
                                         v-model="rule.action"
                                         :items="[{text: 'Block (404)', value: 'block'}, {text: 'Mark as bot', value: 'mark'}]"
                                         outlined
                                         dense
                                         hide-details
-                                        style="max-width: 150px;"
+                                        class="bot-rule-action"
                                 ></v-select>
                                 <v-btn icon small @click="settings.bot_rules.rules.splice(i, 1)">
                                     <v-icon small color="red">mdi-close</v-icon>
@@ -392,9 +403,56 @@
                     </v-card>
                 </v-col>
 
+                <!-- Custom conversion statuses block (G19) -->
+                <v-col cols="12" md="6">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-tag-plus-outline</v-icon>
+                            Conversion Statuses
+                        </v-card-title>
+                        <v-card-text>
+                            <div class="caption grey--text mb-3">
+                                Custom event types accepted on postbacks and imports, in addition to the
+                                built-ins (lead, sale, upsale, rejected, hold, trash). Names are normalized
+                                to lowercase_underscore — "ReGistration Bonus" becomes
+                                <code>registration_bonus</code>.
+                            </div>
+
+                            <div v-for="(cs, i) in settings.custom_statuses" :key="i"
+                                 class="d-flex align-center custom-status-row">
+                                <v-text-field
+                                        v-model="cs.name"
+                                        label="Status name"
+                                        outlined
+                                        dense
+                                        hide-details
+                                        class="mr-3"
+                                ></v-text-field>
+                                <span class="status-chip mr-3" :class="customStatusChipClass(i)">
+                                    {{ slugifyStatus(cs.name) || '…' }}
+                                </span>
+                                <v-btn icon small @click="settings.custom_statuses.splice(i, 1)">
+                                    <v-icon small color="red">mdi-close</v-icon>
+                                </v-btn>
+                            </div>
+
+                            <div class="mt-2">
+                                <v-btn small text color="primary" @click="addCustomStatus">
+                                    <v-icon small class="mr-1">mdi-plus</v-icon>Add status
+                                </v-btn>
+                            </div>
+
+                            <div class="caption grey--text mt-2">
+                                Custom statuses appear in the conversion-log status filter and edit dialog,
+                                and in the postback URL <code>/pb/{click_id}/{status}/{payout}</code>.
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
                 <!-- Variable mapping block -->
                 <v-col cols="12">
-                    <v-card flat class="pa-2">
+                    <v-card class="pa-4">
                         <v-card-title>Matching Variables (Sub IDs)</v-card-title>
                         <v-card-text>
                             <v-row dense v-for="(mapping, index) in subIdMapping" :key="index" align="center">
@@ -429,10 +487,239 @@
                         </v-card-text>
                     </v-card>
                 </v-col>
+
+                <!-- G69: flow monitoring -->
+                <v-col cols="12">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-heart-pulse</v-icon>
+                            Monitoring
+                            <v-spacer></v-spacer>
+                            <v-btn small outlined color="primary" :loading="monitorChecking" @click="checkNow">
+                                <v-icon small class="mr-1">mdi-refresh</v-icon>Check now
+                            </v-btn>
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.monitoring.auto_disable_flows"
+                                    label="Auto-disable flows after 3 consecutive failures"
+                                    inset
+                                    dense
+                                    hide-details
+                                    hint="Every 15 minutes the tracker HTTP-checks every offer URL, landing link and redirect URL used by active campaigns. A dead flow is switched off in its campaign config so the routing engine skips it, and a Telegram alert is sent (when Telegram notifications are enabled). Turning this off keeps monitoring + alerts but never changes flows."
+                                    persistent-hint
+                                    class="mb-3"
+                            ></v-switch>
+                            <v-data-table
+                                    :headers="monitorHeaders"
+                                    :items="monitorItems"
+                                    dense
+                                    :loading="monitorLoading"
+                                    :items-per-page="10"
+                            >
+                                <template v-slot:item.status="{ item }">
+                                    <span class="status-chip"
+                                          :class="item.status === 'ok' ? 'status-chip--success' : 'status-chip--danger'">{{ item.status }}</span>
+                                </template>
+                                <template v-slot:item.checked_at="{ item }">
+                                    {{ item.checked_at ? $formatDate(item.checked_at) : '—' }}
+                                </template>
+                                <template v-slot:no-data>
+                                    <div class="empty-state">
+                                        <v-icon>mdi-heart-pulse</v-icon>
+                                        <div class="mt-2">No checks yet — hit "Check now" to probe every flow destination</div>
+                                    </div>
+                                </template>
+                            </v-data-table>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
+                <!-- G70: auto rules -->
+                <v-col cols="12">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-robot-outline</v-icon>
+                            Auto Rules
+                            <v-spacer></v-spacer>
+                            <v-btn small outlined color="primary" @click="openRuleDialog">
+                                <v-icon small class="mr-1">mdi-plus</v-icon>Add rule
+                            </v-btn>
+                        </v-card-title>
+                        <v-card-text>
+                            <div class="caption grey--text mb-3">
+                                Every 15 minutes each enabled rule is evaluated against ClickHouse metrics for its
+                                lookback window. When ALL conditions match, the action runs: pause the campaign
+                                (note: the tracking plane still routes paused campaigns — pair it with a Telegram
+                                alert), or send a Telegram / email alert (once per continuous match).
+                            </div>
+                            <v-data-table
+                                    :headers="ruleHeaders"
+                                    :items="rules"
+                                    dense
+                                    :loading="rulesLoading"
+                                    :items-per-page="10"
+                            >
+                                <template v-slot:item.enabled="{ item }">
+                                    <v-switch :input-value="item.enabled" dense hide-details inset
+                                              @change="toggleRule(item)"></v-switch>
+                                </template>
+                                <template v-slot:item.conditions="{ item }">
+                                    <div v-for="(c, i) in item.conditions" :key="i" class="caption">
+                                        {{ c.metric }} {{ c.comparator }} {{ c.value }} · last {{ c.period_hours }}h
+                                    </div>
+                                </template>
+                                <template v-slot:item.last_result="{ item }">
+                                    <template v-if="item.last_result">
+                                        <span class="status-chip"
+                                              :class="item.last_result.matched ? 'status-chip--warning' : 'status-chip--success'">
+                                            {{ item.last_result.matched ? 'fired' : 'clear' }}
+                                        </span>
+                                        <div class="caption grey--text">
+                                            {{ (item.last_result.conditions || []).map(c => c.metric + ' ' + c.comparator + ' ' + c.value + ' → ' + (c.actual == null ? '—' : c.actual)).join('; ') }}
+                                        </div>
+                                    </template>
+                                    <span v-else class="grey--text caption">never run</span>
+                                </template>
+                                <template v-slot:item.actions="{ item }">
+                                    <v-btn small text color="primary" :loading="ruleRunning === item.id"
+                                           @click="runRuleNow(item)">Run now</v-btn>
+                                    <v-btn icon small color="red" @click="deleteRule(item)">
+                                        <v-icon small>mdi-trash-can-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <template v-slot:no-data>
+                                    <div class="empty-state">
+                                        <v-icon>mdi-robot-outline</v-icon>
+                                        <div class="mt-2">No auto rules yet — e.g. "ROI &lt; -30% over 6h → pause campaign"</div>
+                                    </div>
+                                </template>
+                            </v-data-table>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
+                <!-- D1e: privacy -->
+                <v-col cols="12" md="6">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-shield-lock-outline</v-icon>
+                            Privacy
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.privacy.anonymize_ip"
+                                    label="Anonymize IP addresses"
+                                    inset
+                                    dense
+                                    hide-details
+                                    hint="The tracking plane masks visitor IPs (last octet zeroed: 203.0.113.55 → 203.0.113.0) before writing ClickHouse rows. Geo detection still works; per-IP drill-down is lost. Applied to new traffic only."
+                                    persistent-hint
+                                    class="mb-3"
+                            ></v-switch>
+                            <div class="caption grey--text">
+                                Visitors can opt out of all tracking entirely via the
+                                <a :href="optoutUrl" target="_blank">{{ optoutUrl }}</a> page — it sets the
+                                <code>aaa_optout</code> cookie and the tracking plane stops writing rows and setting
+                                cookies for that browser.
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
+                <!-- G65: audit log (admin-only) -->
+                <v-col cols="12">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-clipboard-text-clock-outline</v-icon>
+                            Audit Log
+                        </v-card-title>
+                        <v-card-text>
+                            <div class="caption grey--text mb-3">
+                                Security-relevant events: sign-ins (success/failure), 2FA changes, user and permission changes, archive/restore. Newest first.
+                            </div>
+                            <v-row dense align="center" class="mb-2">
+                                <v-col cols="12" sm="3">
+                                    <v-text-field
+                                            label="Filter by user"
+                                            v-model="auditFilterUser"
+                                            outlined
+                                            dense
+                                            hide-details
+                                            clearable
+                                            @keyup.enter="loadAudit(1)"
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="6" sm="3">
+                                    <v-select
+                                            label="Action"
+                                            :items="auditActions"
+                                            v-model="auditFilterAction"
+                                            outlined
+                                            dense
+                                            hide-details
+                                            clearable
+                                    ></v-select>
+                                </v-col>
+                                <v-col cols="6" sm="3">
+                                    <v-select
+                                            label="Entity"
+                                            :items="['user', 'campaigns', 'offers', 'sources', 'affiliate_networks', 'domains', 'auto_rules', 'monitoring']"
+                                            v-model="auditFilterEntity"
+                                            outlined
+                                            dense
+                                            hide-details
+                                            clearable
+                                    ></v-select>
+                                </v-col>
+                                <v-col cols="auto">
+                                    <v-btn small outlined color="primary" @click="loadAudit(1)">
+                                        <v-icon small class="mr-1">mdi-filter-outline</v-icon>Apply
+                                    </v-btn>
+                                </v-col>
+                            </v-row>
+
+                            <v-data-table
+                                    :headers="auditHeaders"
+                                    :items="auditEntries"
+                                    dense
+                                    :loading="auditLoading"
+                                    :server-items-length="auditTotal"
+                                    :page.sync="auditPage"
+                                    :items-per-page="50"
+                                    hide-default-footer
+                            >
+                                <template v-slot:item.at="{ item }">
+                                    {{ $formatDate(item.at) }}
+                                </template>
+                                <template v-slot:item.action="{ item }">
+                                    <span class="status-chip" :class="auditChipClass(item.action)">{{ item.action }}</span>
+                                </template>
+                                <template v-slot:item.detail="{ item }">
+                                    <code v-if="item.detail" class="caption">{{ JSON.stringify(item.detail) }}</code>
+                                </template>
+                                <template v-slot:no-data>
+                                    <div class="empty-state">
+                                        <v-icon>mdi-clipboard-text-outline</v-icon>
+                                        <div class="mt-2">No audit entries match</div>
+                                    </div>
+                                </template>
+                            </v-data-table>
+                            <div class="d-flex align-center justify-end mt-2">
+                                <span class="caption grey--text mr-4">{{ auditTotal }} entries · page {{ auditPage }} of {{ Math.max(1, Math.ceil(auditTotal / 50)) }}</span>
+                                <v-btn small outlined :disabled="auditPage <= 1" @click="loadAudit(auditPage - 1)">
+                                    <v-icon small>mdi-chevron-left</v-icon>
+                                </v-btn>
+                                <v-btn small outlined class="ml-2" :disabled="auditPage >= Math.ceil(auditTotal / 50)" @click="loadAudit(auditPage + 1)">
+                                    <v-icon small>mdi-chevron-right</v-icon>
+                                </v-btn>
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
             </v-row>
 
-            <v-row class="mt-4 mb-2">
-                &nbsp;
+            <v-row class="mt-6 mb-4">
                 <v-btn
                         color="red"
                         @click="clearData"
@@ -443,6 +730,84 @@
             </v-row>
 
         </v-container>
+
+        <v-dialog v-model="ruleDialog" persistent max-width="520px">
+            <v-card>
+                <v-card-title class="text-h6">New Auto Rule</v-card-title>
+                <v-card-text>
+                    <v-text-field
+                            label="Rule name"
+                            v-model="ruleForm.name"
+                            outlined
+                            dense
+                    ></v-text-field>
+                    <v-select
+                            label="Campaign"
+                            v-model="ruleForm.campaign_id"
+                            :items="campaignOptions"
+                            item-text="name"
+                            item-value="id"
+                            outlined
+                            dense
+                            hint="Rules always evaluate one campaign's metrics (required for pause)."
+                            persistent-hint
+                    ></v-select>
+                    <v-row dense>
+                        <v-col cols="4">
+                            <v-select
+                                    label="Metric"
+                                    v-model="ruleForm.metric"
+                                    :items="ruleMetrics"
+                                    outlined
+                                    dense
+                            ></v-select>
+                        </v-col>
+                        <v-col cols="3">
+                            <v-text-field
+                                    label="Period (h)"
+                                    v-model.number="ruleForm.period_hours"
+                                    type="number"
+                                    min="1"
+                                    max="720"
+                                    outlined
+                                    dense
+                            ></v-text-field>
+                        </v-col>
+                        <v-col cols="2">
+                            <v-select
+                                    label="Cmp"
+                                    v-model="ruleForm.comparator"
+                                    :items="['<', '>', '<=', '>=', '==', '!=']"
+                                    outlined
+                                    dense
+                            ></v-select>
+                        </v-col>
+                        <v-col cols="3">
+                            <v-text-field
+                                    label="Value"
+                                    v-model.number="ruleForm.value"
+                                    type="number"
+                                    step="any"
+                                    outlined
+                                    dense
+                            ></v-text-field>
+                        </v-col>
+                    </v-row>
+                    <v-select
+                            label="Action"
+                            v-model="ruleForm.action"
+                            :items="ruleActions"
+                            outlined
+                            dense
+                    ></v-select>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="ruleDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="ruleSaving" @click="saveRule">Create Rule</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
     </v-container>
 </script>
 
@@ -492,6 +857,13 @@
                         enabled: false,
                         days: 180,
                     },
+                    custom_statuses: [],
+                    monitoring: {
+                        auto_disable_flows: false,
+                    },
+                    privacy: {
+                        anonymize_ip: false,
+                    },
                 },
                 subIdMapping: [
                 ],
@@ -510,11 +882,78 @@
                 showSmtpPassword: false,
                 showBrevoApiKey: false,
                 showPbSecret: false,
+                darkMode: false,
+                auditEntries: [],
+                auditTotal: 0,
+                auditPage: 1,
+                auditLoading: false,
+                auditFilterUser: '',
+                auditFilterAction: '',
+                auditFilterEntity: '',
+                auditHeaders: [
+                    {text: 'Time', value: 'at'},
+                    {text: 'User', value: 'username'},
+                    {text: 'Action', value: 'action'},
+                    {text: 'Entity', value: 'entity'},
+                    {text: 'Entity ID', value: 'entity_id'},
+                    {text: 'IP', value: 'ip'},
+                    {text: 'Detail', value: 'detail', sortable: false},
+                ],
+                auditActions: ['login_success', 'login_failed', 'login_totp_required', 'totp_failed',
+                    'totp_setup', 'totp_enabled', 'totp_disabled', 'totp_reset',
+                    'user_created', 'user_updated', 'user_deleted',
+                    'create', 'update', 'delete', 'rule_executed', 'monitor_check',
+                    'archive', 'restore', 'logout'],
+                // G69 monitoring
+                monitorItems: [],
+                monitorLoading: false,
+                monitorChecking: false,
+                monitorHeaders: [
+                    {text: 'URL', value: 'url'},
+                    {text: 'Campaign', value: 'campaign_name'},
+                    {text: 'Status', value: 'status'},
+                    {text: 'Checked', value: 'checked_at'},
+                    {text: 'Fails', value: 'fail_count', align: 'end'},
+                ],
+                // G70 auto rules
+                rules: [],
+                rulesLoading: false,
+                ruleRunning: null,
+                ruleDialog: false,
+                ruleSaving: false,
+                ruleForm: {name: '', campaign_id: null, metric: 'roi', period_hours: 6,
+                           comparator: '<', value: -30, action: 'alert_telegram'},
+                ruleMetrics: ['roi', 'profit', 'cost', 'revenue', 'conversions', 'clicks'],
+                ruleActions: [
+                    {text: 'Pause campaign', value: 'pause_campaign'},
+                    {text: 'Alert via Telegram', value: 'alert_telegram'},
+                    {text: 'Alert via email', value: 'alert_email'},
+                ],
+                ruleHeaders: [
+                    {text: 'Name', value: 'name'},
+                    {text: 'Enabled', value: 'enabled', sortable: false},
+                    {text: 'Conditions', value: 'conditions', sortable: false},
+                    {text: 'Action', value: 'action'},
+                    {text: 'Last run', value: 'last_result', sortable: false},
+                    {text: 'Actions', value: 'actions', sortable: false},
+                ],
+                campaignOptions: [],
             };
         },
         mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
+            this.darkMode = (document.documentElement.dataset.theme === 'dark');
             this.loadSettings();
+            this.loadAudit(1);
+            this.loadMonitorStatus();
+            this.loadRules();
             this.$root.$on('load-settings', this.loadSettings);
+        },
+        watch: {
+            darkMode(on) {
+                if (window.setTheme) window.setTheme(on ? 'dark' : 'light');
+                this.$vuetify.theme.dark = !!on;
+            }
         },
         computed:{
               postbackUrl() {
@@ -522,6 +961,9 @@
               },
               postbackUrlDemo() {
                 return `${window.location.origin}/pb/d8f8d388-356b-4063-90ef-6137258b59c1/sale/202.15`;
+              },
+              optoutUrl() {
+                return `${window.location.origin}/optout`;
               }
         },
         methods: {
@@ -584,6 +1026,11 @@
                         if (!Array.isArray(this.settings.bot_rules.rules)) this.settings.bot_rules.rules = [];
                         this.settings.data_retention = Object.assign(
                             {}, {enabled: false, days: 180}, this.settings.data_retention || {});
+                        this.settings.monitoring = Object.assign(
+                            {}, {auto_disable_flows: false}, this.settings.monitoring || {});
+                        this.settings.privacy = Object.assign(
+                            {}, {anonymize_ip: false}, this.settings.privacy || {});
+                        if (!Array.isArray(this.settings.custom_statuses)) this.settings.custom_statuses = [];
                         if (data.subIdMapping) this.subIdMapping = data.subIdMapping;
                     });
             },
@@ -606,7 +1053,7 @@
                         return data;
                     })
                     .catch((err) => {
-                        this.$root.$emit("show-message", {type: "error", text: err.message});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                         throw err;
                     });
             },
@@ -654,11 +1101,214 @@
             generateToken() {
                 this.settings.apiToken = Math.random().toString(36).substring(2, 12);
             },
+            loadAudit(page) {
+                this.auditLoading = true;
+                const params = new URLSearchParams({page: page || 1, page_size: 50});
+                if (this.auditFilterUser) params.set('user', this.auditFilterUser);
+                if (this.auditFilterAction) params.set('action', this.auditFilterAction);
+                if (this.auditFilterEntity) params.set('entity', this.auditFilterEntity);
+                fetch(`/backend/api/audit/?${params.toString()}`, {credentials: 'include'})
+                    .then(r => r.json())
+                    .then(data => {
+                        this.auditEntries = data.entries || [];
+                        this.auditTotal = data.total || 0;
+                        this.auditPage = data.page || 1;
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.auditLoading = false;
+                    });
+            },
+            auditChipClass(action) {
+                if (action.includes('fail') || action.includes('delete') || action === 'totp_failed') {
+                    return 'status-chip--danger';
+                }
+                if (action.includes('login') || action === 'totp_enabled') return 'status-chip--success';
+                if (action.startsWith('totp') || action.includes('update') || action === 'archive') {
+                    return 'status-chip--warning';
+                }
+                return 'status-chip--info';
+            },
             addBotRule() {
                 if (!Array.isArray(this.settings.bot_rules.rules)) this.settings.bot_rules.rules = [];
                 this.settings.bot_rules.rules.push({type: 'ip', value: '', action: 'block', enabled: true});
+            },
+            addCustomStatus() {
+                if (!Array.isArray(this.settings.custom_statuses)) this.settings.custom_statuses = [];
+                this.settings.custom_statuses.push({name: ''});
+            },
+            // --- G69 monitoring ---
+            loadMonitorStatus() {
+                this.monitorLoading = true;
+                fetch('/backend/api/monitor/status', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {items: []})
+                    .then(data => {
+                        this.monitorItems = data.items || [];
+                        if (data.auto_disable_flows !== undefined) {
+                            this.settings.monitoring.auto_disable_flows = data.auto_disable_flows;
+                        }
+                    })
+                    .catch(() => {})
+                    .finally(() => {
+                        this.monitorLoading = false;
+                    });
+            },
+            async checkNow() {
+                this.monitorChecking = true;
+                try {
+                    const res = await fetch('/backend/api/monitor/check-now', {
+                        method: 'POST', credentials: 'include'});
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    this.$root.$emit('show-message', {type: 'success',
+                        text: `Checked ${data.checked} destination(s) — ${data.dead} dead`});
+                    this.loadMonitorStatus();
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Check failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.monitorChecking = false;
+                }
+            },
+            // --- G70 auto rules ---
+            loadRules() {
+                this.rulesLoading = true;
+                fetch('/backend/api/rules/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {rules: []})
+                    .then(data => {
+                        this.rules = data.rules || [];
+                    })
+                    .catch(() => {})
+                    .finally(() => {
+                        this.rulesLoading = false;
+                    });
+                fetch('/backend/api/campaigns/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : [])
+                    .then(data => {
+                        this.campaignOptions = (data || []).map(c => ({id: c.id, name: c.name}));
+                    })
+                    .catch(() => {});
+            },
+            openRuleDialog() {
+                this.ruleForm = {name: '', campaign_id: null, metric: 'roi', period_hours: 6,
+                                 comparator: '<', value: -30, action: 'alert_telegram'};
+                this.ruleDialog = true;
+            },
+            async saveRule() {
+                if (!this.ruleForm.name.trim() || !this.ruleForm.campaign_id) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Rule name and campaign are required.'});
+                    return;
+                }
+                this.ruleSaving = true;
+                try {
+                    const res = await fetch('/backend/api/rules/', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            name: this.ruleForm.name.trim(),
+                            enabled: true,
+                            campaign_id: this.ruleForm.campaign_id,
+                            conditions: [{metric: this.ruleForm.metric,
+                                          period_hours: this.ruleForm.period_hours,
+                                          comparator: this.ruleForm.comparator,
+                                          value: this.ruleForm.value}],
+                            action: this.ruleForm.action,
+                        })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    this.ruleDialog = false;
+                    this.$root.$emit('show-message', {type: 'success', text: 'Rule created'});
+                    this.loadRules();
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Rule save failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.ruleSaving = false;
+                }
+            },
+            async toggleRule(item) {
+                try {
+                    const res = await fetch(`/backend/api/rules/${item.id}`, {
+                        method: 'PATCH',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({enabled: !item.enabled})
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.loadRules();
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Toggle failed: ' + sanitizeToastMessage(err.message)});
+                }
+            },
+            async runRuleNow(item) {
+                this.ruleRunning = item.id;
+                try {
+                    const res = await fetch(`/backend/api/rules/${item.id}/run`, {
+                        method: 'POST', credentials: 'include'});
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    const conds = (data.conditions || []).map(c =>
+                        `${c.metric} ${c.comparator} ${c.value} → ${c.actual == null ? '—' : c.actual}`);
+                    this.$root.$emit('show-message', {
+                        type: data.would_fire ? 'warning' : 'success',
+                        text: `Run: ${conds.join('; ')}${data.would_fire ? ' — would fire' : ' — clear'}`});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Run failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.ruleRunning = null;
+                }
+            },
+            async deleteRule(item) {
+                if (!confirm(`Delete rule "${item.name}"?`)) return;
+                try {
+                    const res = await fetch(`/backend/api/rules/${item.id}`, {
+                        method: 'DELETE', credentials: 'include'});
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.loadRules();
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Delete failed: ' + sanitizeToastMessage(err.message)});
+                }
+            },
+            slugifyStatus(name) {
+                return String(name || '').trim().toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+            },
+            customStatusChipClass(index) {
+                const palette = ['status-chip--info', 'status-chip--success',
+                    'status-chip--warning', 'status-chip--danger', 'status-chip--neutral'];
+                return palette[index % palette.length];
             }
         }
     });
 </script>
+
+<style>
+    .bot-rule-row {
+        gap: var(--space-2, 8px);
+    }
+    .custom-status-row {
+        gap: var(--space-2, 8px);
+        margin-bottom: var(--space-2, 8px);
+    }
+    .bot-rule-type {
+        max-width: 170px;
+    }
+    .bot-rule-action {
+        max-width: 150px;
+    }
+    .bot-rule-grow {
+        flex: 1;
+    }
+    .demo-label {
+        min-width: 42px;
+    }
+</style>
 {% endraw %}
