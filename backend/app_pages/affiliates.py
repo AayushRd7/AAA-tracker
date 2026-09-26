@@ -307,3 +307,35 @@ def delete_network(network_id: int, request: Request, db: Session = Depends(get_
                 {"name": net.name}, request.client.host if request.client else "")
     return {"message": "Affiliate network deleted"}
 
+
+class NetworkBulkIn(BaseModel):
+    ids: List[int]
+    action: str  # 'delete'
+
+
+@router.post("/bulk", response_model=dict)
+def bulk_networks(data: NetworkBulkIn, request: Request, db: Session = Depends(get_db)):
+    """Bulk delete affiliate networks; networks with linked offers are skipped."""
+    from audit_logger import audit_event
+    from auth import get_caller
+    networks = db.query(AffiliateNetworkORM).filter(
+        AffiliateNetworkORM.id.in_(data.ids)).all()
+    if data.action != 'delete':
+        raise HTTPException(status_code=400, detail=f"Unknown action '{data.action}'")
+
+    blocked, deleted = [], []
+    for net in networks:
+        if db.query(OfferORM).filter_by(affiliate_network_id=net.id).first():
+            blocked.append(net.name)
+            continue
+        db.delete(net)
+        deleted.append(net.id)
+    db.commit()
+
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "delete", "affiliate_networks",
+                ",".join(map(str, deleted)),
+                {"bulk": "delete", "count": len(deleted)}, request.client.host if request.client else "")
+    return {"message": f"Deleted {len(deleted)} networks",
+            "updated": len(deleted), "skipped": blocked}
+

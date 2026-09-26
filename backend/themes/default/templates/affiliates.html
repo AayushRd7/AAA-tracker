@@ -134,7 +134,18 @@
         <v-row dense class="mt-4">
             <v-col>
                 <v-card>
+                    <!-- Bulk actions bar -->
+                    <div v-if="selected.length" class="d-flex align-center pa-2 pl-4 bulk-bar">
+                        <span class="text-body-2 font-weight-medium mr-4">{{ selected.length }} selected</span>
+                        <v-btn small color="red" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkDelete">
+                            <v-icon small class="mr-1">mdi-trash-can-outline</v-icon>Delete
+                        </v-btn>
+                        <v-spacer></v-spacer>
+                        <v-btn small text @click="selected = []">Clear selection</v-btn>
+                    </div>
                     <v-data-table v-col-resize:affiliates="headers"
+                            v-model="selected"
+                            show-select
                             :headers="headers"
                             :items="affiliateNetworks"
                             dense
@@ -257,6 +268,8 @@
                 ],
                 affiliateNetworks: [],
                 loading: false,
+                selected: [],
+                bulkLoading: false,
 
             }
         },
@@ -473,6 +486,36 @@
                     .catch(err => {
                         this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
+            },
+
+            async bulkDelete() {
+                const ok = await this.$refs.confirm.open(
+                    'Delete affiliate networks',
+                    `Permanently delete ${this.selected.length} network(s)? Networks with linked offers are skipped. This cannot be undone.`);
+                if (!ok) return;
+                this.bulkLoading = true;
+                try {
+                    const res = await fetch('/backend/api/affiliate-networks/bulk', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids: this.selected.map(n => n.id), action: 'delete'})
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.detail || 'Bulk delete failed');
+                    const skipped = (data.skipped || []).length
+                        ? ` Skipped (has offers): ${data.skipped.join(', ')}.` : '';
+                    this.$root.$emit('show-message', {
+                        type: 'success',
+                        text: `Deleted ${data.updated ?? this.selected.length} networks.${skipped}`
+                    });
+                    this.selected = [];
+                    this.loadNetworks();
+                } catch (e) {
+                    this.$root.$emit('show-message', {type: 'error', text: e.message});
+                } finally {
+                    this.bulkLoading = false;
+                }
             },
 
             async deleteAffiliateNetwork(network) {
