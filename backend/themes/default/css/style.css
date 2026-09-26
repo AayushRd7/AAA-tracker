@@ -663,74 +663,141 @@ body::-webkit-scrollbar-thumb:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- Top navigation (dark chrome bar keeps every pixel for data) ---------- */
+/* ---------- App shell: left section rail + slim utility top bar ---------- */
 
-.topnav-bar {
-  background: var(--chrome) !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
+.side-nav {
+  background: var(--surface) !important;
+  border-right: 1px solid var(--border-soft) !important;
 }
 
-/* Vuetify doesn't vertically center toolbar children at custom heights —
-   without this the nav rides high and sits off the brand baseline. */
-.topnav-bar .v-toolbar__content {
-  align-items: center;
-  height: 40px !important;
+.side-nav .v-navigation-drawer__content {
+  display: flex;
+  flex-direction: column;
 }
 
-.topnav-bar .brand-logo {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  box-shadow: none;
-}
-
-.brand-block-top {
-  padding-right: 22px;
-  border-right: 1px solid rgba(255, 255, 255, 0.09);
-  margin-right: 22px !important;
-}
-
-.top-nav {
+.side-nav-brand {
   display: flex;
   align-items: center;
-  height: 100%;
-  overflow-x: auto;
-  scrollbar-width: none;
+  gap: 10px;
+  height: 56px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+  flex: none;
 }
 
-.top-nav::-webkit-scrollbar {
-  display: none;
-}
-
-.top-nav .v-btn {
-  text-transform: none;
-  font-weight: 500;
-  font-size: var(--fs-13);
-  color: var(--chrome-text);
+.side-nav-brand .brand-logo {
+  width: 28px;
   height: 28px;
   border-radius: var(--radius-sm);
-  min-width: auto;
-  padding: 0 var(--space-3);
-  margin: 0 2px;
-  letter-spacing: 0.2px;
-  background: transparent;
-  transition: color var(--t-fast) ease, background var(--t-fast) ease;
-}
-
-.top-nav .v-btn::before {
-  opacity: 0 !important;
-}
-
-.top-nav .v-btn:hover {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.top-nav .v-btn.top-nav-item--active {
-  color: #ffffff !important;
-  background: var(--accent) !important;
-  font-weight: 600;
   box-shadow: none;
+}
+
+.side-nav-brand-name {
+  font-size: var(--fs-13);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+}
+
+.side-nav-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.side-nav-item {
+  border-radius: var(--radius-sm);
+  margin: 1px var(--space-2);
+  min-height: 40px;
+  color: var(--text-secondary);
+  position: relative;
+  transition: background var(--t-fast) ease, color var(--t-fast) ease;
+}
+
+.side-nav-item .v-list-item__icon {
+  margin-top: 0;
+  margin-bottom: 0;
+  align-self: center;
+}
+
+.side-nav-label {
+  font-size: var(--fs-13);
+  font-weight: 500;
+  letter-spacing: 0.1px;
+}
+
+.side-nav-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+/* Active: soft tint + 3px accent rail on the left edge (no pill) */
+.side-nav-item.side-nav-item--active,
+.side-nav-item.v-list-item--active {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+  font-weight: 600;
+}
+
+.side-nav-item.side-nav-item--active::before,
+.side-nav-item.v-list-item--active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.side-nav-item.side-nav-item--active .v-icon,
+.side-nav-item.v-list-item--active .v-icon {
+  color: var(--accent) !important;
+}
+
+.side-nav-foot {
+  display: flex;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-soft);
+  flex: none;
+}
+
+.side-nav-foot-text {
+  font-size: var(--fs-11);
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+}
+
+/* Slim light top bar */
+.topbar {
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border-soft) !important;
+  color: var(--text-primary) !important;
+}
+
+.topbar .v-toolbar__content {
+  align-items: center;
+}
+
+.topbar-crumb {
+  font-size: var(--fs-15);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.1px;
+}
+
+.topbar-search {
+  max-width: 420px;
+  font-size: var(--fs-13);
+}
+
+.topbar-search .v-input__slot {
+  background: var(--surface) !important;
+}
+
+.topbar .v-btn.v-btn--icon {
+  color: var(--text-secondary);
 }
 
 /* Mobile section menu (white dropdown — light-theme active state) */

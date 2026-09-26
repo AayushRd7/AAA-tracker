@@ -253,22 +253,46 @@
     <v-app>
         {% if page == 'dashboard' and is_authenticated_user_type %}
         {% raw %}
-        <v-app-bar app dark elevation="0" height="40" class="topnav-bar">
-            <div class="d-flex align-center mr-6 brand-block-top">
-                <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo mr-2">
-                <div class="brand-name">AAA TRACKER</div>
+        <!-- RedTrack-style shell: left section rail + slim utility top bar -->
+        <v-navigation-drawer
+                app
+                v-model="drawer"
+                :permanent="$vuetify.breakpoint.lgAndUp"
+                :temporary="$vuetify.breakpoint.mdAndDown"
+                :width="228"
+                class="side-nav"
+        >
+            <div class="side-nav-brand">
+                <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo">
+                <div class="side-nav-brand-name">AAA TRACKER</div>
             </div>
-            <!-- Desktop: horizontal nav keeps every pixel for data -->
-            <nav class="top-nav d-none d-lg-block">
-                <v-btn
+            <v-list nav dense class="side-nav-list py-2">
+                <v-list-item
                         v-for="item in visibleNavItems"
                         :key="item.key"
-                        text
+                        link
                         :input-value="activeSection === item.key"
-                        active-class="top-nav-item--active"
-                        @click="activeSection = item.key"
-                >{{ item.title }}</v-btn>
-            </nav>
+                        active-class="side-nav-item--active"
+                        class="side-nav-item"
+                        @click="navigate(item)"
+                >
+                    <v-list-item-icon class="mr-3"><v-icon dense>{{ item.icon }}</v-icon></v-list-item-icon>
+                    <v-list-item-title class="side-nav-label">{{ item.title }}</v-list-item-title>
+                </v-list-item>
+            </v-list>
+            <template v-slot:append>
+                <div class="side-nav-foot">
+                    <v-icon small class="mr-1" color="primary">mdi-shield-check</v-icon>
+                    <span class="side-nav-foot-text">AAA Tracker · v0.9</span>
+                </div>
+            </template>
+        </v-navigation-drawer>
+
+        <v-app-bar app elevation="0" height="56" class="topbar">
+            <v-btn icon class="d-lg-none mr-1" @click="drawer = true" aria-label="Open navigation">
+                <v-icon>mdi-menu</v-icon>
+            </v-btn>
+            <div class="topbar-crumb d-none d-sm-block">{{ activeNavTitle }}</div>
             <v-spacer></v-spacer>
             <!-- G75 global search: debounced, grouped, jumps to the section -->
             <v-menu v-model="searchMenu" offset-y bottom nudge-bottom="6"
@@ -278,11 +302,11 @@
                             v-model="searchQuery"
                             dense
                             hide-details
-                            flat
-                            solo-inverted
+                            outlined
+                            rounded
                             prepend-inner-icon="mdi-magnify"
-                            placeholder="Search…"
-                            class="topnav-search d-none d-md-block"
+                            placeholder="Search campaigns, offers, landings…"
+                            class="topbar-search d-none d-md-block"
                             v-bind="attrs"
                             v-on="on"
                             @input="searchInput"
@@ -309,30 +333,9 @@
                     <div v-else class="pa-3 caption grey--text">Type at least 2 characters to search campaigns, offers, landings, domains, sources, networks and conversions.</div>
                 </v-card>
             </v-menu>
-            <!-- Mobile: all sections in a dropdown -->
-            <v-menu offset-y bottom nudge-bottom="6">
-                <template v-slot:activator="{ on, attrs }">
-                    <v-btn icon v-bind="attrs" v-on="on" class="d-lg-none">
-                        <v-icon>mdi-menu</v-icon>
-                    </v-btn>
-                </template>
-                <v-list dense>
-                    <v-list-item
-                            v-for="item in visibleNavItems"
-                            :key="'m-' + item.key"
-                            link
-                            :input-value="activeSection === item.key"
-                            active-class="nav-item--active"
-                            @click="activeSection = item.key"
-                    >
-                        <v-list-item-icon><v-icon small>{{ item.icon }}</v-icon></v-list-item-icon>
-                        <v-list-item-title>{{ item.title }}</v-list-item-title>
-                    </v-list-item>
-                </v-list>
-            </v-menu>
             <v-menu offset-y left>
                 <template v-slot:activator="{ on, attrs }">
-                    <v-btn icon v-bind="attrs" v-on="on">
+                    <v-btn icon v-bind="attrs" v-on="on" class="ml-2" aria-label="Account menu">
                         <v-icon>mdi-account-circle-outline</v-icon>
                     </v-btn>
                 </template>
@@ -536,6 +539,10 @@
                 const isAdmin = this.roleLabel === 'admin';
                 return this.navItems.filter(i =>
                     (!i.admin || isAdmin) && (isAdmin || this.userPerms.sections[i.key] !== false));
+            },
+            activeNavTitle() {
+                const item = this.visibleNavItems.find(i => i.key === this.activeSection);
+                return item ? item.title : '';
             },
             searchGroups() {
                 const order = ['campaigns', 'offers', 'landings', 'domains', 'sources', 'affiliates', 'conversions'];
@@ -753,6 +760,13 @@
                 this.pwForm = {current: '', new1: '', new2: ''};
                 this.passwordDialog = true;
             },
+            navigate(item) {
+                this.activeSection = item.key;
+                // close the drawer after picking a section on mobile
+                if (!this.$vuetify.breakpoint.lgAndUp) {
+                    this.drawer = false;
+                }
+            },
             async changeMyPassword() {
                 if (!this.pwForm.current || this.pwForm.new1.length < 6 || this.pwForm.new1 !== this.pwForm.new2) {
                     this.$root.$emit('show-message', {type: 'error', text: 'Check the fields — new passwords must match and be at least 6 characters.'});
@@ -790,12 +804,6 @@
 </script>
 
 <style>
-    .topnav-search {
-        max-width: 260px;
-        margin-top: 6px;
-        margin-bottom: 6px;
-        font-size: var(--fs-13, 13px);
-    }
     .search-menu-card {
         max-height: 420px;
         overflow-y: auto;
