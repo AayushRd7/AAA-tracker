@@ -257,7 +257,7 @@
                             <div class="aff-name-cell">
                                 <template v-if="presetFor(item.name) && (presetFor(item.name).logo_url || presetFor(item.name).logo_domain) && !item._logoBroken">
                                     <div class="aff-logo-wrap">
-                                        <img :src="presetFor(item.name).logo_url || ('/backend/api/sources/favicon/' + encodeURIComponent(presetFor(item.name).logo_domain))"
+                                        <img :src="presetFor(item.name).logo_url || ('/backend/api/sources/favicon/' + faviconB64(presetFor(item.name).logo_domain))"
                                              width="20" height="20" alt="" class="aff-table-logo"
                                              @load="tableLogoLoaded(item, $event)" @error="$set(item, '_logoBroken', true)">
                                     </div>
@@ -507,7 +507,7 @@
                 return !!(p.logo_url || p.logo_domain) && !p._logoBroken;
             },
             logoSrc(p) {
-                return p.logo_url || ('/backend/api/sources/favicon/' + encodeURIComponent(p.logo_domain));
+                return p.logo_url || ('/backend/api/sources/favicon/' + faviconB64(p.logo_domain));
             },
             // The favicon proxy returns a 1×1 transparent PNG for missing
             // favicons (HTTP 200, so @error never fires) — treat that as broken.

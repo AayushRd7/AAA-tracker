@@ -208,8 +208,28 @@ _EMPTY_PNG = base64.b64decode(
 _favicon_cache = {}
 
 
+def _favicon_segment_to_domain(segment: str) -> str:
+    """The frontend base64url-encodes the domain behind a "~" marker so
+    ad-blocking extensions don't match well-known ad-network domains in the
+    URL path (ERR_BLOCKED_BY_CLIENT). Anything that isn't a valid encoded
+    value falls back to the raw segment, which the regex check below rejects
+    unless it looks like a plain domain."""
+    if not segment.startswith("~"):
+        return segment
+    try:
+        body = segment[1:]
+        padded = body + "=" * (-len(body) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode()).decode("utf-8")
+        if re.fullmatch(r"[a-z0-9.\-]+", decoded, re.I):
+            return decoded
+    except Exception:
+        pass
+    return segment
+
+
 @router.get("/favicon/{domain}")
 def get_favicon(domain: str):
+    domain = _favicon_segment_to_domain(domain)
     if not re.fullmatch(r"[a-z0-9.\-]+", domain, re.I):
         return Response(content=_EMPTY_PNG, media_type="image/png")
     cached = _favicon_cache.get(domain.lower())

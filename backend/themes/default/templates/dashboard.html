@@ -347,6 +347,13 @@
         return text;
     }
 
+    // Ad-blockers block any URL whose path contains a known ad-network domain
+    // (ERR_BLOCKED_BY_CLIENT on the favicon proxy), so the domain travels
+    // base64url-encoded behind a "~" marker; the proxy decodes it.
+    function faviconB64(domain) {
+        return '~' + btoa(String(domain)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
     // Notify when the theme flips so charts and other canvas/pinned colors can re-color.
     if (!window.__themePatched && window.setTheme) {
         window.__themePatched = true;

@@ -3337,6 +3337,30 @@ print("ESCAPED-OK")
             "settings": probe.get("settings") or [],
             "additional_settings": probe.get("additional_settings") or {}})
 
+    print("== Favicon proxy ==")
+    # Ad-blockers match well-known ad-network domains anywhere in the URL, so
+    # the frontend sends the domain base64url-encoded behind a "~" marker.
+    # The encoded form must resolve to the same resource as the raw domain.
+    def _favicon_b64(d):
+        return "~" + base64.urlsafe_b64encode(d.encode()).decode().rstrip("=")
+
+    r = s.get(f"{api}/affiliate-networks/favicon/www.google.com")
+    check("favicon: raw domain 200 png", r.status_code == 200
+          and "image/png" in r.headers.get("Content-Type", ""), str(r.status_code))
+    raw_content = r.content
+    enc = _favicon_b64("www.google.com")
+    r = s.get(f"{api}/affiliate-networks/favicon/{enc}")
+    check("favicon: encoded domain 200 png", r.status_code == 200
+          and "image/png" in r.headers.get("Content-Type", ""), str(r.status_code))
+    check("favicon: encoded resolves to same resource as raw",
+          r.content == raw_content, f"{len(r.content)}B vs {len(raw_content)}B")
+    r = s.get(f"{api}/sources/favicon/{enc}")
+    check("favicon: sources proxy matches networks for encoded",
+          r.status_code == 200 and r.content == raw_content, str(r.status_code))
+    r = s.get(f"{api}/affiliate-networks/favicon/~~not-valid-base64!!")
+    check("favicon: invalid segment 200 empty png, no 500", r.status_code == 200
+          and "image/png" in r.headers.get("Content-Type", ""), str(r.status_code))
+
     print("== Audit log sorting ==")
     r = s.get(f"{api}/audit/", params={"sort_by": "id", "sort_desc": "false", "page_size": 100})
     asc_ids = [e["id"] for e in r.json().get("entries", [])]
