@@ -222,7 +222,7 @@ def require_api_auth(request: Request, authorization: Optional[str] = Header(Non
 # Sections a non-admin user can read by default (today's behavior). The admin
 # sections were already admin-only in the UI; the API now enforces the same.
 PERMISSION_SECTIONS = ["dashboard", "campaigns", "landings", "affiliates", "offers",
-                       "sources", "reports", "domains", "settings", "users", "about",
+                       "sources", "reports", "domains", "settings", "users", "documentation",
                        "fraud", "optimizer"]
 ADMIN_ONLY_SECTIONS = {"users", "settings", "domains", "fraud", "optimizer"}
 

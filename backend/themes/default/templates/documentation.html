@@ -1,5 +1,5 @@
 {% raw %}
-<script type="text/x-template" id="about-template">
+<script type="text/x-template" id="documentation-template">
     <v-container fluid>
         <div class="page-title">Documentation</div>
         <div class="page-subtitle mb-3">AAA Tracker help, reference and system status</div>
@@ -821,7 +821,7 @@
                             </v-col>
                         </v-row>
 
-                        <div class="about-heading mt-6">Background loops</div>
+                        <div class="documentation-heading mt-6">Background loops</div>
                         <v-simple-table dense>
                             <thead>
                             <tr><th>Loop</th><th>Last run</th></tr>
@@ -856,8 +856,8 @@
 
 
 <script type="application/javascript">
-    Vue.component('about-component', {
-        template: '#about-template',
+    Vue.component('documentation-component', {
+        template: '#documentation-template',
         data() {
             return {
                 tabAbout: 0,
@@ -994,7 +994,7 @@
 </script>
 
 <style>
-    .about-heading {
+    .documentation-heading {
         font-size: var(--fs-16, 16px);
         font-weight: 600;
         margin-bottom: var(--space-2, 8px);

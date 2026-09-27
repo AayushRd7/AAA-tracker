@@ -32,7 +32,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/terser@5.30.2/dist/bundle.min.js"></script>
 
-    <link href="/backend/backend/css/style.css?v=12" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=13" rel="stylesheet">
 
     <!-- Theme toggle helper: reads localStorage('theme'), exposes window.setTheme(t) -->
     <script>
@@ -231,7 +231,7 @@
 {% endraw %}
 
 {% if is_authenticated_user_type %}
-    {% include "templates/about.html" %}
+    {% include "templates/documentation.html" %}
     {% include "templates/dashboard.html" %}
     {% include "templates/campaigns.html" %}
     {% include "templates/landings.html" %}
@@ -253,14 +253,13 @@
     <v-app>
         {% if page == 'dashboard' and is_authenticated_user_type %}
         {% raw %}
-        <!-- RedTrack-style shell: left section rail + slim utility top bar -->
+        <!-- Top header shell: brand row + horizontal section nav; drawer only on mobile -->
         <v-navigation-drawer
                 app
                 v-model="drawer"
-                :permanent="$vuetify.breakpoint.lgAndUp"
-                :temporary="$vuetify.breakpoint.mdAndDown"
+                temporary
                 :width="228"
-                class="side-nav"
+                class="side-nav d-lg-none"
         >
             <div class="side-nav-brand">
                 <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo">
@@ -292,7 +291,11 @@
             <v-btn icon class="d-lg-none mr-1" @click="drawer = true" aria-label="Open navigation">
                 <v-icon>mdi-menu</v-icon>
             </v-btn>
-            <div class="topbar-crumb d-none d-sm-block">{{ activeNavTitle }}</div>
+            <div class="topbar-brand">
+                <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo">
+                <div class="topbar-brand-name">AAA TRACKER</div>
+                <span class="topbar-version d-none d-md-inline">v0.9</span>
+            </div>
             <v-spacer></v-spacer>
             <!-- G75 global search: debounced, grouped, jumps to the section -->
             <v-menu v-model="searchMenu" offset-y bottom nudge-bottom="6"
@@ -359,6 +362,21 @@
                     </v-list-item>
                 </v-list>
             </v-menu>
+            <template v-slot:extension>
+                <div class="topnav d-none d-lg-flex">
+                    <button
+                            v-for="item in visibleNavItems"
+                            :key="item.key"
+                            type="button"
+                            class="topnav-btn"
+                            :class="{'topnav-btn--active': activeSection === item.key}"
+                            @click="navigate(item)"
+                    >
+                        <v-icon dense>{{ item.icon }}</v-icon>
+                        <span>{{ item.title }}</span>
+                    </button>
+                </div>
+            </template>
         </v-app-bar>
         {% endraw %}
         {% endif %}
@@ -530,7 +548,7 @@
                     {key: 'optimizer', title: 'Optimizer', icon: 'mdi-auto-fix', admin: true},
                     {key: 'settings', title: 'Settings', icon: 'mdi-cog-outline', admin: true},
                     {key: 'users', title: 'Users', icon: 'mdi-account-group', admin: true},
-                    {key: 'about', title: 'Documentation', icon: 'mdi-book-open-variant'},
+                    {key: 'documentation', title: 'Documentation', icon: 'mdi-book-open-variant'},
                 ],
             };
         },
@@ -539,10 +557,6 @@
                 const isAdmin = this.roleLabel === 'admin';
                 return this.navItems.filter(i =>
                     (!i.admin || isAdmin) && (isAdmin || this.userPerms.sections[i.key] !== false));
-            },
-            activeNavTitle() {
-                const item = this.visibleNavItems.find(i => i.key === this.activeSection);
-                return item ? item.title : '';
             },
             searchGroups() {
                 const order = ['campaigns', 'offers', 'landings', 'domains', 'sources', 'affiliates', 'conversions'];
@@ -565,6 +579,7 @@
                     settings: 'Settings',
                     users: 'Users',
                     about: 'Documentation',
+                    documentation: 'Documentation',
                 };
                 return titles[this.activeSection] || 'AAA Tracker';
             },
@@ -603,11 +618,12 @@
             // A bare /backend/dashboard URL restores the last visited section;
             // a section-specific URL (/backend/campaigns) already set it via Jinja.
             if (window.location.pathname.replace(/\/+$/, '') === '/backend/dashboard') {
-                const saved = localStorage.getItem('dashboard_tab');
+                let saved = localStorage.getItem('dashboard_tab');
+                if (saved === 'about') { saved = 'documentation'; }
                 if (saved != null && saved !== '') {
                     if (/^\d+$/.test(saved)) {
                         // Legacy numeric tab index from the old tabs UI
-                        const legacyOrder = ['dashboard','campaigns','landings','affiliates','offers','sources','reports','domains','settings','users','about'];
+                        const legacyOrder = ['dashboard','campaigns','landings','affiliates','offers','sources','reports','domains','settings','users','documentation'];
                         this.activeSection = legacyOrder[parseInt(saved, 10)] || 'dashboard';
                     } else {
                         this.activeSection = saved;

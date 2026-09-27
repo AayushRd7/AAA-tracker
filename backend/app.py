@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, Depends
 from auth import require_section, require_section_write
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
@@ -155,7 +155,7 @@ ALLOWED_PAGES = {"auth", "dashboard", "editor"}
 # Sections of the dashboard shell that get their own URL — /backend/<section>
 # serves the shell pre-focused on that section (deep-linkable, back-button friendly).
 NAV_SECTIONS = {"dashboard", "campaigns", "landings", "affiliates", "offers",
-                "sources", "reports", "domains", "settings", "users", "about",
+                "sources", "reports", "domains", "settings", "users", "documentation",
                 "fraud", "optimizer"}
 
 
@@ -263,6 +263,9 @@ async def serve_page(request: Request, page: Optional[str] = None):
         page = "auth"
     if page == "auth" and user_type:
         page = "dashboard"
+    # Legacy slug: the docs page moved from /backend/about to /backend/documentation
+    if page == "about":
+        return RedirectResponse(url="/backend/documentation", status_code=307)
     section = None
     perms = None
     if page in NAV_SECTIONS:
