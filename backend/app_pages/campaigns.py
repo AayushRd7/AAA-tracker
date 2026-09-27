@@ -34,7 +34,7 @@ class BulkTagsIn(BaseModel):
 
 class BulkIn(BaseModel):
     ids: List[int]
-    action: Literal['tags_add', 'tags_remove', 'archive', 'delete']
+    action: Literal['tags_add', 'tags_remove', 'archive', 'unarchive', 'delete']
     tags: Optional[List[str]] = None
 
 class CampaignImportIn(BaseModel):
@@ -223,7 +223,8 @@ def bulk_set_tags(data: BulkTagsIn, request: Request, db: Session = Depends(get_
 
 @router.post("/bulk", response_model=dict)
 def bulk_campaigns(data: BulkIn, request: Request, db: Session = Depends(get_db)):
-    """G67 bulk actions: tags_add / tags_remove / archive / delete over a set of ids."""
+    """G67 bulk actions: tags_add / tags_remove / archive / unarchive / delete
+    over a set of ids."""
     from audit_logger import audit_event
     from auth import get_caller
     caller, _ = get_caller(request)
@@ -246,6 +247,11 @@ def bulk_campaigns(data: BulkIn, request: Request, db: Session = Depends(get_db)
             c.archived = True
         db.commit()
         detail = {"bulk": "archive", "count": len(campaigns)}
+    elif data.action == 'unarchive':
+        for c in campaigns:
+            c.archived = False
+        db.commit()
+        detail = {"bulk": "unarchive", "count": len(campaigns)}
     elif data.action == 'delete':
         ch = request.state.ch
         for c in campaigns:

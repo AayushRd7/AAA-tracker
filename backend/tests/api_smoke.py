@@ -1687,6 +1687,25 @@ def main():
     flag = pg_query(f"SELECT archived FROM campaigns WHERE id = {arch_cid}")
     check("archive: flag cleared in DB", flag == "f", flag[:80])
 
+    # bulk unarchive — the bulk bar used to offer only Archive, even when the
+    # whole selection was already archived
+    r = s.post(f"{api}/campaigns/bulk", json={"ids": [arch_cid], "action": "archive"})
+    check("bulk: archive accepted", r.status_code == 200 and r.json().get("updated") == 1,
+          r.text[:150])
+    flag = pg_query(f"SELECT archived FROM campaigns WHERE id = {arch_cid}")
+    check("bulk: flag set in DB", flag == "t", flag[:80])
+    r = s.post(f"{api}/campaigns/bulk", json={"ids": [arch_cid], "action": "unarchive"})
+    check("bulk: unarchive accepted", r.status_code == 200 and r.json().get("updated") == 1,
+          r.text[:150])
+    flag = pg_query(f"SELECT archived FROM campaigns WHERE id = {arch_cid}")
+    check("bulk: unarchive flag cleared in DB", flag == "f", flag[:80])
+    r = s.post(f"{api}/archive/campaigns/{arch_cid}")
+    check("bulk: re-archive via entity endpoint", r.status_code == 200, r.text[:120])
+    r = s.post(f"{api}/campaigns/bulk", json={"ids": [arch_cid], "action": "unarchive"})
+    check("bulk: re-unarchive via bulk", r.status_code == 200, r.text[:120])
+    r = s.post(f"{api}/campaigns/bulk", json={"ids": [arch_cid], "action": "resurrect"})
+    check("bulk: unknown action rejected (422)", r.status_code == 422, str(r.status_code))
+
     r = s.post(f"{api}/archive/offers/{arch_offer}")
     check("archive: offer archived", r.status_code == 200, r.text[:150])
     flag = pg_query(f"SELECT archived FROM offers WHERE id = {arch_offer}")

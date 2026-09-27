@@ -1440,8 +1440,11 @@
                         <v-btn small color="secondary" elevation="0" class="mr-2 ml-2" @click="openBulkTags">
                             <v-icon small class="mr-1">mdi-tag-multiple-outline</v-icon>Tag
                         </v-btn>
-                        <v-btn small color="secondary" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkArchive">
+                        <v-btn v-if="selectionHasUnarchived" small color="secondary" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkArchive">
                             <v-icon small class="mr-1">mdi-archive-arrow-down-outline</v-icon>Archive
+                        </v-btn>
+                        <v-btn v-if="selectionHasArchived" small color="success" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkUnarchive">
+                            <v-icon small class="mr-1">mdi-archive-arrow-up-outline</v-icon>Restore
                         </v-btn>
                         <v-btn small color="red" elevation="0" class="ml-2" :loading="bulkLoading" @click="bulkDelete">
                             <v-icon small class="mr-1">mdi-trash-can-outline</v-icon>Delete
@@ -1941,6 +1944,15 @@
             }
         },
         computed: {
+            // Bulk bar archive/restore buttons follow the selection:
+            // Archive shows when anything selected is live; Restore when
+            // anything selected is archived (a mixed selection shows both).
+            selectionHasArchived() {
+                return this.selected.some(c => this.isArchived(c));
+            },
+            selectionHasUnarchived() {
+                return this.selected.some(c => !this.isArchived(c));
+            },
             dateRangeText() {
                 return this.date_range.join(' ~ ')
             },
@@ -2125,6 +2137,31 @@
                 } catch (err) {
                     this.$root.$emit('show-message', {type: 'error',
                         text: 'Bulk archive failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.bulkLoading = false;
+                }
+            },
+            async bulkUnarchive() {
+                const ok = await this.$refs.confirm.open(
+                    'Restore campaigns',
+                    `Restore ${this.selected.length} campaign(s) from the archive?`,
+                    'Restore');
+                if (!ok) return;
+                this.bulkLoading = true;
+                try {
+                    const res = await fetch('/backend/api/campaigns/bulk', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids: this.selected.map(c => c.id), action: 'unarchive'})
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.selected = [];
+                    this.loadCampaigns();
+                    this.$root.$emit('show-message', {type: 'success', text: 'Campaigns restored from archive'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Bulk restore failed: ' + sanitizeToastMessage(err.message)});
                 } finally {
                     this.bulkLoading = false;
                 }
