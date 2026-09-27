@@ -189,7 +189,10 @@ async def ensure_ch_schema():
             "ADD COLUMN IF NOT EXISTS utm_medium String DEFAULT '', "
             "ADD COLUMN IF NOT EXISTS impression UInt8 DEFAULT 0, "
             "ADD COLUMN IF NOT EXISTS fraud_score UInt8 DEFAULT 0, "
-            "ADD COLUMN IF NOT EXISTS click_id String DEFAULT ''")
+            "ADD COLUMN IF NOT EXISTS click_id String DEFAULT '', "
+            # Full client address (v4 or v6) — the `ip` column is IPv4-typed,
+            # so IPv6 visitors were stored as 0.0.0.0 with no recoverable address.
+            "ADD COLUMN IF NOT EXISTS ip_full String DEFAULT ''")
     except Exception as e:
         release_ch(ch, failed=True)
         log_track(f"ClickHouse schema migration error: {e}")
@@ -486,6 +489,14 @@ async def save_click_to_clickhouse(meta: dict, campaign_alias: str):
                 row[k] = v
         if row.get("landing_id") is not None:
             row["landing_id"] = str(row["landing_id"])
+        # Full client address (v4 or v6) for the ip_full String column —
+        # captured BEFORE the IPv4 coercion below, which erases v6 visitors.
+        ip_full_val = row.get("ip")
+        if ip_full_val is not None:
+            try:
+                row["ip_full"] = str(ipaddress.ip_address(str(ip_full_val)))
+            except ValueError:
+                row["ip_full"] = ""
         # IPv4 column — mirror track_event's guard: a garbage IP would fail the
         # whole insert, so store the type default instead of dropping the row.
         ip_val = row.get("ip")
@@ -1289,7 +1300,27 @@ def blacklist_action(meta: dict, client_ip: str, lists: list, campaign_id):
                 continue
             plain = [v for v in values if "/" not in v]
             nets = [v for v in values if "/" in v]
-            if client_ip in plain or (nets and _ip_in_cidrs(client_ip, nets)):
+            # Exact entries compare canonically (so 2001:db8::1 matches
+            # 2001:0db8:0:0:0:0:0:1); CIDR nets go through _ip_in_cidrs,
+            # which is version-aware — a v4 CIDR simply never matches a v6
+            # client and vice versa.
+            matched = False
+            try:
+                addr = ipaddress.ip_address(str(client_ip))
+                for v in plain:
+                    try:
+                        if ipaddress.ip_address(v) == addr:
+                            matched = True
+                            break
+                    except ValueError:
+                        if str(client_ip) == v:
+                            matched = True
+                            break
+            except ValueError:
+                matched = str(client_ip) in plain
+            if not matched and nets and _ip_in_cidrs(client_ip, nets):
+                matched = True
+            if matched:
                 action = (bl.get("action") or "mark").strip().lower()
                 if action == "block":
                     return "block"
@@ -3237,7 +3268,8 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
                 result_row.pop(money_key, None)
 
     # G79 privacy: anonymize IPs at rest when settings.privacy.anonymize_ip is on
-    # (IPv4 → last octet zeroed, e.g. 1.2.3.4 → 1.2.3.0). Default off.
+    # (IPv4 → last octet zeroed, e.g. 1.2.3.4 → 1.2.3.0; IPv6 → last 16 bits
+    # zeroed). Default off.
     if load_privacy_settings().get("anonymize_ip"):
         ip_val = result_row.get("ip")
         if ip_val:
@@ -3245,8 +3277,22 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
                 addr = ipaddress.ip_address(str(ip_val))
                 if addr.version == 4:
                     result_row["ip"] = ".".join(str(addr).split(".")[:3] + ["0"])
+                else:
+                    result_row["ip"] = str(ipaddress.IPv6Address((int(addr) >> 16) << 16))
             except ValueError:
                 pass
+
+    # Full client address (v4 or v6) for the ip_full String column — captured
+    # AFTER the privacy mask above (so it never leaks what `ip` masked) but
+    # BEFORE the IPv4 coercion below, which would otherwise erase v6 visitors.
+    ip_full_val = result_row.get("ip")
+    if ip_full_val:
+        try:
+            result_row["ip_full"] = str(ipaddress.ip_address(str(ip_full_val)))
+        except ValueError:
+            result_row["ip_full"] = ""
+    else:
+        result_row["ip_full"] = ""
 
     # The ClickHouse column is IPv4 — an IPv6/garbage value would fail the whole
     # insert, so store the type default (0.0.0.0) instead of dropping the row.

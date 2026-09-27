@@ -635,6 +635,14 @@
                         class="conv-filter-search"
                         @keyup.enter="searchConversions"
                 ></v-text-field>
+                <v-text-field
+                        v-model="convFilters.url"
+                        label="Offer URL contains"
+                        prepend-inner-icon="mdi-link"
+                        outlined dense hide-details clearable
+                        class="conv-filter-url"
+                        @keyup.enter="searchConversions"
+                ></v-text-field>
                 <v-btn color="primary" elevation="0" :loading="convLoading" @click="searchConversions">
                     <v-icon small class="mr-1">mdi-magnify</v-icon>Search
                 </v-btn>
@@ -985,6 +993,7 @@
                 convFilters: {
                     status: '',
                     search: '',
+                    url: '',
                 },
                 customStatuses: [],
                 importDialog: false,
@@ -1092,7 +1101,7 @@
             },
             convFiltersActive() {
                 const f = this.convFilters;
-                return !!(f.status || f.search);
+                return !!(f.status || f.search || f.url);
             },
             statusOptions() {
                 return ['', 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash', ...this.customStatuses];
@@ -1454,7 +1463,7 @@
                 this.loadClickLog();
             },
             clearConvFilters() {
-                this.convFilters = {status: '', search: ''};
+                this.convFilters = {status: '', search: '', url: ''};
                 this.convPage = 1;
                 this.loadReports();
             },
@@ -1746,6 +1755,7 @@
                 const params = new URLSearchParams();
                 if (this.convFilters.status) params.set('status', this.convFilters.status);
                 if (this.convFilters.search) params.set('search', this.convFilters.search);
+                if (this.convFilters.url) params.set('url', this.convFilters.url);
                 params.set('date_from', this.dateRange[0]);
                 params.set('date_to', this.dateRange[1]);
                 params.set('date_basis', this.convDateBasis);

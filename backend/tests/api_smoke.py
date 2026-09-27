@@ -4186,6 +4186,281 @@ print("ESCAPED-OK")
     for u in [bk_owner] + list(grant_users.values()):
         s.delete(f"{api}/users/{u}")
 
+    # -- IPv6 visitors: the click-api accepts a v6 client address; the CH row
+    # keeps 0.0.0.0 in the IPv4 `ip` column and the full address in ip_full --
+    # (own throwaway campaign: the shared extras campaign is deleted long
+    # before this point, and main() rebinds `alias` late, so neither shared
+    # variable is usable here)
+    print("== IPv6 support ==")
+    v6_alias = f"smoke-v6c-{os.getpid()}"
+    v6_payload = {"name": v6_alias, "alias": v6_alias, "type": "campaign",
+                  "status": "active", "redirect_mode": "position",
+                  "config": {"flows": [{
+                      "type": "default", "position": 1, "enabled": True, "schema": "redirect",
+                      "redirect_url": f"https://example.com/smoke-v6-{os.getpid()}",
+                      "filters": []}], "postbacks": [], "hide_referrer": False,
+                      "fallback_url": ""}}
+    r = s.post(f"{api}/campaigns/", json=v6_payload)
+    check("v6: create campaign", r.status_code == 200 and "id" in r.json(), r.text[:200])
+    v6_cid = r.json().get("id")
+
+    v6_addr = "2001:db8:85a3::8a2e:370:7334"
+    r = requests.post(f"{BASE}/click-api/{v6_alias}", verify=not INSECURE, json={
+        "ip": v6_addr, "user_agent": "SmokeIPv6/1.0 Chrome/120",
+        "referrer": "https://ads.example/v6",
+        "sub_id_2": f"smoke-v6-{os.getpid()}"})
+    v6_click = r.json().get("click_id") if r.status_code == 200 else None
+    check("v6: click-api accepts an IPv6 address",
+          r.status_code == 200 and bool(v6_click), r.text[:200])
+    v6_row = ch_query(
+        f"SELECT toString(ip), ip_full, is_bot, fraud_score "
+        f"FROM clicks_data WHERE visitor_id = '{v6_click}' LIMIT 1") if v6_click else ""
+    v6_parts = v6_row.split("\t") if v6_row and not v6_row.startswith("ERROR") else []
+    check("v6: CH row keeps 0.0.0.0 in ip and the full address in ip_full",
+          len(v6_parts) == 4 and v6_parts[0] == "0.0.0.0" and v6_parts[1] == v6_addr,
+          v6_row[:200])
+    check("v6: bot/fraud fields populated without crashing",
+          len(v6_parts) == 4 and v6_parts[2] in ("true", "false")
+          and v6_parts[3].isdigit(), v6_row[:200])
+
+    # v4 regression: same endpoint, IPv4 address — `ip` unchanged, ip_full mirrors it.
+    r = requests.post(f"{BASE}/click-api/{v6_alias}", verify=not INSECURE, json={
+        "ip": "203.0.113.55", "user_agent": "SmokeIPv6/1.0 Chrome/120",
+        "sub_id_2": f"smoke-v6-{os.getpid()}"})
+    v4_click = r.json().get("click_id") if r.status_code == 200 else None
+    v4_row = ch_query(
+        f"SELECT toString(ip), ip_full FROM clicks_data "
+        f"WHERE visitor_id = '{v4_click}' LIMIT 1") if v4_click else ""
+    v4_parts = v4_row.split("\t") if v4_row and not v4_row.startswith("ERROR") else []
+    check("v4: ip column unchanged and ip_full mirrors the v4 address",
+          len(v4_parts) == 2 and v4_parts[0] == "203.0.113.55"
+          and v4_parts[1] == "203.0.113.55", v4_row[:200])
+
+    # The click log surfaces the full v6 address (falling back to `ip` for
+    # rows written before ip_full existed).
+    r = s.post(f"{api}/dashboard/click-log", json={"campaigns": [v6_cid], "search": v6_addr})
+    v6_log = r.json() if r.status_code == 200 else []
+    check("v6: click-log search finds the row by its full address",
+          isinstance(v6_log, list)
+          and any(row.get("ip") == v6_addr and row.get("visitor_id") == v6_click
+                  for row in v6_log), r.text[:200])
+
+    if v6_click:
+        ch_query(f"ALTER TABLE clicks_data DELETE WHERE visitor_id = '{v6_click}'")
+    if v4_click:
+        ch_query(f"ALTER TABLE clicks_data DELETE WHERE visitor_id = '{v4_click}'")
+    if v6_cid:
+        r = s.delete(f"{api}/campaigns/{v6_cid}")
+        check("v6: campaign deleted", r.status_code == 200, r.text[:120])
+
+    # ----- Ops polish: SSL expiry / settings backup / URL filter / delete guard / click-log scoping -----
+    op_pid = os.getpid()
+
+    print("== Ops polish: SSL expiry ==")
+    r = s.post(f"{api}/domains/", json={"domain": f"smoke-ssl-{op_pid}.example.com"})
+    check("ops-ssl: domain created for ssl check", r.status_code == 200, r.text[:150])
+    ssl_dom_id = r.json().get("id")
+    r = s.get(f"{api}/domains/ssl-expiry")
+    check("ops-ssl: endpoint returns list shape",
+          r.status_code == 200 and isinstance(r.json().get("domains"), list), r.text[:200])
+    ssl_rows = {d.get("domain"): d for d in (r.json().get("domains") or [])} if r.status_code == 200 else {}
+    ssl_row = ssl_rows.get(f"smoke-ssl-{op_pid}.example.com", {})
+    check("ops-ssl: missing cert reported as unknown (not an error)",
+          ssl_row.get("status") == "unknown" and ssl_row.get("days_to_expiry") is None,
+          str(ssl_row)[:150])
+    if ssl_dom_id:
+        r = s.delete(f"{api}/domains/{ssl_dom_id}")
+        check("ops-ssl: check domain cleaned up", r.status_code == 200, r.text[:150])
+
+    print("== Ops polish: settings backup ==")
+    r = s.get(f"{api}/settings/")
+    op_settings_backup = (r.json().get("settings") or {}) if r.status_code == 200 else {}
+    op_tg_backup = op_settings_backup.get("telegram") or {}
+    op_cur_backup = op_settings_backup.get("currency")
+    r = s.post(f"{api}/settings/", json={"settings": {"telegram": {
+        "bot_token": f"smoke-tok-{op_pid}", "chat_id": f"smoke-chat-{op_pid}"}}})
+    check("ops-backup: token seeded", r.status_code == 200, r.text[:150])
+    r = s.get(f"{api}/settings/export")
+    check("ops-backup: export downloads a JSON document",
+          r.status_code == 200
+          and "attachment" in r.headers.get("Content-Disposition", "")
+          and isinstance(r.json().get("data"), dict), r.text[:200])
+    exp_tg = ((r.json().get("data") or {}).get("settings") or {}).get("telegram") or {}
+    check("ops-backup: export nulls secrets but keeps the keys",
+          "bot_token" in exp_tg and exp_tg.get("bot_token") is None, str(exp_tg)[:150])
+    check("ops-backup: export keeps non-secret values",
+          exp_tg.get("chat_id") == f"smoke-chat-{op_pid}", str(exp_tg)[:150])
+    r = s.post(f"{api}/settings/import", json={
+        "data": {"settings": {"currency": "EUR", "telegram": {"bot_token": None}}}})
+    check("ops-backup: import accepted", r.status_code == 200, r.text[:200])
+    r = s.get(f"{api}/settings/")
+    imp_settings = (r.json().get("settings") or {}) if r.status_code == 200 else {}
+    check("ops-backup: import applied the change",
+          imp_settings.get("currency") == "EUR", str(imp_settings.get("currency"))[:60])
+    check("ops-backup: import kept the live secret for nulled keys",
+          (imp_settings.get("telegram") or {}).get("bot_token") == f"smoke-tok-{op_pid}",
+          str((imp_settings.get("telegram") or {}).get("bot_token"))[:80])
+    r = s.post(f"{api}/settings/import", json="not-a-settings-document")
+    check("ops-backup: import rejects garbage (400)", r.status_code == 400, str(r.status_code))
+    r = s.post(f"{api}/settings/", json={
+        "settings": {"currency": op_cur_backup, "telegram": op_tg_backup}})
+    check("ops-backup: original settings restored", r.status_code == 200, r.text[:150])
+    if "chat_id" not in op_tg_backup:
+        s.post(f"{api}/settings/", json={"settings": {"telegram": {"chat_id": None}}})
+    r = s.get(f"{api}/settings/")
+    check("ops-backup: live secret back to original after restore",
+          ((r.json().get("settings") or {}).get("telegram") or {}).get("bot_token")
+          == op_tg_backup.get("bot_token"), r.text[:150])
+
+    print("== Ops polish: conversion URL filter ==")
+    r = s.post(f"{api}/offers/", json={
+        "name": f"Smoke Url Offer {op_pid}",
+        "url": f"https://example.com/smoke-url-{op_pid}/landing"})
+    check("ops-url: offer created", r.status_code == 200 and bool(r.json().get("id")), r.text[:200])
+    url_offer_id = r.json().get("id")
+    url_conv_id = ""
+    if url_offer_id and cid:
+        url_conv_id = ((pg_exec_out(
+            "INSERT INTO conversions_data (received_at, click_id, campaign_id, offer_id, status,"
+            " payout, revenue, profit) VALUES (now(), 'none', %d, %d, 'sale', 1, 1, 1) RETURNING id"
+            % (cid, url_offer_id)) or "").strip().splitlines() or [""])[0]
+    check("ops-url: conversion seeded", bool(url_conv_id), str(url_conv_id)[:80])
+    r = s.get(f"{api}/reports/", params={"url": f"smoke-url-{op_pid}"})
+    matched = [c for c in (r.json() if r.status_code == 200 else [])
+               if str(c.get("id")) == url_conv_id]
+    check("ops-url: url filter matches conversion",
+          r.status_code == 200 and bool(matched), r.text[:200])
+    r = s.get(f"{api}/reports/", params={"url": f"no-such-marker-{op_pid}"})
+    check("ops-url: url filter excludes non-matching",
+          r.status_code == 200
+          and all(str(c.get("id")) != url_conv_id for c in r.json()), r.text[:200])
+    r = s.get(f"{api}/reports/", params={"url": f"smoke-url-{op_pid}", "limit": 10, "offset": 0})
+    check("ops-url: url filter works in paginated mode",
+          r.status_code == 200 and any(str(c.get("id")) == url_conv_id
+                                      for c in (r.json().get("items") or []))
+          and r.json().get("total") is not None, r.text[:200])
+    if url_conv_id:
+        r = s.delete(f"{api}/reports/{url_conv_id}")
+        check("ops-url: seeded conversion cleaned up", r.status_code == 200, r.text[:150])
+    if url_offer_id:
+        s.delete(f"{api}/offers/{url_offer_id}")
+
+    print("== Ops polish: domain delete guard ==")
+    r = s.post(f"{api}/domains/", json={"domain": f"smoke-guard-{op_pid}.example.com"})
+    check("ops-guard: domain created", r.status_code == 200, r.text[:150])
+    guard_dom_id = r.json().get("id")
+    guard_cid = None
+    if guard_dom_id:
+        r = s.post(f"{api}/campaigns/", json={
+            "name": f"Smoke Guard {op_pid}", "alias": f"smoke-guard-{op_pid}",
+            "type": "campaign", "status": "active", "redirect_mode": "weight",
+            "domain_id": guard_dom_id,
+            "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                                  "schema": "redirect",
+                                  "redirect_url": "https://example.com/smoke-guard",
+                                  "weight": 100, "filters": []}],
+                       "postbacks": [], "hide_referrer": False}})
+        guard_cid = r.json().get("id")
+        check("ops-guard: campaign bound to domain", bool(guard_cid), r.text[:200])
+    if guard_dom_id and guard_cid:
+        r = s.delete(f"{api}/domains/{guard_dom_id}")
+        check("ops-guard: bound domain delete -> 409",
+              r.status_code == 409 and "campaign" in (r.json().get("detail") or "").lower(),
+              r.text[:200])
+        pg_exec(f"UPDATE campaigns SET domain_id = NULL WHERE id = {guard_cid}")
+        r = s.delete(f"{api}/domains/{guard_dom_id}")
+        check("ops-guard: unbound domain delete -> 200", r.status_code == 200, r.text[:200])
+    if guard_cid:
+        r = s.delete(f"{api}/campaigns/{guard_cid}")
+        check("ops-guard: campaign cleaned up", r.status_code == 200, r.text[:150])
+
+    print("== Ops polish: click-log campaigns:'own' scoping ==")
+    import time as _time
+    own_cid = other_cid = scope_uid = None
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke Scope Own {op_pid}", "alias": f"smoke-scope-own-{op_pid}",
+        "type": "campaign", "status": "active", "redirect_mode": "weight",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "redirect",
+                              "redirect_url": "https://example.com/smoke-scope-own",
+                              "weight": 100, "filters": []}],
+                   "postbacks": [], "hide_referrer": False}})
+    own_cid = r.json().get("id")
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke Scope Other {op_pid}", "alias": f"smoke-scope-other-{op_pid}",
+        "type": "campaign", "status": "active", "redirect_mode": "weight",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "redirect",
+                              "redirect_url": "https://example.com/smoke-scope-other",
+                              "weight": 100, "filters": []}],
+                   "postbacks": [], "hide_referrer": False}})
+    other_cid = r.json().get("id")
+    check("ops-scope: two campaigns created", bool(own_cid) and bool(other_cid), r.text[:200])
+    for _al in (f"smoke-scope-own-{op_pid}", f"smoke-scope-other-{op_pid}"):
+        requests.get(f"{BASE}/{_al}", verify=not INSECURE, allow_redirects=False)
+    scope_user = f"smoke-scope-{op_pid}"
+    r = s.post(f"{api}/users/", json={
+        "username": scope_user, "password": "smokepass1",
+        "permissions": {"sections": {"campaigns": True, "dashboard": True, "reports": True},
+                        "write": True, "campaigns": "own"}})
+    scope_uid = r.json().get("id")
+    check("ops-scope: limited user created", r.status_code == 200 and bool(scope_uid), r.text[:150])
+    ss = requests.Session()
+    ss.verify = not INSECURE
+    if scope_uid:
+        r = ss.post(f"{api}/login", json={"username": scope_user, "password": "smokepass1"})
+        check("ops-scope: limited user login", r.status_code == 200, r.text[:150])
+        pg_exec(f"UPDATE campaigns SET owner_id = {scope_uid} WHERE id = {own_cid}")
+        scope_ids = set()
+        for _ in range(20):
+            r = ss.post(f"{api}/dashboard/click-log", json={"limit": 500})
+            rows = r.json() if r.status_code == 200 and isinstance(r.json(), list) else []
+            scope_ids = {row.get("campaign_id") for row in rows}
+            if own_cid in scope_ids:
+                break
+            _time.sleep(0.5)
+        check("ops-scope: click-log shows only own campaigns",
+              r.status_code == 200 and scope_ids and scope_ids <= {own_cid} and own_cid in scope_ids,
+              f"status={r.status_code} ids={sorted(i for i in scope_ids if i is not None)[:10]}")
+        r = ss.post(f"{api}/dashboard/click-log", json={"limit": 50, "offset": 0})
+        paged = r.json() if r.status_code == 200 else {}
+        paged_ids = {row.get("campaign_id") for row in (paged.get("items") or [])}
+        check("ops-scope: paginated click-log scoped too",
+              r.status_code == 200 and paged.get("total") is not None
+              and paged_ids <= {own_cid} and own_cid in paged_ids,
+              r.text[:200])
+        feed_ids = set()
+        for _ in range(20):
+            r = ss.get(f"{api}/dashboard/live-clicks", params={"limit": 100})
+            feed = r.json() if r.status_code == 200 and isinstance(r.json(), list) else []
+            feed_ids = {row.get("campaign_id") for row in feed}
+            if own_cid in feed_ids:
+                break
+            _time.sleep(0.5)
+        check("ops-scope: live feed shows only own campaigns",
+              r.status_code == 200 and feed_ids <= {own_cid} and own_cid in feed_ids,
+              f"ids={sorted(i for i in feed_ids if i is not None)[:10]}")
+    if own_cid and other_cid:
+        r = s.post(f"{api}/dashboard/click-log", json={"limit": 500})
+        admin_ids = {row.get("campaign_id") for row in r.json()} if r.status_code == 200 else set()
+        check("ops-scope: admin click-log still sees both campaigns",
+              own_cid in admin_ids and other_cid in admin_ids,
+              f"own={own_cid in admin_ids} other={other_cid in admin_ids}")
+        r = s.get(f"{api}/dashboard/live-clicks", params={"limit": 100})
+        admin_feed = {row.get("campaign_id") for row in r.json()} if r.status_code == 200 else set()
+        check("ops-scope: admin live feed still sees both campaigns",
+              own_cid in admin_feed and other_cid in admin_feed,
+              f"own={own_cid in admin_feed} other={other_cid in admin_feed}")
+    if own_cid:
+        pg_exec(f"UPDATE campaigns SET owner_id = NULL WHERE id = {own_cid}")
+    if scope_uid:
+        r = s.delete(f"{api}/users/{scope_uid}")
+        check("ops-scope: limited user cleaned up", r.status_code == 200, r.text[:150])
+    for _c in (own_cid, other_cid):
+        if _c:
+            r = s.delete(f"{api}/campaigns/{_c}")
+            check("ops-scope: campaign cleaned up", r.status_code == 200, r.text[:150])
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

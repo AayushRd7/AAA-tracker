@@ -6,13 +6,33 @@
                 <div class="page-title">Settings</div>
                 <div class="page-subtitle">Tracker configuration and postback URLs</div>
             </div>
-            <v-btn
-                    color="primary"
-                    elevation="0"
-                    @click="saveSettings"
-            >
-                <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save settings
-            </v-btn>
+            <div class="d-flex align-center">
+                <v-btn
+                        text
+                        small
+                        class="mr-2"
+                        @click="exportSettingsBackup"
+                >
+                    <v-icon small class="mr-1">mdi-download</v-icon>Export
+                </v-btn>
+                <v-btn
+                        text
+                        small
+                        class="mr-2"
+                        @click="openImportPicker"
+                >
+                    <v-icon small class="mr-1">mdi-upload</v-icon>Import
+                </v-btn>
+                <input ref="importFile" type="file" accept="application/json,.json" style="display:none"
+                       @change="onImportFileChosen">
+                <v-btn
+                        color="primary"
+                        elevation="0"
+                        @click="saveSettings"
+                >
+                    <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save settings
+                </v-btn>
+            </div>
         </div>
         <v-container fluid class="px-0 settings-grid">
 
@@ -811,6 +831,8 @@
                 </v-card-actions>
             </v-card>
         </v-dialog>
+
+        <confirm-dialog-component ref="confirm" />
     </v-container>
 </script>
 
@@ -1064,6 +1086,59 @@
                         this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                         throw err;
                     });
+            },
+            async exportSettingsBackup() {
+                try {
+                    const res = await fetch("/backend/api/settings/export", {credentials: "include"});
+                    if (!res.ok) throw new Error("HTTP " + res.status);
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(await res.blob());
+                    a.download = "settings-backup.json";
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    this.$root.$emit("show-message", {type: "success", text: "Settings exported (secrets redacted)"});
+                } catch (err) {
+                    this.$root.$emit("show-message", {type: "error", text: "Export failed: " + sanitizeToastMessage(err.message)});
+                }
+            },
+            openImportPicker() {
+                this.$refs.importFile.click();
+            },
+            onImportFileChosen(evt) {
+                const file = evt.target.files && evt.target.files[0];
+                evt.target.value = "";
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => this.importSettingsBackup(reader.result);
+                reader.readAsText(file);
+            },
+            async importSettingsBackup(text) {
+                let doc;
+                try {
+                    doc = JSON.parse(text);
+                } catch (e) {
+                    this.$root.$emit("show-message", {type: "error", text: "Import failed: the file is not valid JSON"});
+                    return;
+                }
+                const ok = await this.$refs.confirm.open(
+                    "Import settings",
+                    "Restore settings from this backup? Current values will be overwritten; saved secrets (tokens, keys) are kept.",
+                    "Import");
+                if (!ok) return;
+                try {
+                    const res = await fetch("/backend/api/settings/import", {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        credentials: "include",
+                        body: JSON.stringify(doc)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+                    this.$root.$emit("show-message", {type: "success", text: `Settings imported (${data.imported || 0} section(s))`});
+                    this.loadSettings();
+                } catch (err) {
+                    this.$root.$emit("show-message", {type: "error", text: "Import failed: " + sanitizeToastMessage(err.message)});
+                }
             },
             async testTelegram() {
                 this.tgTesting = true;

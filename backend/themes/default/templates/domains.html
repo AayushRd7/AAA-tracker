@@ -118,6 +118,14 @@
                         <template v-slot:item.ssl_status="{ item }">
                             <span class="status-chip" :class="statusChipClass(item.ssl_status)">{{ item.ssl_status }}</span>
                         </template>
+                        <template v-slot:item.ssl_expiry="{ item }">
+                            <span v-if="sslExpiry[item.id]" class="status-chip"
+                                  :class="sslChipClass(sslExpiry[item.id])"
+                                  :title="sslExpiry[item.id].days_to_expiry == null ? 'No certificate found on the server' : sslExpiry[item.id].days_to_expiry + ' days until expiry'">
+                                {{ sslExpiryText(sslExpiry[item.id]) }}
+                            </span>
+                            <span v-else class="grey--text">—</span>
+                        </template>
                         <template v-slot:item.dns="{ item }">
                             <div class="d-flex align-center">
                                 <span v-if="dnsResults[item.id]" class="status-chip"
@@ -332,6 +340,7 @@
                 serverIp: '',
                 dnsResults: {},
                 dnsLoading: null,
+                sslExpiry: {},
                 groups: [],
                 groupsLoading: false,
                 groupDialog: false,
@@ -355,6 +364,7 @@
                     {text: 'Default Campaign', value: 'default_campaign_id'},
                     {text: 'Group Name', value: 'group_name'},
                     {text: 'SSL Status', value: 'ssl_status'},
+                    {text: 'SSL Expiry', value: 'ssl_expiry', sortable: false},
                     {text: 'DNS', value: 'dns', sortable: false},
                     {text: 'Status', value: 'status'},
                     {text: 'Created At', value: 'created_at'},
@@ -368,6 +378,7 @@
             this.loadDomains();
             this.loadServerInfo();
             this.loadGroups();
+            this.loadSslExpiry();
             this.$root.$on('load-domains', this.loadDomains);
         },
         methods: {
@@ -524,6 +535,33 @@
                     default:
                         return 'status-chip--neutral';
                 }
+            },
+            sslChipClass(info) {
+                switch (info.status) {
+                    case 'ok':
+                        return 'status-chip--success';
+                    case 'warning':
+                        return 'status-chip--warning';
+                    case 'critical':
+                    case 'expired':
+                        return 'status-chip--danger';
+                    default:
+                        return 'status-chip--neutral';
+                }
+            },
+            sslExpiryText(info) {
+                if (info.days_to_expiry == null) return 'No cert';
+                if (info.days_to_expiry < 0) return 'Expired';
+                return info.days_to_expiry + 'd left';
+            },
+            async loadSslExpiry() {
+                try {
+                    const r = await fetch('/backend/api/domains/ssl-expiry', {credentials: 'include'});
+                    if (!r.ok) return;
+                    const map = {};
+                    for (const row of (await r.json()).domains || []) map[row.id] = row;
+                    this.sslExpiry = map;
+                } catch (e) { /* chips stay hidden */ }
             },
             async setupSSL(item) {
                 const ok = await this.$refs.confirm.open('Update SSL', `Update the SSL certificate for "${item.domain}"? Keep this page open — SSL issuance takes up to 10 minutes per domain.`, 'Update SSL');

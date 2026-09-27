@@ -382,3 +382,96 @@ def test_report_schedule(report_id: str, request: Request, db: Session = Depends
     if not ok:
         raise HTTPException(status_code=500, detail=detail)
     return {"status": "ok", "message": detail}
+
+
+# --- Settings backup: export (secrets redacted) / import (secrets restored) ---
+
+# Key names that look like credentials — their values are nulled on export so
+# the downloaded document is safe to share/store, while the key itself stays
+# so the document round-trips through import.
+SECRET_KEY_RE = re.compile(r"(token|api[_-]?key|secret|password|postback[_-]?key)",
+                           re.IGNORECASE)
+
+
+def _sanitize_for_export(value):
+    """Recursively replace secret-looking values with null, keeping the key."""
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if isinstance(k, str) and SECRET_KEY_RE.search(k):
+                out[k] = None
+            else:
+                out[k] = _sanitize_for_export(v)
+        return out
+    if isinstance(value, list):
+        return [_sanitize_for_export(v) for v in value]
+    return value
+
+
+def _restore_secrets(imported, current):
+    """Deep-merge an imported section over the live one: a null leaf in the
+    import means "redacted on export" — keep the live value so restoring a
+    backup never wipes credentials."""
+    if isinstance(imported, dict) and isinstance(current, dict):
+        return {k: _restore_secrets(v, current.get(k)) for k, v in imported.items()}
+    if imported is None:
+        return current
+    return imported
+
+
+@router.get("/export")
+def export_settings(db: Session = Depends(get_db)):
+    """Download the full settings document as JSON. Secret-looking values
+    (API tokens, postback keys, Telegram tokens, passwords) are replaced
+    with null — the key remains so the file can be re-imported."""
+    rows = db.query(SettingsORM).all()
+    data = {}
+    for row in rows:
+        try:
+            data[row.name] = json.loads(row.value)
+        except Exception:
+            data[row.name] = row.value
+    doc = {"exported_at": int(time.time()), "data": _sanitize_for_export(data)}
+    return JSONResponse(
+        content=doc,
+        headers={"Content-Disposition": 'attachment; filename="settings-backup.json"'})
+
+
+@router.post("/import")
+async def import_settings(request: Request, db: Session = Depends(get_db)):
+    """Restore a document produced by /export. Unknown shapes are rejected;
+    redacted (null) secret leaves keep the live values."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400,
+                            detail="Request body must be a JSON settings document")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400,
+                            detail="Invalid settings document: expected a JSON object")
+    data = body.get("data") if isinstance(body.get("data"), dict) else body
+    if not isinstance(data, dict) or not data:
+        raise HTTPException(status_code=400,
+                            detail="Invalid settings document: expected a non-empty "
+                                   "JSON object of settings sections")
+    for name, value in data.items():
+        if not isinstance(name, str) \
+                or not isinstance(value, (dict, list)) or isinstance(value, bool):
+            raise HTTPException(status_code=400,
+                                detail=f"Invalid settings document: section '{name}' "
+                                       "must be an object or a list")
+        row = db.query(SettingsORM).filter_by(name=name).first()
+        current = None
+        if row and row.value:
+            try:
+                current = json.loads(row.value)
+            except Exception:
+                current = None
+        merged = _restore_secrets(value, current)
+        val_str = json.dumps(merged)
+        if row:
+            row.value = val_str
+        else:
+            db.add(SettingsORM(name=name, value=val_str))
+    db.commit()
+    return {"status": "ok", "imported": len(data)}

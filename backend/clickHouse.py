@@ -76,7 +76,9 @@ def get_recent_visits(client, filters, limit: int = 100):
     params['limit'] = limit
 
     query = f"""
-        SELECT ip, country, url, referrer, received_at
+        SELECT
+            empty(ip_full) ? toString(ip) : ip_full AS ip,
+            country, url, referrer, received_at
         FROM clicks_data
         {where_clause}
         ORDER BY received_at DESC
@@ -105,7 +107,8 @@ def get_live_clicks(client, after: Optional[str] = None, limit: int = 20) -> Lis
     query = f"""
         SELECT
             received_at, visitor_id, campaign_id, country, device_type, os,
-            browser, referrer, url, status, click, cost, revenue
+            browser, referrer, url, status, click, cost, revenue,
+            empty(ip_full) ? toString(ip) : ip_full AS ip
         FROM clicks_data
         {where_clause}
         ORDER BY received_at DESC
@@ -152,13 +155,14 @@ def _click_log_where(filters: dict) -> Tuple[str, dict]:
             params[field] = value
 
     # Substring search over text fields (searching in ILIKE fashion).
-    # ip is an IPv4 column — cast to String before matching, and escape
-    # LIKE wildcards in the term so '%' / '_' in user input stay literal.
+    # `ip` is an IPv4 column — the full client address lives in ip_full, so
+    # match whichever is populated. LIKE wildcards in the term stay literal.
     search = filters.get("search")
     if search:
         escaped = escape_like(search)
         conditions.append(
             "(url ILIKE %(search)s OR referrer ILIKE %(search)s OR toString(ip) ILIKE %(search)s "
+            "OR ip_full ILIKE %(search)s "
             "OR visitor_id ILIKE %(search)s OR keyword ILIKE %(search)s)"
         )
         params["search"] = f"%{escaped}%"
@@ -169,8 +173,11 @@ def _click_log_where(filters: dict) -> Tuple[str, dict]:
 
 # Deterministic newest-first order shared by every click-log query — the
 # secondary keys keep OFFSET pages stable when received_at ties (batched
-# inserts share one timestamp).
-CLICK_LOG_ORDER_BY = "received_at DESC, visitor_id DESC, ip DESC"
+# inserts share one timestamp). The order applies to the wrapped query in
+# get_click_log, where the display address column is ip_display (ordering by
+# the output alias `ip` would collide with the source IPv4 `ip` column that
+# the search filter references — AMBIGUOUS_COLUMN_NAME).
+CLICK_LOG_ORDER_BY = "received_at DESC, visitor_id DESC, ip_display DESC"
 
 
 def get_click_log(client, filters: dict, limit: int = 500, offset: int = 0) -> List[Dict[str, Any]]:
@@ -179,16 +186,38 @@ def get_click_log(client, filters: dict, limit: int = 500, offset: int = 0) -> L
     params["limit"] = limit
     params["offset"] = max(int(offset or 0), 0)
 
+    # The inner query computes the display address as ip_display (ip_full,
+    # falling back to the IPv4 column), built from an explicit ip_v4_str
+    # intermediate. The output key is renamed to `ip` in Python (not via
+    # `AS ip` in SQL): ClickHouse substitutes aliases across the whole SELECT,
+    # so an output alias named `ip` collides with the source IPv4 `ip` column
+    # that the search filter references (AMBIGUOUS_COLUMN_NAME) — and any
+    # display-expression alias whose expansion mentions the raw `ip` name
+    # hits the same clash when substituted into ORDER BY.
     query = f"""
         SELECT
-            received_at, ip, country, region, city, device_type, os, browser,
+            received_at, ip_display,
+            country, region, city, device_type, os, browser,
             language, isp, connection_type, url, referrer, keyword,
             utm_source, utm_campaign, utm_creative,
             traffic_source_name, campaign_id, offer_id, landing_id,
             status, cost, revenue, visitor_id, is_bot, is_using_proxy,
             fraud_score
-        FROM clicks_data
-        {where_clause}
+        FROM
+        (
+            SELECT
+                received_at,
+                toString(ip) AS ip_v4_str,
+                empty(ip_full) ? ip_v4_str : ip_full AS ip_display,
+                country, region, city, device_type, os, browser,
+                language, isp, connection_type, url, referrer, keyword,
+                utm_source, utm_campaign, utm_creative,
+                traffic_source_name, campaign_id, offer_id, landing_id,
+                status, cost, revenue, visitor_id, is_bot, is_using_proxy,
+                fraud_score
+            FROM clicks_data
+            {where_clause}
+        )
         ORDER BY {CLICK_LOG_ORDER_BY}
         LIMIT %(limit)s OFFSET %(offset)s
     """
@@ -200,7 +229,10 @@ def get_click_log(client, filters: dict, limit: int = 500, offset: int = 0) -> L
         raise
 
     columns = result.column_names
-    return [dict(zip(columns, row)) for row in result.result_rows]
+    rows = [dict(zip(columns, row)) for row in result.result_rows]
+    for row in rows:
+        row["ip"] = row.pop("ip_display", "")
+    return rows
 
 
 def get_click_log_total(client, filters: dict) -> int:

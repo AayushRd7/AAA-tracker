@@ -131,7 +131,7 @@ def fraud_summary(request: Request, db: Session = Depends(get_db)):
 
     fraud_where = f"({period}) AND (is_bot = true OR fraud_score >= {FRAUD_SCORE_THRESHOLD})"
     ip_rows = ch.query(f"""
-        SELECT toString(ip) AS ip, count() AS hits,
+        SELECT if(empty(ip_full), toString(ip), ip_full) AS ip, count() AS hits,
                round(avg(fraud_score), 1) AS avg_score,
                max(received_at) AS last_seen
         FROM clicks_data
@@ -197,7 +197,9 @@ def fraud_feed(request: Request, after: str = None, limit: int = FEED_LIMIT):
 
     query = f"""
         SELECT
-            received_at, visitor_id, ip, campaign_id, country, device_type,
+            received_at, visitor_id,
+            if(empty(ip_full), toString(ip), ip_full) AS ip,
+            campaign_id, country, device_type,
             os, browser, referrer, url, status, is_bot, is_using_proxy,
             fraud_score
         FROM clicks_data

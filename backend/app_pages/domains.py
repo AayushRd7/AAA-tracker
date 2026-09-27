@@ -13,6 +13,7 @@ from models.domain import DomainORM
 from models.user import UserORM
 from models.domain_groups import DomainGroupORM, DomainGroupDomainORM, DomainGroupUserORM
 import httpx
+import ssl as ssl_mod
 from datetime import datetime
 from pathlib import Path
 
@@ -130,6 +131,56 @@ async def dns_status(domain: str, db: Session = Depends(get_db)):
     }
 
 
+# ====== GET /domains/ssl-expiry ======
+LETSENCRYPT_LIVE = Path("/etc/letsencrypt/live")
+
+
+def _cert_expiry_days(domain: str) -> Optional[int]:
+    """Days until the domain's certificate expires (None when no/invalid cert).
+
+    Certificates are the certbot layout mounted at /etc/letsencrypt — the same
+    files nginx's per-domain server blocks point at."""
+    cert_path = LETSENCRYPT_LIVE / domain / "fullchain.pem"
+    if not cert_path.is_file():
+        return None
+    try:
+        info = ssl_mod._ssl._test_decode_cert(str(cert_path))
+        not_after = info.get("notAfter")
+        if not not_after:
+            return None
+        expiry = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
+        return (expiry - datetime.utcnow()).days
+    except Exception:
+        return None
+
+
+@router.get("/ssl-expiry")
+async def ssl_expiry(db: Session = Depends(get_db)):
+    """Days-to-expiry per managed domain. Domains without a certificate on
+    disk report status "unknown" so the UI shows a neutral chip instead of
+    failing."""
+    out = []
+    for d in db.query(DomainORM).order_by(DomainORM.id.asc()).all():
+        days = _cert_expiry_days(d.domain)
+        if days is None:
+            status = "unknown"
+        elif days < 0:
+            status = "expired"
+        elif days <= 7:
+            status = "critical"
+        elif days <= 30:
+            status = "warning"
+        else:
+            status = "ok"
+        out.append({
+            "id": d.id,
+            "domain": d.domain,
+            "days_to_expiry": days,
+            "status": status,
+        })
+    return {"domains": out}
+
+
 # ====== POST /domains ======
 @router.post("/")
 async def create_domain(domain: DomainCreateUpdate, request: Request, db: Session = Depends(get_db)):
@@ -189,6 +240,13 @@ async def delete_domain(domain_id: int, request: Request, db: Session = Depends(
     domain_obj = db.query(DomainORM).filter(DomainORM.id == domain_id).first()
     if not domain_obj:
         raise HTTPException(status_code=404, detail="Domain not found")
+
+    from models.campaigns import CampaignORM
+    if db.query(CampaignORM).filter_by(domain_id=domain_obj.id).first():
+        raise HTTPException(status_code=409,
+                            detail=f'Domain "{domain_obj.domain}" is linked to campaigns '
+                                   'and cannot be deleted. Unlink it from the '
+                                   'campaigns first.')
 
     db.delete(domain_obj)
     db.commit()

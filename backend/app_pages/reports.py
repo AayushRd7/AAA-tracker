@@ -228,6 +228,13 @@ def _build_conversions_query(request: Request, db: Session):
                 (Conversion.transaction_id.ilike(term)) |
                 (Conversion.visitor_id.ilike(term))
             )
+        elif key == "url":
+            # substring match against the bound offer's URL — conversion rows
+            # carry no URL column themselves
+            from models.offers import OfferORM
+            term = f"%{value}%"
+            query = query.join(OfferORM, Conversion.offer_id == OfferORM.id) \
+                         .filter(OfferORM.url.ilike(term))
 
     if date_from and date_to:
         if date_basis == "conversion_date":

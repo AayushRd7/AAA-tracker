@@ -11,6 +11,8 @@ from schemas import Filters
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 from db import get_db
+from models.user import UserORM
+from models.campaigns import CampaignORM
 
 from pydantic import BaseModel
 from typing import Optional, List
@@ -124,7 +126,8 @@ async def get_visits(
 
 
 @router.get("/live-clicks")
-async def live_clicks(request: Request, after: Optional[str] = None, limit: int = 20):
+async def live_clicks(request: Request, after: Optional[str] = None, limit: int = 20,
+                      db: Session = Depends(get_db)):
     """G51: raw live click feed. Latest rows first; ``after`` (ISO timestamp)
     polls for rows newer than the last seen one."""
     if after:
@@ -134,11 +137,50 @@ async def live_clicks(request: Request, after: Optional[str] = None, limit: int 
             raise HTTPException(status_code=400, detail="Invalid 'after' timestamp — expected ISO format")
     try:
         ch = request.state.ch
-        return get_live_clicks(ch, after=after, limit=min(max(limit, 1), 100))
+        limit = min(max(limit, 1), 100)
+        scope = _click_scope_campaign_ids(request, db)
+        if scope is None:
+            return get_live_clicks(ch, after=after, limit=limit)
+        if not scope:
+            return []
+        # get_live_clicks has no campaign filter — over-fetch and filter here
+        allowed = set(scope)
+        rows = get_live_clicks(ch, after=after, limit=min(limit * 5, 500))
+        return [r for r in rows if r.get("campaign_id") in allowed][:limit]
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _click_scope_campaign_ids(request: Request, db: Session) -> Optional[List[int]]:
+    """campaigns:'own' parity with reports.py: scoped callers are limited to
+    clicks on campaigns they own. Returns None for admins and unscoped users;
+    a (possibly empty) campaign-id list for scoped ones."""
+    from auth import get_caller
+    username, is_admin = get_caller(request)
+    if is_admin or not username:
+        return None
+    user = db.query(UserORM).filter(UserORM.username == username).first()
+    raw = (user.permissions or {}) if user else {}
+    if raw.get("campaigns") != "own":
+        return None
+    return [r[0] for r in db.query(CampaignORM.id)
+                    .filter(CampaignORM.owner_id == user.id).all()]
+
+
+def _apply_click_scope(f: dict, scope: Optional[List[int]]):
+    """Narrow the click-log filter dict to the caller's own campaigns.
+    Returns True when the query can run, False when the scope is empty (the
+    caller must get an empty result — an empty 'campaigns' list would mean
+    'no filter' downstream)."""
+    if scope is None:
+        return True
+    if not scope:
+        return False
+    requested = set(f.get("campaigns") or [])
+    f["campaigns"] = sorted(requested & set(scope)) if requested else list(scope)
+    return True
 
 
 def _series_payload(series):
@@ -304,19 +346,25 @@ async def get_breakdown(request: Request, body: ReportRequest, db: Session = Dep
 
 
 @router.post("/click-log")
-async def get_click_log_view(request: Request, filters: ClickLogFilters):
+async def get_click_log_view(request: Request, filters: ClickLogFilters,
+                             db: Session = Depends(get_db)):
     try:
         ch = request.state.ch
         f = filters.dict()
+        scope = _click_scope_campaign_ids(request, db)
         # Paginated mode is opted into by sending `offset` — the response then
         # carries the count() total so the UI can render a pager. Plain calls
         # (no offset) keep the legacy bare-list shape.
         if filters.offset is not None:
             limit = min(max(int(filters.limit or 50), 1), 5000)
             offset = max(int(filters.offset or 0), 0)
+            if not _apply_click_scope(f, scope):
+                return {"items": [], "total": 0, "limit": limit, "offset": offset}
             rows = get_click_log(ch, f, limit=limit, offset=offset)
             total = get_click_log_total(ch, f)
             return {"items": rows, "total": total, "limit": limit, "offset": offset}
+        if not _apply_click_scope(f, scope):
+            return []
         rows = get_click_log(ch, f, limit=min(max(int(filters.limit or 500), 1), 5000))
         return rows
     except Exception as e:
@@ -337,7 +385,8 @@ def _csv_safe(value):
 
 
 @router.post("/click-log/export")
-async def export_click_log(request: Request, filters: ClickLogFilters):
+async def export_click_log(request: Request, filters: ClickLogFilters,
+                           db: Session = Depends(get_db)):
     """CSV export of the click log with the same drill-down filters (no cap on
     the usual 500-row view — up to CLICK_LOG_EXPORT_MAX rows)."""
     import csv as _csv
@@ -345,7 +394,11 @@ async def export_click_log(request: Request, filters: ClickLogFilters):
     from fastapi.responses import Response
     try:
         ch = request.state.ch
-        rows = get_click_log(ch, filters.dict(), limit=CLICK_LOG_EXPORT_MAX)
+        f = filters.dict()
+        if not _apply_click_scope(f, _click_scope_campaign_ids(request, db)):
+            rows = []
+        else:
+            rows = get_click_log(ch, f, limit=CLICK_LOG_EXPORT_MAX)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     buf = _io.StringIO()
