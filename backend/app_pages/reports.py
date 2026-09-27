@@ -8,6 +8,8 @@ from sqlalchemy import text
 from db import get_db
 from models.base import Base
 from models.settings import SettingsORM
+from models.user import UserORM
+from models.campaigns import CampaignORM
 
 import csv
 import io
@@ -64,6 +66,42 @@ class Conversion(Base):
     events = Column(JSONB)
 
 VALID_STATUSES = {"lead", "sale", "upsale", "rejected", "hold", "trash"}
+
+
+def _conversions_scope(request: Request, db: Session, query):
+    """G63/D1c parity with campaigns:'own' — a scoped caller only sees
+    conversions whose campaign they own; unattributable rows (NULL campaign_id)
+    are hidden from them. Admins and regular users pass through."""
+    from auth import get_caller
+    username, is_admin = get_caller(request)
+    if is_admin or not username:
+        return query
+    user = db.query(UserORM).filter(UserORM.username == username).first()
+    raw = (user.permissions or {}) if user else {}
+    if raw.get("campaigns") != "own":
+        return query
+    owned = db.query(CampaignORM.id).filter(CampaignORM.owner_id == user.id)
+    return query.filter(Conversion.campaign_id.in_(owned))
+
+
+def _require_conversion_access(request: Request, db: Session, conv: "Conversion") -> None:
+    """Mutation counterpart of _conversions_scope: scoped users may only touch
+    conversions on campaigns they own (unattributable rows are off-limits)."""
+    from auth import get_caller
+    username, is_admin = get_caller(request)
+    if is_admin or not username:
+        return
+    user = db.query(UserORM).filter(UserORM.username == username).first()
+    raw = (user.permissions or {}) if user else {}
+    if raw.get("campaigns") != "own":
+        return
+    if conv.campaign_id is None:
+        raise HTTPException(status_code=403,
+                            detail="You can only modify conversions of your own campaigns")
+    owner_id = db.query(CampaignORM.owner_id).filter_by(id=conv.campaign_id).scalar()
+    if owner_id != user.id:
+        raise HTTPException(status_code=403,
+                            detail="You can only modify conversions of your own campaigns")
 
 
 def normalize_status(status: str) -> str:
@@ -124,6 +162,7 @@ def get_conversions(request: Request, limit: int = 100, db: Session = Depends(ge
             visitor_ids_in_window = set()
 
     query = db.query(Conversion)
+    query = _conversions_scope(request, db, query)
 
     # Apply the filters
     for key, value in request.query_params.items():
@@ -296,7 +335,7 @@ def import_conversions(data: ConversionImport, db: Session = Depends(get_db)):
         tid = cells[2] if len(cells) > 2 and cells[2] else None
         status = normalize_status(cells[3]) if len(cells) > 3 and cells[3] else "sale"
         try:
-            payout = float(payout_raw)
+            payout = float(payout_raw.strip().replace(",", "."))
         except ValueError:
             results.append({"line": i, "ok": False,
                             "detail": f"invalid payout '{payout_raw}'"})
@@ -343,10 +382,12 @@ class ConversionUpdate(BaseModel):
 
 
 @router.patch("/{conversion_id}")
-def update_conversion(conversion_id: int, data: ConversionUpdate, db: Session = Depends(get_db)):
+def update_conversion(conversion_id: int, data: ConversionUpdate,
+                      request: Request, db: Session = Depends(get_db)):
     conv = db.query(Conversion).filter_by(id=conversion_id).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversion not found")
+    _require_conversion_access(request, db, conv)
 
     updates = data.dict(exclude_none=True)
     if "status" in updates:
@@ -372,10 +413,11 @@ def update_conversion(conversion_id: int, data: ConversionUpdate, db: Session = 
 
 
 @router.delete("/{conversion_id}")
-def delete_conversion(conversion_id: int, db: Session = Depends(get_db)):
+def delete_conversion(conversion_id: int, request: Request, db: Session = Depends(get_db)):
     conv = db.query(Conversion).filter_by(id=conversion_id).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversion not found")
+    _require_conversion_access(request, db, conv)
 
     db.delete(conv)
     db.commit()

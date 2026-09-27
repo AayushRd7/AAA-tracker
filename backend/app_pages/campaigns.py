@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from typing import Optional, Literal
 from datetime import datetime, date, timedelta
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+import json
 
 from clickHouse import get_clickhouse_client, get_report_breakdown
 
@@ -141,8 +143,15 @@ def clone_campaign(campaign_id: int, request: Request, db: Session = Depends(get
         alias = f"{base_alias}-{n}"
         n += 1
 
+    base_name = f"{campaign.name} (copy)"
+    name = base_name
+    n = 2
+    while db.query(CampaignORM).filter(CampaignORM.name == name).first():
+        name = f"{base_name} {n}"
+        n += 1
+
     clone = CampaignORM(
-        name=f"{campaign.name} (copy)",
+        name=name,
         alias=alias,
         type=campaign.type,
         status='paused',
@@ -150,8 +159,8 @@ def clone_campaign(campaign_id: int, request: Request, db: Session = Depends(get
         traffic_source_id=campaign.traffic_source_id,
         domain_id=campaign.domain_id,
         notes=campaign.notes,
-        tags=campaign.tags,
-        config=campaign.config,
+        tags=list(campaign.tags) if campaign.tags else None,
+        config=json.loads(json.dumps(campaign.config or {})),
         owner_id=campaign.owner_id,
     )
     db.add(clone)
@@ -161,7 +170,8 @@ def clone_campaign(campaign_id: int, request: Request, db: Session = Depends(get
     caller, _ = get_caller(request)
     audit_event(caller or "api_token", "create", "campaigns", str(clone.id),
                 {"cloned_from": campaign_id}, _client_ip(request))
-    return {"message": "Campaign cloned", "id": clone.id, "alias": clone.alias}
+    return {"message": "Campaign cloned", "id": clone.id, "alias": clone.alias,
+            "name": clone.name}
 
 @router.post("/", response_model=dict)
 def create_campaign(data: CampaignIn, request: Request, db: Session = Depends(get_db)):
@@ -174,7 +184,12 @@ def create_campaign(data: CampaignIn, request: Request, db: Session = Depends(ge
         owner_id = user.id if user else None
     campaign = CampaignORM(**data.dict(), owner_id=owner_id)
     db.add(campaign)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400,
+                            detail="Campaign name or alias already exists")
     db.refresh(campaign)
     audit_event(caller or "api_token", "create", "campaigns", str(campaign.id),
                 {"name": campaign.name}, _client_ip(request))
@@ -302,7 +317,7 @@ def export_campaigns(request: Request, db: Session = Depends(get_db)):
                 ";".join(c.tags or []), c.notes or "",
             )
         ])
-    return Response(content=buf.getvalue(), media_type="text/csv",
+    return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=campaigns.csv"})
 
 
@@ -324,6 +339,8 @@ def import_campaigns(data: CampaignImportIn, request: Request, db: Session = Dep
         return {"results": [], "imported": 0, "failed": 0}
 
     first = [str(h).strip().lower() for h in rows[0]]
+    if first:
+        first[0] = first[0].lstrip("\ufeff")  # Excel-saved CSVs carry a BOM
     if "name" in first:
         header = first
         body = [(i + 2, r) for i, r in enumerate(rows[1:])]  # real file line numbers
@@ -431,7 +448,12 @@ def update_campaign(campaign_id: int, data: CampaignIn, request: Request, db: Se
         setattr(campaign, key, value)
     campaign.updated_at = datetime.utcnow()
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400,
+                            detail="Campaign name or alias already exists")
     db.refresh(campaign)
     from auth import get_caller
     caller, _ = get_caller(request)

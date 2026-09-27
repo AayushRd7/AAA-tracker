@@ -440,12 +440,15 @@ def main():
     loc3 = sess2.get(f"{BASE}/{sticky_alias}", headers=ua_sticky,
                      allow_redirects=False).headers.get("location") or ""
     check("sticky: 100/0 weight routes offer A", "offer-a" in loc3, loc3[:120])
-    payload["config"]["flows"][0]["weight"] = 0
-    payload["config"]["flows"][1]["weight"] = 100
+    # config-hash invalidation: a real routing change (offer swap) must
+    # invalidate old bindings — weight-only edits intentionally do not
+    # (they were resetting every bound visitor, changelog-parity fix)
+    payload["config"]["flows"][0]["offer"] = offer_b
+    payload["config"]["flows"][1]["offer"] = offer_a
     s.put(f"{api}/campaigns/{sticky_id}", json=payload)
     loc4 = sess2.get(f"{BASE}/{sticky_alias}", headers=ua_sticky,
                      allow_redirects=False).headers.get("location") or ""
-    check("sticky: flow edit invalidates binding (routes offer B)",
+    check("sticky: routing edit invalidates binding (routes offer B)",
           "offer-b" in loc4, loc4[:120])
 
     # -- G8: click caps — total cap 1, second click skips the flow --
@@ -1187,11 +1190,11 @@ def main():
     cmp_pid = os.getpid()
     ch_query(
         f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, cost) "
-        f"SELECT toDateTime(toDate(now()) - 1) + toIntervalHour(number % 24), 999, true, '', "
+        f"SELECT toDateTime(toDate(now()) - 1) + toIntervalHour(number % 24), 999, NULL, '', "
         f"'seed-rd-{cmp_pid}-cur-' || toString(number), 'US', 0.01 FROM numbers(60)")
     ch_query(
         f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, cost) "
-        f"SELECT toDateTime(toDate(now()) - 3) + toIntervalHour(number), 999, true, '', "
+        f"SELECT toDateTime(toDate(now()) - 3) + toIntervalHour(number), 999, NULL, '', "
         f"'seed-rd-{cmp_pid}-prev-' || toString(number), 'US', 0.01 FROM numbers(3)")
     cur_from, cur_to = str(today.fromordinal(today.toordinal() - 1)), str(today)
     r = s.post(f"{api}/dashboard/metrics", json={
@@ -1316,11 +1319,12 @@ def main():
     check("seeded CH rows removed", leftover == "0", leftover[:80])
 
     print("== Regression: reporting polish ==")
-    # Seed isolated campaign 776: 10 visits, 4 clicks, 2 rejected.
+    # Seed isolated campaign 776: 10 visits (2 rejected) + 4 click rows, so
+    # rejected_rate=20% and ctr=40% under visits = non-click rows.
     ch_query(
         f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, cost) "
-        f"SELECT now(), 776, number < 4, if(number IN (4, 5), 'rejected', ''), "
-        f"'seed-g5-{os.getpid()}-' || toString(number), 'US', 0.01 FROM numbers(10)")
+        f"SELECT now(), 776, number >= 10, if(number IN (0, 1), 'rejected', ''), "
+        f"'seed-g5-{os.getpid()}-' || toString(number), 'US', 0.01 FROM numbers(14)")
     ch_query(
         f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, sub_id_1, sub_id_2, utm_source, utm_medium, utm_campaign, keyword) "
         f"SELECT now() - INTERVAL number SECOND, 777, NULL, '', 'seed-g5-{os.getpid()}-live-' || toString(number), 'DE', "
@@ -1783,7 +1787,9 @@ def main():
     r = s.get(f"{api}/campaigns/export")
     check("export: CSV download", r.status_code == 200
           and r.headers.get("content-type", "").startswith("text/csv")
-          and r.text.startswith("id,name,alias"), r.headers.get("content-type", ""))
+          and r.content.startswith(b"\xef\xbb\xbf")
+          and r.text.lstrip("\ufeff").startswith("id,name,alias"),
+          r.headers.get("content-type", ""))
     lines = r.text.strip().split("\n")
     hdr = lines[0]
     row = [l for l in lines[1:] if l.startswith(f"{ap_cid},")]
@@ -3319,8 +3325,22 @@ print("ESCAPED-OK")
     PRESET_PROBE_NAMES = ["Outbrain", "ExoClick", "PropellerAds", "Adsterra", "Taboola"]
     r = s.get(f"{api}/sources/")
     probe = next((x for x in r.json() if x["name"] in PRESET_PROBE_NAMES), None)
+    created_probe = False
+    if probe is None:
+        # the operator may have purged the seeded catalog — recreate one
+        # catalog row from the template endpoint purely for this regression
+        rp = s.get(f"{api}/sources/presets")
+        catalog = {p["name"]: p for p in rp.json().get("presets", [])} if rp.status_code == 200 else {}
+        pname = next((n for n in PRESET_PROBE_NAMES if n in catalog), None)
+        if pname:
+            rc = s.post(f"{api}/sources/", json={
+                "name": pname, "traffic_loss": 0,
+                "settings": catalog[pname].get("params", [])})
+            if rc.status_code == 200:
+                probe = rc.json()
+                created_probe = True
     check("sources presets: catalog preset present for probe", probe is not None,
-          "all probe presets previously deleted")
+          "probe presets unavailable in catalog")
     if probe:
         r = s.post(f"{api}/sources/bulk", json={"ids": [probe["id"]], "action": "delete"})
         check("sources presets: preset bulk-deleted", r.status_code == 200
@@ -3329,13 +3349,14 @@ print("ESCAPED-OK")
         check("sources presets: deleted preset stays deleted (no GET re-seed)",
               all(x["name"] != probe["name"] for x in r.json()),
               "preset was resurrected by the list endpoint")
-        s.post(f"{api}/sources/", json={
-            "name": probe["name"],
-            "traffic_loss": probe.get("traffic_loss") or 0,
-            "s2s_postback": probe.get("s2s_postback"),
-            "s2s_postback_statuses": probe.get("s2s_postback_statuses") or {},
-            "settings": probe.get("settings") or [],
-            "additional_settings": probe.get("additional_settings") or {}})
+        if not created_probe:  # leave operator-purged catalogs purged
+            s.post(f"{api}/sources/", json={
+                "name": probe["name"],
+                "traffic_loss": probe.get("traffic_loss") or 0,
+                "s2s_postback": probe.get("s2s_postback"),
+                "s2s_postback_statuses": probe.get("s2s_postback_statuses") or {},
+                "settings": probe.get("settings") or [],
+                "additional_settings": probe.get("additional_settings") or {}})
 
     print("== Favicon proxy ==")
     # Ad-blockers match well-known ad-network domains anywhere in the URL, so
@@ -3510,6 +3531,286 @@ print("ESCAPED-OK")
     if mcp_cid:
         r = s.delete(f"{api}/campaigns/{mcp_cid}")
         check("mcp: delete scratch campaign", r.status_code == 200, r.text[:120])
+
+    print("== Changelog parity: live analytics sync & platform bugs ==")
+    # Bugs fixed in a competitor's changelog that this tracker shared (audit
+    # 2026-09-27): click-outs/conversions never reached ClickHouse, visitor
+    # params poisoned reports, comma-decimal payouts rejected, weight edits
+    # reset visitor bindings, paused offers received traffic, no offer-cap on
+    # click-out, Accept-Language filters never matched, duplicate names 500'd,
+    # campaigns:'own' leaked conversions, CSVs garbled in Excel.
+
+    def cp_breakdown_clicks(campaign_id):
+        out = ch_query(f"SELECT countIf(click IS NULL OR click = false), countIf(click = true), "
+                       f"countIf(status IN ('sale','upsale')), sumOrNull(toFloat64(revenue)) "
+                       f"FROM clicks_data WHERE campaign_id = {campaign_id}")
+        if not out or out.startswith("ERROR"):
+            return [0, 0, 0, 0.0]
+        parts = [p if p != "\\N" else "0" for p in (out.split("\t") + ["0", "0", "0", "0"])[:4]]
+        return [int(float(parts[0] or 0)), int(float(parts[1] or 0)),
+                int(float(parts[2] or 0)), float(parts[3] or 0)]
+
+    cp_pid = os.getpid()
+    # offer + campaign whose flow serves that offer directly
+    r = s.post(f"{api}/offers/", json={
+        "name": f"Smoke CP Offer {cp_pid}", "url": f"https://example.com/smoke-cp-offer-{cp_pid}?cid={{click_id}}"})
+    cp_oid = r.json().get("id") if r.status_code == 200 else None
+    check("cp: offer created", bool(cp_oid), r.text[:200])
+    cp_alias = f"smoke-cp-{cp_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": cp_alias, "alias": cp_alias, "type": "campaign", "status": "active",
+        "redirect_mode": "position",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "direct", "offer": cp_oid, "filters": []}],
+                   "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+    check("cp: campaign created", r.status_code == 200 and "id" in r.json(), r.text[:200])
+    cp_cid = r.json().get("id")
+
+    # 1. Live click-out must appear in ClickHouse as a click
+    r = requests.get(f"{BASE}/{cp_alias}", verify=not INSECURE, allow_redirects=False,
+                     params={"sub_id_1": f"smoke-cp-visit-{cp_pid}"})
+    check("cp: campaign hit redirects", r.status_code in (301, 302, 307, 308), str(r.status_code))
+    import time
+    time.sleep(1.5)
+    visits, clicks, convs, rev = cp_breakdown_clicks(cp_cid)
+    check("cp: hit recorded as a visit row", visits == 1, f"visits={visits} clicks={clicks}")
+    r = requests.get(f"{BASE}/c/{cp_alias}/{cp_oid}", verify=not INSECURE, allow_redirects=False,
+                     params={"sub_id_1": f"smoke-cp-click-{cp_pid}"})
+    check("cp: click-out redirects", r.status_code in (301, 302, 307, 308), str(r.status_code))
+    loc = r.headers.get("location") or ""
+    m = re.search(r"[?&]click_id=([^&]+)", loc)
+    cp_click_id = m.group(1) if m else None
+    check("cp: click-out location carries click_id", bool(cp_click_id), loc[:120])
+    time.sleep(1.5)
+    visits, clicks, convs, rev = cp_breakdown_clicks(cp_cid)
+    check("cp: click-out recorded as CH click (not a second visit)",
+          visits == 1 and clicks == 1, f"visits={visits} clicks={clicks}")
+
+    # 2. Live postback must update the CH click row (conversions + revenue)
+    if cp_click_id:
+        r = requests.get(f"{BASE}/pb/{cp_click_id}/sale/10", verify=not INSECURE)
+        check("cp: postback 200", r.status_code == 200, f"{r.status_code} {r.text[:80]}")
+        ok = False
+        for _ in range(10):
+            time.sleep(1)
+            _, _, convs2, rev2 = cp_breakdown_clicks(cp_cid)
+            if convs2 >= 1 and rev2 >= 10:
+                ok = True
+                break
+        check("cp: conversion visible in CH reports (clicks/conversions/revenue)",
+              ok, f"convs={convs2} rev={rev2}")
+
+    # 3. Visitor params must not poison CH rows
+    poison_alias = f"smoke-cpp-{cp_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": poison_alias, "alias": poison_alias, "type": "campaign", "status": "active",
+        "redirect_mode": "position",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "redirect",
+                              "redirect_url": f"https://example.com/smoke-cpp-{cp_pid}",
+                              "filters": []}],
+                   "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+    poison_cid = r.json().get("id") if r.status_code == 200 else None
+    requests.get(f"{BASE}/{poison_alias}", verify=not INSECURE, allow_redirects=False,
+                 params={"sub_id_1": f"smoke-cpp-{cp_pid}", "status": "sale",
+                         "revenue": "999", "cost": "0,5"})
+    time.sleep(1.5)
+    row = ch_query(f"SELECT empty(status), isNull(revenue), cost FROM clicks_data "
+                   f"WHERE campaign_id = {poison_cid} AND sub_id_1 = 'smoke-cpp-{cp_pid}' LIMIT 1")
+    parts = (row.split("\t") + ["ERR", "ERR", "ERR"])[:3] if row else ["ERR", "ERR", "ERR"]
+    check("cp: poisoned status/revenue ignored, row kept, bad cost sanitized",
+          parts[0] == "1" and parts[1] == "1" and parts[2] == "0.5", str(parts))
+
+    # 4. Comma-decimal payout accepted on the postback
+    if cp_click_id:
+        r = requests.get(f"{BASE}/pb/{cp_click_id}/sale/2,25", verify=not INSECURE)
+        check("cp: comma-decimal postback accepted", r.status_code == 200, f"{r.status_code} {r.text[:80]}")
+
+    # 5. Accept-Language filter matches primary subtag
+    al_alias = f"smoke-cpal-{cp_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": al_alias, "alias": al_alias, "type": "campaign", "status": "active",
+        "redirect_mode": "position",
+        "config": {"flows": [
+            {"type": "default", "position": 1, "enabled": True, "schema": "redirect",
+             "redirect_url": f"https://example.com/smoke-cpal-en-{cp_pid}",
+             "filters": [{"logic": "and", "conditions":
+                          [{"field": "language", "operator": "equals", "value": "en"}]}]},
+            {"type": "default", "position": 2, "enabled": True, "schema": "redirect",
+             "redirect_url": f"https://example.com/smoke-cpal-any-{cp_pid}", "filters": []}],
+            "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+    al_cid = r.json().get("id") if r.status_code == 200 else None
+    r = requests.get(f"{BASE}/{al_alias}", verify=not INSECURE, allow_redirects=False,
+                     headers={"Accept-Language": "en-US,en;q=0.9"})
+    check("cp: en-US Accept-Language matches 'en' filter",
+          f"smoke-cpal-en-{cp_pid}" in (r.headers.get("location") or ""), r.headers.get("location", "")[:100])
+    r = requests.get(f"{BASE}/{al_alias}", verify=not INSECURE, allow_redirects=False,
+                     headers={"Accept-Language": "fr-FR,fr;q=0.9"})
+    check("cp: fr Accept-Language falls through to next flow",
+          f"smoke-cpal-any-{cp_pid}" in (r.headers.get("location") or ""), r.headers.get("location", "")[:100])
+
+    # 6. Weight-only edit must not reset visitor bindings
+    wb_alias = f"smoke-cpwb-{cp_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": wb_alias, "alias": wb_alias, "type": "campaign", "status": "active",
+        "redirect_mode": "weight",
+        "config": {"stickiness": True, "flows": [
+            {"type": "regular", "position": 1, "enabled": True, "schema": "redirect",
+             "redirect_url": f"https://example.com/smoke-cpwb-a-{cp_pid}", "weight": 50, "filters": []},
+            {"type": "regular", "position": 2, "enabled": True, "schema": "redirect",
+             "redirect_url": f"https://example.com/smoke-cpwb-b-{cp_pid}", "weight": 50, "filters": []}],
+            "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+    wb_cid = r.json().get("id") if r.status_code == 200 else None
+    wb_cfg = None
+    if wb_cid:
+        rg = s.get(f"{api}/campaigns/{wb_cid}")
+        wb_cfg = rg.json().get("config") if rg.status_code == 200 else None
+    if not wb_cfg:  # fall back to the payload shape the API accepted
+        wb_cfg = {"stickiness": True, "flows": [
+            {"type": "regular", "position": 1, "enabled": True, "schema": "redirect",
+             "redirect_url": f"https://example.com/smoke-cpwb-a-{cp_pid}", "weight": 50, "filters": []},
+            {"type": "regular", "position": 2, "enabled": True, "schema": "redirect",
+             "redirect_url": f"https://example.com/smoke-cpwb-b-{cp_pid}", "weight": 50, "filters": []}],
+            "postbacks": [], "hide_referrer": False, "fallback_url": ""}
+    r = requests.get(f"{BASE}/{wb_alias}", verify=not INSECURE, allow_redirects=False)
+    first_loc = r.headers.get("location") or ""
+    bind_cookie = r.cookies.get("aaa_bind")
+    # change ONLY the weights, keep everything else byte-identical
+    for f in wb_cfg["flows"]:
+        f["weight"] = 80 if f["position"] == 1 else 20
+    if wb_cid:
+        s.put(f"{api}/campaigns/{wb_cid}", json={
+            "name": wb_alias, "alias": wb_alias, "type": "campaign", "status": "active",
+            "redirect_mode": "weight", "config": wb_cfg})
+        r2 = requests.get(f"{BASE}/{wb_alias}", verify=not INSECURE, allow_redirects=False,
+                          cookies={"aaa_bind": bind_cookie} if bind_cookie else {})
+        second_loc = r2.headers.get("location") or ""
+        check("cp: weight-only edit preserves visitor binding",
+              bool(bind_cookie) and first_loc == second_loc and first_loc != "",
+              f"{first_loc[:60]} vs {second_loc[:60]}")
+
+    # 7. Paused / archived offers must not receive click-outs
+    r = s.post(f"{api}/offers/", json={
+        "name": f"Smoke CP Paused {cp_pid}",
+        "url": f"https://example.com/smoke-cp-paused-{cp_pid}", "status": "paused"})
+    paused_oid = r.json().get("id") if r.status_code == 200 else None
+    if paused_oid:
+        r = requests.get(f"{BASE}/c/{cp_alias}/{paused_oid}", verify=not INSECURE, allow_redirects=False)
+        check("cp: paused offer click-out refused", r.status_code == 404, str(r.status_code))
+        s.patch(f"{api}/offers/{paused_oid}", json={"archived": True})
+        r = requests.get(f"{BASE}/c/{cp_alias}/{paused_oid}", verify=not INSECURE, allow_redirects=False)
+        check("cp: archived offer click-out refused", r.status_code == 404, str(r.status_code))
+        s.delete(f"{api}/offers/{paused_oid}")
+
+    # 8. Offer daily cap enforced on the click-out route
+    r = s.post(f"{api}/offers/", json={
+        "name": f"Smoke CP Cap {cp_pid}", "url": f"https://example.com/smoke-cp-cap-{cp_pid}?cid={{click_id}}",
+        "daily_conversions_cap": 1})
+    cap_oid = r.json().get("id") if r.status_code == 200 else None
+    if cap_oid:
+        r = requests.get(f"{BASE}/c/{cp_alias}/{cap_oid}", verify=not INSECURE, allow_redirects=False)
+        m = re.search(r"[?&]click_id=([^&]+)", r.headers.get("location") or "")
+        if m:
+            requests.get(f"{BASE}/pb/{m.group(1)}/sale/5", verify=not INSECURE)
+        r = requests.get(f"{BASE}/c/{cp_alias}/{cap_oid}", verify=not INSECURE, allow_redirects=False)
+        check("cp: capped offer click-out refused after cap reached", r.status_code == 404, str(r.status_code))
+        s.delete(f"{api}/offers/{cap_oid}")
+
+    # 9. Duplicate campaign name -> 400, not 500; clone twice works
+    r = s.post(f"{api}/campaigns/", json={
+        "name": cp_alias, "alias": f"smoke-cp-dup-{cp_pid}", "type": "campaign",
+        "status": "active", "redirect_mode": "position", "config": {"flows": []}})
+    check("cp: duplicate campaign name -> 400", r.status_code == 400, f"{r.status_code} {r.text[:80]}")
+    if cp_cid:
+        r1 = s.post(f"{api}/campaigns/{cp_cid}/clone")
+        r2 = s.post(f"{api}/campaigns/{cp_cid}/clone")
+        names = []
+        for rr in (r1, r2):
+            if rr.status_code == 200:
+                names.append(rr.json().get("name"))
+                s.delete(f"{api}/campaigns/{rr.json().get('id')}")
+        check("cp: cloning twice succeeds with distinct names",
+              r1.status_code == 200 and r2.status_code == 200 and len(set(names)) == 2,
+              f"{r1.status_code}/{r2.status_code} {names}")
+
+    # 10. campaigns:'own' must scope the conversions log + mutations
+    own2 = f"smoke-own2-{cp_pid}"
+    r = s.post(f"{api}/users/", json={
+        "username": own2, "password": "smokepass1",
+        "permissions": {"sections": {"campaigns": True, "reports": True, "dashboard": True},
+                        "write": True, "campaigns": "own"}})
+    own2_uid = r.json().get("id") if r.status_code == 200 else None
+    check("cp: scoped user created", bool(own2_uid), r.text[:150])
+    ou2 = requests.Session()
+    ou2.verify = not INSECURE
+    ou2.post(f"{api}/login", json={"username": own2, "password": "smokepass1"})
+    own_alias = f"smoke-cpown-{cp_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": own_alias, "alias": own_alias, "type": "campaign", "status": "active",
+        "redirect_mode": "position",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "redirect",
+                              "redirect_url": f"https://example.com/smoke-cpown-{cp_pid}",
+                              "filters": []}],
+                   "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+    own_cid = r.json().get("id") if r.status_code == 200 else None
+    if own2_uid and own_cid:
+        pg_exec(f"UPDATE campaigns SET owner_id = {own2_uid} WHERE id = {own_cid}")
+        # a conversion on the ADMIN-owned campaign (cp_cid) must be invisible
+        requests.get(f"{BASE}/pb/smoke-cpadmin-conv-{cp_pid}/sale/7", verify=not INSECURE)
+        r = ou2.get(f"{api}/reports/", params={"click_id": f"smoke-cpadmin-conv-{cp_pid}"})
+        check("cp: scoped user cannot read others' conversions",
+              r.status_code in (200, 403) and
+              (r.status_code == 403 or all(c.get("campaign_id") == own_cid for c in r.json())),
+              f"{r.status_code} {r.text[:120]}")
+        r = ou2.get(f"{api}/reports/")
+        check("cp: scoped user conversions list excludes others' rows",
+              r.status_code == 200 and all(c.get("campaign_id") == own_cid for c in r.json()),
+              r.text[:150])
+    if own2_uid:
+        s.delete(f"{api}/users/{own2_uid}")
+    if own_cid:
+        s.delete(f"{api}/campaigns/{own_cid}")
+
+    # 11. CSV export starts with a UTF-8 BOM (Excel-safe non-ASCII)
+    r = s.get(f"{api}/campaigns/export")
+    check("cp: campaigns CSV has UTF-8 BOM",
+          r.status_code == 200 and r.content.startswith(b"\xef\xbb\xbf"), str(r.status_code))
+    r = s.get(f"{api}/offers/export")
+    check("cp: offers CSV has UTF-8 BOM",
+          r.status_code == 200 and r.content.startswith(b"\xef\xbb\xbf"), str(r.status_code))
+
+    # 12. Landing link whitespace stripped on create
+    r = requests.post(f"{BASE}/landing", verify=not INSECURE, data={
+        "name": f"Smoke CP Landing {cp_pid}", "site_folder": f"smoke_cp_l_{cp_pid}",
+        "type": 0, "link": f"  https://example.com/smoke-cp-landing-{cp_pid}  "})
+    check("cp: landing created", r.status_code in (200, 201), f"{r.status_code} {r.text[:100]}")
+    r = requests.get(f"{BASE}/landings", verify=not INSECURE)
+    landing_rows = r.json() if r.status_code == 200 else []
+    cp_landing = next((x for x in landing_rows
+                       if x.get("folder") == f"smoke_cp_l_{cp_pid}"), None)
+    check("cp: landing link stripped",
+          cp_landing is not None and cp_landing.get("link") == f"https://example.com/smoke-cp-landing-{cp_pid}",
+          str((cp_landing or {}).get("link")))
+    if cp_landing:
+        requests.delete(f"{BASE}/landing/{cp_landing.get('id')}", verify=not INSECURE)
+
+    print("== Changelog parity cleanup ==")
+    if poison_cid:
+        ch_query(f"ALTER TABLE clicks_data DELETE WHERE campaign_id = {poison_cid}")
+        s.delete(f"{api}/campaigns/{poison_cid}")
+    if al_cid:
+        ch_query(f"ALTER TABLE clicks_data DELETE WHERE campaign_id = {al_cid}")
+        s.delete(f"{api}/campaigns/{al_cid}")
+    if wb_cid:
+        ch_query(f"ALTER TABLE clicks_data DELETE WHERE campaign_id = {wb_cid}")
+        s.delete(f"{api}/campaigns/{wb_cid}")
+    if cp_cid:
+        ch_query(f"ALTER TABLE clicks_data DELETE WHERE campaign_id = {cp_cid}")
+        fraud_pg(f"DELETE FROM conversions_data WHERE click_id = '{cp_click_id}'") if cp_click_id else None
+        s.delete(f"{api}/campaigns/{cp_cid}")
+    if cp_oid:
+        s.delete(f"{api}/offers/{cp_oid}")
 
     print("== Cleanup ==")
     if conv_id:

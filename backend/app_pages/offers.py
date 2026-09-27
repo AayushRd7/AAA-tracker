@@ -175,7 +175,7 @@ def export_offers(db: Session = Depends(get_db)):
                 o.overflow_offer_id or "", o.notes or "",
             )
         ])
-    return Response(content=buf.getvalue(), media_type="text/csv",
+    return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=offers.csv"})
 
 
@@ -196,6 +196,8 @@ def import_offers(data: OfferImportIn, request: Request, db: Session = Depends(g
         return {"results": [], "imported": 0, "failed": 0}
 
     first = [str(h).strip().lower() for h in rows[0]]
+    if first:
+        first[0] = first[0].lstrip("\ufeff")  # Excel-saved CSVs carry a BOM
     if "name" in first:
         header = first
         body = [(i + 2, r) for i, r in enumerate(rows[1:])]

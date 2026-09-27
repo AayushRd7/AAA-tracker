@@ -362,8 +362,8 @@ async def upload_landing(
 
     landing = Landing(
         folder=site_folder,
-        name=name[:255] if name else None,
-        link=link[:255] if link else None,
+        name=name.strip()[:255] if name and name.strip() else None,
+        link=link.strip()[:255] if link and link.strip() else None,
         type=landing_type,
         tags=tags[:250] if tags else None,
         created_at=datetime.utcnow()

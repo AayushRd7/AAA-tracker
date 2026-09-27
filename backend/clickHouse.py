@@ -216,8 +216,8 @@ def get_metrics_series(client, filters: Filters, limit: int = 30) -> List[Dict[s
     query = f"""
         SELECT
             toDate(received_at) AS day,
-            count(*) AS visits,
-            uniqIf(visitor_id, click IS NULL) AS unique_visits,
+            countIf(click IS NULL OR click = false) AS visits,
+            uniqIf(visitor_id, click IS NULL OR click = false) AS unique_visits,
             countIf(click = true) AS clicks,
             uniqIf(visitor_id, click = true) AS unique_clicks,
             countIf(status IN ('sale', 'upsale')) AS conversions,
@@ -309,8 +309,8 @@ def get_report_breakdown(client, filters: dict, dimension: str, limit: int = 100
     query = f"""
         SELECT
             {dim_expr} AS dimension,
-            count(*) AS visits,
-            uniqIf(visitor_id, click IS NULL) AS unique_visits,
+            countIf(click IS NULL OR click = false) AS visits,
+            uniqIf(visitor_id, click IS NULL OR click = false) AS unique_visits,
             countIf(click = true) AS clicks,
             uniqIf(visitor_id, click = true) AS unique_clicks,
             countIf(status IN ('lead', 'sale')) AS leads,
@@ -319,8 +319,8 @@ def get_report_breakdown(client, filters: dict, dimension: str, limit: int = 100
             sumOrNull(toFloat64(cost)) AS cost,
             sumOrNull(toFloat64(revenue)) AS revenue,
             sumOrNull(toFloat64(profit)) AS profit,
-            countIf(is_bot = true) AS bot_clicks,
-            sumIf(toFloat64(clicks_data.cost), is_bot = true) AS bot_cost,
+            countIf(is_bot = true AND (click IS NULL OR click = false)) AS bot_clicks,
+            sumIf(toFloat64(clicks_data.cost), is_bot = true AND (click IS NULL OR click = false)) AS bot_cost,
             avgOrNull(fraud_score) AS fraud_score_avg
         FROM clicks_data
         {where_clause}
@@ -364,8 +364,8 @@ FORMULA_METRIC_KEYS = frozenset(BASE_METRICS + ("cr", "epc", "roi", "rejected_ra
                                                 "fraud_score_avg"))
 
 METRIC_SELECT_SQL = """
-            count(*) AS visits,
-            uniqIf(visitor_id, click IS NULL) AS unique_visits,
+            countIf(click IS NULL OR click = false) AS visits,
+            uniqIf(visitor_id, click IS NULL OR click = false) AS unique_visits,
             countIf(click = true) AS clicks,
             uniqIf(visitor_id, click = true) AS unique_clicks,
             countIf(status IN ('lead', 'sale')) AS leads,
@@ -374,8 +374,8 @@ METRIC_SELECT_SQL = """
             sumOrNull(toFloat64(cost)) AS cost,
             sumOrNull(toFloat64(revenue)) AS revenue,
             sumOrNull(toFloat64(profit)) AS profit,
-            countIf(is_bot = true) AS bot_clicks,
-            sumIf(toFloat64(clicks_data.cost), is_bot = true) AS bot_cost,
+            countIf(is_bot = true AND (click IS NULL OR click = false)) AS bot_clicks,
+            sumIf(toFloat64(clicks_data.cost), is_bot = true AND (click IS NULL OR click = false)) AS bot_cost,
             avgOrNull(fraud_score) AS fraud_score_avg
 """
 

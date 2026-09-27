@@ -188,7 +188,8 @@ async def ensure_ch_schema():
             "ADD COLUMN IF NOT EXISTS flow_index UInt8 DEFAULT 0, "
             "ADD COLUMN IF NOT EXISTS utm_medium String DEFAULT '', "
             "ADD COLUMN IF NOT EXISTS impression UInt8 DEFAULT 0, "
-            "ADD COLUMN IF NOT EXISTS fraud_score UInt8 DEFAULT 0")
+            "ADD COLUMN IF NOT EXISTS fraud_score UInt8 DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS click_id String DEFAULT ''")
     except Exception as e:
         release_ch(ch, failed=True)
         log_track(f"ClickHouse schema migration error: {e}")
@@ -317,6 +318,10 @@ async def enrich_meta(request: Request, params_id_mapping: list = None) -> dict:
         match = re.search(r'-([A-Z]{2})', language)
         if match:
             country_code = match.group(1)
+
+    # Store only the primary language subtag so equality filters match
+    # ("en-US,en;q=0.9" -> "en", "FR-fr" -> "fr").
+    language = language.split(',')[0].split('-')[0].strip().lower()
 
     # GET parameters
     query_params = dict(request.query_params)
@@ -457,6 +462,53 @@ def generate_click_id():
     return str(uuid.uuid4())
 
 
+async def save_click_to_clickhouse(meta: dict, campaign_alias: str):
+    """Insert the click-out row (click=true) into ClickHouse.
+
+    Dedicated path — track_event would re-enrich the request and mislabel the
+    row. No cost (cost belongs to the visit row) and no is_bot/status/revenue/
+    profit (server-owned fields, never request-derived). A CH failure must
+    never break the visitor's redirect.
+    """
+    try:
+        row = {
+            "received_at": datetime.utcnow(),
+            "campaign_id": str(meta["campaign_id"]),
+            "offer_id": meta.get("offer_id"),
+            "click_id": str(meta.get("click_id") or ""),
+            "click": True,
+            "visitor_id": str(meta.get("visitor_id") or ""),
+            "flow_index": int(meta.get("flow_index") or 0),
+        }
+        _CLICK_ROW_EXCLUDED = ("cost", "is_bot", "status", "revenue", "profit")
+        for k, v in meta.items():
+            if k in VALID_PARAMS and k not in _CLICK_ROW_EXCLUDED and v is not None:
+                row[k] = v
+        if row.get("landing_id") is not None:
+            row["landing_id"] = str(row["landing_id"])
+        # IPv4 column — mirror track_event's guard: a garbage IP would fail the
+        # whole insert, so store the type default instead of dropping the row.
+        ip_val = row.get("ip")
+        if ip_val is not None:
+            try:
+                if ipaddress.ip_address(str(ip_val)).version != 4:
+                    row["ip"] = "0.0.0.0"
+            except ValueError:
+                row["ip"] = "0.0.0.0"
+        row = {k: v for k, v in row.items() if v is not None}
+        columns = list(row.keys())
+        values = [list(row.values())]
+        ch = acquire_ch()
+        try:
+            await asyncio.to_thread(ch.insert, "clicks_data", values, column_names=columns)
+        except Exception:
+            release_ch(ch, failed=True)
+            raise
+        release_ch(ch)
+    except Exception as e:
+        log_track(f"❌ ClickHouse click-row insert failed for '{campaign_alias}': {e}")
+
+
 @app.get("/c/{campaign_alias}/{offer_id}")
 async def campaign_click(
         campaign_alias: str,
@@ -482,6 +534,28 @@ async def campaign_click(
         offer = await conn.fetchrow("SELECT * FROM offers WHERE id = $1", offer_id_int)
         if not offer:
             return Response("Offer not found", status_code=404)
+
+    # Paused/archived offers must never receive traffic.
+    if offer["status"] != "active" or offer.get("archived"):
+        log_track(f"🚫 Click-out refused for non-active offer {offer['id']}")
+        return Response("Offer unavailable", status_code=404)
+
+    # G4: daily conversion cap on the click-out route — transparently serve the
+    # overflow offer when the primary is capped, otherwise refuse.
+    cap_state_cache: dict = {}
+    conv_count_cache: dict = {}
+    daily_cap, overflow_id = await offer_cap_state(pg, cap_state_cache, offer["id"])
+    if daily_cap and await offer_conversions_today(pg, conv_count_cache, offer["id"]) >= int(daily_cap):
+        overflow = None
+        if overflow_id:
+            o_cap, _ = await offer_cap_state(pg, cap_state_cache, overflow_id)
+            o_used = await offer_conversions_today(pg, conv_count_cache, overflow_id) if o_cap else 0
+            if not o_cap or o_used < int(o_cap):
+                async with pg.acquire() as conn:
+                    overflow = await conn.fetchrow("SELECT * FROM offers WHERE id = $1", int(overflow_id))
+        if overflow is None:
+            return Response("Offer unavailable", status_code=404)
+        offer = overflow
 
     # 4. Enrich the meta data via paramsIdMapping
     paramsIdMapping = get_params_id_mapping_from_campaign(campaign)
@@ -567,6 +641,10 @@ async def campaign_click(
 
     # Assemble the final URL
     offer_url = urlunparse(parsed._replace(query=urlencode(query_params)))
+
+    # 7. ClickHouse click row (click=true) — awaited inline so the row is
+    # observable the moment the redirect returns; failures never block it.
+    await save_click_to_clickhouse(meta_data, campaign_alias)
 
     response = await flow_action_response(
         offer_url, action_flow, lambda u: RedirectResponse(u))
@@ -1577,6 +1655,45 @@ async def notify_telegram_conversion_async(click_id: str, status: str, payout: f
     await asyncio.to_thread(notify_telegram_conversion, click_id, status, payout, row)
 
 
+async def sync_conversion_to_clickhouse(click_id: str):
+    """Best-effort mirror of a conversions_data row onto the CH click row.
+
+    Called in the background after a successful postback write. NOTE: the
+    table is a plain MergeTree ordered by received_at, so the UPDATE below is a
+    heavy full-part mutation — at high volume this should move to a
+    ReplacingMergeTree/AggregatingMergeTree design instead.
+    """
+    try:
+        pg = app.state.pg
+        async with pg.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT status, revenue, profit FROM conversions_data "
+                "WHERE click_id = $1 ORDER BY received_at DESC LIMIT 1",
+                click_id)
+        if not row:
+            return
+        ch = acquire_ch()
+        try:
+            await asyncio.to_thread(
+                ch.command,
+                "ALTER TABLE clicks_data UPDATE "
+                "status = %(status)s, revenue = %(revenue)s, profit = %(profit)s "
+                "WHERE click_id = %(cid)s",
+                parameters={
+                    "status": row["status"] or "",
+                    "revenue": row["revenue"],
+                    "profit": row["profit"],
+                    "cid": click_id,
+                },
+                settings={"mutations_sync": 1})
+        except Exception:
+            release_ch(ch, failed=True)
+            raise
+        release_ch(ch)
+    except Exception as e:
+        log_track(f"❌ ClickHouse conversion sync failed for {click_id}: {e}")
+
+
 async def record_conversion(click_id: str, status: str, payout_value: float, request: Request,
                             background_tasks: BackgroundTasks, extra_fields: dict = None,
                             source: str = "postback") -> dict:
@@ -1666,6 +1783,15 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             f"INSERT INTO conversions_data ({', '.join(cols)}) VALUES ({', '.join(vals)})",
             *args)
 
+    def schedule_ch_sync(cid: str):
+        """Mirror the fresh conversion onto the CH click row (best-effort).
+
+        Only real click ids — the unattributed 'none' rows have no CH
+        counterpart. Failures inside the task are logged, never propagated.
+        """
+        if cid and str(cid).strip().lower() not in ("", "none", "0"):
+            background_tasks.add_task(sync_conversion_to_clickhouse, str(cid))
+
     JOINED_CLICK_QUERY = """
         SELECT c.*, ca.config AS campaign_config, ca.name AS campaign_name,
                ca.traffic_source_id AS traffic_source_id
@@ -1688,8 +1814,10 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                 offer = await conn.fetchrow("SELECT * FROM offers WHERE id = $1", row["offer_id"])
                 if offer:
                     we_pay = offer["payout"]
-                data = {"click_id": cid, "status": status, "payout": we_pay}
-                data.update(dict(row))
+                # Row values first, fresh values last — a lead→sale upgrade must
+                # forward status=sale, not the stale pre-update row value.
+                data = dict(row)
+                data.update({"click_id": cid, "status": status, "payout": we_pay})
                 background_tasks.add_task(
                     send_postback, url, data, post=postback.get("method") == "POST")
 
@@ -1705,9 +1833,11 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                 if not src_statuses:
                     fire = True
                 if fire:
-                    src_data = {"click_id": cid, "status": status, "payout": payout_value}
+                    # Fresh status/payout overwrite the stale pre-update row values.
+                    src_data = {k: v for k, v in dict(row).items()
+                                if v is not None and k not in ("status", "payout")}
+                    src_data.update({"click_id": cid, "status": status, "payout": payout_value})
                     src_data["clickid"] = cid
-                    src_data.update({k: v for k, v in dict(row).items() if v is not None})
                     background_tasks.add_task(
                         send_postback, source["s2s_postback"], src_data, post=False)
 
@@ -1743,6 +1873,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                     background_tasks.add_task(
                         notify_telegram_conversion_async, row["click_id"], status, payout_value, dict(row))
                     await fanout(conn, row, row["click_id"])
+                    schedule_ch_sync(row["click_id"])
                 return {"status": "ok", "click_id": row["click_id"],
                         "updated_status": status, "duplicate": is_duplicate,
                         "clickless": True, "attributed": True}
@@ -1756,6 +1887,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             # Clicks from direct/redirect/landing flows never pass through /c,
             # so no conversions_data row exists for them — create one
             await insert_row(conn, click_id)
+            schedule_ch_sync(click_id)
             return {"status": "ok", "click_id": click_id,
                     "updated_status": status, "duplicate": False}
 
@@ -1767,6 +1899,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             background_tasks.add_task(
                 notify_telegram_conversion_async, click_id, status, payout_value, dict(row))
             await fanout(conn, row, click_id)
+            schedule_ch_sync(click_id)
 
     return {"status": "ok", "click_id": click_id, "updated_status": status,
             "duplicate": is_duplicate}
@@ -1781,7 +1914,7 @@ async def postback_receive(click_id: str, status: str, payout: str, request: Req
         raise HTTPException(status_code=400, detail="Invalid status")
 
     try:
-        payout_value = float(payout)
+        payout_value = float(str(payout).strip().replace(",", "."))
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid payout format")
 
@@ -1838,7 +1971,7 @@ async def conversion_pixel(campaign_alias: str, request: Request, background_tas
         return respond(status_code=400, detail="Invalid status")
 
     try:
-        payout_value = float(request.query_params.get("payout") or 0)
+        payout_value = float(str(request.query_params.get("payout") or 0).strip().replace(",", "."))
     except ValueError:
         return respond(status_code=400, detail="Invalid payout format")
 
@@ -2117,6 +2250,20 @@ def cap_exceeded(caps: dict, counts: dict) -> bool:
 
 
 # ─── Offer daily conversion caps + overflow (G4) ───────────────────
+async def offer_state(pg, cache: dict, offer_id) -> tuple:
+    """(status, archived) for an offer, cached per request."""
+    try:
+        offer_id = int(offer_id)
+    except (TypeError, ValueError):
+        return None, None
+    if offer_id not in cache:
+        async with pg.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT status, archived FROM offers WHERE id = $1", offer_id)
+        cache[offer_id] = (row["status"], row["archived"]) if row else (None, None)
+    return cache[offer_id]
+
+
 async def offer_cap_state(pg, cache: dict, offer_id) -> tuple:
     """(daily_conversions_cap, overflow_offer_id) for an offer, cached per request."""
     try:
@@ -2148,7 +2295,9 @@ async def offer_conversions_today(pg, cache: dict, offer_id) -> int:
             row = await conn.fetchrow("""
                 SELECT count(*) AS n FROM conversions_data
                 WHERE offer_id = $1 AND status IN ('sale', 'upsale')
-                  AND received_at >= CURRENT_DATE
+                  -- Rows are stamped with Python utcnow() — anchor the day window
+                  -- to UTC, not the server's local date.
+                  AND received_at >= (NOW() AT TIME ZONE 'UTC')::date
                 """, offer_id)
         cache[offer_id] = row["n"] if row else 0
     return cache[offer_id]
@@ -2214,8 +2363,15 @@ def _b64url_decode(data: str) -> bytes:
 
 
 def campaign_routing_hash(config: dict, distribution_mode: str) -> str:
-    """Hash of the routing-relevant config — editing flows/weights invalidates bindings."""
-    payload_obj = {"flows": config.get("flows", []), "redirect_mode": distribution_mode}
+    """Hash of the routing-relevant config — editing flows invalidates bindings.
+
+    `weight` is excluded: weight tweaks (including the AI optimizer's periodic
+    reweighting) must not reset already-bound visitors. Every other flow field
+    (offer/landing/schema/position/type/filters/enabled) still feeds the hash.
+    """
+    flows = [{k: v for k, v in flow.items() if k != "weight"}
+             for flow in config.get("flows", [])]
+    payload_obj = {"flows": flows, "redirect_mode": distribution_mode}
     # G10: funnel mode replaces flows at execution time, so the funnel config
     # is part of the routing hash too — editing steps/names resets every
     # bound visitor to step 0 (the step rides in the same bind cookie).
@@ -2642,6 +2798,7 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
         eligible = []
         cap_state_cache: dict = {}
         conv_count_cache: dict = {}
+        offer_state_cache: dict = {}
         for idx, flow in enumerate(sorted_flows):
             if not flow or not flow.get("enabled"):
                 continue
@@ -2662,6 +2819,11 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
             offer_override = None
             flow_offer = flow.get("offer")
             if flow_offer:
+                # Paused/archived offers receive no traffic — skip the flow
+                # (same as capped-without-overflow).
+                offer_status, offer_archived = await offer_state(pg, offer_state_cache, flow_offer)
+                if offer_status != "active" or offer_archived:
+                    continue
                 daily_cap, overflow = await offer_cap_state(pg, cap_state_cache, flow_offer)
                 if daily_cap and await offer_conversions_today(pg, conv_count_cache, flow_offer) >= int(daily_cap):
                     if overflow:
@@ -3004,8 +3166,12 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
         if title:
             meta_data["keyword"] = title
 
+    # Request-derived meta may never set conversion/server fields — a crafted
+    # ?status=sale&revenue=999 would otherwise fabricate conversions in the
+    # ClickHouse row. Only the server-set paths below may touch these.
+    _SERVER_ONLY_KEYS = ("status", "revenue", "profit", "is_bot")
     for k, v in meta_data.items():
-        if k in VALID_PARAMS:
+        if k in VALID_PARAMS and k not in _SERVER_ONLY_KEYS:
             result_row[k] = v
 
     # G55: stamp the visitor id so click-date attribution can join this row
@@ -3037,6 +3203,10 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
     if score >= 30:
         log_track(f"🕵 Fraud score {score} for '{campaign_alias}': {', '.join(reasons)}")
 
+    # Live rows always carry an explicit bot flag — reports treat NULL as
+    # human, but the fraud feed and regression checks expect a crisp false.
+    result_row.setdefault("is_bot", False)
+
     if click is not None:
         result_row["click"] = bool(click)
 
@@ -3045,14 +3215,26 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
             if k in VALID_PARAMS and v is not None:
                 result_row[k] = v
 
-    # Apply the mapping and add the query parameters
+    # Apply the mapping and add the query parameters — same server-only guard
+    # as the meta copy above (query values are request-derived too).
     for key in VALID_PARAMS:
-        if key in query:
+        if key in query and key not in _SERVER_ONLY_KEYS:
             mapped_key = mapping.get(key, key)
             result_row[mapped_key] = query[key]
 
     # ❗ Drop every field whose value is None
     result_row = {k: v for k, v in result_row.items() if v is not None}
+
+    # Money columns are Float32 — European decimals ("0,5") or garbage would
+    # fail the whole insert, so normalize commas and drop the key on failure
+    # (keeping the row).
+    for money_key in ("cost", "revenue", "profit"):
+        if money_key in result_row:
+            try:
+                result_row[money_key] = round(
+                    float(str(result_row[money_key]).strip().replace(",", ".")), 6)
+            except (TypeError, ValueError):
+                result_row.pop(money_key, None)
 
     # G79 privacy: anonymize IPs at rest when settings.privacy.anonymize_ip is on
     # (IPv4 → last octet zeroed, e.g. 1.2.3.4 → 1.2.3.0). Default off.
