@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from fastapi.responses import FileResponse
-from clickHouse import get_clickhouse_client
+from clickHouse import get_clickhouse_client, ensure_report_dimensions_schema
 from types import SimpleNamespace
 
 app = FastAPI(
@@ -71,6 +71,26 @@ async def startup():
                     last_run TIMESTAMP,
                     last_result JSONB
                 )"""))
+            # D2 — domain groups with per-user access grants
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS domain_groups (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) UNIQUE NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT now()
+                )"""))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS domain_group_domains (
+                    group_id INTEGER NOT NULL REFERENCES domain_groups(id) ON DELETE CASCADE,
+                    domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+                    PRIMARY KEY (group_id, domain_id)
+                )"""))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS domain_group_users (
+                    group_id INTEGER NOT NULL REFERENCES domain_groups(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    PRIMARY KEY (group_id, user_id)
+                )"""))
             conn.commit()
     except Exception as e:
         print("startup migration:", e)
@@ -84,6 +104,8 @@ async def startup():
     _fraud_ch = get_clickhouse_client()
     try:
         ensure_fraud_schema(_fraud_ch)
+        # user_agent / os_version columns backing the report dimensions.
+        ensure_report_dimensions_schema(_fraud_ch)
     finally:
         try:
             _fraud_ch.close()
@@ -244,6 +266,10 @@ app.include_router(search_router, prefix="/api/search", tags=["Search"],
 from app_pages.status import router as status_router
 app.include_router(status_router, prefix="/api/status", tags=["Status"],
                    dependencies=[Depends(require_section("settings"))])
+# Retroactive cost update — same admin plane as monitoring/rules/fraud.
+from app_pages.costs import router as costs_router
+app.include_router(costs_router, prefix="/api/costs", tags=["Costs"],
+                   dependencies=[Depends(require_section_write("settings"))])
 
 
 # G52: minimal public view for shared reports — shell-less, token in the query

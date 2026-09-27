@@ -30,6 +30,10 @@ class OfferBulkIn(BaseModel):
     action: str  # 'tags_add' | 'tags_remove' | 'archive' | 'delete'
     tags: Optional[List[str]] = None
 
+class OfferBulkNetworkIn(BaseModel):
+    ids: List[int]
+    affiliate_network_id: Optional[int] = None  # null = no network
+
 class OfferImportIn(BaseModel):
     lines: str
 
@@ -144,6 +148,28 @@ def bulk_offers(data: OfferBulkIn, request: Request, db: Session = Depends(get_d
                 "offers", ",".join(map(str, data.ids)), detail, _client_ip(request))
     return {"message": f"Bulk {data.action} applied to {len(offers)} offers",
             "updated": len(offers)}
+
+
+@router.post("/bulk-network", response_model=dict)
+def bulk_set_network(data: OfferBulkNetworkIn, request: Request, db: Session = Depends(get_db)):
+    """Attach many offers to one affiliate network (or clear it with null)."""
+    from audit_logger import audit_event
+    from models.affiliate_networks import AffiliateNetworkORM
+    if data.affiliate_network_id is not None:
+        network = db.query(AffiliateNetworkORM) \
+            .filter(AffiliateNetworkORM.id == data.affiliate_network_id).first()
+        if not network:
+            raise HTTPException(status_code=404, detail="Affiliate network not found")
+    offers = db.query(OfferORM).filter(OfferORM.id.in_(data.ids)).all()
+    for offer in offers:
+        offer.affiliate_network_id = data.affiliate_network_id
+    db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "offers", ",".join(map(str, data.ids)),
+                {"bulk": "network", "affiliate_network_id": data.affiliate_network_id,
+                 "count": len(offers)}, _client_ip(request))
+    return {"message": f"Network set on {len(offers)} offers", "updated": len(offers)}
 
 
 def _csv_safe(value):

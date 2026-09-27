@@ -126,8 +126,55 @@ def all_valid_statuses(db: Session) -> set:
 
 
 @router.get("/")
-def get_conversions(request: Request, limit: int = 100, db: Session = Depends(get_db)):
+def get_conversions(request: Request, limit: int = 100, offset: Optional[int] = None,
+                    db: Session = Depends(get_db)):
+    query = _build_conversions_query(request, db)
+    total = None
+    if offset is not None:
+        # Paginated mode: `offset` opts in so legacy callers keep the bare-list
+        # shape; total comes from count(), never len(items).
+        total = query.count()
+        offset = max(int(offset or 0), 0)
+    rows = (query.order_by(Conversion.received_at.desc(), Conversion.id.desc())
+                 .limit(min(max(int(limit or 50), 1), 5000)))
+    if offset is not None:
+        rows = rows.offset(offset)
+    items = [row.__dict__ for row in rows.all()]
+    if total is not None:
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
+    return items
 
+
+CONVERSION_EXPORT_FIELDS = ["id", "received_at", "click_id", "campaign_id", "offer_id",
+                            "landing_id", "status", "external_id", "transaction_id",
+                            "visitor_id", "country", "payout", "revenue", "profit",
+                            "currency", "postback_count"]
+
+
+@router.get("/export")
+def export_conversions(request: Request, db: Session = Depends(get_db)):
+    """CSV export of the conversion log with the same filters as the list."""
+    from fastapi.responses import Response
+    query = _build_conversions_query(request, db)
+    rows = query.order_by(Conversion.received_at.desc(), Conversion.id.desc()).limit(50000).all()
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(CONVERSION_EXPORT_FIELDS)
+    for conv in rows:
+        writer.writerow([_csv_safe(getattr(conv, k, None)) for k in CONVERSION_EXPORT_FIELDS])
+    return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=conversions.csv"})
+
+
+def _csv_safe(value):
+    """Prefix cells that would start a spreadsheet formula (=,+,-,@) with an
+    apostrophe so exported CSVs can't smuggle live formulas into Excel/Sheets."""
+    s = "" if value is None else (value if isinstance(value, str) else str(value))
+    return "'" + s if s[:1] in ("=", "+", "-", "@") else s
+
+
+def _build_conversions_query(request: Request, db: Session):
+    """Full filtered conversions query shared by the list and CSV export."""
     # fields allowed for filtering
     ALLOWED_FILTER_FIELDS = {
         "campaign_id", "offer_id", "landing_id", "status", "click_id", "external_id",
@@ -170,7 +217,7 @@ def get_conversions(request: Request, limit: int = 100, db: Session = Depends(ge
             column = getattr(Conversion, key, None)
             if column is not None:
                 query = query.filter(column == value)
-        elif key in ("date_from", "date_to", "date_basis"):
+        elif key in ("date_from", "date_to", "date_basis", "limit", "offset"):
             continue
         elif key == "search":
             # free-text search across the identifier columns
@@ -200,10 +247,7 @@ def get_conversions(request: Request, limit: int = 100, db: Session = Depends(ge
                      Conversion.received_at < window_end),
             ))
 
-    rows = query.order_by(Conversion.received_at.desc()).limit(limit).all()
-
-    # Convert the ORM objects to dicts
-    return [row.__dict__ for row in rows]
+    return query
 
 
 @router.get("/funnel/{campaign_id}")

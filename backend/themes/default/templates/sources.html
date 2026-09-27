@@ -655,7 +655,8 @@
             },
 
             async deleteSource(source) {
-                const ok = await this.$refs.confirm.open('Delete source', 'Are you sure you want to delete this source? This cannot be undone.');
+                const ok = await this.$refs.confirm.open('Delete source',
+                    `Are you sure you want to delete "${source.name}"? Sources linked to campaigns cannot be deleted. This cannot be undone.`);
                 if (!ok) return;
 
                 fetch(`/backend/api/sources/${source.id}`, {
@@ -675,7 +676,7 @@
                         }
                         this.$root.$emit("show-message", {
                             type: "success",
-                            text: "Source deleted"
+                            text: `Source "${source.name}" deleted`
                         });
                         this.loadSources();
                     })

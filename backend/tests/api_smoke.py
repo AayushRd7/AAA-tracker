@@ -3817,6 +3817,375 @@ print("ESCAPED-OK")
     if cp_oid:
         s.delete(f"{api}/offers/{cp_oid}")
 
+    print("== Sources single delete (row action) ==")
+    sng_pid = os.getpid()
+    r = s.post(f"{api}/sources/", json={"name": f"Smoke Single Src {sng_pid}", "traffic_loss": 0})
+    check("sources single: source created", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    single_src = r.json().get("id")
+    # a source linked to a campaign must be refused with 409, not a 500 FK error
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke SingleLink {sng_pid}", "alias": f"smoke-singlelink-{sng_pid}",
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "traffic_source_id": single_src,
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                "schema": "redirect", "redirect_url": "https://example.com/smoke-singlelink",
+                "filters": []}], "postbacks": [], "fallback_url": "", "hide_referrer": False}})
+    check("sources single: linked campaign created", r.status_code == 200 and "id" in r.json(),
+          r.text[:150])
+    single_camp = r.json().get("id")
+    r = s.delete(f"{api}/sources/{single_src}")
+    check("sources single: linked source delete -> 409", r.status_code == 409, str(r.status_code))
+    check("sources single: 409 detail mentions campaigns",
+          "campaign" in (r.json().get("detail") or "").lower(), r.text[:200])
+    r = s.get(f"{api}/sources/")
+    check("sources single: linked source survives", any(x["id"] == single_src for x in r.json()), "")
+    if single_camp:
+        r = s.delete(f"{api}/campaigns/{single_camp}")
+        check("sources single: linked campaign cleaned up", r.status_code == 200, r.text[:120])
+    r = s.delete(f"{api}/sources/{single_src}")
+    check("sources single: unlinked source deleted", r.status_code == 200, r.text[:150])
+    r = s.get(f"{api}/sources/")
+    check("sources single: row gone from the list",
+          all(x["id"] != single_src for x in r.json()), "")
+    r = s.delete(f"{api}/sources/{single_src}")
+    check("sources single: re-delete -> 404", r.status_code == 404, str(r.status_code))
+    r = s.delete(f"{api}/sources/999999999")
+    check("sources single: unknown id -> 404", r.status_code == 404, str(r.status_code))
+
+    print("== Pagination & CSV export ==")
+    # Self-seeded, pid-isolated data: 12 CH click rows + 7 PG conversions.
+    pg_cid = 880000 + (os.getpid() % 10000)
+    ch_query(
+        f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, cost) "
+        f"SELECT now(), {pg_cid}, number >= 10, '', 'seed-pg-{os.getpid()}-' || toString(number), 'US', 0.01 "
+        f"FROM numbers(12)")
+    fraud_pg(
+        f"INSERT INTO conversions_data (received_at, click_id, campaign_id, status, revenue, profit) "
+        f"SELECT now(), 'seed-pgc-{os.getpid()}-' || g, {pg_cid}, 'sale', 1.5, 1.5 "
+        f"FROM generate_series(1, 7) g")
+
+    # click-log: offset opts into the {items, total} pager shape; total is a
+    # real count() over the same filters (isolated campaign → exactly 12)
+    r = s.post(f"{api}/dashboard/click-log", json={"campaigns": [pg_cid], "limit": 5, "offset": 0})
+    page1 = r.json() if r.status_code == 200 else {}
+    check("click-log paged shape {items,total}",
+          isinstance(page1, dict) and "items" in page1 and "total" in page1, r.text[:150])
+    check("click-log limit=5 returns 5 items", len(page1.get("items") or []) == 5,
+          str(len(page1.get("items") or [])))
+    check("click-log total counts all filtered rows", page1.get("total") == 12, str(page1.get("total")))
+    r = s.post(f"{api}/dashboard/click-log", json={"campaigns": [pg_cid], "limit": 5, "offset": 5})
+    page2 = r.json() if r.status_code == 200 else {}
+    ids1 = {x.get("visitor_id") for x in page1.get("items") or []}
+    ids2 = {x.get("visitor_id") for x in page2.get("items") or []}
+    check("click-log offset=5 skips the first 5 (stable order)",
+          len(ids2) == 5 and not (ids1 & ids2), f"{sorted(ids1 & ids2)[:3]}")
+    check("click-log page 2 keeps the same total", page2.get("total") == 12, str(page2.get("total")))
+    # no offset → legacy bare-list shape (back-compat for existing callers)
+    r = s.post(f"{api}/dashboard/click-log", json={"campaigns": [pg_cid], "limit": 5})
+    check("click-log without offset keeps list shape",
+          r.status_code == 200 and isinstance(r.json(), list), r.text[:120])
+
+    # click-log CSV export: BOM, text/csv, filename, filters honored
+    r = s.post(f"{api}/dashboard/click-log/export", json={"campaigns": [pg_cid]})
+    csv_body = r.content.decode("utf-8-sig") if r.status_code == 200 else ""
+    check("click-log CSV has UTF-8 BOM",
+          r.status_code == 200 and r.content.startswith(b"\xef\xbb\xbf"), str(r.status_code))
+    check("click-log CSV content-type text/csv",
+          "text/csv" in r.headers.get("content-type", ""), r.headers.get("content-type", ""))
+    check("click-log CSV filename click_log.csv",
+          "click_log.csv" in r.headers.get("content-disposition", ""), r.headers.get("content-disposition", ""))
+    check("click-log CSV exports all filtered rows",
+          len(csv_body.splitlines()) == 13 and csv_body.count(f"seed-pg-{os.getpid()}-") == 12,
+          f"{len(csv_body.splitlines())} lines")
+    r = s.post(f"{api}/dashboard/click-log/export", json={"campaigns": [pg_cid + 1]})
+    check("click-log CSV respects filters",
+          r.status_code == 200 and len(r.content.decode("utf-8-sig").splitlines()) == 1, r.text[:100])
+
+    # conversions: same contract on the Postgres list
+    r = s.get(f"{api}/reports/", params={"search": f"seed-pgc-{os.getpid()}", "limit": 5, "offset": 0})
+    page1 = r.json() if r.status_code == 200 else {}
+    check("conversions paged shape {items,total}",
+          isinstance(page1, dict) and "items" in page1 and "total" in page1, r.text[:150])
+    check("conversions limit=5 returns 5 items", len(page1.get("items") or []) == 5,
+          str(len(page1.get("items") or [])))
+    check("conversions total counts all filtered rows", page1.get("total") == 7, str(page1.get("total")))
+    r = s.get(f"{api}/reports/", params={"search": f"seed-pgc-{os.getpid()}", "limit": 5, "offset": 5})
+    page2 = r.json() if r.status_code == 200 else {}
+    cids1 = {x.get("click_id") for x in page1.get("items") or []}
+    cids2 = {x.get("click_id") for x in page2.get("items") or []}
+    check("conversions offset=5 skips the first 5 (stable order)",
+          len(cids2) == 2 and not (cids1 & cids2), f"{sorted(cids1 & cids2)[:3]}")
+    r = s.get(f"{api}/reports/", params={"limit": 5})
+    check("conversions without offset keeps list shape",
+          r.status_code == 200 and isinstance(r.json(), list), r.text[:120])
+
+    # conversions CSV export
+    r = s.get(f"{api}/reports/export", params={"search": f"seed-pgc-{os.getpid()}"})
+    csv_body = r.content.decode("utf-8-sig") if r.status_code == 200 else ""
+    check("conversions CSV has UTF-8 BOM",
+          r.status_code == 200 and r.content.startswith(b"\xef\xbb\xbf"), str(r.status_code))
+    check("conversions CSV content-type text/csv",
+          "text/csv" in r.headers.get("content-type", ""), r.headers.get("content-type", ""))
+    check("conversions CSV filename conversions.csv",
+          "conversions.csv" in r.headers.get("content-disposition", ""), r.headers.get("content-disposition", ""))
+    check("conversions CSV exports all filtered rows",
+          len(csv_body.splitlines()) == 8 and csv_body.count(f"seed-pgc-{os.getpid()}-") == 7,
+          f"{len(csv_body.splitlines())} lines")
+
+    # cleanup what we seeded
+    ch_query(f"ALTER TABLE clicks_data DELETE WHERE visitor_id LIKE 'seed-pg-{os.getpid()}-%'")
+    fraud_pg(f"DELETE FROM conversions_data WHERE click_id LIKE 'seed-pgc-{os.getpid()}-%'")
+    leftover_ch = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {pg_cid}")
+    check("pagination seed CH rows removed", leftover_ch == "0", leftover_ch[:80])
+    leftover_pg = fraud_pg(f"SELECT count(*) FROM conversions_data WHERE click_id LIKE 'seed-pgc-{os.getpid()}-%'")
+    check("pagination seed PG rows removed", leftover_pg == "0", leftover_pg[:80])
+
+    print("== Report dimensions + retroactive cost update ==")
+    # New report dimensions (domain / user_agent / week / os_version) plus the
+    # admin retroactive cost-update tool, verified on a pid-suffixed campaign.
+    dim_pid = os.getpid()
+    dim_alias = f"smoke-dim-{dim_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": dim_alias, "alias": dim_alias, "type": "campaign", "status": "active",
+        "redirect_mode": "position",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "redirect",
+                              "redirect_url": f"https://example.com/smoke-dim-{dim_pid}",
+                              "filters": []}],
+                   "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+    check("dims: campaign created", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    dim_cid = r.json().get("id")
+
+    # 6 rows: two domains, two os_versions, one user_agent; row 5 is a click.
+    ch_query(
+        "INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, url, user_agent, os_version, cost) "
+        f"SELECT now(), {dim_cid}, number >= 5, '', 'seed-dim-{dim_pid}-' || toString(number), 'US', "
+        f"if(number % 2 = 0, 'https://landing-a.example/lp', 'https://landing-b.example/lp'), "
+        f"'SmokeUA/{dim_pid} Chrome/120.0', if(number % 3 = 0, '10', '14.5'), 0 FROM numbers(6)")
+    dim_today = datetime.now(timezone.utc).date()
+    dim_today_s = str(dim_today)
+    dim_filters = {"date_from": dim_today_s, "date_to": dim_today_s, "campaigns": [dim_cid]}
+
+    def dim_breakdown(dims):
+        return s.post(f"{api}/dashboard/breakdown", json={"dimensions": dims, "filters": dim_filters})
+
+    # -- week: ISO-week keys derived from received_at --
+    r = dim_breakdown(["week"])
+    week_rows = r.json().get("rows") if r.status_code == 200 else []
+    iso = dim_today.isocalendar()
+    expect_week = f"{iso[0]}-W{iso[1]:02d}"
+    check("dims: week breakdown returns ISO week keys",
+          r.status_code == 200 and any(x["value"] == expect_week for x in week_rows),
+          str([x.get("value") for x in week_rows[:5]]))
+
+    # -- user_agent / os_version / domain read the (migrated) columns --
+    r = dim_breakdown(["user_agent"])
+    ua_rows = r.json().get("rows") if r.status_code == 200 else []
+    check("dims: user_agent breakdown groups the seeded UA",
+          r.status_code == 200 and any(
+              x["value"] == f"SmokeUA/{dim_pid} Chrome/120.0" and x["visits"] == 5 and x["clicks"] == 1
+              for x in ua_rows), str([(x.get("value"), x.get("visits")) for x in ua_rows[:3]]))
+    r = dim_breakdown(["os_version"])
+    osv_rows = r.json().get("rows") if r.status_code == 200 else []
+    check("dims: os_version breakdown splits 10 / 14.5",
+          r.status_code == 200 and {x["value"] for x in osv_rows} == {"10", "14.5"},
+          str([x.get("value") for x in osv_rows]))
+    r = dim_breakdown(["domain"])
+    dom_rows = r.json().get("rows") if r.status_code == 200 else []
+    check("dims: domain breakdown extracts host from url",
+          r.status_code == 200 and {x["value"] for x in dom_rows} == {"landing-a.example", "landing-b.example"},
+          str([x.get("value") for x in dom_rows]))
+
+    # -- retroactive cost update: auth + payload validation --
+    r = requests.post(f"{api}/costs/update", json={
+        "campaign_id": dim_cid, "period": {"from": dim_today_s, "to": dim_today_s}, "cost": 0.07},
+        verify=not INSECURE)
+    check("costs: unauthenticated -> 401", r.status_code == 401, str(r.status_code))
+    bad_payloads = (
+        {"campaign_id": dim_cid, "cost": 0.07},                                                  # no period
+        {"campaign_id": dim_cid, "period": {"from": dim_today_s, "to": "2020-01-01"}, "cost": 0.07},  # from > to
+        {"campaign_id": dim_cid, "period": {"from": "nope", "to": dim_today_s}, "cost": 0.07},  # bad date
+        {"campaign_id": dim_cid, "period": {"from": dim_today_s, "to": dim_today_s}, "cost": -1},  # negative
+    )
+    bad_codes = [s.post(f"{api}/costs/update", json=p).status_code for p in bad_payloads]
+    check("costs: bad payloads -> 400", bad_codes == [400] * len(bad_payloads), str(bad_codes))
+    r = s.post(f"{api}/costs/update", json={
+        "campaign_id": dim_cid, "period": {"from": dim_today_s, "to": dim_today_s}, "cost": "x"})
+    check("costs: non-numeric cost -> 4xx", r.status_code in (400, 422), str(r.status_code))
+
+    # -- retroactive cost update: applies per-click cost, report reflects it --
+    r = s.post(f"{api}/costs/update", json={
+        "campaign_id": dim_cid, "period": {"from": dim_today_s, "to": dim_today_s}, "cost": 0.07})
+    check("costs: update sets cost on all 6 rows",
+          r.status_code == 200 and r.json().get("updated_rows") == 6, r.text[:200])
+    r = dim_breakdown(["campaign_id"])
+    mine = {x["value"]: x for x in (r.json().get("rows") or [])}.get(str(dim_cid)) \
+        if r.status_code == 200 else None
+    check("costs: breakdown reflects new cost (6 x 0.07 = 0.42)",
+          bool(mine) and abs(float(mine.get("cost") or 0) - 0.42) < 0.001,
+          str(mine and mine.get("cost")))
+    ch_cost = ch_query(f"SELECT DISTINCT toString(cost) FROM clicks_data WHERE campaign_id = {dim_cid}")
+    check("costs: CH rows carry the per-click cost", ch_cost == "0.07", ch_cost[:80])
+
+    print("== Report dimensions + cost update cleanup ==")
+    ch_query(f"ALTER TABLE clicks_data DELETE WHERE campaign_id = {dim_cid}")
+    leftover = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {dim_cid}")
+    check("dims: seeded CH rows removed", leftover == "0", leftover[:80])
+    if dim_cid:
+        r = s.delete(f"{api}/campaigns/{dim_cid}")
+        check("dims: campaign deleted", r.status_code == 200, r.text[:120])
+
+    print("== Bulk owner/network + domain groups ==")
+    bk_pid = os.getpid()
+
+    # -- bulk owner: only the selected campaigns change --
+    bk_camps = []
+    for i in (1, 2):
+        r = s.post(f"{api}/campaigns/", json={
+            "name": f"Smoke BulkOwner {bk_pid}-{i}", "alias": f"smoke-bulkown-{bk_pid}-{i}",
+            "type": "campaign", "status": "active", "redirect_mode": "position",
+            "config": {"flows": []}})
+        check(f"bulk: campaign {i} created", r.status_code == 200 and "id" in r.json(),
+              r.text[:150])
+        bk_camps.append(r.json().get("id"))
+    r = s.post(f"{api}/users/", json={"username": f"smoke-bulkown-{bk_pid}",
+                                      "password": "smokepass1"})
+    check("bulk: owner user created", r.status_code == 200, r.text[:150])
+    bk_owner = r.json().get("id")
+    r = s.get(f"{api}/campaigns/users")
+    check("bulk: owner choices listed", r.status_code == 200
+          and any(u.get("id") == bk_owner for u in r.json()), r.text[:150])
+    r = s.post(f"{api}/campaigns/bulk/owner", json={"ids": bk_camps, "owner_id": bk_owner})
+    check("bulk-owner applied to 2", r.status_code == 200 and r.json().get("updated") == 2,
+          r.text[:150])
+    r = s.get(f"{api}/campaigns/")
+    owners = {c["id"]: c.get("owner_id") for c in r.json() if c["id"] in bk_camps}
+    check("bulk-owner set on exactly the selected campaigns",
+          owners == {bk_camps[0]: bk_owner, bk_camps[1]: bk_owner}, str(owners))
+    r = s.post(f"{api}/campaigns/bulk/owner", json={"ids": [bk_camps[0]], "owner_id": None})
+    check("bulk-owner clear one", r.status_code == 200 and r.json().get("updated") == 1,
+          r.text[:150])
+    r = s.get(f"{api}/campaigns/")
+    cleared = {c["id"]: c.get("owner_id") for c in r.json() if c["id"] in bk_camps}
+    check("bulk-owner clear took effect",
+          cleared.get(bk_camps[0]) is None and cleared.get(bk_camps[1]) == bk_owner,
+          str(cleared))
+    r = s.post(f"{api}/campaigns/bulk/owner", json={"ids": bk_camps, "owner_id": 999999999})
+    check("bulk-owner unknown owner -> 404", r.status_code == 404, str(r.status_code))
+
+    # -- bulk network --
+    r = s.post(f"{api}/affiliate-networks/", json={"name": f"Smoke Bulk Net {bk_pid}"})
+    check("bulk: network created", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    bk_net = r.json().get("id")
+    bk_offers = []
+    for i in (1, 2):
+        r = s.post(f"{api}/offers/", json={"name": f"Smoke BulkNet {bk_pid}-{i}",
+                                           "url": "https://example.com/bulk"})
+        check(f"bulk: offer {i} created", r.status_code == 200 and "id" in r.json(),
+              r.text[:150])
+        bk_offers.append(r.json().get("id"))
+    r = s.post(f"{api}/offers/bulk-network",
+               json={"ids": bk_offers, "affiliate_network_id": bk_net})
+    check("bulk-network applied to 2",
+          r.status_code == 200 and r.json().get("updated") == 2, r.text[:150])
+    r = s.get(f"{api}/offers/")
+    nets = {o["id"]: o.get("affiliate_network_id") for o in r.json() if o["id"] in bk_offers}
+    check("bulk-network set on exactly the selected offers",
+          nets == {bk_offers[0]: bk_net, bk_offers[1]: bk_net}, str(nets))
+    r = s.post(f"{api}/offers/bulk-network",
+               json={"ids": bk_offers, "affiliate_network_id": 999999999})
+    check("bulk-network unknown network -> 404", r.status_code == 404, str(r.status_code))
+
+    # -- domain groups: grants gate the campaign-binding domain list --
+    grp_doms = []
+    for suffix in ("a", "b"):
+        r = s.post(f"{api}/domains/",
+                   json={"domain": f"smoke-grp-{bk_pid}-{suffix}.example.com"})
+        check(f"bulk: domain {suffix} created", r.status_code == 200 and "id" in r.json(),
+              r.text[:150])
+        grp_doms.append(r.json().get("id"))
+    r = s.post(f"{api}/domains/groups", json={"name": f"Smoke Group {bk_pid}"})
+    check("bulk: group created", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    grp_id = r.json().get("id")
+    r = s.post(f"{api}/domains/groups/{grp_id}/domains", json={"ids": [grp_doms[0]]})
+    check("bulk: domain assigned to group",
+          r.status_code == 200 and r.json().get("updated") == 1, r.text[:150])
+    r = s.get(f"{api}/domains/groups")
+    mine = [g for g in r.json() if g.get("id") == grp_id] if r.status_code == 200 else []
+    check("bulk: group lists its domain",
+          bool(mine) and grp_doms[0] in (mine[0].get("domain_ids") or []), r.text[:200])
+
+    grant_users = {}
+    for tag in ("grant", "nogrant"):
+        r = s.post(f"{api}/users/", json={
+            "username": f"smoke-{tag}-{bk_pid}", "password": "smokepass1",
+            "permissions": {"sections": {"domains": True}}})
+        check(f"bulk: {tag} user created", r.status_code == 200, r.text[:150])
+        grant_users[tag] = r.json().get("id")
+    gsess = {}
+    for tag in ("grant", "nogrant"):
+        gsess[tag] = requests.Session()
+        gsess[tag].verify = not INSECURE
+        r = gsess[tag].post(f"{api}/login",
+                            json={"username": f"smoke-{tag}-{bk_pid}",
+                                  "password": "smokepass1"})
+        check(f"bulk: {tag} user login", r.status_code == 200, r.text[:150])
+
+    r = gsess["nogrant"].get(f"{api}/domains/")
+    visible = {d["id"] for d in r.json()} if r.status_code == 200 else set()
+    check("groups: non-granted user does not see grouped domain",
+          grp_doms[0] not in visible and grp_doms[1] in visible, str(sorted(visible))[:120])
+    r = gsess["grant"].get(f"{api}/domains/")
+    visible = {d["id"] for d in r.json()} if r.status_code == 200 else set()
+    check("groups: user without grant does not see grouped domain yet",
+          grp_doms[0] not in visible, str(sorted(visible))[:120])
+    r = s.get(f"{api}/domains/")
+    check("groups: admin always sees grouped domain",
+          r.status_code == 200 and grp_doms[0] in {d["id"] for d in r.json()}, r.text[:120])
+
+    r = s.post(f"{api}/domains/groups/{grp_id}/users",
+               json={"ids": [grant_users["grant"]]})
+    check("groups: user granted", r.status_code == 200 and r.json().get("updated") == 1,
+          r.text[:150])
+    r = gsess["grant"].get(f"{api}/domains/")
+    visible = {d["id"] for d in r.json()} if r.status_code == 200 else set()
+    check("groups: granted user now sees grouped domain", grp_doms[0] in visible,
+          str(sorted(visible))[:120])
+    r = gsess["nogrant"].get(f"{api}/domains/")
+    visible = {d["id"] for d in r.json()} if r.status_code == 200 else set()
+    check("groups: grant changed nothing for others", grp_doms[0] not in visible, "")
+
+    r = s.delete(f"{api}/domains/groups/{grp_id}/users/{grant_users['grant']}")
+    check("groups: grant revoked", r.status_code == 200, r.text[:150])
+    r = gsess["grant"].get(f"{api}/domains/")
+    visible = {d["id"] for d in r.json()} if r.status_code == 200 else set()
+    check("groups: revoked user loses grouped domain again", grp_doms[0] not in visible, "")
+    r = s.put(f"{api}/domains/groups/{grp_id}", json={"name": f"Smoke Group {bk_pid} R"})
+    check("groups: rename works", r.status_code == 200, r.text[:150])
+    r = s.delete(f"{api}/domains/groups/{grp_id}/domains/{grp_doms[0]}")
+    check("groups: domain unassigned", r.status_code == 200, r.text[:150])
+    r = s.get(f"{api}/domains/")
+    check("groups: ungrouped domain visible to everyone again",
+          r.status_code == 200 and grp_doms[0] in {d["id"] for d in r.json()}, r.text[:120])
+
+    # cleanup everything this block created
+    r = s.delete(f"{api}/domains/groups/{grp_id}")
+    check("groups: group deleted", r.status_code == 200, r.text[:150])
+    r = s.get(f"{api}/domains/groups")
+    check("groups: gone from list",
+          r.status_code == 200 and all(g.get("id") != grp_id for g in r.json()), r.text[:150])
+    r = s.delete(f"{api}/domains/groups/999999999")
+    check("groups: unknown group -> 404", r.status_code == 404, str(r.status_code))
+    for d in grp_doms:
+        s.delete(f"{api}/domains/{d}")
+    for o in bk_offers:
+        s.delete(f"{api}/offers/{o}")
+    s.delete(f"{api}/affiliate-networks/{bk_net}")
+    for c in bk_camps:
+        s.delete(f"{api}/campaigns/{c}")
+    for u in [bk_owner] + list(grant_users.values()):
+        s.delete(f"{api}/users/{u}")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

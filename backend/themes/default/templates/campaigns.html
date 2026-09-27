@@ -1451,6 +1451,28 @@
             </v-card>
         </v-dialog>
 
+        <v-dialog v-model="bulkOwnerDialog" persistent>
+            <v-card class="dialog-sm">
+                <v-card-title class="text-h6">Set owner — {{ selected.length }} campaigns</v-card-title>
+                <v-card-text>
+                    <v-select
+                            label="Owner"
+                            :items="ownerChoices()"
+                            v-model="bulkOwnerId"
+                            outlined
+                            dense
+                            hint="The owner scopes the campaigns:'own' permission"
+                            persistent-hint
+                    ></v-select>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="bulkOwnerDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="bulkLoading" @click="applyBulkOwner">Apply</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
         <v-dialog v-model="metricsCustomDialog" persistent>
             <v-card class="dialog-sm">
                 <v-card-title class="text-h6">Custom stats period</v-card-title>
@@ -1481,6 +1503,9 @@
                         </v-btn>
                         <v-btn small color="secondary" elevation="0" class="mr-2 ml-2" @click="openBulkTags">
                             <v-icon small class="mr-1">mdi-tag-multiple-outline</v-icon>Tag
+                        </v-btn>
+                        <v-btn small color="secondary" elevation="0" class="mr-2" @click="openBulkOwner">
+                            <v-icon small class="mr-1">mdi-account-arrow-right-outline</v-icon>Set owner
                         </v-btn>
                         <v-btn v-if="selectionHasUnarchived" small color="secondary" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkArchive">
                             <v-icon small class="mr-1">mdi-archive-arrow-down-outline</v-icon>Archive
@@ -1727,6 +1752,9 @@
                 bulkTagDialog: false,
                 bulkTagMode: 'add',
                 bulkTagInput: [],
+                bulkOwnerDialog: false,
+                bulkOwnerId: null,
+                campaignUsers: [],
                 metricsMap: {},
                 metricsPeriod: '30d',
                 metricsPeriodItems: [
@@ -3198,6 +3226,40 @@
                 this.bulkTagInput = [];
                 this.bulkTagMode = 'add';
                 this.bulkTagDialog = true;
+            },
+            ownerChoices() {
+                return [{text: '— Unassigned —', value: null}]
+                    .concat((this.campaignUsers || []).map(u => ({text: u.username, value: u.id})));
+            },
+            async openBulkOwner() {
+                if (!this.campaignUsers.length) {
+                    try {
+                        const res = await fetch('/backend/api/campaigns/users', {credentials: 'include'});
+                        if (res.ok) this.campaignUsers = await res.json();
+                    } catch (e) { /* picker just stays empty */ }
+                }
+                this.bulkOwnerId = null;
+                this.bulkOwnerDialog = true;
+            },
+            async applyBulkOwner() {
+                this.bulkLoading = true;
+                try {
+                    const res = await fetch('/backend/api/campaigns/bulk/owner', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids: this.selected.map(c => c.id), owner_id: this.bulkOwnerId})
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.bulkOwnerDialog = false;
+                    this.selected = [];
+                    this.loadCampaigns();
+                    this.$root.$emit('show-message', {type: 'success', text: 'Owner updated'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Set owner failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.bulkLoading = false;
+                }
             },
             async applyBulkTags() {
                 const tags = (this.bulkTagInput || []).map(t => String(t).trim()).filter(Boolean);

@@ -32,7 +32,7 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 ## ⚙️ Production Hardening
 
 - [x] **17. Remove `--reload` / add uvicorn workers** — `docker-compose.prod.yml` override: uvicorn with 2 workers, no reload, ClickHouse memory cap. Dev compose stays hot-reload. Run with `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`.
-- [x] **18. Automated tests** — `backend/tests/api_smoke.py`: 526-check live suite covering auth/2FA/permissions, campaign CRUD/clone/bulk/CSV, routing rules (filters/stickiness/caps/schedules), tracking plane (direct JS/pixel/impressions/Click API/simulation), conversion economics (LTV/custom events/clickless/import), reporting depth, fraud/cloaking, flow actions, optimizer, funnels, and the security audit regressions. 526/526 passing.
+- [x] **18. Automated tests** — `backend/tests/api_smoke.py`: 748-check live suite covering auth/2FA/permissions, campaign CRUD/clone/bulk/CSV, routing rules (filters/stickiness/caps/schedules), tracking plane (direct JS/pixel/impressions/Click API/simulation with visitor profiles), conversion economics (LTV/custom events/clickless/import), reporting depth (28 dimensions, pagination, CSV export), retroactive cost updates, domain groups, fraud/cloaking, flow actions, optimizer, funnels, and the security audit regressions. 748/748 passing.
 - [x] **19. CI** — GitHub Actions: compileall over backend+frontend and compose YAML sanity on push/PR.
 - [ ] **20. HTTPS/Certbot automation check** — Domains page now guides DNS setup (A record / CNAME instructions, per-domain "Check DNS" button) and the cert flow fails fast with a clear message when the domain doesn't route to the server yet; the auto-renewal cron flow itself is still unverified.
 
@@ -74,3 +74,21 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 - Fixed: selected tag chips rendered white text on transparent background (Vuetify `v-chip--outlined` transparent-`!important` outranked our fill); select-dropdown active items were green-on-green (now dark green, semibold).
 - Fixed: smoke-suite timezone flake near local midnight — "today" now derived from UTC.
 - Known: historical clicks/conversions have empty `visitor_id`, so pre-wave-7 data still won't appear under click-date basis.
+
+## 🔧 Wave 10 — Data tables, dimensions, ops depth (2026-09-27)
+
+- [x] **40. Changelog-parity bug batch** — click-outs and postbacks now write/sync to ClickHouse live (new `click_id` column; `ALTER UPDATE … mutations_sync` conversion sync); report-poisoning, stale postback fanout, offer gating, and binding-reset regressions fixed.
+- [x] **41. Clicklog & conversions server-side pagination** — limit/offset with true `total` (ClickHouse `count()` / PG `query.count()`), deterministic page ordering, legacy response shape kept when no offset is sent; Vuetify pagers wired to both tables.
+- [x] **42. Clicklog & conversions CSV export** — server-side, UTF-8 BOM, formula-injection guard, honors current filters, blob download from the UI.
+- [x] **43. Report dimensions: week, domain, user agent, OS version** — two new ClickHouse columns (`user_agent`, `os_version`) via idempotent startup migration; domain derived from URL, ISO-week keys; dimension count 24 → 28.
+- [x] **44. Retroactive cost-update tool** — admin endpoint `POST /api/costs/update` `{campaign_id?, period, cost}` sets per-click cost on matching ClickHouse rows (synced mutation); dialog in Reports with campaign select, date range, and result feedback.
+- [x] **45. Bulk owner / network reassignment** — campaigns: set owner for selected rows (user picker incl. unassign, `GET /api/campaigns/users` for editor access); offers: set affiliate network for selected rows (incl. "no network").
+- [x] **46. Domain groups with per-user access grants** — `domain_groups` + membership + grant tables (cascading), full CRUD UI on the Domains page; non-admins only see grouped domains they have a grant on in the campaign picker (admins bypass).
+- [x] **47. Simulate-dialog visitor profiles** — visitor count slider, country/OS/browser/device/IP-prefix selects (empty = random mix per visitor), optional seed (blank = entropy); backend omitted-seed default fixed from fixed `0` to true randomness.
+- [x] **48. Sources single-delete guard** — deleting a campaign-linked source now returns 409 with an actionable message (was an unhandled FK 500); confirm dialog and toast name the source.
+
+## 🔜 Next waves (queued, no external credentials needed)
+
+- **Wave 11 — tracking-plane parity**: IPv6 ClickHouse storage (G92) · postback rules layer + fanout controls (G85/G86) · `/pb` POST/HEAD + extra postback tokens (G87) · rDNS / conversion-status / source-`is_bot` routing criteria (G88) · prefetch filtering + no-cost-for-bot-clicks (G89) · login IP whitelist (G90) · hide-referrer secondary domain (G91).
+- **Wave 12 — ops polish**: SSL-expiry warning · settings backup/export · conversion-log search by URL · Google Safe Browsing check · pause offers from report rows · server-side GeoIP DB · domain-deletion reassignment · campaign-group filter in clicklog · click-log `campaigns:'own'` scoping.
+- **Still blocked on user input**: cost auto-sync (5) and CAPI/conversion upload to Meta/Google — need ad-platform API tokens; certbot auto-renewal verification (20).

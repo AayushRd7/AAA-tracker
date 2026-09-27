@@ -174,6 +174,16 @@
                 </v-btn>
                 <v-spacer></v-spacer>
                 <v-btn
+                        v-if="$root.roleLabel === 'admin'"
+                        outlined
+                        elevation="0"
+                        class="mr-2"
+                        @click="openCostDialog"
+                >
+                    <v-icon small class="mr-1">mdi-cash-sync</v-icon>
+                    Cost update
+                </v-btn>
+                <v-btn
                         outlined
                         elevation="0"
                         class="mr-2"
@@ -455,6 +465,45 @@
             </v-card>
         </v-dialog>
 
+        <!-- Retroactive cost update (admin only) -->
+        <v-dialog v-model="costDialog" max-width="520">
+            <v-card>
+                <v-card-title class="text-h6">Retroactive cost update</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-3">
+                        Overwrites the per-click cost on every matching ClickHouse row
+                        (total spend = cost × matched rows). Applies to all campaigns
+                        when no campaign is selected.
+                    </div>
+                    <v-select v-model="costForm.campaign_id" :items="campaigns"
+                              label="Campaign (optional — all campaigns if empty)"
+                              item-text="name" item-value="id" outlined dense hide-details clearable
+                              class="mb-3"></v-select>
+                    <v-row dense>
+                        <v-col cols="6">
+                            <v-text-field v-model="costForm.from" label="From" type="date"
+                                          outlined dense hide-details></v-text-field>
+                        </v-col>
+                        <v-col cols="6">
+                            <v-text-field v-model="costForm.to" label="To" type="date"
+                                          outlined dense hide-details></v-text-field>
+                        </v-col>
+                    </v-row>
+                    <v-text-field v-model="costForm.cost" label="Cost per click" type="number"
+                                  min="0" step="0.001" outlined dense hide-details></v-text-field>
+                    <div v-if="costError" class="caption error--text mt-2">{{ costError }}</div>
+                    <div v-if="costResult" class="caption success--text mt-2">
+                        Updated {{ costResult.updated_rows }} rows to {{ costResult.cost }} per click.
+                    </div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="costDialog = false">Close</v-btn>
+                    <v-btn color="primary" :loading="costLoading" @click="applyCostUpdate">Apply</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
         <!-- Click log drill-down -->
         <div class="d-flex align-center justify-space-between mt-6 mb-2">
             <div>
@@ -498,9 +547,9 @@
                         prepend-inner-icon="mdi-magnify"
                         outlined dense hide-details clearable
                         class="log-filter-search"
-                        @keyup.enter="loadClickLog"
+                        @keyup.enter="searchClickLog"
                 ></v-text-field>
-                <v-btn color="primary" elevation="0" :loading="logLoading" @click="loadClickLog">
+                <v-btn color="primary" elevation="0" :loading="logLoading" @click="searchClickLog">
                     <v-icon small class="mr-1">mdi-magnify</v-icon>Search
                 </v-btn>
             </div>
@@ -511,8 +560,11 @@
                     :headers="clickLogHeaders"
                     :items="clickLog"
                     dense
-                    :items-per-page="15"
-                    :footer-props="{ 'items-per-page-options': [15, 25, 50, 100] }"
+                    :server-items-length="logTotal"
+                    :page="logPage"
+                    @update:page="onLogPage"
+                    :items-per-page="logPageSize"
+                    :footer-props="{ 'items-per-page-options': [logPageSize] }"
                     :loading="logLoading"
             >
                 <template v-slot:item.received_at="{ item }">
@@ -581,9 +633,9 @@
                         prepend-inner-icon="mdi-magnify"
                         outlined dense hide-details clearable
                         class="conv-filter-search"
-                        @keyup.enter="loadReports"
+                        @keyup.enter="searchConversions"
                 ></v-text-field>
-                <v-btn color="primary" elevation="0" :loading="convLoading" @click="loadReports">
+                <v-btn color="primary" elevation="0" :loading="convLoading" @click="searchConversions">
                     <v-icon small class="mr-1">mdi-magnify</v-icon>Search
                 </v-btn>
             </div>
@@ -596,8 +648,11 @@
                             :headers="headers"
                             :items="conversions"
                             dense
-                            :items-per-page="10"
-                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            :server-items-length="convTotal"
+                            :page="convPage"
+                            @update:page="onConvPage"
+                            :items-per-page="convPageSize"
+                            :footer-props="{ 'items-per-page-options': [convPageSize] }"
                             :loading="convLoading"
                     >
                         <template v-slot:item.status="{ item }">
@@ -831,6 +886,16 @@
                 emailScheduleLoading: false,
                 emailScheduleTesting: false,
                 emailScheduleError: '',
+                costDialog: false,
+                costLoading: false,
+                costError: '',
+                costResult: null,
+                costForm: {
+                    campaign_id: null,
+                    from: new Date(new Date().setDate(new Date().getDate() - 7)).toISOString().split('T')[0],
+                    to: new Date().toISOString().split('T')[0],
+                    cost: '',
+                },
                 dimensionPresets: [
                     { label: 'SubID chain', icon: 'mdi-numeric', dims: ['sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5'] },
                     { label: 'Geo chain', icon: 'mdi-earth', dims: ['country', 'region', 'city'] },
@@ -842,6 +907,7 @@
                 dimensionItems: [
                     { key: 'date', label: 'Date' },
                     { key: 'hour', label: 'Hour' },
+                    { key: 'week', label: 'Week' },
                     { key: 'campaign_id', label: 'Campaign' },
                     { key: 'offer_id', label: 'Offer' },
                     { key: 'landing_id', label: 'Landing page' },
@@ -850,6 +916,7 @@
                     { key: 'city', label: 'City' },
                     { key: 'device_type', label: 'Device type' },
                     { key: 'os', label: 'OS' },
+                    { key: 'os_version', label: 'OS version' },
                     { key: 'browser', label: 'Browser' },
                     { key: 'language', label: 'Language' },
                     { key: 'traffic_source_name', label: 'Traffic source' },
@@ -865,6 +932,8 @@
                     { key: 'sub_id_5', label: 'Sub ID 5' },
                     { key: 'isp', label: 'ISP' },
                     { key: 'connection_type', label: 'Connection type' },
+                    { key: 'domain', label: 'Domain' },
+                    { key: 'user_agent', label: 'User Agent' },
                     { key: 'status', label: 'Conversion status' },
                     { key: 'is_bot', label: 'Bot flag' },
                     { key: 'is_using_proxy', label: 'Proxy flag' },
@@ -910,6 +979,9 @@
                 ],
                 conversions: [],
                 convLoading: false,
+                convPage: 1,
+                convPageSize: 50,
+                convTotal: 0,
                 convFilters: {
                     status: '',
                     search: '',
@@ -923,6 +995,9 @@
                 editSaving: false,
                 editItem: {},
                 logLoading: false,
+                logPage: 1,
+                logPageSize: 50,
+                logTotal: 0,
                 clickLog: [],
                 logFilters: {
                     country: '',
@@ -1127,6 +1202,48 @@
             openSaveDialog() {
                 this.saveName = '';
                 this.saveDialog = true;
+            },
+            // --- retroactive cost update (admin only, /api/costs/update) ---
+            openCostDialog() {
+                this.costError = '';
+                this.costResult = null;
+                this.costDialog = true;
+            },
+            applyCostUpdate() {
+                this.costError = '';
+                this.costResult = null;
+                const cost = parseFloat(this.costForm.cost);
+                if (!this.costForm.from || !this.costForm.to) {
+                    this.costError = 'Date range is required';
+                    return;
+                }
+                if (isNaN(cost) || cost < 0) {
+                    this.costError = 'Cost must be a number >= 0';
+                    return;
+                }
+                this.costLoading = true;
+                fetch('/backend/api/costs/update', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        campaign_id: this.costForm.campaign_id || null,
+                        period: {from: this.costForm.from, to: this.costForm.to},
+                        cost: cost,
+                    })
+                })
+                    .then(res => res.ok ? res.json()
+                        : res.json().then(e => Promise.reject(new Error(
+                            (e && e.detail) || ('HTTP ' + res.status)))))
+                    .then(data => {
+                        this.costResult = data;
+                        this.$root.$emit('show-message', {
+                            type: 'success',
+                            text: 'Cost updated on ' + data.updated_rows + ' rows',
+                        });
+                    })
+                    .catch(err => { this.costError = sanitizeToastMessage(err.message); })
+                    .finally(() => { this.costLoading = false; });
             },
             saveReport() {
                 const name = this.saveName.trim();
@@ -1333,10 +1450,12 @@
             },
             clearLogFilters() {
                 this.logFilters = {country: '', device_type: '', os: '', status: '', search: ''};
+                this.logPage = 1;
                 this.loadClickLog();
             },
             clearConvFilters() {
                 this.convFilters = {status: '', search: ''};
+                this.convPage = 1;
                 this.loadReports();
             },
             roiClass(roi) {
@@ -1487,15 +1606,7 @@
                     'report_' + this.dimensions.join('_') + '.csv'
                 );
             },
-            exportCsv() {
-                this.downloadCsv(
-                    this.headers.map(h => h.text),
-                    this.conversions.map(it => this.headers.map(h => it[h.value])),
-                    'conversions.csv'
-                );
-            },
-            loadClickLog() {
-                this.logLoading = true;
+            clickLogPayload() {
                 const payload = {
                     date_from: this.dateRange[0],
                     date_to: this.dateRange[1],
@@ -1505,9 +1616,25 @@
                     os: this.logFilters.os || null,
                     status: this.logFilters.status || null,
                     search: this.logFilters.search || null,
-                    limit: 500,
                 };
                 Object.keys(payload).forEach(k => payload[k] === null && delete payload[k]);
+                return payload;
+            },
+            searchClickLog() {
+                this.logPage = 1;
+                this.loadClickLog();
+            },
+            onLogPage(page) {
+                if (page === this.logPage) return;
+                this.logPage = page;
+                this.loadClickLog();
+            },
+            loadClickLog() {
+                this.logLoading = true;
+                const payload = Object.assign(this.clickLogPayload(), {
+                    limit: this.logPageSize,
+                    offset: (this.logPage - 1) * this.logPageSize,
+                });
                 fetch('/backend/api/dashboard/click-log', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -1515,7 +1642,13 @@
                 })
                     .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
                     .then(data => {
-                        this.clickLog = Array.isArray(data) ? data : [];
+                        if (Array.isArray(data)) {
+                            this.clickLog = data;
+                            this.logTotal = data.length;
+                        } else {
+                            this.clickLog = data.items || [];
+                            this.logTotal = data.total || 0;
+                        }
                         this.logLoading = false;
                     })
                     .catch(err => {
@@ -1523,12 +1656,27 @@
                         this.$root.$emit('show-message', {type: 'error', text: 'Click log failed: ' + sanitizeToastMessage(err.message)});
                     });
             },
-            exportClickLogCsv() {
-                this.downloadCsv(
-                    this.clickLogHeaders.map(h => h.text),
-                    this.clickLog.map(it => this.clickLogHeaders.map(h => it[h.value])),
-                    'click_log.csv'
-                );
+            async exportClickLogCsv() {
+                try {
+                    const res = await fetch('/backend/api/dashboard/click-log/export', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify(this.clickLogPayload())
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.saveBlob(await res.blob(), 'click_log.csv');
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Click log export failed: ' + sanitizeToastMessage(err.message)});
+                }
+            },
+            saveBlob(blob, filename) {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                this.$root.$emit('show-message', {type: 'success', text: 'CSV exported'});
             },
             reloadReports() {
                 this.loadReports();
@@ -1594,18 +1742,39 @@
                     this.importing = false;
                 }
             },
-            loadReports() {
-                this.convLoading = true;
+            conversionListParams() {
                 const params = new URLSearchParams();
                 if (this.convFilters.status) params.set('status', this.convFilters.status);
                 if (this.convFilters.search) params.set('search', this.convFilters.search);
                 params.set('date_from', this.dateRange[0]);
                 params.set('date_to', this.dateRange[1]);
                 params.set('date_basis', this.convDateBasis);
+                return params;
+            },
+            searchConversions() {
+                this.convPage = 1;
+                this.loadReports();
+            },
+            onConvPage(page) {
+                if (page === this.convPage) return;
+                this.convPage = page;
+                this.loadReports();
+            },
+            loadReports() {
+                this.convLoading = true;
+                const params = this.conversionListParams();
+                params.set('limit', this.convPageSize);
+                params.set('offset', (this.convPage - 1) * this.convPageSize);
                 fetch('/backend/api/reports/?' + params.toString())
                     .then(response => response.ok ? response.json() : Promise.reject(new Error('HTTP ' + response.status)))
                     .then(data => {
-                        this.conversions = Array.isArray(data) ? data : [];
+                        if (Array.isArray(data)) {
+                            this.conversions = data;
+                            this.convTotal = data.length;
+                        } else {
+                            this.conversions = data.items || [];
+                            this.convTotal = data.total || 0;
+                        }
                         this.convLoading = false;
                     })
                     .catch(err => {
@@ -1613,6 +1782,16 @@
                         console.error("Failed to load conversions:", err)
                         this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
+            },
+            async exportCsv() {
+                try {
+                    const res = await fetch('/backend/api/reports/export?' + this.conversionListParams().toString(),
+                        {credentials: 'include'});
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.saveBlob(await res.blob(), 'conversions.csv');
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Conversions export failed: ' + sanitizeToastMessage(err.message)});
+                }
             },
             openEdit(item) {
                 this.editItem = Object.assign({}, item);

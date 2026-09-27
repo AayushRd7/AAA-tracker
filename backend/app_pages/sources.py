@@ -1593,9 +1593,16 @@ def bulk_sources(data: SourceBulkIn, request: Request, db: Session = Depends(get
 @router.delete("/{source_id}")
 def delete_source(source_id: int, request: Request, db: Session = Depends(get_db)):
     from audit_logger import audit_event
+    from models.campaigns import CampaignORM
     source = db.query(SourceORM).filter(SourceORM.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
+
+    if db.query(CampaignORM).filter_by(traffic_source_id=source.id).first():
+        raise HTTPException(status_code=409,
+                            detail=f'Source "{source.name}" is linked to campaigns '
+                                   'and cannot be deleted. Unlink it from the '
+                                   'campaigns first.')
 
     db.delete(source)
     db.commit()

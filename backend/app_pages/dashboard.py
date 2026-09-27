@@ -4,7 +4,8 @@ from datetime import datetime as datetime_cls
 from fastapi import APIRouter, Request, HTTPException, Depends
 from clickHouse import (
     get_recent_visits, get_metrics_series, get_report_breakdown, get_report_breakdown_multi,
-    get_click_log, get_live_clicks, apply_custom_metrics, sum_rows, REPORT_DIMENSIONS,
+    get_click_log, get_click_log_total, get_live_clicks, apply_custom_metrics, sum_rows,
+    REPORT_DIMENSIONS,
 )
 from schemas import Filters
 from sqlalchemy.orm import Session
@@ -57,7 +58,8 @@ class ClickLogFilters(BaseModel):
     status: Optional[str] = None
     search: Optional[str] = None
     fraud_score: Optional[int] = None
-    limit: int = 500
+    limit: Optional[int] = 500   # explicit cap; None → server default
+    offset: Optional[int] = None  # presence switches the response to {items, total}
 
 
 # Dimensions conversions_data can be grouped by for the conversion_date basis (G55).
@@ -305,10 +307,54 @@ async def get_breakdown(request: Request, body: ReportRequest, db: Session = Dep
 async def get_click_log_view(request: Request, filters: ClickLogFilters):
     try:
         ch = request.state.ch
-        rows = get_click_log(ch, filters.dict(), limit=filters.limit)
+        f = filters.dict()
+        # Paginated mode is opted into by sending `offset` — the response then
+        # carries the count() total so the UI can render a pager. Plain calls
+        # (no offset) keep the legacy bare-list shape.
+        if filters.offset is not None:
+            limit = min(max(int(filters.limit or 50), 1), 5000)
+            offset = max(int(filters.offset or 0), 0)
+            rows = get_click_log(ch, f, limit=limit, offset=offset)
+            total = get_click_log_total(ch, f)
+            return {"items": rows, "total": total, "limit": limit, "offset": offset}
+        rows = get_click_log(ch, f, limit=min(max(int(filters.limit or 500), 1), 5000))
         return rows
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+CLICK_LOG_EXPORT_FIELDS = ["received_at", "ip", "country", "device_type", "os", "browser",
+                           "url", "referrer", "keyword", "traffic_source_name",
+                           "campaign_id", "status", "is_bot", "visitor_id"]
+CLICK_LOG_EXPORT_MAX = 50000
+
+
+def _csv_safe(value):
+    """Prefix cells that would start a spreadsheet formula (=,+,-,@) with an
+    apostrophe so exported CSVs can't smuggle live formulas into Excel/Sheets."""
+    s = "" if value is None else (value if isinstance(value, str) else str(value))
+    return "'" + s if s[:1] in ("=", "+", "-", "@") else s
+
+
+@router.post("/click-log/export")
+async def export_click_log(request: Request, filters: ClickLogFilters):
+    """CSV export of the click log with the same drill-down filters (no cap on
+    the usual 500-row view — up to CLICK_LOG_EXPORT_MAX rows)."""
+    import csv as _csv
+    import io as _io
+    from fastapi.responses import Response
+    try:
+        ch = request.state.ch
+        rows = get_click_log(ch, filters.dict(), limit=CLICK_LOG_EXPORT_MAX)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    buf = _io.StringIO()
+    writer = _csv.writer(buf, lineterminator="\n")
+    writer.writerow(CLICK_LOG_EXPORT_FIELDS)
+    for row in rows:
+        writer.writerow([_csv_safe(row.get(k)) for k in CLICK_LOG_EXPORT_FIELDS])
+    return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=click_log.csv"})
 
 
 # ---------------------------------------------------------------------------

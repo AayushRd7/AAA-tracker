@@ -117,8 +117,9 @@ def get_live_clicks(client, after: Optional[str] = None, limit: int = 20) -> Lis
     return [dict(zip(columns, row)) for row in result.result_rows]
 
 
-def get_click_log(client, filters: dict, limit: int = 500) -> List[Dict[str, Any]]:
-    """Detailed click log with drill-down filters for the Reports page."""
+def _click_log_where(filters: dict) -> Tuple[str, dict]:
+    """Shared WHERE-builder for the click log — list, count and CSV export
+    must apply exactly the same filters."""
     conditions = []
     params = {}
 
@@ -163,7 +164,20 @@ def get_click_log(client, filters: dict, limit: int = 500) -> List[Dict[str, Any
         params["search"] = f"%{escaped}%"
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    return where_clause, params
+
+
+# Deterministic newest-first order shared by every click-log query — the
+# secondary keys keep OFFSET pages stable when received_at ties (batched
+# inserts share one timestamp).
+CLICK_LOG_ORDER_BY = "received_at DESC, visitor_id DESC, ip DESC"
+
+
+def get_click_log(client, filters: dict, limit: int = 500, offset: int = 0) -> List[Dict[str, Any]]:
+    """Detailed click log with drill-down filters for the Reports page."""
+    where_clause, params = _click_log_where(filters)
     params["limit"] = limit
+    params["offset"] = max(int(offset or 0), 0)
 
     query = f"""
         SELECT
@@ -175,8 +189,8 @@ def get_click_log(client, filters: dict, limit: int = 500) -> List[Dict[str, Any
             fraud_score
         FROM clicks_data
         {where_clause}
-        ORDER BY received_at DESC
-        LIMIT %(limit)s
+        ORDER BY {CLICK_LOG_ORDER_BY}
+        LIMIT %(limit)s OFFSET %(offset)s
     """
 
     try:
@@ -187,6 +201,13 @@ def get_click_log(client, filters: dict, limit: int = 500) -> List[Dict[str, Any
 
     columns = result.column_names
     return [dict(zip(columns, row)) for row in result.result_rows]
+
+
+def get_click_log_total(client, filters: dict) -> int:
+    """count() over the same filter set — powers the click-log pager."""
+    where_clause, params = _click_log_where(filters)
+    result = client.query(f"SELECT count() FROM clicks_data {where_clause}", parameters=params)
+    return int(result.result_rows[0][0]) if result.result_rows else 0
 
 
 def generate_date_range(start: str, end: str) -> List[str]:
@@ -262,10 +283,25 @@ def get_metrics_series(client, filters: Filters, limit: int = 30) -> List[Dict[s
     return output
 
 
+def ensure_report_dimensions_schema(client) -> None:
+    """Idempotent migration for report dimensions the raw click row doesn't
+    carry yet: user_agent / os_version (the tracking plane enriches them;
+    rows written before the columns existed keep the '' default and group
+    as '(empty)'). Domain and week need no column — they are derived from
+    url / received_at in REPORT_DIMENSIONS."""
+    client.command(
+        "ALTER TABLE clicks_data "
+        "ADD COLUMN IF NOT EXISTS user_agent String DEFAULT '', "
+        "ADD COLUMN IF NOT EXISTS os_version String DEFAULT ''")
+
+
 # Dimensions available for report breakdowns (key -> ClickHouse expression)
 REPORT_DIMENSIONS = {
     "date": "toDate(received_at)",
     "hour": "toStartOfHour(received_at)",
+    "week": "concat(toString(toISOYear(received_at)), '-W', "
+            "leftPad(toString(toISOWeek(received_at)), 2, '0'))",
+    "domain": "coalesce(nullIf(domainWithoutWWW(url), ''), '(empty)')",
     "campaign_id": "toString(coalesce(campaign_id, -1))",
     "offer_id": "toString(coalesce(offer_id, -1))",
     "landing_id": "toString(coalesce(nullIf(landing_id, ''), '-1'))",
@@ -274,6 +310,7 @@ REPORT_DIMENSIONS = {
     "city": "city",
     "device_type": "device_type",
     "os": "os",
+    "os_version": "coalesce(nullIf(os_version, ''), '(empty)')",
     "browser": "browser",
     "language": "language",
     "traffic_source_name": "traffic_source_name",
@@ -291,6 +328,7 @@ REPORT_DIMENSIONS = {
     "connection_type": "connection_type",
     "referrer": "referrer",
     "url": "url",
+    "user_agent": "coalesce(nullIf(user_agent, ''), '(empty)')",
     "status": "status",
     "is_bot": "toString(is_bot)",
     "is_using_proxy": "toString(is_using_proxy)",

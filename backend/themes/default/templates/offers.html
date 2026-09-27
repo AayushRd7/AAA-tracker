@@ -256,6 +256,28 @@
             </v-card>
         </v-dialog>
 
+        <v-dialog v-model="bulkNetworkDialog" persistent max-width="440px">
+            <v-card>
+                <v-card-title class="text-h6">Set network — {{ selected.length }} offers</v-card-title>
+                <v-card-text>
+                    <v-select
+                            label="Affiliate network"
+                            :items="networkChoices()"
+                            v-model="bulkNetworkId"
+                            outlined
+                            dense
+                            hint="Pick '— No network —' to detach the current network"
+                            persistent-hint
+                    ></v-select>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="bulkNetworkDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="bulkLoading" @click="applyBulkNetwork">Apply</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
 
         <v-row dense class="mt-4">
             <v-col>
@@ -265,6 +287,9 @@
                         <span class="text-body-2 font-weight-medium mr-4">{{ selected.length }} selected</span>
                         <v-btn small color="secondary" elevation="0" class="mr-2" @click="openBulkTags">
                             <v-icon small class="mr-1">mdi-tag-multiple-outline</v-icon>Tags
+                        </v-btn>
+                        <v-btn small color="secondary" elevation="0" class="mr-2" @click="openBulkNetwork">
+                            <v-icon small class="mr-1">mdi-lan-connect</v-icon>Set network
                         </v-btn>
                         <v-btn small color="secondary" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkArchive">
                             <v-icon small class="mr-1">mdi-archive-arrow-down-outline</v-icon>Archive
@@ -370,6 +395,8 @@
                 bulkTagDialog: false,
                 bulkTagMode: 'tags_add',
                 bulkTagInput: [],
+                bulkNetworkDialog: false,
+                bulkNetworkId: null,
                 exporting: false,
                 showArchived: false,
                 archivedIds: [],
@@ -558,6 +585,37 @@
                 this.bulkTagInput = [];
                 this.bulkTagMode = 'tags_add';
                 this.bulkTagDialog = true;
+            },
+            networkChoices() {
+                return [{text: '— No network —', value: null}]
+                    .concat((this.affiliateNetworks || []).map(n => ({text: n.name, value: n.id})));
+            },
+            openBulkNetwork() {
+                if (!(this.affiliateNetworks || []).length) this.loadAffiliateNetworks();
+                this.bulkNetworkId = null;
+                this.bulkNetworkDialog = true;
+            },
+            async applyBulkNetwork() {
+                this.bulkLoading = true;
+                try {
+                    const res = await fetch('/backend/api/offers/bulk-network', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids: this.selected.map(o => o.id),
+                                              affiliate_network_id: this.bulkNetworkId})
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.bulkNetworkDialog = false;
+                    this.selected = [];
+                    this.loadOffers();
+                    this.$root.$emit('show-message', {type: 'success', text: 'Network updated'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Set network failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.bulkLoading = false;
+                }
             },
             async applyBulkTags() {
                 const tags = (this.bulkTagInput || []).map(t => String(t).trim()).filter(Boolean);

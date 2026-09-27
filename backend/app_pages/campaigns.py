@@ -39,11 +39,16 @@ class BulkIn(BaseModel):
     action: Literal['tags_add', 'tags_remove', 'archive', 'unarchive', 'delete']
     tags: Optional[List[str]] = None
 
+class BulkOwnerIn(BaseModel):
+    ids: List[int]
+    owner_id: Optional[int] = None  # null = unassigned
+
 class CampaignImportIn(BaseModel):
     lines: str
 
 class CampaignOut(CampaignIn):
     id: int
+    owner_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -234,6 +239,37 @@ def bulk_set_tags(data: BulkTagsIn, request: Request, db: Session = Depends(get_
     audit_event(caller or "api_token", "update", "campaigns", ",".join(map(str, data.ids)),
                 {"bulk": "tags", "mode": data.mode, "tags": clean}, _client_ip(request))
     return {"message": f"Tags applied to {len(campaigns)} campaigns", "updated": len(campaigns)}
+
+
+@router.post("/bulk/owner", response_model=dict)
+def bulk_set_owner(data: BulkOwnerIn, request: Request, db: Session = Depends(get_db)):
+    """Set (or clear, with null) the owning user on many campaigns at once."""
+    from audit_logger import audit_event
+    if data.owner_id is not None:
+        owner = db.query(UserORM).filter(UserORM.id == data.owner_id).first()
+        if not owner:
+            raise HTTPException(status_code=404, detail="Owner user not found")
+    campaigns = db.query(CampaignORM).filter(CampaignORM.id.in_(data.ids)).all()
+    _require_mutation_access(request, db, campaigns)
+    for campaign in campaigns:
+        campaign.owner_id = data.owner_id
+        campaign.updated_at = datetime.utcnow()
+    db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "campaigns", ",".join(map(str, data.ids)),
+                {"bulk": "owner", "owner_id": data.owner_id, "count": len(campaigns)},
+                _client_ip(request))
+    return {"message": f"Owner set on {len(campaigns)} campaigns", "updated": len(campaigns)}
+
+
+@router.get("/users", response_model=List[dict])
+def campaign_owner_choices(db: Session = Depends(get_db)):
+    """Active users for the bulk 'Set owner' picker — id + username only, so
+    campaigns editors need no access to the admin Users section."""
+    return [{"id": u.id, "username": u.username}
+            for u in db.query(UserORM).filter(UserORM.active == True)
+            .order_by(UserORM.id.asc()).all()]
 
 
 @router.post("/bulk", response_model=dict)

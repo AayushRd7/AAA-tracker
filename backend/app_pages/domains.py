@@ -6,9 +6,12 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.future import select
+from sqlalchemy import text
 
 from db import get_db
 from models.domain import DomainORM
+from models.user import UserORM
+from models.domain_groups import DomainGroupORM, DomainGroupDomainORM, DomainGroupUserORM
 import httpx
 from datetime import datetime
 from pathlib import Path
@@ -59,8 +62,29 @@ class DomainCreateUpdate(BaseModel):
 
 # ====== GET /domains ======
 @router.get("/", response_model=List[dict])
-async def get_domains(db: Session = Depends(get_db)):
+async def get_domains(request: Request, db: Session = Depends(get_db)):
     domains = db.query(DomainORM).order_by(DomainORM.id.asc()).all()
+
+    # D2 — domains that belong to a group are only listed for granted users
+    # (and admins); everyone else still sees ungrouped domains. This endpoint
+    # feeds the campaign editor's domain picker, so the filter lives here.
+    from auth import get_caller
+    username, is_admin = get_caller(request)
+    hidden_ids = set()
+    if not is_admin and username:
+        user = db.query(UserORM).filter(UserORM.username == username).first()
+        if user:
+            rows = db.execute(
+                text("""
+                    SELECT dgd.domain_id FROM domain_group_domains dgd
+                    WHERE dgd.group_id NOT IN (
+                        SELECT group_id FROM domain_group_users WHERE user_id = :uid
+                    )
+                """),
+                {"uid": user.id},
+            ).fetchall()
+            hidden_ids = {r[0] for r in rows}
+
     return [
         {
             "id": domain.id,
@@ -74,7 +98,7 @@ async def get_domains(db: Session = Depends(get_db)):
             "created_at": domain.created_at.isoformat() if domain.created_at else None,
             "updated_at": domain.updated_at.isoformat() if domain.updated_at else None,
         }
-        for domain in domains
+        for domain in domains if domain.id not in hidden_ids
     ]
 
 
@@ -214,3 +238,180 @@ async def check_domains(db: Session = Depends(get_db)):
 
     db.commit()
     return {"results": results}
+
+
+#################### DOMAIN GROUPS (D2) #########################
+
+class DomainGroupIn(BaseModel):
+    name: str
+
+
+class GroupIdsIn(BaseModel):
+    ids: List[int]
+
+
+def _group_payload(db: Session, group: DomainGroupORM) -> dict:
+    domain_rows = db.query(DomainGroupDomainORM) \
+        .filter(DomainGroupDomainORM.group_id == group.id).all()
+    user_rows = db.query(DomainGroupUserORM) \
+        .filter(DomainGroupUserORM.group_id == group.id).all()
+    users = {u.id: u.username for u in
+             db.query(UserORM).filter(UserORM.id.in_([r.user_id for r in user_rows])).all()} \
+        if user_rows else {}
+    return {
+        "id": group.id,
+        "name": group.name,
+        "domain_ids": [r.domain_id for r in domain_rows],
+        "users": [{"id": r.user_id, "username": users.get(r.user_id, str(r.user_id))}
+                  for r in user_rows],
+    }
+
+
+@router.get("/groups", response_model=List[dict])
+async def list_groups(db: Session = Depends(get_db)):
+    groups = db.query(DomainGroupORM).order_by(DomainGroupORM.id.asc()).all()
+    return [_group_payload(db, g) for g in groups]
+
+
+@router.post("/groups", response_model=dict)
+async def create_group(data: DomainGroupIn, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Group name is required")
+    group = DomainGroupORM(name=name)
+    db.add(group)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="A group with this name already exists")
+    db.refresh(group)
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "create", "domain_groups", str(group.id),
+                {"name": group.name}, request.client.host if request.client else "")
+    return {"message": "Domain group created", "id": group.id}
+
+
+@router.put("/groups/{group_id}", response_model=dict)
+async def update_group(group_id: int, data: DomainGroupIn, request: Request,
+                       db: Session = Depends(get_db)):
+    from audit_logger import audit_event
+    group = db.query(DomainGroupORM).filter(DomainGroupORM.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Group name is required")
+    group.name = name
+    group.updated_at = datetime.utcnow()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="A group with this name already exists")
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "domain_groups", str(group_id),
+                {"name": name}, request.client.host if request.client else "")
+    return {"message": f"Group {group_id} updated"}
+
+
+@router.delete("/groups/{group_id}", response_model=dict)
+async def delete_group(group_id: int, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
+    group = db.query(DomainGroupORM).filter(DomainGroupORM.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    name = group.name
+    db.delete(group)  # member + grant rows cascade
+    db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "delete", "domain_groups", str(group_id),
+                {"name": name}, request.client.host if request.client else "")
+    return {"message": f"Group {group_id} deleted"}
+
+
+@router.post("/groups/{group_id}/domains", response_model=dict)
+async def assign_group_domains(group_id: int, data: GroupIdsIn, request: Request,
+                               db: Session = Depends(get_db)):
+    """Add domains to a group (idempotent — existing members are skipped)."""
+    from audit_logger import audit_event
+    group = db.query(DomainGroupORM).filter(DomainGroupORM.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    valid = {d.id for d in db.query(DomainORM)
+             .filter(DomainORM.id.in_(data.ids)).all()} if data.ids else set()
+    existing = {r.domain_id for r in db.query(DomainGroupDomainORM)
+                .filter(DomainGroupDomainORM.group_id == group_id).all()}
+    added = 0
+    for domain_id in valid - existing:
+        db.add(DomainGroupDomainORM(group_id=group_id, domain_id=domain_id))
+        added += 1
+    db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "domain_groups", str(group_id),
+                {"domains_added": sorted(valid - existing)}, request.client.host if request.client else "")
+    return {"message": f"Added {added} domains to group", "updated": added}
+
+
+@router.delete("/groups/{group_id}/domains/{domain_id}", response_model=dict)
+async def unassign_group_domain(group_id: int, domain_id: int, request: Request,
+                                db: Session = Depends(get_db)):
+    row = db.query(DomainGroupDomainORM) \
+        .filter(DomainGroupDomainORM.group_id == group_id,
+                DomainGroupDomainORM.domain_id == domain_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Domain is not in this group")
+    db.delete(row)
+    db.commit()
+    from audit_logger import audit_event
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "domain_groups", str(group_id),
+                {"domain_removed": domain_id}, request.client.host if request.client else "")
+    return {"message": f"Domain {domain_id} removed from group"}
+
+
+@router.post("/groups/{group_id}/users", response_model=dict)
+async def grant_group_users(group_id: int, data: GroupIdsIn, request: Request,
+                            db: Session = Depends(get_db)):
+    """Grant users access to the group's domains (idempotent)."""
+    from audit_logger import audit_event
+    group = db.query(DomainGroupORM).filter(DomainGroupORM.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    valid = {u.id for u in db.query(UserORM)
+             .filter(UserORM.id.in_(data.ids)).all()} if data.ids else set()
+    existing = {r.user_id for r in db.query(DomainGroupUserORM)
+                .filter(DomainGroupUserORM.group_id == group_id).all()}
+    granted = valid - existing
+    for user_id in granted:
+        db.add(DomainGroupUserORM(group_id=group_id, user_id=user_id))
+    db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "domain_groups", str(group_id),
+                {"users_granted": sorted(granted)}, request.client.host if request.client else "")
+    return {"message": f"Granted {len(granted)} users", "updated": len(granted)}
+
+
+@router.delete("/groups/{group_id}/users/{user_id}", response_model=dict)
+async def revoke_group_user(group_id: int, user_id: int, request: Request,
+                            db: Session = Depends(get_db)):
+    row = db.query(DomainGroupUserORM) \
+        .filter(DomainGroupUserORM.group_id == group_id,
+                DomainGroupUserORM.user_id == user_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="User has no grant on this group")
+    db.delete(row)
+    db.commit()
+    from audit_logger import audit_event
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "domain_groups", str(group_id),
+                {"user_revoked": user_id}, request.client.host if request.client else "")
+    return {"message": f"User {user_id} grant revoked"}

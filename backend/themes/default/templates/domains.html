@@ -177,6 +177,134 @@
             </v-col>
         </v-row>
 
+        <v-row align="center" class="mb-2 mt-6">
+            <v-col>
+                <div class="page-title">Domain groups</div>
+                <div class="page-subtitle">Group domains and control which users may bind them to campaigns</div>
+            </v-col>
+            <v-col class="d-flex justify-end" cols="auto">
+                <v-btn color="primary" elevation="0" @click="openGroupCreate">
+                    <v-icon small class="mr-1">mdi-plus</v-icon>
+                    Add group
+                </v-btn>
+            </v-col>
+        </v-row>
+
+        <v-row dense>
+            <v-col>
+                <v-card id="domain-groups-card">
+                    <v-data-table
+                            :headers="groupHeaders"
+                            :items="groups"
+                            :loading="groupsLoading"
+                            dense
+                            :items-per-page="10"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                    >
+                        <template v-slot:item.domains="{ item }">
+                            <span v-if="!(item.domain_ids || []).length" class="grey--text">-</span>
+                            <v-chip v-for="did in (item.domain_ids || [])" :key="did" x-small outlined class="mr-1 tag-chip">
+                                {{ domainName(did) }}
+                            </v-chip>
+                        </template>
+                        <template v-slot:item.users="{ item }">
+                            <span v-if="!(item.users || []).length" class="grey--text">All users (no restrictions)</span>
+                            <v-chip v-for="u in (item.users || [])" :key="u.id" x-small outlined class="mr-1 tag-chip">
+                                {{ u.username }}
+                            </v-chip>
+                        </template>
+                        <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openGroupManage(item)">
+                                        <v-icon small>mdi-playlist-edit</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Manage domains &amp; users</span>
+                            </v-tooltip>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteGroup(item)">
+                                        <v-icon small>mdi-trash-can-outline</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Delete group</span>
+                            </v-tooltip>
+                        </template>
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-inbox-outline</v-icon>
+                                <div class="mt-2">No domain groups yet</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <v-dialog v-model="groupDialog" persistent max-width="440px">
+            <v-card>
+                <v-card-title class="text-h6">{{ groupForm.id ? 'Rename group' : 'Add group' }}</v-card-title>
+                <v-card-text>
+                    <v-text-field
+                            label="Group name"
+                            v-model="groupForm.name"
+                            outlined
+                            dense
+                            @keyup.enter="saveGroup"
+                    ></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="groupDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="groupSaving" @click="saveGroup">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="groupManageDialog" persistent max-width="560px">
+            <v-card>
+                <v-card-title class="text-h6">Manage "{{ manageForm.group ? manageForm.group.name : '' }}"</v-card-title>
+                <v-card-text>
+                    <v-select
+                            label="Domains in this group"
+                            :items="domains"
+                            item-text="domain"
+                            item-value="id"
+                            v-model="manageForm.domain_ids"
+                            multiple
+                            chips
+                            small-chips
+                            deletable-chips
+                            outlined
+                            dense
+                            hint="Grouped domains are hidden from non-granted users when binding to campaigns"
+                            persistent-hint
+                    ></v-select>
+                    <v-select
+                            label="Users granted access"
+                            :items="allUsers"
+                            item-text="username"
+                            item-value="id"
+                            v-model="manageForm.user_ids"
+                            multiple
+                            chips
+                            small-chips
+                            deletable-chips
+                            outlined
+                            dense
+                            hint="Empty = every user can use these domains; admins always can"
+                            persistent-hint
+                    ></v-select>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="groupManageDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="groupSaving" @click="saveGroupManage">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
         <confirm-dialog-component ref="confirm" />
     </v-container>
 </script>
@@ -204,6 +332,21 @@
                 serverIp: '',
                 dnsResults: {},
                 dnsLoading: null,
+                groups: [],
+                groupsLoading: false,
+                groupDialog: false,
+                groupSaving: false,
+                groupForm: {id: null, name: ''},
+                groupManageDialog: false,
+                manageForm: {group: null, domain_ids: [], user_ids: []},
+                allUsers: [],
+                groupHeaders: [
+                    {text: 'ID', value: 'id'},
+                    {text: 'Name', value: 'name'},
+                    {text: 'Domains', value: 'domains', sortable: false},
+                    {text: 'Granted users', value: 'users', sortable: false},
+                    {text: 'Actions', value: 'actions', sortable: false},
+                ],
                 headers: [
                     {text: 'ID', value: 'id'},
                     {text: 'Domain', value: 'domain'},
@@ -224,9 +367,133 @@
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadDomains();
             this.loadServerInfo();
+            this.loadGroups();
             this.$root.$on('load-domains', this.loadDomains);
         },
         methods: {
+            domainName(id) {
+                const d = (this.domains || []).find(x => String(x.id) === String(id));
+                return d ? d.domain : ('#' + id);
+            },
+            async loadGroups() {
+                this.groupsLoading = true;
+                try {
+                    const r = await fetch('/backend/api/domains/groups', {credentials: 'include'});
+                    if (r.ok) this.groups = await r.json();
+                } catch (e) { /* keep existing list */ }
+                finally { this.groupsLoading = false; }
+            },
+            async loadUsers() {
+                if (this.allUsers.length) return;
+                try {
+                    const r = await fetch('/backend/api/users/', {credentials: 'include'});
+                    if (r.ok) this.allUsers = await r.json();
+                } catch (e) { /* non-admin viewers just get an empty picker */ }
+            },
+            openGroupCreate() {
+                this.groupForm = {id: null, name: ''};
+                this.groupDialog = true;
+            },
+            async saveGroup() {
+                const name = (this.groupForm.name || '').trim();
+                if (!name) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Group name is required.'});
+                    return;
+                }
+                this.groupSaving = true;
+                try {
+                    const url = this.groupForm.id
+                        ? `/backend/api/domains/groups/${this.groupForm.id}`
+                        : '/backend/api/domains/groups';
+                    const r = await fetch(url, {
+                        method: this.groupForm.id ? 'PUT' : 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({name})
+                    });
+                    const data = await r.json();
+                    if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+                    this.groupDialog = false;
+                    this.$root.$emit('show-message', {type: 'success', text: 'Group saved'});
+                    this.loadGroups();
+                } catch (e) {
+                    this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(e.message)});
+                } finally {
+                    this.groupSaving = false;
+                }
+            },
+            async openGroupManage(group) {
+                await Promise.all([this.loadUsers()]);
+                this.manageForm = {
+                    group,
+                    domain_ids: (group.domain_ids || []).slice(),
+                    user_ids: (group.users || []).map(u => u.id)
+                };
+                this.groupManageDialog = true;
+            },
+            async saveGroupManage() {
+                const group = this.manageForm.group;
+                if (!group) return;
+                this.groupSaving = true;
+                try {
+                    const beforeDomains = new Set(group.domain_ids || []);
+                    const afterDomains = new Set(this.manageForm.domain_ids || []);
+                    const toAdd = [...afterDomains].filter(x => !beforeDomains.has(x));
+                    const toRemove = [...beforeDomains].filter(x => !afterDomains.has(x));
+                    const beforeUsers = new Set((group.users || []).map(u => u.id));
+                    const afterUsers = new Set(this.manageForm.user_ids || []);
+                    const toGrant = [...afterUsers].filter(x => !beforeUsers.has(x));
+                    const toRevoke = [...beforeUsers].filter(x => !afterUsers.has(x));
+
+                    if (toAdd.length) {
+                        const r = await fetch(`/backend/api/domains/groups/${group.id}/domains`, {
+                            method: 'POST', credentials: 'include',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ids: toAdd})});
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                    }
+                    for (const did of toRemove) {
+                        const r = await fetch(`/backend/api/domains/groups/${group.id}/domains/${did}`, {
+                            method: 'DELETE', credentials: 'include'});
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                    }
+                    if (toGrant.length) {
+                        const r = await fetch(`/backend/api/domains/groups/${group.id}/users`, {
+                            method: 'POST', credentials: 'include',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ids: toGrant})});
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                    }
+                    for (const uid of toRevoke) {
+                        const r = await fetch(`/backend/api/domains/groups/${group.id}/users/${uid}`, {
+                            method: 'DELETE', credentials: 'include'});
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                    }
+                    this.groupManageDialog = false;
+                    this.$root.$emit('show-message', {type: 'success', text: 'Group updated'});
+                    this.loadGroups();
+                } catch (e) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Group update failed: ' + sanitizeToastMessage(e.message)});
+                } finally {
+                    this.groupSaving = false;
+                }
+            },
+            async deleteGroup(group) {
+                const ok = await this.$refs.confirm.open(
+                    'Delete group',
+                    `Delete group "${group.name}"? Its domains become unrestricted again.`,
+                    'Delete');
+                if (!ok) return;
+                try {
+                    const r = await fetch(`/backend/api/domains/groups/${group.id}`, {
+                        method: 'DELETE', credentials: 'include'});
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    this.$root.$emit('show-message', {type: 'success', text: 'Group deleted'});
+                    this.loadGroups();
+                } catch (e) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Group delete failed: ' + sanitizeToastMessage(e.message)});
+                }
+            },
             async loadServerInfo() {
                 try {
                     const r = await fetch('/backend/api/domains/server-info', {credentials: 'include'});
