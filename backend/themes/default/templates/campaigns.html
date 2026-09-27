@@ -1326,15 +1326,57 @@
             </v-card>
         </v-dialog>
 
-        <v-dialog v-model="simulateDialog" max-width="560px">
+        <v-dialog v-model="simulateDialog" max-width="640px">
             <v-card>
                 <v-card-title class="text-h6">
-                    Simulate — {{ simulateData.campaign || '…' }}
+                    Simulate — {{ simulateData.campaign || (simulateItem && simulateItem.name) || '…' }}
                     <v-spacer></v-spacer>
                     <v-btn small outlined :loading="simulateLoading" @click="runSimulate">
                         <v-icon small class="mr-1">mdi-refresh</v-icon>Re-run
                     </v-btn>
                 </v-card-title>
+                <v-card-text class="pb-2">
+                    <div class="subtitle-2 mb-2">Visitor profile</div>
+                    <v-row dense align="center">
+                        <v-col cols="12" sm="6">
+                            <div class="caption grey--text">Visitors: {{ simulateProfile.count }}</div>
+                            <v-slider v-model="simulateProfile.count" dense min="10" max="1000"
+                                      step="10" hide-details color="primary"></v-slider>
+                        </v-col>
+                        <v-col cols="6" sm="3">
+                            <v-select v-model="simulateProfile.country" :items="simCountries"
+                                      label="Country" dense hide-details></v-select>
+                        </v-col>
+                        <v-col cols="6" sm="3">
+                            <v-select v-model="simulateProfile.device" :items="simDevices"
+                                      label="Device" dense hide-details></v-select>
+                        </v-col>
+                        <v-col cols="6" sm="3">
+                            <v-select v-model="simulateProfile.os" :items="simOS"
+                                      label="OS" dense hide-details></v-select>
+                        </v-col>
+                        <v-col cols="6" sm="3">
+                            <v-select v-model="simulateProfile.browser" :items="simBrowsers"
+                                      label="Browser" dense hide-details></v-select>
+                        </v-col>
+                        <v-col cols="6" sm="3">
+                            <v-select v-model="simulateProfile.ip_prefix" :items="simPrefixes"
+                                      label="IP prefix" dense hide-details></v-select>
+                        </v-col>
+                        <v-col cols="6" sm="3">
+                            <v-text-field v-model="simulateProfile.seed" label="Seed"
+                                          placeholder="random" dense hide-details></v-text-field>
+                        </v-col>
+                    </v-row>
+                    <div class="d-flex align-center mt-2">
+                        <v-btn small color="primary" :loading="simulateLoading" @click="runSimulate">
+                            <v-icon small class="mr-1">mdi-play</v-icon>Run
+                        </v-btn>
+                        <span class="caption grey--text ml-3">
+                            Empty selects = random mix per visitor. Same seed + same profile = same result.
+                        </span>
+                    </div>
+                </v-card-text>
                 <v-card-text v-if="simulateData.stats">
                     <div class="caption grey--text mb-2">
                         {{ simulateData.count }} synthetic visitors through the routing pipeline (no side effects).
@@ -1639,6 +1681,18 @@
                 simulateData: {},
                 simulateItem: null,
                 simulateLoading: false,
+                simulateProfile: {count: 100, country: '', os: '', browser: '',
+                                  device: '', ip_prefix: '', seed: ''},
+                simCountries: [{value: '', text: 'Random mix'}].concat(
+                    ['US', 'GB', 'DE', 'IN', 'BR', 'FR', 'NL', 'ES'].map(c => ({value: c, text: c}))),
+                simOS: [{value: '', text: 'Random mix'}].concat(
+                    ['Windows', 'Android', 'iOS', 'macOS', 'Linux'].map(o => ({value: o, text: o}))),
+                simBrowsers: [{value: '', text: 'Random mix'}].concat(
+                    ['Chrome', 'Safari', 'Firefox', 'Edge'].map(b => ({value: b, text: b}))),
+                simDevices: [{value: '', text: 'Auto (by OS)'}, {value: 'desktop', text: 'Desktop'},
+                             {value: 'mobile', text: 'Mobile'}],
+                simPrefixes: [{value: '', text: 'Random'}].concat(
+                    ['11.22.33.', '44.55.66.', '77.88.99.', '90.12.34.'].map(p => ({value: p, text: p}))),
                 simPalette: ['#16a34a', '#2563eb', '#d97706', '#dc2626', '#7c3aed', '#0891b2'],
                 headers: [
                     {text: 'Name', value: 'name'},
@@ -2224,12 +2278,23 @@
             async runSimulate() {
                 if (!this.simulateItem) return;
                 this.simulateLoading = true;
+                const p = this.simulateProfile;
+                const profile = {};
+                if (p.country) profile.country = p.country;
+                if (p.os) profile.os = p.os;
+                if (p.browser) profile.browser = p.browser;
+                if (p.device) profile.device = p.device;
+                if (p.ip_prefix) profile.ip_prefix = p.ip_prefix;
+                const body = {count: Math.min(1000, Math.max(10, parseInt(p.count, 10) || 100)),
+                              profile: profile};
+                if (p.seed !== '' && p.seed !== null && p.seed !== undefined)
+                    body.seed = Number(p.seed);
                 try {
                     const res = await fetch('/simulate/' + this.simulateItem.alias, {
                         method: 'POST',
                         credentials: 'include',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({count: 100, seed: 42})
+                        body: JSON.stringify(body)
                     });
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);

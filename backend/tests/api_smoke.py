@@ -827,6 +827,11 @@ def main():
     sim_after = ch_query("SELECT count() FROM clicks_data")
     check("simulate wrote no ClickHouse rows", sim_before == sim_after,
           f"{sim_before} -> {sim_after}")
+    r = s.post(f"{BASE}/simulate/{extra_alias}",
+               json={"count": 40, "seed": 7, "profile": {"country": "ZZ"}})
+    sim = r.json().get("stats") if r.status_code == 200 else {}
+    check("simulate profile option (country=ZZ) routes through the matched filter",
+          r.status_code == 200 and sim.get("flow_distribution") == {"0": 40}, r.text[:200])
     r = s.post(f"{BASE}/simulate/{extra_alias}", json={"count": 1001})
     check("simulate count > 1000 -> 400", r.status_code == 400, f"{r.status_code} {r.text[:80]}")
     r = s.post(f"{BASE}/simulate/smoke-nope-{os.getpid()}", json={"count": 1})

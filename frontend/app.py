@@ -3827,7 +3827,8 @@ async def simulate_traffic(campaign_alias: str, request: Request) -> Response:
         raise HTTPException(status_code=400, detail="'count' must be between 1 and 1000")
 
     seed = body.get("seed")
-    rng = random.Random(seed if seed is not None else 0)
+    # seed omitted/None -> system entropy; a fixed seed reproduces a run exactly
+    rng = random.Random(seed)
     profile = body.get("profile")
     profile = profile if isinstance(profile, dict) else {}
 
