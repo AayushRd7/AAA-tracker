@@ -3314,6 +3314,28 @@ print("ESCAPED-OK")
         r = s.post(f"{api}/sources/bulk", json={"ids": [linked_src], "action": "delete"})
         check("sources bulk: linked source deleted after unlink", r.status_code == 200
               and r.json().get("updated") == 1, r.text[:150])
+    # deleting a built-in preset must stick: the list endpoint used to re-seed
+    # missing presets on every GET, instantly resurrecting them
+    PRESET_PROBE_NAMES = ["Outbrain", "ExoClick", "PropellerAds", "Adsterra", "Taboola"]
+    r = s.get(f"{api}/sources/")
+    probe = next((x for x in r.json() if x["name"] in PRESET_PROBE_NAMES), None)
+    check("sources presets: catalog preset present for probe", probe is not None,
+          "all probe presets previously deleted")
+    if probe:
+        r = s.post(f"{api}/sources/bulk", json={"ids": [probe["id"]], "action": "delete"})
+        check("sources presets: preset bulk-deleted", r.status_code == 200
+              and r.json().get("updated") == 1, r.text[:150])
+        r = s.get(f"{api}/sources/")
+        check("sources presets: deleted preset stays deleted (no GET re-seed)",
+              all(x["name"] != probe["name"] for x in r.json()),
+              "preset was resurrected by the list endpoint")
+        s.post(f"{api}/sources/", json={
+            "name": probe["name"],
+            "traffic_loss": probe.get("traffic_loss") or 0,
+            "s2s_postback": probe.get("s2s_postback"),
+            "s2s_postback_statuses": probe.get("s2s_postback_statuses") or {},
+            "settings": probe.get("settings") or [],
+            "additional_settings": probe.get("additional_settings") or {}})
 
     print("== Audit log sorting ==")
     r = s.get(f"{api}/audit/", params={"sort_by": "id", "sort_desc": "false", "page_size": 100})

@@ -1461,16 +1461,16 @@ for _preset in SOURCE_PRESETS:
 
 
 def seed_source_presets(db: Session):
-    """Backfill built-in traffic source presets by name (idempotent), so both
-    fresh installs and existing ones end up with the full catalog. Only the
-    name/settings are stored on the row; capabilities live on SOURCE_PRESETS
-    and are served by the /presets endpoint."""
+    """Seed built-in traffic source presets exactly once (marker in settings),
+    adding any presets missing by name so existing installs get them too.
+    User-deleted presets must not be resurrected on every list call."""
+    if db.query(SettingsORM).filter_by(name="source_presets_seeded").first():
+        return
     existing_names = {name for (name,) in db.query(SourceORM.name).all()}
     missing = [p for p in SOURCE_PRESETS if p["name"] not in existing_names]
     if missing:
         db.add_all([SourceORM(name=p["name"], settings=p["settings"]) for p in missing])
-    if not db.query(SettingsORM).filter_by(name="source_presets_seeded").first():
-        db.add(SettingsORM(name="source_presets_seeded", value="1"))
+    db.add(SettingsORM(name="source_presets_seeded", value="1"))
     db.commit()
 
 
