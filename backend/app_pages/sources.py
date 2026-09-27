@@ -1561,6 +1561,35 @@ def update_source(source_id: int, payload: SourceIn, request: Request, db: Sessi
     return source
 
 
+class SourceBulkIn(BaseModel):
+    ids: List[int]
+    action: str  # 'delete'
+
+
+@router.post("/bulk", response_model=dict)
+def bulk_sources(data: SourceBulkIn, request: Request, db: Session = Depends(get_db)):
+    """Bulk delete traffic sources; sources linked to campaigns are skipped."""
+    if data.action != 'delete':
+        raise HTTPException(status_code=400, detail=f"Unknown action '{data.action}'")
+    from audit_logger import audit_event
+    from auth import get_caller
+    from models.campaigns import CampaignORM
+    sources = db.query(SourceORM).filter(SourceORM.id.in_(data.ids)).all()
+    blocked, deleted = [], []
+    for src in sources:
+        if db.query(CampaignORM).filter_by(traffic_source_id=src.id).first():
+            blocked.append(src.name)
+            continue
+        db.delete(src)
+        deleted.append(src.id)
+    db.commit()
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "delete", "sources", ",".join(map(str, deleted)),
+                {"bulk": "delete", "count": len(deleted)}, request.client.host if request.client else "")
+    return {"message": f"Deleted {len(deleted)} sources",
+            "updated": len(deleted), "skipped": blocked}
+
+
 @router.delete("/{source_id}")
 def delete_source(source_id: int, request: Request, db: Session = Depends(get_db)):
     from audit_logger import audit_event

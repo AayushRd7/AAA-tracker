@@ -99,7 +99,9 @@ def restore(entity: str, row_id: int, request: Request):
 
 @audit_router.get("/")
 def read_audit(user: str = "", action: str = "", entity: str = "",
-               page: int = 1, page_size: int = 50, db: Session = Depends(get_db)):
+               page: int = 1, page_size: int = 50,
+               sort_by: str = "id", sort_desc: bool = True,
+               db: Session = Depends(get_db)):
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     where, params = [], {}
@@ -112,11 +114,16 @@ def read_audit(user: str = "", action: str = "", entity: str = "",
     if entity:
         where.append("entity = :e")
         params["e"] = entity
+    # Whitelisted columns only — anything else falls back to the default
+    # newest-first ordering so header-sort clicks can never inject SQL.
+    order_col = sort_by if sort_by in ("id", "at", "username", "action",
+                                       "entity", "entity_id", "ip") else "id"
+    direction = "DESC" if sort_desc else "ASC"
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     total = db.execute(text(f"SELECT count(*) FROM audit_log{clause}"), params).scalar()
     rows = db.execute(
         text(f"SELECT id, at, username, action, entity, entity_id, detail, ip "
-             f"FROM audit_log{clause} ORDER BY id DESC LIMIT :lim OFFSET :off"),
+             f"FROM audit_log{clause} ORDER BY {order_col} {direction} LIMIT :lim OFFSET :off"),
         dict(params, lim=page_size, off=(page - 1) * page_size)).fetchall()
     return {"total": total, "page": page, "page_size": page_size,
             "entries": [{"id": r[0], "at": r[1].isoformat() if r[1] else None,

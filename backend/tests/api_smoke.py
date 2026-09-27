@@ -3269,6 +3269,67 @@ print("ESCAPED-OK")
           r.status_code == 200
           and not [f for f in r.json().get("findings", []) if f.get("campaign_id") == ins_cid], "")
 
+    print("== Sources bulk (multi-select) ==")
+    src_pid = os.getpid()
+    bulk_src_ids = []
+    for n in ("A", "B"):
+        r = s.post(f"{api}/sources/", json={"name": f"Smoke Bulk Src {n} {src_pid}", "traffic_loss": 0})
+        check(f"sources bulk: create {n}", r.status_code == 200 and "id" in r.json(), r.text[:150])
+        bulk_src_ids.append(r.json().get("id"))
+    r = s.post(f"{api}/sources/bulk", json={"ids": bulk_src_ids, "action": "delete"})
+    check("sources bulk: delete both", r.status_code == 200 and r.json().get("updated") == 2,
+          r.text[:150])
+    r = s.get(f"{api}/sources/")
+    leftover = [x["id"] for x in r.json() if x["id"] in bulk_src_ids]
+    check("sources bulk: both gone from the list", leftover == [], str(leftover))
+    r = s.post(f"{api}/sources/bulk", json={"ids": bulk_src_ids, "action": "delete"})
+    check("sources bulk: re-delete is harmless", r.status_code == 200
+          and r.json().get("updated") == 0, r.text[:150])
+    r = s.post(f"{api}/sources/bulk", json={"ids": bulk_src_ids, "action": "nuke"})
+    check("sources bulk: unknown action 400", r.status_code == 400, str(r.status_code))
+    # a source linked to a campaign is skipped, not deleted
+    r = s.post(f"{api}/sources/", json={"name": f"Smoke Linked Src {src_pid}", "traffic_loss": 0})
+    check("sources bulk: linked source created", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    linked_src = r.json().get("id")
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke SrcLink {src_pid}", "alias": f"smoke-srclink-{src_pid}",
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "traffic_source_id": linked_src,
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                "schema": "redirect", "redirect_url": "https://example.com/smoke-srclink",
+                "filters": []}], "postbacks": [], "fallback_url": "", "hide_referrer": False}})
+    check("sources bulk: linked campaign created", r.status_code == 200 and "id" in r.json(),
+          r.text[:150])
+    linked_camp = r.json().get("id")
+    r = s.post(f"{api}/sources/bulk", json={"ids": [linked_src], "action": "delete"})
+    check("sources bulk: linked source skipped", r.status_code == 200
+          and r.json().get("updated") == 0
+          and len(r.json().get("skipped") or []) == 1, r.text[:200])
+    r = s.get(f"{api}/sources/")
+    check("sources bulk: linked source survives", any(x["id"] == linked_src for x in r.json()), "")
+    if linked_camp:
+        r = s.delete(f"{api}/campaigns/{linked_camp}")
+        check("sources bulk: linked campaign cleaned up", r.status_code == 200, r.text[:120])
+    if linked_src:
+        r = s.post(f"{api}/sources/bulk", json={"ids": [linked_src], "action": "delete"})
+        check("sources bulk: linked source deleted after unlink", r.status_code == 200
+              and r.json().get("updated") == 1, r.text[:150])
+
+    print("== Audit log sorting ==")
+    r = s.get(f"{api}/audit/", params={"sort_by": "id", "sort_desc": "false", "page_size": 100})
+    asc_ids = [e["id"] for e in r.json().get("entries", [])]
+    check("audit: sort id ascending", r.status_code == 200 and asc_ids == sorted(asc_ids),
+          str(asc_ids[:6]))
+    r = s.get(f"{api}/audit/", params={"sort_by": "id", "sort_desc": "true", "page_size": 100})
+    desc_ids = [e["id"] for e in r.json().get("entries", [])]
+    check("audit: sort id descending", desc_ids == sorted(desc_ids, reverse=True),
+          str(desc_ids[:6]))
+    r = s.get(f"{api}/audit/", params={"sort_by": "username", "sort_desc": "false"})
+    check("audit: sort by username accepted", r.status_code == 200, r.text[:120])
+    r = s.get(f"{api}/audit/", params={"sort_by": "bogus'; DROP TABLE audit_log;--"})
+    check("audit: unknown sort column ignored safely", r.status_code == 200
+          and [e["id"] for e in r.json().get("entries", [])][:3] == desc_ids[:3], r.text[:150])
+
     print("== MCP / AI-agent access (G76) ==")
     mcp_url = f"{api}/mcp"
 

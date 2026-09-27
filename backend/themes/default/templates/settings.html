@@ -680,12 +680,15 @@
                             </v-row>
 
                             <v-data-table
+                                    v-col-resize:audit="auditHeaders"
                                     :headers="auditHeaders"
                                     :items="auditEntries"
                                     dense
                                     :loading="auditLoading"
                                     :server-items-length="auditTotal"
                                     :page.sync="auditPage"
+                                    :sort-by.sync="auditSortBy"
+                                    :sort-desc.sync="auditSortDesc"
                                     :items-per-page="50"
                                     hide-default-footer
                             >
@@ -886,6 +889,8 @@
                 auditEntries: [],
                 auditTotal: 0,
                 auditPage: 1,
+                auditSortBy: 'id',
+                auditSortDesc: true,
                 auditLoading: false,
                 auditFilterUser: '',
                 auditFilterAction: '',
@@ -953,7 +958,10 @@
             darkMode(on) {
                 if (window.setTheme) window.setTheme(on ? 'dark' : 'light');
                 this.$vuetify.theme.dark = !!on;
-            }
+            },
+            // Header sort arrows are server-side: a new ordering refetches page 1
+            auditSortBy() { this.loadAudit(1); },
+            auditSortDesc() { this.loadAudit(1); },
         },
         computed:{
               postbackUrl() {
@@ -1107,6 +1115,8 @@
                 if (this.auditFilterUser) params.set('user', this.auditFilterUser);
                 if (this.auditFilterAction) params.set('action', this.auditFilterAction);
                 if (this.auditFilterEntity) params.set('entity', this.auditFilterEntity);
+                if (this.auditSortBy) params.set('sort_by', this.auditSortBy);
+                params.set('sort_desc', this.auditSortDesc ? 'true' : 'false');
                 fetch(`/backend/api/audit/?${params.toString()}`, {credentials: 'include'})
                     .then(r => r.json())
                     .then(data => {
