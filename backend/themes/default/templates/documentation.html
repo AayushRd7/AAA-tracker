@@ -152,6 +152,17 @@
                                 sending real visitors — it runs your flows, filters, schedules and caps in memory
                                 without writing anything.
                             </div>
+                            <h3 class="doc-h3">Moving around</h3>
+                            <ul class="doc-list">
+                                <li><b>Global search</b> — the rounded field in the top bar finds campaigns, offers,
+                                landings, domains, sources, networks and conversions (including tags and click IDs)
+                                as you type; Enter jumps to the first match.</li>
+                                <li><b>Bulk actions</b> — select rows with the checkboxes on campaigns, sources and
+                                affiliate networks to archive, restore or delete many at once.</li>
+                                <li><b>Column resize</b> — drag the handle at the edge of any table header to resize
+                                it (widths persist per table); double-click a handle to reset.</li>
+                                <li><b>Dark mode</b> — Settings → General → theme, remembered per browser.</li>
+                            </ul>
                         </section>
 
                         <!-- 2 ── CAMPAIGNS & FLOWS ───────────────────────── -->
@@ -334,6 +345,13 @@
     "bot_blocked": false
   }
 }</pre>
+                            <h3 class="doc-h3">List tools</h3>
+                            <p>
+                                On the campaign list: the row menu <b>clones</b> a campaign (deep-copies flows,
+                                filters and postbacks into a paused copy), checkboxes enable <b>bulk
+                                activate / pause / archive / restore / delete</b>, and tag chips below the name
+                                click-filter the list. CSV export/import round-trips the full campaign set.
+                            </p>
                         </section>
 
                         <!-- 3 ── TRACKING METHODS ────────────────────────── -->
@@ -522,6 +540,26 @@
                                 All tables (report, click log, conversion log) export to CSV. Every cell is
                                 double-quoted with internal quotes escaped, so values always open as plain text in
                                 spreadsheet apps and separators/newlines can't break the row structure.
+                            </p>
+
+                            <h3 class="doc-h3">Anomaly insights</h3>
+                            <p>
+                                Six always-on detectors compare every active campaign's last 24 hours against its
+                                own trailing 7-day baseline and surface findings on the dashboard card and the
+                                Fraud page's <b>Insights</b> tab: conversion-rate drops, cost spikes, click-out
+                                outages (cross-referenced with monitor-disabled flows), bot surges, revenue stops
+                                and zero-conversion spend. Each finding carries a severity and magnitude; new
+                                critical findings trigger one Telegram alert per run. Results are cached (the tab
+                                loads instantly), <b>Run now</b> recomputes on demand, and the detectors ride the
+                                auto-rules cadence — no separate scheduler.
+                            </p>
+
+                            <h3 class="doc-h3">Shared public reports</h3>
+                            <p>
+                                Any saved report can be shared as a standalone public page: Reports → the report's
+                                <b>share</b> action creates a tokenized link that opens a clean, shell-less view of
+                                just that report's breakdown — no login required, ideal for clients and partners.
+                                Remove the share (or regenerate the token) to revoke access instantly.
                             </p>
                         </section>
 
@@ -829,6 +867,23 @@
                                 users, settings, fraud, monitor, rules, optimizer, status, …) accepts the session
                                 cookie or an <code>Authorization: Bearer &lt;api-token&gt;</code> header.
                             </p>
+                            <h3 class="doc-h3">AI-agent access (MCP)</h3>
+                            <p>
+                                <code>POST /backend/api/mcp</code> is a <b>Model Context Protocol</b> endpoint
+                                (JSON-RPC 2.0) for AI assistants and automation: <code>initialize</code>,
+                                <code>ping</code>, <code>tools/list</code> and <code>tools/call</code> with an
+                                <code>arguments</code> object. Admin session or Bearer token required. Nine tools
+                                are exposed — <code>campaigns.list</code>, <code>campaigns.get</code>,
+                                <code>campaigns.metrics</code>, <code>campaigns.set_status</code> (the only mutator,
+                                audit-logged), <code>offers.list</code>, <code>sources.list</code>,
+                                <code>reports.summary</code>, <code>conversions.recent</code> and
+                                <code>insights.latest</code>; periods are <code>today</code>, <code>7d</code>,
+                                <code>30d</code> or <code>all</code>.
+                            </p>
+                            <pre class="doc-code">curl -X POST "https://your-domain.com/backend/api/mcp" \
+  -H "Authorization: Bearer &lt;api-token&gt;" -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"campaigns.metrics","arguments":{"period":"7d"}}}'</pre>
                             <h3 class="doc-h3">Examples</h3>
                             <p>S2S postback from a network:</p>
                             <pre class="doc-code">curl "https://your-domain.com/pb/9f2c1a7e/sale/25.50?transaction_id=T123"</pre>
@@ -853,6 +908,7 @@
                                 <tr><td>Monitor</td><td>every 15 min (first pass ~1 min after boot)</td><td>Walks all active campaigns' flow URLs, records status/latency in <code>monitor_state</code>; after <b>3 consecutive failures</b> it can auto-disable the flow (Settings → Monitoring, default off) and alert.</td></tr>
                                 <tr><td>Auto rules</td><td>every few minutes</td><td>Evaluates every enabled rule against live campaign metrics over its lookback window: metrics <code>roi</code>, <code>profit</code>, <code>cost</code>, <code>conversions</code>, <code>clicks</code>, <code>revenue</code>; conditions compare (e.g. ROI &lt; −20% over 6h); when <b>all</b> conditions match the action fires: <code>pause_campaign</code>, <code>alert_telegram</code> or <code>alert_email</code>. Alert actions fire <b>once per continuous match</b> and re-arm after the condition breaks.</td></tr>
                                 <tr><td>Optimizer</td><td>periodic</td><td>For campaigns with the optimizer on, recomputes flow weights from the chosen metric over the lookback window, respecting min clicks, max shift %, the exploration boost and the weight floor.</td></tr>
+                                <tr><td>Anomaly insights</td><td>with the auto-rules pass</td><td>Runs the six insight detectors over all active campaigns, caches the findings block and fires one Telegram alert per run when new critical anomalies appear.</td></tr>
                                 <tr><td>Retention prune</td><td>daily</td><td>Deletes raw clicks older than the configured retention window (Settings → Data retention).</td></tr>
                                 <tr><td>Email reports</td><td>periodic</td><td>Sends the daily summary email and due saved-report schedules (recipients + UTC hour from the schedule, SMTP/Brevo from Settings).</td></tr>
                                 </tbody>

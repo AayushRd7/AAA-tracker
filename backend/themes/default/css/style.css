@@ -1567,6 +1567,7 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 /* System status tab container */
 .doc-status {
   max-width: 860px;
+  padding: var(--space-4, 16px) var(--space-6, 24px) var(--space-8, 48px);
 }
 
 /* Mobile: rail becomes a top dropdown */
