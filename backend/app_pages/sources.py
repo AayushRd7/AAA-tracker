@@ -1421,6 +1421,32 @@ _SOURCE_LOGO_DOMAINS = {
 _SOURCE_LOGO_URLS = {
     "Ad2games": "https://files.startupranking.com/startup/thumb/59015_fc7ff7df388c24b028de73095f314dc93eac6179_ad2games_l.png",
 }
+_SOURCE_POSTBACK_TEMPLATE = "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"
+# Sources whose conversion postback is keyed on a sub-id rather than the
+# external-id slot (verified against each platform's postback docs pattern).
+_SOURCE_POSTBACK_MACRO_OVERRIDES = {
+    "PropellerAds": "${SUBID}",
+    "PopAds": "${SUBID}",
+}
+
+
+def _source_preset_postback(preset: dict) -> str:
+    """Ready-to-hand-to-the-source S2S postback: the tracker's /pb/ URL with
+    the SOURCE's own click-id macro in place of {click_id}. Empty when the
+    preset doesn't map a click macro (better blank than a wrong URL). The
+    YOUR-TRACKER-DOMAIN placeholder is resolved by the UI at copy/create."""
+    name = preset.get("name", "")
+    macro = _SOURCE_POSTBACK_MACRO_OVERRIDES.get(name, "")
+    if not macro:
+        for param in preset.get("settings", []):
+            if param.get("parameter") == "external_id" and param.get("token"):
+                macro = param["token"]
+                break
+    if not macro:
+        return ""
+    return _SOURCE_POSTBACK_TEMPLATE.replace("{click_id}", macro)
+
+
 for _preset in SOURCE_PRESETS:
     _name = _preset["name"]
     if _name in _SOURCE_LOGO_URLS:
@@ -1432,6 +1458,7 @@ for _preset in SOURCE_PRESETS:
         _m = re.search(r"([a-z0-9-]+(?:\.[a-z0-9-]+)+)", _name, re.I)
         _preset["logo_domain"] = _m.group(1).lower()
     # else: no logo_domain → UI renders the initial-letter fallback
+    _preset["postback"] = _source_preset_postback(_preset)
 
 
 def seed_source_presets(db: Session):
@@ -1455,7 +1482,7 @@ def get_source_presets():
     presets = sorted(
         ({"name": p["name"], "capabilities": p["capabilities"],
           "logo_domain": p.get("logo_domain"), "logo_url": p.get("logo_url"),
-          "params": p["settings"]}
+          "postback": p.get("postback"), "params": p["settings"]}
          for p in SOURCE_PRESETS),
         key=lambda p: (p["name"].lower() == "other", p["name"].lower()),
     )

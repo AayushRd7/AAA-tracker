@@ -1,187 +1,856 @@
+{% raw %}
 <script type="text/x-template" id="about-template">
     <v-container fluid>
         <div class="page-title">Documentation</div>
-        <div class="page-subtitle mb-4">About AAA Tracker and its sections</div>
+        <div class="page-subtitle mb-3">AAA Tracker help, reference and system status</div>
 
-        <v-row class="mt-2">
-            <v-col cols="3">
-                <v-card flat class="py-2">
-                <v-tabs vertical
-                v-model="tabAbout">
-                    <v-tab><v-icon small left>mdi-text-box-search-outline</v-icon>Logs</v-tab>
-                    <v-tab><v-icon small left>mdi-information-outline</v-icon>Overview</v-tab>
-                    <v-tab><v-icon small left>mdi-view-dashboard-outline</v-icon>Dashboard</v-tab>
-                    <v-tab><v-icon small left>mdi-bullhorn-outline</v-icon>Campaigns</v-tab>
-                    <v-tab><v-icon small left>mdi-file-document-outline</v-icon>Landing Pages</v-tab>
-                    <v-tab><v-icon small left>mdi-handshake-outline</v-icon>Affiliate Networks</v-tab>
-                    <v-tab><v-icon small left>mdi-tag-outline</v-icon>Offers</v-tab>
-                    <v-tab><v-icon small left>mdi-share-variant-outline</v-icon>Sources</v-tab>
-                    <v-tab><v-icon small left>mdi-chart-box-outline</v-icon>Reports</v-tab>
-                    {% if is_authenticated_user_type == 'admin' %}
-                    <v-tab><v-icon small left>mdi-earth</v-icon>Domains</v-tab>
-                    <v-tab><v-icon small left>mdi-cog-outline</v-icon>Settings</v-tab>
-                    <v-tab><v-icon small left>mdi-account-group-outline</v-icon>Users</v-tab>
-                    <v-tab><v-icon small left>mdi-pulse</v-icon>System status</v-tab>
-                    {% endif %}
-                </v-tabs>
-                </v-card>
-            </v-col>
+        {% endraw %}{% if is_authenticated_user_type == 'admin' %}{% raw %}
+        <v-tabs v-model="tabAbout" class="doc-tabs mb-4">
+            <v-tab><v-icon small left>mdi-book-open-variant</v-icon>Documentation</v-tab>
+            <v-tab><v-icon small left>mdi-pulse</v-icon>System status</v-tab>
+        </v-tabs>
+        {% endraw %}{% endif %}{% raw %}
 
-            <v-col cols="9">
-                <v-card flat class="pa-4">
-                <v-tabs-items v-model="tabAbout">
-                    <v-tab-item>
-                        <div class="about-heading">Logs</div>
-                        <p>
-                            AAA Tracker Logs links
-                            <a href="/_aaa_tracker_debug" target="_blank">View logs</a>
-                        </p>
-                    </v-tab-item>
-                    <v-tab-item>
-                        <div class="about-heading">Overview</div>
-                        <p>
-                            AAA Tracker is a web application designed to help you manage and track your affiliate marketing campaigns.
-                            It provides a user-friendly interface for managing offers, sources, reports, and domains.
-                            The application is built using modern web technologies, including Vue.js and Vuetify, to ensure a smooth
-                            and responsive user experience.
+        <v-tabs-items v-model="tabAbout" class="doc-tabs-items">
+            <!-- ===================== DOCUMENTATION HUB ===================== -->
+            <v-tab-item>
+                <div class="doc-layout">
+                    <aside class="doc-rail">
+                        <v-text-field
+                                v-model="docSearch"
+                                prepend-inner-icon="mdi-magnify"
+                                placeholder="Search docs"
+                                clearable
+                                dense
+                                outlined
+                                hide-details
+                                class="doc-search"
+                                aria-label="Search documentation"></v-text-field>
+                        <nav class="doc-rail-nav" aria-label="Documentation sections">
+                            <a v-for="sec in visibleSections" :key="sec.id"
+                               class="doc-rail-link"
+                               :class="{ 'doc-rail-link--active': activeSection === sec.id }"
+                               :href="'#' + sec.id"
+                               @click.prevent="scrollToSection(sec.id)">
+                                <v-icon x-small class="mr-2">{{ sec.icon }}</v-icon>
+                                <span>{{ sec.title }}</span>
+                            </a>
+                            <div v-if="!visibleSections.length" class="doc-rail-empty">
+                                No sections match your search.
+                            </div>
+                        </nav>
+                    </aside>
 
-                            The application is designed to be easy to use, with a clean and intuitive interface that allows you to
-                            quickly navigate through different sections. You can easily add, edit, and delete offers, sources, and
-                            domains, as well as view detailed reports on your campaigns' performance.
-                        </p>
-                    </v-tab-item>
+                    <div class="doc-rail-mobile">
+                        <v-select
+                                :items="visibleSections"
+                                item-text="title"
+                                item-value="id"
+                                :value="activeSection"
+                                @change="scrollToSection"
+                                label="Jump to section"
+                                outlined
+                                dense
+                                hide-details></v-select>
+                    </div>
 
-                    <v-tab-item>
-                        <div class="about-heading">Dashboard</div>
-                        <p>
-                            The main overview of your advertising performance. It displays real-time metrics like
-                            clicks, unique clicks, conversions, cost, revenue, and ROI. You can filter by date range and quickly spot
-                            trends, spikes, or drops in your campaigns. This is your central command center for quick insights.
-                        </p>
-                    </v-tab-item>
+                    <div class="doc-content">
+                        <!-- 1 ── GETTING STARTED ─────────────────────────── -->
+                        <section class="doc-section" id="getting-started" data-doc-id="getting-started">
+                            <h2 class="doc-h2">Getting started</h2>
+                            <p>
+                                AAA Tracker is a self-hosted click tracker and analytics platform for affiliate
+                                marketing. You run it on your own server; the app keeps your campaign configuration
+                                in <b>Postgres</b>, streams every click, visit and impression into
+                                <b>ClickHouse</b> for fast analytics, and uses <b>nginx</b> as the public edge
+                                (reverse proxy, SSL termination) with <b>certbot</b> issuing per-domain
+                                certificates.
+                            </p>
+                            <h3 class="doc-h3">Logging in</h3>
+                            <p>
+                                Open <code>/backend</code> in your browser and sign in with the admin account
+                                created during installation. Each team member gets their own account — see
+                                <a href="#users-security" class="doc-link" @click.prevent="scrollToSection('users-security')">Users &amp; security</a>.
+                            </p>
+                            <h3 class="doc-h3">Your first campaign — checklist</h3>
+                            <ol class="doc-steps">
+                                <li><b>Create a traffic source</b> — either pick a preset from the catalog
+                                    (Sources → From catalog) or create one manually and map its tokens
+                                    (see <a href="#traffic-sources" class="doc-link" @click.prevent="scrollToSection('traffic-sources')">Traffic sources</a>).</li>
+                                <li><b>Create an affiliate network</b> — pick a catalog preset or add one manually,
+                                    and set its S2S postback URL
+                                    (see <a href="#affiliate-networks" class="doc-link" @click.prevent="scrollToSection('affiliate-networks')">Affiliate networks</a>).</li>
+                                <li><b>Create an offer</b> — paste the network offer URL with the
+                                    <code>{click_id}</code> macro where the network expects your tracking id.</li>
+                                <li><b>Add a landing</b> — upload a zip, link an external page, or grab a page by URL
+                                    (see <a href="#landings" class="doc-link" @click.prevent="scrollToSection('landings')">Landings</a>).</li>
+                                <li><b>Create the campaign</b> — bind source, flows, filters and caps
+                                    (see <a href="#campaigns-flows" class="doc-link" @click.prevent="scrollToSection('campaigns-flows')">Campaigns &amp; flows</a>).</li>
+                                <li><b>Fire a test hit</b> — open the campaign URL with test parameters and confirm
+                                    the click lands in the Dashboard live feed and the report builder.</li>
+                                <li><b>Test the postback</b> — send a test conversion to
+                                    <code>/pb/{click_id}/{status}/{payout}</code> and check the conversion log.</li>
+                            </ol>
+                            <div class="doc-callout doc-callout--info">
+                                Use the built-in <b>traffic simulation</b> (campaign row → simulate button) before
+                                sending real visitors — it runs your flows, filters, schedules and caps in memory
+                                without writing anything.
+                            </div>
+                        </section>
 
-                    <v-tab-item>
-                        <div class="about-heading">Campaigns</div>
-                        <p>
-                            These are traffic entry points that connect your sources with landing pages and offers.
-                            Each campaign defines the flow rules, country targeting, devices, rotation logic, and how tokens are passed.
-                            You control how traffic is routed and optimized using advanced rules and flow logic.
-                        </p>
-                    </v-tab-item>
+                        <!-- 2 ── CAMPAIGNS & FLOWS ───────────────────────── -->
+                        <section class="doc-section" id="campaigns-flows" data-doc-id="campaigns-flows">
+                            <h2 class="doc-h2">Campaigns &amp; flows</h2>
+                            <p>
+                                A campaign is a traffic entry point. Its URL (<code>https://your-domain/{alias}</code>)
+                                accepts GET and POST. Each campaign holds an ordered list of <b>flows</b>; for every
+                                visitor the tracker picks one eligible flow and executes its <b>schema</b>.
+                            </p>
 
-                    <v-tab-item>
-                        <div class="about-heading">Landing Pages</div>
-                        <p>
-                            These are pre-offer pages used to warm up visitors or capture data before redirecting
-                            them to the offer. In this section, you can upload landing files (ZIP, HTML, PHP), assign tags, and
-                            configure how landers behave inside campaign flows. You can also A/B test landers.
-                        </p>
-                    </v-tab-item>
-
-                    <v-tab-item>
-                        <div class="about-heading">Affiliate Networks</div>
-                        <p>
-                            This is where you manage your partnerships with external affiliate networks. You
-                            define the S2S postback structure, tokens, and offer tracking parameters.
-                        </p>
-                    </v-tab-item>
-
-                    <v-tab-item>
-                        <div class="about-heading">Offers</div>
-                        <p>
-                            The final destinations where your traffic is sent. Each offer includes a payout, targeting
-                            (countries), currency, tokens, and is linked to an affiliate network.
-                        </p>
-                    </v-tab-item>
-
-                    <v-tab-item>
-                        <div class="about-heading">Sources</div>
-                        <p>
-                            Defines your traffic source configurations. You can predefine UTM
-                            parameters, postback URLs, and token structures.
-                        </p>
-                    </v-tab-item>
-
-                    <v-tab-item>
-                        <div class="about-heading">Reports</div>
-                        <p>
-                            Your performance breakdown hub. Get detailed analytics on campaigns, landers, offers,
-                            countries, devices, conversions, and more.
-                        </p>
-                    </v-tab-item>
-
-                    {% if is_authenticated_user_type == 'admin' %}
-                    <v-tab-item>
-                        <div class="about-heading">Domains</div>
-                        <p>
-                            Manage your tracking and redirect domains. You can add custom domains, group them,
-                            configure HTTPS redirects, and assign specific domains to campaigns or flows.
-                        </p>
-                    </v-tab-item>
-
-                    <v-tab-item>
-                        <div class="about-heading">Settings</div>
-                        <p>
-                            The system-wide configuration panel. Adjust timezone, currency, logging behavior,
-                            auto-refresh reports, token behavior, default parameters, and more.
-                        </p>
-                    </v-tab-item>
-
-                    <v-tab-item>
-                        <div class="about-heading">Users</div>
-                        <p>
-                            Manage access to your tracker. Create users, assign roles, and control login access.
-                        </p>
-                    </v-tab-item>
-
-                    <v-tab-item>
-                        <div class="about-heading">System status</div>
-                        {% raw %}
-                        <div v-if="status" class="mt-2">
-                            <v-row dense>
-                                <v-col cols="6" sm="3" v-for="card in statusCards" :key="card.title">
-                                    <v-card class="pa-3 stat-card">
-                                        <div class="text-caption grey--text text--darken-1">{{ card.title }}</div>
-                                        <div class="text-h6 font-weight-bold mt-2" :class="card.colorClass">{{ card.value }}</div>
-                                        <div v-if="card.hint" class="caption grey--text mt-1">{{ card.hint }}</div>
-                                    </v-card>
-                                </v-col>
-                            </v-row>
-
-                            <div class="about-heading mt-6">Background loops</div>
-                            <v-simple-table dense>
+                            <h3 class="doc-h3">Flow schemas</h3>
+                            <table class="doc-table">
                                 <thead>
-                                <tr><th>Loop</th><th>Last run</th></tr>
+                                <tr><th>Schema</th><th>What happens</th></tr>
                                 </thead>
                                 <tbody>
-                                <tr v-for="(ts, name) in status.loops" :key="name">
-                                    <td class="text-capitalize">{{ name }}</td>
-                                    <td>
-                                        <span v-if="ts">{{ $formatDate(ts) }}</span>
-                                        <span v-else class="grey--text">not yet</span>
-                                    </td>
-                                </tr>
+                                <tr><td><code>direct</code></td><td>Redirects straight to the offer URL. <code>{click_id}</code> is substituted if present, otherwise appended as <code>?click_id=</code>.</td></tr>
+                                <tr><td><code>landing_offer</code></td><td>Serves the chosen landing page; the landing's click-out link points at <code>/c/{alias}/{offer_id}</code> which then redirects to the offer.</td></tr>
+                                <tr><td><code>landing_only</code></td><td>Serves a landing page only — no offer click-out.</td></tr>
+                                <tr><td><code>multi</code></td><td>Picks one landing and one offer at random from the configured pools (A/B rotation).</td></tr>
+                                <tr><td><code>redirect</code></td><td>302-redirects to a fixed URL. <code>send_query_params</code> / <code>send_se_referrer</code> campaign options append the hit's query string / referrer.</td></tr>
+                                <tr><td><code>redirect_campaign</code></td><td>Redirects the visitor into another campaign. Chains deeper than <b>3</b> fall back to 404 / the campaign fallback URL.</td></tr>
+                                <tr><td><code>return_404</code></td><td>Answers HTTP 404 — use as a "drop" flow for unwanted traffic.</td></tr>
                                 </tbody>
-                            </v-simple-table>
+                            </table>
 
-                            <div class="caption grey--text mt-4">
-                                App version {{ status.version }} · polls every 15s
-                                <template v-if="status.landings_disk">
-                                    · landings disk {{ status.landings_disk.used_gb }}/{{ status.landings_disk.total_gb }} GB free
-                                </template>
+                            <h3 class="doc-h3">Flow types, position and weight</h3>
+                            <ul class="doc-list">
+                                <li><b>forced</b> flows are always evaluated first (sorted ahead of everything else);</li>
+                                <li><b>regular</b> flows follow, ordered by their <b>position</b>;</li>
+                                <li><b>default</b> flows have no filters and catch everything that no other flow matched.</li>
+                            </ul>
+                            <p>
+                                The campaign's <b>distribution mode</b> decides how a matching flow is chosen:
+                                <b>Position</b> — first matching flow in sort order wins; <b>Weight&nbsp;%</b> —
+                                matching flows split traffic randomly by their weight (e.g. 70/30).
+                            </p>
+
+                            <h3 class="doc-h3">Filters</h3>
+                            <p>
+                                Flows (except <code>default</code>) carry filter <b>groups</b>. Groups combine with
+                                AND ("all groups must match") or OR ("any group must match"); conditions inside a
+                                group combine with their own AND/OR, and every condition can be inverted
+                                ("IS&nbsp;NOT"). Operators: <code>equals</code>, <code>not_equals</code>,
+                                <code>contains</code>, <code>not_contains</code>, <code>starts_with</code>,
+                                <code>ends_with</code>, <code>regex</code>, <code>greater</code>, <code>less</code>,
+                                <code>greater_eq</code>, <code>less_eq</code>, <code>in</code>, <code>not_in</code>,
+                                <code>exists</code>, <code>not_exists</code>, <code>cidr</code> (comma-separated IP
+                                ranges such as <code>10.0.0.0/8</code>).
+                            </p>
+                            <p>Filterable fields:</p>
+                            <table class="doc-table">
+                                <thead><tr><th>Group</th><th>Fields</th></tr></thead>
+                                <tbody>
+                                <tr><td>Geo</td><td><code>country</code>, <code>region</code>, <code>city</code></td></tr>
+                                <tr><td>Device</td><td><code>device_type</code>, <code>device_brand</code>, <code>device_model</code>, <code>os</code>, <code>os_version</code>, <code>browser</code>, <code>browser_version</code>, <code>language</code></td></tr>
+                                <tr><td>Traffic</td><td><code>ip</code>, <code>isp</code>, <code>connection_type</code>, <code>referrer</code>, <code>keyword</code>, <code>traffic_source_name</code>, <code>campaign_id</code>, <code>external_id</code>, <code>ad_campaign_id</code>, <code>is_bot</code>, <code>is_using_proxy</code></td></tr>
+                                <tr><td>SubIDs &amp; UTM</td><td><code>sub_id_1</code> … <code>sub_id_10</code>, <code>utm_source</code>, <code>utm_medium</code>, <code>utm_campaign</code>, <code>utm_term</code>, <code>utm_content</code></td></tr>
+                                <tr><td>Time</td><td><code>hour_of_day</code> (numeric), <code>day_of_week</code></td></tr>
+                                </tbody>
+                            </table>
+
+                            <h3 class="doc-h3">Schedules (dayparting) and click caps</h3>
+                            <p>
+                                Each flow can carry a <b>schedule</b>: a timezone, a set of weekdays and an
+                                hour range. Outside the window the flow is ineligible and traffic falls through to
+                                the next flow or the fallback URL.
+                            </p>
+                            <p>
+                                <b>Click caps</b> per flow — <code>per_hour</code>, <code>per_day</code>,
+                                <code>total</code> — are counted from ClickHouse; once a cap is hit the flow stops
+                                matching.
+                            </p>
+
+                            <h3 class="doc-h3">Offer caps and overflow</h3>
+                            <p>
+                                On the offer itself you can set a <b>daily conversions cap</b>; when the cap is
+                                reached, traffic is routed to the configured <b>overflow offer</b> instead.
+                            </p>
+
+                            <h3 class="doc-h3">Visitor stickiness (bind)</h3>
+                            <p>
+                                When <b>bind visitors to their flow</b> is on, the first assigned flow/offer/landing
+                                is stored in a signed, HttpOnly <code>aaa_bind</code> cookie (30-day TTL; the
+                                <b>uniqueness bind TTL</b> setting controls the hours) and returning visitors keep
+                                their assignment — this makes weight-based A/B splits stable. Bindings are
+                                invalidated automatically when the flow list or distribution mode changes (a
+                                config hash is baked into the cookie). Uniqueness methods: <code>ip</code>,
+                                <code>ip_ua</code>, <code>cookie</code>.
+                            </p>
+
+                            <h3 class="doc-h3">Campaign-level options</h3>
+                            <ul class="doc-list">
+                                <li><b>Fallback URL</b> — where visitors go when no flow matches (instead of the platform 404 page).</li>
+                                <li><b>Hide referrer</b> — strip the referrer on redirect.</li>
+                                <li><b>Send query params</b> / <b>send referrer</b> — forward the incoming query string / search-engine referrer to <code>direct</code> and <code>redirect</code> destinations.</li>
+                                <li><b>Use page title as keyword</b> — when no keyword parameter arrives, the referring page's <code>&lt;title&gt;</code> is used.</li>
+                            </ul>
+
+                            <h3 class="doc-h3">Delivery actions</h3>
+                            <p>How the visitor is delivered to the destination (for landing schemas the action applies at the offer click-out):</p>
+                            <table class="doc-table">
+                                <thead><tr><th>Action</th><th>Behavior</th><th>Typical use</th></tr></thead>
+                                <tbody>
+                                <tr><td><code>302 redirect</code></td><td>Classic HTTP 302 to the destination.</td><td>Default everywhere.</td></tr>
+                                <tr><td><code>iFrame</code></td><td>Serves an iframe pointing at the destination.</td><td>Keep the visitor on your domain.</td></tr>
+                                <tr><td><code>Form POST</code></td><td>Auto-submits a form (POST) to the destination.</td><td>Destinations that require POSTed query data.</td></tr>
+                                <tr><td><code>Serve content (CURL)</code></td><td>Fetches the destination server-side and serves the body directly.</td><td>Cloaking-friendly serving where the destination must not see the visitor's request.</td></tr>
+                                <tr><td><code>Show HTML</code></td><td>Serves your custom HTML snippet.</td><td>Interstitial pages, compliance walls.</td></tr>
+                                <tr><td><code>Do nothing</code></td><td>Tracks the hit and returns 200 with no redirect.</td><td>Tracking-only campaigns.</td></tr>
+                                </tbody>
+                            </table>
+
+                            <h3 class="doc-h3">Campaign shield (cloaking)</h3>
+                            <p>
+                                A per-campaign whitelist defines who is <i>allowed</i>: whitelisted <b>IP CIDRs</b>,
+                                <b>referrer substrings</b> or a <b>User-Agent regex</b> (any match whitelists; an
+                                empty whitelist disables the shield). Everyone else gets the shield action:
+                            </p>
+                            <ul class="doc-list">
+                                <li><b>Blank</b> — untracked empty 200 page;</li>
+                                <li><b>404</b> — untracked Not Found;</li>
+                                <li><b>Watch</b> — tracked, but the row is forced to <code>is_bot</code> with a fraud score of at least 50.</li>
+                            </ul>
+                            <p>
+                                With the honeypot option on, verified crawlers can never be whitelisted and always
+                                receive the shield action. Honeypot-flagged visitors are never whitelisted either.
+                            </p>
+
+                            <h3 class="doc-h3">Funnels</h3>
+                            <p>
+                                Funnel mode replaces flows with an ordered list of <b>steps</b> (each step is a
+                                landing + offers with schema <code>landing_offer</code> or <code>landing_only</code>).
+                                A visitor sees one step per campaign-URL visit; the step <b>advances only on a
+                                successful click-out</b> to the offer. The current step lives in the signed bind
+                                cookie, so editing the funnel resets everyone to step 0. The funnel report shows
+                                per-step visits, click-outs, conversions, step CR and cumulative CR.
+                            </p>
+
+                            <h3 class="doc-h3">Optimizer</h3>
+                            <p>
+                                The per-campaign optimizer (Optimizer page) periodically re-weights flows by a
+                                chosen metric: <b>EPC</b> (profit per click), <b>CR</b>, <b>profit</b> or
+                                <b>revenue</b>, evaluated over a <b>lookback window</b> (hours, 1–720). Guards:
+                                <b>min clicks</b> before a flow may be judged, a <b>max shift %</b> per cycle, an
+                                <b>exploration boost</b> so fresh flows accumulate data, and a <b>floor</b> — flows
+                                with a zero/negative metric keep ~10% of the average weight, never 0.
+                            </p>
+
+                            <h3 class="doc-h3">Traffic simulation</h3>
+                            <p>
+                                <code>POST /simulate/{alias}</code> (admin session required) runs
+                                <code>count</code> (1–1000) synthetic visitors through the real routing pipeline
+                                in memory — filters, schedules, stickiness-independent selection and caps are
+                                evaluated for real. It is fully side-effect free: no ClickHouse/Postgres writes, no
+                                redirects, no postbacks. Returns flow/schema/offer distributions plus counters for
+                                rejected-by-filters, capped, scheduled-out, fallback and bot-blocked. An optional
+                                <code>profile</code> pins country / OS / browser / device / IP prefix; a
+                                <code>seed</code> makes runs reproducible.
+                            </p>
+
+                            <h3 class="doc-h3">Click API</h3>
+                            <p>
+                                <code>POST /click-api/{alias}</code> is server-to-server click processing: a mobile
+                                app or webview POSTs the visitor's real <code>ip</code> (required, validated),
+                                <code>user_agent</code>, <code>referrer</code>, <code>language</code>,
+                                <code>click_id</code> and any sub_ids as JSON, and gets the routing decision back
+                                instead of a redirect. The full pipeline runs (enrich, bot rules, blacklists,
+                                shield, honeypot, filters, caps) and the click is tracked; no cookies are set.
+                                Response:
+                            </p>
+                            <pre class="doc-code">{
+  "click_id": "…",
+  "decision": {
+    "flow_index": 0, "schema": "landing_offer",
+    "action": "redirect", "url": "…",
+    "bot_rule": "ua_regex", "blacklist": "block",
+    "shield": "blank", "shield_blocked": false,
+    "bot_blocked": false
+  }
+}</pre>
+                        </section>
+
+                        <!-- 3 ── TRACKING METHODS ────────────────────────── -->
+                        <section class="doc-section" id="tracking-methods" data-doc-id="tracking-methods">
+                            <h2 class="doc-h2">Tracking methods</h2>
+
+                            <h3 class="doc-h3">Campaign URL</h3>
+                            <p>
+                                Every campaign gets a public URL on one of your tracking domains:
+                                <code>https://your-domain/{alias}?param=value…</code>. Query, POST and cookie
+                                parameters all merge into the hit meta; tokens registered in the campaign's
+                                <b>paramsIdMapping</b> are mapped to their canonical parameter names (a token
+                                mapped to the <code>click</code> parameter bridges a network's click id into
+                                <code>click_id</code>).
+                            </p>
+
+                            <h3 class="doc-h3">Click-out</h3>
+                            <p>
+                                Landings link to the offer through
+                                <code>/c/{alias}/{offer_id}</code>. The handler re-enriches the request, restores
+                                the visitor's flow from the bind cookie, substitutes every
+                                <code>{placeholder}</code> found in the offer URL from the hit meta, always appends
+                                <code>click_id</code>, applies the flow's delivery action and records the click
+                                (with the flow index, so click caps and the conversion log can join on it).
+                                Funnel campaigns advance their step here.
+                            </p>
+
+                            <h3 class="doc-h3">S2S postback</h3>
+                            <p>
+                                Networks fire conversions into
+                                <code>GET /pb/{click_id}/{status}/{payout}</code>. Built-in statuses:
+                                <code>lead</code>, <code>sale</code>, <code>upsale</code>, <code>rejected</code>,
+                                <code>hold</code>, <code>trash</code> — plus any custom statuses you define in
+                                Settings. Unknown statuses return 400. A secret key and/or IP allowlist can be
+                                required (Settings → Postback security); violations get 403.
+                            </p>
+                            <p>Behavior of <code>record_conversion</code>:</p>
+                            <ul class="doc-list">
+                                <li><b>Upsert</b> — status follows the <i>latest</i> postback (lead → sale upgrades); payout and revenue <b>accumulate</b> (LTV) on repeat conversions for the same click.</li>
+                                <li><b>Dedupe</b> — a repeated <code>transaction_id</code> (or <code>external_id</code>), or an identical anonymous (status, payout) re-fire inside a <b>60-second</b> window, only advances <code>postback_count</code> — money and history stay untouched. The guard is an atomic UPDATE, so concurrent duplicates can't double-count.</li>
+                                <li><b>History</b> — every accepted postback is appended to the row's <code>events</code> JSONB log with timestamp and source (<code>postback</code> / <code>pixel</code> / <code>import</code>).</li>
+                                <li><b>Fan-out</b> — Telegram notification, campaign-cycle postback and the traffic source's S2S postback fire per accepted conversion.</li>
+                                <li><b>Clickless</b> — a click id of <code>none</code>/<code>0</code> records an unattributed row; with <code>transaction_id</code>/<code>external_id</code> or <code>sub_id_1..5</code> values that uniquely match one real click in the last <b>7 days</b>, the conversion is attributed to that click instead.</li>
+                            </ul>
+
+                            <h3 class="doc-h3">Clickless conversions, manual import</h3>
+                            <p>
+                                The conversion pixel and postback accept clickless conversions (see above), and the
+                                conversion log has an <b>Import conversions</b> dialog: one conversion per line as
+                                <code>click_id,payout,transaction_id,status</code>. Existing click ids accumulate
+                                onto their conversion; unknown ids create unattributed rows; the status may be a
+                                built-in or custom status.
+                            </p>
+
+                            <h3 class="doc-h3">Direct JS tracking</h3>
+                            <p>
+                                Add <code>&lt;script src="/t.js?c={alias}"&gt;&lt;/script&gt;</code> to any page.
+                                The script keeps a first-party visitor id in the <code>aaa_cid</code> cookie (+
+                                localStorage, 30 days) and POSTs a visit to <code>/t/collect</code> (sendBeacon →
+                                fetch → image fallback). Visits are recorded with <code>click=false</code>; the
+                                response is <code>{"status":"ok","click_id":"…"}</code>. It exposes:
+                            </p>
+                            <ul class="doc-list">
+                                <li><code>aaaTrack()</code> — returns the visitor's click id (fires the collect);</li>
+                                <li><code>aaaClickThrough(url)</code> — appends <code>&amp;click_id=</code> so <code>/c/{alias}/{offer}</code> reuses the same id;</li>
+                                <li><code>aaaFire(status, payout, extra)</code> — fires a client-side conversion pixel for this visitor.</li>
+                            </ul>
+                            <p>
+                                <code>/t/collect</code> also works standalone (GET or POST) with
+                                <code>?c={alias or id}&amp;click_id=…</code>; it collects UTM parameters and the
+                                page title, honors bot rules (blocked bots get a 404) and the GDPR opt-out cookie.
+                            </p>
+
+                            <h3 class="doc-h3">Conversion pixel</h3>
+                            <p>
+                                <code>GET /p/{alias}?click_id=…&amp;status=sale&amp;payout=10.5</code> records a
+                                conversion and returns a 1×1 GIF; add <code>&amp;fmt=json</code> for JSON. The
+                                click id comes from <code>?click_id=</code> or the <code>aaa_cid</code> cookie set
+                                by <code>/t.js</code>/<code>/t/collect</code>. Extra attribution fields
+                                (<code>transaction_id</code>, <code>external_id</code>,
+                                <code>sub_id_1..10</code>) pass through as query params; a bare pixel with no click
+                                id and no attribution params gets a 400. Opted-out visitors get the GIF with
+                                nothing recorded.
+                            </p>
+
+                            <h3 class="doc-h3">Impressions</h3>
+                            <p>
+                                <code>GET /i/{alias}</code> records an impression (<code>click=false</code>,
+                                <code>impression=1</code>) and returns a 1×1 GIF, enabling view-through reporting.
+                                Bot rules apply; the <code>aaa_cid</code> cookie is kept so a later conversion can
+                                attribute.
+                            </p>
+
+                            <h3 class="doc-h3">Macro reference</h3>
+                            <p>
+                                Placeholders in offer URLs are replaced from the hit meta (single braces, unknown
+                                macros are left untouched). Common macros:
+                            </p>
+                            <table class="doc-table">
+                                <thead><tr><th>Macro</th><th>Value</th><th>Macro</th><th>Value</th></tr></thead>
+                                <tbody>
+                                <tr><td><code>{click_id}</code></td><td>Unique click id</td><td><code>{visitor_id}</code></td><td>First-party visitor id</td></tr>
+                                <tr><td><code>{campaign_id}</code></td><td>Campaign id</td><td><code>{offer_id}</code></td><td>Offer id</td></tr>
+                                <tr><td><code>{sub_id_1}</code>…<code>{sub_id_10}</code></td><td>SubIDs 1–10</td><td><code>{external_id}</code></td><td>External (ad) id</td></tr>
+                                <tr><td><code>{cost}</code> / <code>{currency}</code></td><td>Click cost / currency</td><td><code>{ip}</code></td><td>Visitor IP</td></tr>
+                                <tr><td><code>{country}</code> / <code>{region}</code> / <code>{city}</code></td><td>Geo</td><td><code>{isp}</code> / <code>{connection_type}</code></td><td>Network / connection</td></tr>
+                                <tr><td><code>{os}</code> / <code>{os_version}</code></td><td>Operating system</td><td><code>{browser}</code> / <code>{browser_version}</code></td><td>Browser</td></tr>
+                                <tr><td><code>{device_type}</code> / <code>{device_brand}</code> / <code>{device_model}</code></td><td>Device</td><td><code>{language}</code> / <code>{referrer}</code> / <code>{keyword}</code></td><td>Locale &amp; context</td></tr>
+                                <tr><td><code>{utm_source}</code>, <code>{utm_medium}</code>, <code>{utm_campaign}</code>, <code>{utm_creative}</code></td><td>UTM tags</td><td><code>{traffic_source_name}</code></td><td>Source name</td></tr>
+                                </tbody>
+                            </table>
+                            <p>
+                                In local landing files, <code>{offer}</code> is replaced with the click-out URL.
+                                Outgoing source postbacks support the same field set plus
+                                <code>{payout}</code>, <code>{status}</code>, <code>{revenue}</code> and
+                                <code>{profit}</code> — anything in the tracker field list is available.
+                            </p>
+
+                            <h3 class="doc-h3">Cost handling</h3>
+                            <p>
+                                Campaigns use a cost model: <code>CPC</code>, <code>CPUC</code> (unique click),
+                                <code>CPM</code>, <code>CPA</code>, <code>CPS</code>, <code>RevShare</code> or
+                                <code>Auto</code>. Per-click cost arrives as the <code>cost</code> parameter (map
+                                the source's token to <code>cost</code> in paramsIdMapping, e.g.
+                                <code>cost → cost</code>) and is stored on the ClickHouse row; otherwise the
+                                campaign's cost value is used for the whole period.
+                            </p>
+                        </section>
+
+                        <!-- 4 ── REPORTING ───────────────────────────────── -->
+                        <section class="doc-section" id="reporting" data-doc-id="reporting">
+                            <h2 class="doc-h2">Reporting</h2>
+
+                            <h3 class="doc-h3">Dashboard</h3>
+                            <p>
+                                The dashboard shows stat cards (clicks, unique clicks, conversions, cost, revenue,
+                                profit, ROI), trend charts, a <b>live feed</b> of incoming hits, period
+                                <b>annotations</b> (mark launches and incidents on the timeline) and, for admins, a
+                                <b>fraud watch</b> card with 24h bot share, bot clicks and estimated savings.
+                            </p>
+
+                            <h3 class="doc-h3">Report builder</h3>
+                            <p>
+                                The Reports page builds drill-down tables over ClickHouse. Stack multiple
+                                <b>dimensions</b> (e.g. Campaign → SubID 1 → SubID 2) from: date, hour, campaign,
+                                offer, landing, country, region, city, device type, OS, browser, language, traffic
+                                source, UTM source/medium/campaign/creative, keyword, SubIDs 1–10, hour of day,
+                                day of week, plus bot/proxy/fraud dimensions (<code>is_bot</code>,
+                                <code>is_using_proxy</code>, <code>fraud_score_avg</code>). One-click
+                                <b>dimension presets</b>: SubID chain, Geo chain, Traffic chain, Funnel.
+                            </p>
+                            <p>
+                                Metrics include visits, clicks, unique clicks, conversions, cost, revenue, profit
+                                and derived <b>CR&nbsp;%</b>, <b>EPC</b> and <b>ROI&nbsp;%</b>. <b>Custom formula
+                                metrics</b> let you combine base metrics with arithmetic, e.g.
+                                <code>(revenue - cost) / clicks * 100</code> (validated against a safe
+                                <code>number/operator/identifier</code> grammar). Reports support <b>period
+                                comparison</b>, a <b>date basis</b> toggle (<code>click_date</code> vs
+                                <code>conversion_date</code> — conversion-dated revenue joined onto click dates
+                                falls back with a notice), column selection and sorting.
+                            </p>
+                            <ul class="doc-list">
+                                <li><b>Saved reports</b> — persist dimensions, columns, custom metrics, date basis and filters; reload from the saved dropdown.</li>
+                                <li><b>Scheduled emails</b> — email a saved report snapshot daily at a chosen UTC hour to a recipient list (SMTP or Brevo; configured in Settings).</li>
+                                <li><b>Public share links</b> — a read-only, login-free copy of a saved report; revocable at any time.</li>
+                            </ul>
+
+                            <h3 class="doc-h3">Click log</h3>
+                            <p>
+                                Per-campaign drill-down of individual hits: time, IP, country, device, OS, browser,
+                                referrer, keyword, SubIDs, fraud score and bot flags, with free-text
+                                <b>search</b> and CSV export.
+                            </p>
+
+                            <h3 class="doc-h3">Conversion log</h3>
+                            <p>
+                                Every conversion with status, payout, postback count, last postback time and the
+                                full events history. Filter by status, date basis (click date vs conversion date)
+                                and free-text search. Conversions are <b>editable</b> — change status/payout
+                                manually; postbacks arriving later still update the row (status follows the latest
+                                event).
+                            </p>
+
+                            <h3 class="doc-h3">CSV export</h3>
+                            <p>
+                                All tables (report, click log, conversion log) export to CSV. Every cell is
+                                double-quoted with internal quotes escaped, so values always open as plain text in
+                                spreadsheet apps and separators/newlines can't break the row structure.
+                            </p>
+                        </section>
+
+                        <!-- 5 ── FRAUD & CLOAKING ────────────────────────── -->
+                        <section class="doc-section" id="fraud-cloaking" data-doc-id="fraud-cloaking">
+                            <h2 class="doc-h2">Fraud &amp; cloaking</h2>
+
+                            <h3 class="doc-h3">Fraud score</h3>
+                            <p>
+                                Every hit gets a heuristic <b>0–100 fraud score</b>. It is monitoring-only — hits
+                                are still tracked, but rows with a score ≥ 70 (or a verified-crawler match) are
+                                flagged <code>is_bot</code>.
+                            </p>
+                            <table class="doc-table">
+                                <thead><tr><th>Signal</th><th>Points</th></tr></thead>
+                                <tbody>
+                                <tr><td>Bot detected by UA parser / bot keyword</td><td>+50</td></tr>
+                                <tr><td>Crawler-UA spoof (crawler claimed but not from a verified crawler range)</td><td>+50</td></tr>
+                                <tr><td>Empty or generic User-Agent</td><td>+30</td></tr>
+                                <tr><td>IP in your suspicious CIDR list (Settings → Fraud)</td><td>+25</td></tr>
+                                <tr><td>Duplicate visitor (process-local 10-minute window, threshold default 3)</td><td>+20</td></tr>
+                                <tr><td>Hosting / datacenter ISP</td><td>+15</td></tr>
+                                </tbody>
+                            </table>
+                            <p>
+                                <b>Verified crawler ranges</b> are excluded from fraud signals and reported
+                                separately: <code>66.249.64.0/19</code> (Googlebot), <code>157.55.39.0/24</code>,
+                                <code>40.77.167.0/24</code>, <code>207.46.13.0/24</code> (Bingbot) and
+                                <code>13.66.139.0/24</code> (DuckDuckGo). Both CIDR lists and the duplicate
+                                threshold are overridable via <code>settings.fraud</code>. A honeypot hit forces
+                                the score to 100; shield watch mode forces ≥ 50.
+                            </p>
+
+                            <h3 class="doc-h3">Global bot lists (Settings)</h3>
+                            <p>
+                                Click-level bot filtering with two actions: <b>Block</b> — serve nothing (404, hit
+                                untracked) — or <b>Mark</b> — track the hit but flag <code>is_bot</code>. Rules
+                                match on <b>User-Agent regex</b>, <b>IP CIDR ranges</b> or plain <b>IP lists</b>.
+                            </p>
+
+                            <h3 class="doc-h3">Honeypot</h3>
+                            <p>
+                                <code>/t/hp.js?c={alias}</code> injects an invisible decoy link
+                                (<code>display:none</code>, <code>nofollow</code>) into your pages. Humans never
+                                click it — scrapers that follow every link hit <code>/t/hp</code>, which flags
+                                their visitor key for 24h (cached 60s): all subsequent hits score 100 and fail
+                                campaign-shield whitelists. Hits are rate-limited to one row per visitor per hour
+                                and answered with 204.
+                            </p>
+
+                            <h3 class="doc-h3">Blacklists (traffic quality)</h3>
+                            <p>
+                                Managed on the Fraud page. A blacklist matches a field against values and either
+                                <b>blocks</b> (404) or <b>marks</b> (bot) the hit:
+                            </p>
+                            <ul class="doc-list">
+                                <li><b>Fields</b>: <code>sub_id_1</code>…<code>sub_id_10</code>, <code>country</code>, <code>city</code>, <code>device_type</code>, <code>os</code>, <code>browser</code>, <code>ip</code>;</li>
+                                <li><b>Scope</b>: global, or bound to one campaign;</li>
+                                <li><b>Action</b>: <code>block</code> or <code>mark</code>, individually toggleable per blacklist.</li>
+                            </ul>
+
+                            <h3 class="doc-h3">Fraud dashboard</h3>
+                            <p>
+                                The Fraud page shows a <b>live feed</b> of suspicious hits (<code>is_bot</code> or
+                                score ≥ 50, polled every 5s), top fraud IPs and user-agents, average fraud score
+                                and an <b>estimated savings</b> figure. The admin dashboard's fraud-watch card
+                                summarizes the last 24h and links straight there.
+                            </p>
+
+                            <h3 class="doc-h3">GDPR</h3>
+                            <p>
+                                Visiting <code>/optout</code> sets a 10-year <code>aaa_optout</code> cookie: the
+                                tracker acknowledges requests normally but stores nothing and sets no cookies.
+                                Additionally, Settings → Privacy can <b>anonymize IPs at rest</b> (IPv4 last octet
+                                zeroed, e.g. <code>1.2.3.4 → 1.2.3.0</code>).
+                            </p>
+                        </section>
+
+                        <!-- 6 ── LANDINGS ────────────────────────────────── -->
+                        <section class="doc-section" id="landings" data-doc-id="landings">
+                            <h2 class="doc-h2">Landings</h2>
+                            <p>
+                                Pre-offer pages that warm up visitors before the click-out. Three types:
+                            </p>
+                            <table class="doc-table">
+                                <thead><tr><th>Type</th><th>Behavior</th></tr></thead>
+                                <tbody>
+                                <tr><td><code>file</code> (local file)</td><td>Uploaded archive or single file served from the tracker's landings volume.</td></tr>
+                                <tr><td><code>link</code></td><td>Redirects to an external landing URL.</td></tr>
+                                <tr><td><code>mirror</code></td><td>Fetches and re-serves an external URL.</td></tr>
+                                </tbody>
+                            </table>
+                            <h3 class="doc-h3">Uploads</h3>
+                            <p>
+                                Upload a <code>.zip</code> (the archive must contain an <code>index.php</code> or
+                                <code>index.html</code> at its root), a single <code>.php</code> or a single
+                                <code>.html</code> file. Uploaded landings can be edited in the built-in
+                                <b>code editor</b> (Landings → code editor, opens <code>/backend/editor?landing={id}</code>).
+                            </p>
+                            <h3 class="doc-h3">Grab from URL</h3>
+                            <p>
+                                Instead of uploading, give the grabber a URL: the page is fetched server-side and
+                                stored as a local landing. A built-in <b>SSRF guard</b> accepts only
+                                <code>http(s)</code> URLs with publicly resolvable hosts and refuses localhost and
+                                internal addresses; enable <b>"allow internal address"</b> only when grabbing from
+                                your own infrastructure behind the same proxy.
+                            </p>
+                            <h3 class="doc-h3">Click-out links</h3>
+                            <p>
+                                Inside a local landing's HTML, the placeholder <code>{offer}</code> is replaced
+                                with the click-out URL <code>/c/{alias}/{offer_id}</code> (it carries the landing
+                                id, click id and mapped passthrough tokens automatically) — so a button like
+                                <code>&lt;a href="{offer}"&gt;Continue&lt;/a&gt;</code> routes through the tracker
+                                on every click.
+                            </p>
+                        </section>
+
+                        <!-- 7 ── DOMAINS ─────────────────────────────────── -->
+                        <section class="doc-section" id="domains" data-doc-id="domains">
+                            <h2 class="doc-h2">Domains</h2>
+                            <p>
+                                Domains are the public edge of the tracker. Per domain you can configure:
+                            </p>
+                            <ul class="doc-list">
+                                <li><b>Default campaign</b> — visitors hitting <code>/</code> on this domain are routed into that campaign (domain-level rotation without a campaign alias in the URL);</li>
+                                <li><b>404 handling</b> — <code>handle</code> (serve the tracker's styled 404) or <code>error</code> (bare response);</li>
+                                <li><b>Redirect HTTPS</b> — force http → https for this domain;</li>
+                                <li><b>SSL status</b> — none / issued, shown per domain.</li>
+                            </ul>
+                            <h3 class="doc-h3">Per-domain SSL</h3>
+                            <p>
+                                Before a certificate can be issued the domain must point at this server — create
+                                an <b>A record</b> (or a <b>CNAME</b>) to the server's IP. Once DNS propagates, use
+                                <b>Check DNS</b> (confirms the domain resolves here) and then <b>Update SSL for 90
+                                days</b> to issue the certificate via certbot.
+                            </p>
+                            <div class="doc-callout doc-callout--warning">
+                                Certificates are issued for 90 days. Renewal is not automatic for every setup —
+                                re-run <b>Update SSL</b> before expiry, or wire the certbot renewal timer on the
+                                host. A lapsed certificate breaks HTTPS redirects for that domain.
                             </div>
-                        </div>
-                        <div v-else class="mt-4 grey--text">
-                            {{ statusError || 'Loading status…' }}
-                        </div>
-                        {% endraw %}
-                    </v-tab-item>
-                    {% endif %}
+                        </section>
 
-                </v-tabs-items>
-                </v-card>
-            </v-col>
-        </v-row>
+                        <!-- 8 ── TRAFFIC SOURCES ─────────────────────────── -->
+                        <section class="doc-section" id="traffic-sources" data-doc-id="traffic-sources">
+                            <h2 class="doc-h2">Traffic sources</h2>
+                            <p>
+                                A source describes where traffic comes from and how its parameters map into the
+                                tracker. The catalog ships <b>187 presets</b> (Sources → From catalog); each shows
+                                <b>capability badges</b> describing its API integration:
+                            </p>
+                            <table class="doc-table">
+                                <thead><tr><th>Badge</th><th>Meaning</th></tr></thead>
+                                <tbody>
+                                <tr><td><code>cost</code></td><td>Cost update supported</td></tr>
+                                <tr><td><code>pause_campaign</code></td><td>Campaign pausing supported</td></tr>
+                                <tr><td><code>blacklist</code></td><td>Blacklisting supported</td></tr>
+                                <tr><td><code>pause_creative</code></td><td>Creative pausing supported</td></tr>
+                                </tbody>
+                            </table>
+                            <p>A preset without badges is marked "No API integration".</p>
+                            <h3 class="doc-h3">Key settings</h3>
+                            <ul class="doc-list">
+                                <li><b>paramsIdMapping</b> — map each source token to a tracker parameter (e.g. <code>var_in → sub_id_2</code>, <code>clickid → click</code>). Mapped values flow into reports, filters, macros and postbacks. Custom presets whose name is a domain auto-derive their mapping.</li>
+                                <li><b>S2S postback URL</b> — where conversion data is sent back to the source, with per-status <b>toggles</b> choosing which statuses fire (sale, lead, rejected, upsale).</li>
+                                <li><b>Traffic loss (%)</b> — expected loss between the source's reported clicks and tracked visits, kept per source for reconciliation.</li>
+                                <li><b>Cost</b> — the source-level cost per click vs per-click cost passed in the <code>cost</code> parameter (see Cost handling).</li>
+                            </ul>
+                        </section>
+
+                        <!-- 9 ── AFFILIATE NETWORKS ──────────────────────── -->
+                        <section class="doc-section" id="affiliate-networks" data-doc-id="affiliate-networks">
+                            <h2 class="doc-h2">Affiliate networks</h2>
+                            <p>
+                                Networks group your offers and define how conversions come back. The catalog
+                                ships <b>125 presets</b> filterable by <b>vertical</b> (Dating, Gambling, Nutra,
+                                Sweepstakes, …).
+                            </p>
+                            <ul class="doc-list">
+                                <li><b>Offer parameters</b> — the network's subid macro appended to every offer URL, e.g. <code>s1={click_id}</code> or <code>subid={click_id}</code>, so the network echoes your click id back in postbacks.</li>
+                                <li><b>S2S postback template</b> — pre-filled per network with the placeholders <code>https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}</code>; paste it into the network's panel so conversions land in AAA Tracker.</li>
+                            </ul>
+                        </section>
+
+                        <!-- 10 ── OFFERS ─────────────────────────────────── -->
+                        <section class="doc-section" id="offers" data-doc-id="offers">
+                            <h2 class="doc-h2">Offers</h2>
+                            <p>
+                                Offers are the final destination of a click.
+                            </p>
+                            <ul class="doc-list">
+                                <li><b>URL</b> — paste the network URL with macros (<code>{click_id}</code>, <code>{sub_id_N}</code>, …); placeholders are substituted at click-out and <code>click_id</code> is always appended.</li>
+                                <li><b>Payout &amp; currency</b> — per-offer payout with its own currency.</li>
+                                <li><b>Countries</b> — ISO-code targeting list (search by name or code).</li>
+                                <li><b>Daily conversions cap</b> — when reached, traffic overflows to the chosen <b>overflow offer</b>.</li>
+                                <li><b>Affiliate network</b>, <b>notes</b> and <b>tags</b> (free-form, e.g. <code>nutra</code>, <code>tier1</code>) for filtering and bulk operations.</li>
+                                <li><b>Status</b> — active, paused, archived. Archiving is soft-delete; restore any time.</li>
+                                <li><b>Bulk CSV import</b> — paste CSV with the header <code>id,name,url,affiliate_network_id,countries,payout,currency,status,tags,daily_conversions_cap,overflow_offer_id,notes</code>; matching rows update, the rest are created (tags and countries <code>;</code>-separated).</li>
+                            </ul>
+                        </section>
+
+                        <!-- 11 ── USERS & SECURITY ───────────────────────── -->
+                        <section class="doc-section" id="users-security" data-doc-id="users-security">
+                            <h2 class="doc-h2">Users &amp; security</h2>
+                            <h3 class="doc-h3">Accounts and roles</h3>
+                            <p>
+                                Each user has the <b>admin</b> flag or is a regular user. Regular users get
+                                per-section <b>read/write</b> permissions (Campaigns, Landings, Offers, Sources,
+                                Reports, …; admin sections — Users, Settings, Domains — are off unless explicitly
+                                granted). The special <b>campaigns:&nbsp;'own'</b> scope limits a user to campaigns
+                                they own (they can only see and mutate those).
+                            </p>
+                            <h3 class="doc-h3">Two-factor authentication (TOTP)</h3>
+                            <p>
+                                Users can enable TOTP 2FA from their profile dialog: scan the QR code, confirm a
+                                code (accepted within a ±1 time-step window) and store the <b>10 one-time backup
+                                codes</b> — they are shown exactly once. Each backup code works a single time.
+                                An admin can reset a user's 2FA. Enabling, disabling and resets are written to
+                                the audit log.
+                            </p>
+                            <h3 class="doc-h3">Passwords</h3>
+                            <p>
+                                Changing a password requires the current one. Legacy password hashes are upgraded
+                                transparently on login.
+                            </p>
+                            <h3 class="doc-h3">API access</h3>
+                            <p>
+                                Two auth mechanisms guard <code>/backend/api/…</code>: the <b>session cookie</b>
+                                (browser login) and a <b>Bearer API token</b> (Settings → general; treated as an
+                                admin principal, ideal for external tools). Public tracking endpoints
+                                (<code>/c</code>, <code>/pb</code>, <code>/p</code>, …) need no auth at all.
+                            </p>
+                            <h3 class="doc-h3">Brute-force protection</h3>
+                            <p>
+                                Login is rate-limited in-process: <b>5 failed attempts per IP+username per rolling
+                                60 seconds</b>.
+                            </p>
+                            <h3 class="doc-h3">Audit log</h3>
+                            <p>
+                                Settings → Audit log records security-relevant actions (logins, user create /
+                                update / delete, 2FA events, entity changes across the app) with user, action,
+                                entity and detail — filterable by user, action and entity.
+                            </p>
+                            <h3 class="doc-h3">Archive &amp; restore</h3>
+                            <p>
+                                Deleting campaigns, offers, landings, sources and networks is a soft archive
+                                (frozen, hidden from pickers, restorable); the audit log keeps the history.
+                            </p>
+                        </section>
+
+                        <!-- 12 ── SETTINGS REFERENCE ─────────────────────── -->
+                        <section class="doc-section" id="settings-reference" data-doc-id="settings-reference">
+                            <h2 class="doc-h2">Settings reference</h2>
+                            <p>One paragraph per block, in page order:</p>
+                            <h3 class="doc-h3">General</h3>
+                            <p>Dark mode, tracker domain, default currency and timezone — the global defaults for new data and display.</p>
+                            <h3 class="doc-h3">Telegram notifications</h3>
+                            <p>Bot token (from @BotFather), chat ID and per-status toggles — receive a message for every conversion (or only chosen statuses); includes a "send test message" button.</p>
+                            <h3 class="doc-h3">Email reports / SMTP</h3>
+                            <p>Daily report scheduling: SMTP host/port/login/password or a Brevo API key, "from" name/address, recipients and the UTC send hour. Powers the report email schedules created on the Reports page; includes a test send.</p>
+                            <h3 class="doc-h3">Postback security</h3>
+                            <p>Optionally require a <b>secret key</b> (query param) and/or an <b>IP allowlist</b> for inbound <code>/pb/…</code> postbacks — denied postbacks return 403.</p>
+                            <h3 class="doc-h3">Data retention</h3>
+                            <p>Auto-delete ClickHouse tracking data older than a chosen number of days (daily prune).</p>
+                            <h3 class="doc-h3">Bot rules</h3>
+                            <p>Global click-level bot filtering: User-Agent regex, IP CIDR ranges or IP lists, each rule block (404) or mark (flag) with an enable switch.</p>
+                            <h3 class="doc-h3">Custom statuses</h3>
+                            <p>Define extra conversion statuses (name + color) that postbacks may then use alongside the six built-ins.</p>
+                            <h3 class="doc-h3">Matching variables (Sub IDs)</h3>
+                            <p>The variable-name mapping used when parsing incoming parameters — which token fills which SubID slot.</p>
+                            <h3 class="doc-h3">Monitoring</h3>
+                            <p>Flow health checks: enable to have the monitor probe flow URLs every 15 minutes and (optionally) <b>auto-disable flows after 3 consecutive failures</b>; includes a "Check now" button and status board.</p>
+                            <h3 class="doc-h3">Auto rules</h3>
+                            <p>Campaign automation rules (metric over a lookback window, comparison, value, action) — see Background jobs.</p>
+                            <h3 class="doc-h3">Privacy</h3>
+                            <p>IP anonymization at rest (zero the last IPv4 octet) and the <code>/optout</code> page behavior.</p>
+                            <h3 class="doc-h3">Audit log</h3>
+                            <p>Filterable audit-trail browser (user / action / entity filters).</p>
+                            <p class="doc-note">Saved reports and email schedules are managed on the Reports page itself; the per-campaign optimizer lives on the Optimizer page.</p>
+                        </section>
+
+                        <!-- 13 ── API REFERENCE ──────────────────────────── -->
+                        <section class="doc-section" id="api-reference" data-doc-id="api-reference">
+                            <h2 class="doc-h2">API reference</h2>
+                            <h3 class="doc-h3">Public tracking endpoints (tracking domains)</h3>
+                            <table class="doc-table">
+                                <thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Auth</th></tr></thead>
+                                <tbody>
+                                <tr><td>GET/POST</td><td><code>/{alias}</code></td><td>Campaign URL — main tracking hit</td><td>none</td></tr>
+                                <tr><td>GET</td><td><code>/c/{alias}/{offer_id}</code></td><td>Click-out to an offer</td><td>none</td></tr>
+                                <tr><td>GET</td><td><code>/pb/{click_id}/{status}/{payout}</code></td><td>S2S conversion postback</td><td>optional key / IP list</td></tr>
+                                <tr><td>GET</td><td><code>/p/{alias}</code></td><td>Conversion pixel (GIF / <code>fmt=json</code>)</td><td>none</td></tr>
+                                <tr><td>GET</td><td><code>/i/{alias}</code></td><td>Impression pixel</td><td>none</td></tr>
+                                <tr><td>GET/POST</td><td><code>/t/collect</code></td><td>Direct-tracking visit collection</td><td>none</td></tr>
+                                <tr><td>GET</td><td><code>/t.js?c={alias}</code></td><td>Direct-tracking script</td><td>none</td></tr>
+                                <tr><td>GET</td><td><code>/t/hp.js</code> · <code>/t/hp</code></td><td>Honeypot script / trap hit</td><td>none</td></tr>
+                                <tr><td>GET</td><td><code>/optout</code></td><td>GDPR opt-out cookie</td><td>none</td></tr>
+                                <tr><td>POST</td><td><code>/click-api/{alias}</code></td><td>Server-to-server click decision (JSON)</td><td>none</td></tr>
+                                <tr><td>POST</td><td><code>/simulate/{alias}</code></td><td>Traffic simulation (dry run)</td><td>admin session</td></tr>
+                                </tbody>
+                            </table>
+                            <h3 class="doc-h3">Admin API</h3>
+                            <p>
+                                Everything under <code>/backend/api/…</code> (campaigns, offers, sources, reports,
+                                users, settings, fraud, monitor, rules, optimizer, status, …) accepts the session
+                                cookie or an <code>Authorization: Bearer &lt;api-token&gt;</code> header.
+                            </p>
+                            <h3 class="doc-h3">Examples</h3>
+                            <p>S2S postback from a network:</p>
+                            <pre class="doc-code">curl "https://your-domain.com/pb/9f2c1a7e/sale/25.50?transaction_id=T123"</pre>
+                            <p>Server-to-server click decision:</p>
+                            <pre class="doc-code">curl -X POST "https://your-domain.com/click-api/my-campaign" \
+  -H "Content-Type: application/json" \
+  -d '{"ip": "203.0.113.7", "user_agent": "Mozilla/5.0 …", "sub_id_1": "adset-42"}'</pre>
+                            <p>Client-side conversion pixel (JSON mode):</p>
+                            <pre class="doc-code">curl "https://your-domain.com/p/my-campaign?click_id=9f2c1a7e&amp;status=lead&amp;payout=3.25&amp;fmt=json"</pre>
+                        </section>
+
+                        <!-- 14 ── BACKGROUND JOBS ────────────────────────── -->
+                        <section class="doc-section" id="background-jobs" data-doc-id="background-jobs">
+                            <h2 class="doc-h2">Background jobs</h2>
+                            <p>
+                                The tracker runs several loops in the background. The <b>System status</b> tab
+                                shows each loop's last run time.
+                            </p>
+                            <table class="doc-table">
+                                <thead><tr><th>Loop</th><th>Cadence</th><th>What it does</th></tr></thead>
+                                <tbody>
+                                <tr><td>Monitor</td><td>every 15 min (first pass ~1 min after boot)</td><td>Walks all active campaigns' flow URLs, records status/latency in <code>monitor_state</code>; after <b>3 consecutive failures</b> it can auto-disable the flow (Settings → Monitoring, default off) and alert.</td></tr>
+                                <tr><td>Auto rules</td><td>every few minutes</td><td>Evaluates every enabled rule against ClickHouse metrics over its lookback window: metrics <code>roi</code>, <code>profit</code>, <code>cost</code>, <code>conversions</code>, <code>clicks</code>, <code>revenue</code>; conditions compare (e.g. ROI &lt; −20% over 6h); when <b>all</b> conditions match the action fires: <code>pause_campaign</code>, <code>alert_telegram</code> or <code>alert_email</code>. Alert actions fire <b>once per continuous match</b> and re-arm after the condition breaks.</td></tr>
+                                <tr><td>Optimizer</td><td>periodic</td><td>For campaigns with the optimizer on, recomputes flow weights from the chosen metric over the lookback window, respecting min clicks, max shift %, the exploration boost and the weight floor.</td></tr>
+                                <tr><td>Retention prune</td><td>daily</td><td>Deletes ClickHouse clicks older than the configured retention window (Settings → Data retention).</td></tr>
+                                <tr><td>Email reports</td><td>periodic</td><td>Sends the daily summary email and due saved-report schedules (recipients + UTC hour from the schedule, SMTP/Brevo from Settings).</td></tr>
+                                </tbody>
+                            </table>
+                        </section>
+                    </div>
+                </div>
+            </v-tab-item>
+
+            <!-- ===================== SYSTEM STATUS (admin) ===================== -->
+            {% endraw %}{% if is_authenticated_user_type == 'admin' %}{% raw %}
+            <v-tab-item>
+                <div class="doc-status">
+                    <div v-if="status" class="mt-2">
+                        <v-row dense>
+                            <v-col cols="6" sm="3" v-for="card in statusCards" :key="card.title">
+                                <v-card class="pa-3 stat-card">
+                                    <div class="text-caption grey--text text--darken-1">{{ card.title }}</div>
+                                    <div class="text-h6 font-weight-bold mt-2" :class="card.colorClass">{{ card.value }}</div>
+                                    <div v-if="card.hint" class="caption grey--text mt-1">{{ card.hint }}</div>
+                                </v-card>
+                            </v-col>
+                        </v-row>
+
+                        <div class="about-heading mt-6">Background loops</div>
+                        <v-simple-table dense>
+                            <thead>
+                            <tr><th>Loop</th><th>Last run</th></tr>
+                            </thead>
+                            <tbody>
+                            <tr v-for="(ts, name) in status.loops" :key="name">
+                                <td class="text-capitalize">{{ name }}</td>
+                                <td>
+                                    <span v-if="ts">{{ $formatDate(ts) }}</span>
+                                    <span v-else class="grey--text">not yet</span>
+                                </td>
+                            </tr>
+                            </tbody>
+                        </v-simple-table>
+
+                        <div class="caption grey--text mt-4">
+                            App version {{ status.version }} · polls every 15s
+                            <template v-if="status.landings_disk">
+                                · landings disk {{ status.landings_disk.used_gb }}/{{ status.landings_disk.total_gb }} GB free
+                            </template>
+                        </div>
+                    </div>
+                    <div v-else class="mt-4 grey--text">
+                        {{ statusError || 'Loading status…' }}
+                    </div>
+                </div>
+            </v-tab-item>
+            {% endraw %}{% endif %}{% raw %}
+        </v-tabs-items>
     </v-container>
 </script>
 
@@ -195,6 +864,26 @@
                 status: null,
                 statusError: '',
                 statusTimer: null,
+                docSearch: '',
+                activeSection: 'getting-started',
+                searchIndex: {},
+                docObserver: null,
+                docSections: [
+                    {id: 'getting-started', title: 'Getting started', icon: 'mdi-rocket-launch-outline'},
+                    {id: 'campaigns-flows', title: 'Campaigns & flows', icon: 'mdi-sitemap-outline'},
+                    {id: 'tracking-methods', title: 'Tracking methods', icon: 'mdi-target'},
+                    {id: 'reporting', title: 'Reporting', icon: 'mdi-chart-box-outline'},
+                    {id: 'fraud-cloaking', title: 'Fraud & cloaking', icon: 'mdi-shield-outline'},
+                    {id: 'landings', title: 'Landings', icon: 'mdi-file-document-outline'},
+                    {id: 'domains', title: 'Domains', icon: 'mdi-earth'},
+                    {id: 'traffic-sources', title: 'Traffic sources', icon: 'mdi-share-variant-outline'},
+                    {id: 'affiliate-networks', title: 'Affiliate networks', icon: 'mdi-handshake-outline'},
+                    {id: 'offers', title: 'Offers', icon: 'mdi-tag-outline'},
+                    {id: 'users-security', title: 'Users & security', icon: 'mdi-account-lock-outline'},
+                    {id: 'settings-reference', title: 'Settings reference', icon: 'mdi-cog-outline'},
+                    {id: 'api-reference', title: 'API reference', icon: 'mdi-api'},
+                    {id: 'background-jobs', title: 'Background jobs', icon: 'mdi-autorenew'},
+                ],
             }
         },
         computed: {
@@ -215,9 +904,17 @@
                     {title: 'Conversions (24h)', value: Number(s.conversions_24h || 0).toLocaleString(), colorClass: '', hint: ''},
                 ];
             },
+            visibleSections() {
+                return this.docSections.filter(s => this.matchesSection(s.id));
+            },
         },
         mounted() {
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
+            this.$nextTick(() => {
+                this.buildSearchIndex();
+                this.applyDocFilter();
+                this.setupScrollSpy();
+            });
             if (this.$root.roleLabel === 'admin') {
                 this.loadStatus();
                 this.statusTimer = setInterval(this.loadStatus, 15000);
@@ -225,6 +922,18 @@
         },
         beforeDestroy() {
             if (this.statusTimer) clearInterval(this.statusTimer);
+            if (this.docObserver) this.docObserver.disconnect();
+        },
+        watch: {
+            docSearch() {
+                this.$nextTick(() => {
+                    this.applyDocFilter();
+                    const first = this.visibleSections[0];
+                    if (first && !this.matchesSection(this.activeSection)) {
+                        this.activeSection = first.id;
+                    }
+                });
+            },
         },
         methods: {
             loadStatus() {
@@ -243,6 +952,43 @@
                         this.statusError = 'Status unavailable (' + err.message + ')';
                     });
             },
+            matchesSection(id) {
+                const q = (this.docSearch || '').trim().toLowerCase();
+                if (!q) return true;
+                return (this.searchIndex[id] || '').indexOf(q) !== -1;
+            },
+            sectionEls() {
+                return Array.prototype.slice.call(this.$el.querySelectorAll('.doc-section'));
+            },
+            applyDocFilter() {
+                this.sectionEls().forEach(el => {
+                    el.style.display = this.matchesSection(el.getAttribute('data-doc-id')) ? '' : 'none';
+                });
+            },
+            buildSearchIndex() {
+                this.sectionEls().forEach(el => {
+                    const id = el.getAttribute('data-doc-id');
+                    if (id) this.$set(this.searchIndex, id, el.textContent.toLowerCase());
+                });
+            },
+            setupScrollSpy() {
+                const els = this.sectionEls();
+                if (!els.length || typeof IntersectionObserver === 'undefined') return;
+                this.docObserver = new IntersectionObserver((entries) => {
+                    const visible = entries
+                        .filter(e => e.isIntersecting && e.target.offsetParent !== null)
+                        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+                    if (visible.length) {
+                        this.activeSection = visible[0].target.getAttribute('data-doc-id');
+                    }
+                }, {root: null, rootMargin: '-64px 0px -75% 0px', threshold: 0});
+                els.forEach(el => this.docObserver.observe(el));
+            },
+            scrollToSection(id) {
+                this.activeSection = id;
+                const el = document.getElementById(id);
+                if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+            },
         },
     });
 </script>
@@ -254,3 +1000,4 @@
         margin-bottom: var(--space-2, 8px);
     }
 </style>
+{% endraw %}

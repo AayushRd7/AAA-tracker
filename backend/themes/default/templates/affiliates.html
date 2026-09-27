@@ -185,7 +185,7 @@
 
                         <template v-slot:item.s2s_postback="{ item }">
                             <span v-if="item.s2s_postback" class="text-truncate postback-cell">
-                                {{ item.s2s_postback }}
+                                {{ readyPostbackUrl(item) }}
                             </span>
                             <span v-else>-</span>
                         </template>
@@ -355,7 +355,9 @@
                     body: JSON.stringify({
                         name: p.name,
                         offer_parameters: p.offer_parameters,
+                        // store the real tracker domain, not the placeholder
                         s2s_postback: "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"
+                            .replace(/YOUR-TRACKER-DOMAIN/gi, window.location.host)
                     }),
                     credentials: "include"
                 })

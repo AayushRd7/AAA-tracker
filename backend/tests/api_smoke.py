@@ -86,7 +86,8 @@ def main():
 
     alias = f"smoke-{os.getpid()}"
     payload = {
-        "name": "Smoke Test Campaign", "alias": alias, "type": "campaign",
+        # pid-suffixed so parallel suite runs never collide on the unique name
+        "name": f"Smoke Test Campaign {os.getpid()}", "alias": alias, "type": "campaign",
         "status": "active", "redirect_mode": "weight",
         "config": {"flows": [{
             "type": "default", "position": 1, "enabled": True, "schema": "redirect",
@@ -139,7 +140,7 @@ def main():
 
     direct_alias = f"smoke-direct-{os.getpid()}"
     direct_payload = {
-        "name": "Smoke Direct Campaign", "alias": direct_alias, "type": "campaign",
+        "name": f"Smoke Direct Campaign {os.getpid()}", "alias": direct_alias, "type": "campaign",
         "status": "active", "redirect_mode": "position",
         "config": {"flows": [{
             "type": "default", "position": 1, "enabled": True, "schema": "direct",
@@ -3169,6 +3170,220 @@ print("ESCAPED-OK")
             check("grab: delete created landing", r.status_code in (200, 204), r.text[:120])
         shutil.rmtree(os.path.join(landings_dir, grab_src_folder), ignore_errors=True)
         shutil.rmtree(os.path.join(landings_dir, grab_folder), ignore_errors=True)
+
+    print("== Insights (G56) ==")
+    ins_pid = os.getpid()
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke Insights {ins_pid}", "alias": f"smoke-insights-{ins_pid}",
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "config": {"flows": [{
+            "type": "default", "position": 1, "enabled": True, "schema": "redirect",
+            "redirect_url": "https://example.com/smoke-insights", "filters": [],
+        }], "postbacks": [], "fallback_url": "", "hide_referrer": False}})
+    check("insights: create campaign", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    ins_cid = r.json().get("id")
+    # baseline: 7 full days, 70 click-outs/day, $0.30 cost each
+    ch_query(
+        f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, cost) "
+        f"SELECT now() - toIntervalHour(24) - toIntervalDay(number % 7) - toIntervalHour(number % 20), "
+        f"{ins_cid}, true, '', 'smoke-ins-base-{ins_pid}-' || toString(number), 'US', 0.3 FROM numbers(490)")
+    # current 24h: 40 human click-outs + 60 bots, zero conversions today
+    ch_query(
+        f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, country, cost, is_bot) "
+        f"SELECT now() - toIntervalHour(number % 22), {ins_cid}, true, '', "
+        f"'smoke-ins-cur-{ins_pid}-' || toString(number), 'US', 0.3, number >= 40 FROM numbers(100)")
+    # PG conversions: 2/day over the 7 baseline days
+    subprocess.run(
+        ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-c",
+         f"INSERT INTO conversions_data (received_at, click_id, campaign_id, offer_id, status, payout, revenue, profit, visitor_id) "
+         f"SELECT now() - interval '24 hours' - (d || ' days')::interval - (g || ' hours')::interval, "
+         f"'smoke-ins-cv-{ins_pid}', {ins_cid}, 5, 'sale', 10, 10, 9.8, 'smoke-ins-cv-{ins_pid}-' || d || '-' || g "
+         f"FROM generate_series(0,6) d, generate_series(1,2) g"],
+        capture_output=True, text=True, timeout=30)
+
+    r = s.post(f"{api}/insights/run")
+    body = r.json() if r.status_code == 200 else {}
+    ins_findings = [f for f in (body.get("findings") or []) if f.get("campaign_id") == ins_cid]
+    check("insights: run 200 with findings", r.status_code == 200 and bool(ins_findings), r.text[:200])
+    ins_by_type = {f["type"]: f for f in ins_findings}
+    check("insights: ctr_drop detected critical",
+          (ins_by_type.get("ctr_drop") or {}).get("severity") == "critical",
+          str([f["type"] for f in ins_findings]))
+    check("insights: bot_surge detected warning",
+          (ins_by_type.get("bot_surge") or {}).get("severity") == "warning", "")
+    check("insights: finding shape (severity/type/message/detail/detected_at)",
+          all(all(k in f for k in ("severity", "type", "message", "detail", "detected_at"))
+              for f in ins_findings)
+          and all(all(k in f["detail"] for k in ("current", "baseline", "change_pct"))
+                  for f in ins_findings), "")
+    check("insights: findings sorted severity-first",
+          [f["severity"] for f in body.get("findings") or []]
+          == sorted([f["severity"] for f in body.get("findings") or []],
+                    key=lambda s: {"critical": 0, "warning": 1, "info": 2}[s]), "")
+
+    r = s.get(f"{api}/insights/latest")
+    latest = r.json() if r.status_code == 200 else {}
+    check("insights: latest returns cached run",
+          r.status_code == 200 and latest.get("run_at") == body.get("run_at")
+          and isinstance(latest.get("findings"), list), r.text[:200])
+    r = requests.get(f"{api}/insights/latest", verify=not INSECURE)
+    check("insights: latest unauthenticated 401", r.status_code == 401, str(r.status_code))
+    r = requests.post(f"{api}/insights/run", verify=not INSECURE)
+    check("insights: run unauthenticated 401", r.status_code == 401, str(r.status_code))
+
+    print("== Insights cleanup ==")
+    ch_query(f"ALTER TABLE clicks_data DELETE WHERE visitor_id LIKE 'smoke-ins-%-{ins_pid}-%'")
+    leftover = ch_query(
+        f"SELECT count() FROM clicks_data WHERE visitor_id LIKE 'smoke-ins-%-{ins_pid}-%'")
+    check("insights: seeded clicks removed", leftover == "0", leftover[:80])
+    subprocess.run(
+        ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-c",
+         f"DELETE FROM conversions_data WHERE visitor_id LIKE 'smoke-ins-cv-{ins_pid}-%'"],
+        capture_output=True, text=True, timeout=30)
+    if ins_cid:
+        r = s.delete(f"{api}/campaigns/{ins_cid}")
+        check("insights: delete campaign", r.status_code == 200, r.text[:120])
+    # refresh the cached block so it no longer references the scratch campaign
+    r = s.post(f"{api}/insights/run")
+    check("insights: post-cleanup run 200", r.status_code == 200, r.text[:120])
+    check("insights: scratch findings gone after cleanup",
+          r.status_code == 200
+          and not [f for f in r.json().get("findings", []) if f.get("campaign_id") == ins_cid], "")
+
+    print("== MCP / AI-agent access (G76) ==")
+    mcp_url = f"{api}/mcp"
+
+    def mcp_call(method, params=None, mid=1, sess=None):
+        payload = {"jsonrpc": "2.0", "id": mid, "method": method}
+        if params is not None:
+            payload["params"] = params
+        r = (sess or s).post(mcp_url, json=payload)
+        body = r.json() if "json" in r.headers.get("content-type", "") else {}
+        return r, body
+
+    def mcp_tool(name, arguments=None, mid=1):
+        r, body = mcp_call("tools/call", {"name": name,
+                                          "arguments": arguments or {}}, mid=mid)
+        result = (body.get("result") or {})
+        parsed = None
+        try:
+            parsed = json.loads(result["content"][0]["text"])
+        except Exception:
+            pass
+        return r, body, result.get("isError") is True, parsed
+
+    r = requests.post(mcp_url, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                      verify=not INSECURE)
+    check("mcp: unauthenticated 401", r.status_code == 401, str(r.status_code))
+
+    r, body = mcp_call("initialize")
+    init = body.get("result") or {}
+    check("mcp: initialize serverInfo",
+          r.status_code == 200 and init.get("serverInfo", {}).get("name") == "aaa-tracker",
+          r.text[:200])
+    check("mcp: initialize protocolVersion + tools capability",
+          bool(init.get("protocolVersion")) and "tools" in (init.get("capabilities") or {}), "")
+
+    r, body = mcp_call("ping")
+    check("mcp: ping", r.status_code == 200 and "result" in body, r.text[:120])
+
+    r, body = mcp_call("tools/list")
+    tools = {t["name"]: t for t in (body.get("result") or {}).get("tools") or []}
+    expected_tools = {"campaigns.list", "campaigns.get", "campaigns.metrics",
+                      "campaigns.set_status", "offers.list", "sources.list",
+                      "reports.summary", "conversions.recent", "insights.latest"}
+    check("mcp: tools/list exposes the tracker tool set",
+          expected_tools <= set(tools), str(sorted(tools)))
+    check("mcp: tool descriptors carry description + inputSchema",
+          all(t.get("description") and isinstance(t.get("inputSchema"), dict)
+              for t in tools.values()), "")
+
+    r, body, is_err, rows = mcp_tool("campaigns.list")
+    smoke_alias = f"smoke-{os.getpid()}"
+    check("mcp: campaigns.list finds the smoke campaign",
+          r.status_code == 200 and not is_err and isinstance(rows, list)
+          and any(c.get("alias") == smoke_alias for c in rows), str(rows)[:200])
+
+    r, body, is_err, camp = mcp_tool("campaigns.get", {"campaign_id": cid})
+    check("mcp: campaigns.get returns the campaign",
+          r.status_code == 200 and not is_err and (camp or {}).get("alias") == smoke_alias,
+          str(camp)[:200])
+
+    r, body, is_err, rows = mcp_tool("campaigns.metrics", {"period": "7d"})
+    check("mcp: campaigns.metrics returns per-campaign rows",
+          r.status_code == 200 and not is_err and isinstance(rows, list)
+          and all("clicks" in m and "roi" in m for m in rows), str(rows)[:200])
+
+    r, body, is_err, totals = mcp_tool("reports.summary", {"period": "7d"})
+    check("mcp: reports.summary totals shape",
+          r.status_code == 200 and not is_err
+          and all(k in (totals or {}) for k in
+                  ("clicks", "conversions", "cost", "revenue", "profit", "roi")),
+          str(totals)[:200])
+
+    r, body, is_err, convs = mcp_tool("conversions.recent", {"limit": 5})
+    check("mcp: conversions.recent honours the limit",
+          r.status_code == 200 and not is_err and isinstance(convs, list)
+          and len(convs) <= 5, str(convs)[:200])
+
+    r, body, is_err, ins = mcp_tool("insights.latest")
+    check("mcp: insights.latest exposes the findings block",
+          r.status_code == 200 and not is_err and "findings" in (ins or {}), str(ins)[:200])
+
+    # set_status round-trip on a dedicated MCP campaign
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke MCP {os.getpid()}", "alias": f"smoke-mcp-{os.getpid()}",
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "config": {"flows": [{
+            "type": "default", "position": 1, "enabled": True, "schema": "redirect",
+            "redirect_url": "https://example.com/smoke-mcp", "filters": [],
+        }], "postbacks": [], "fallback_url": "", "hide_referrer": False}})
+    check("mcp: scratch campaign created", r.status_code == 200 and "id" in r.json(),
+          r.text[:150])
+    mcp_cid = r.json().get("id")
+
+    r, body, is_err, updated = mcp_tool("campaigns.set_status",
+                                        {"campaign_id": mcp_cid, "status": "paused"})
+    check("mcp: set_status paused",
+          r.status_code == 200 and not is_err and (updated or {}).get("status") == "paused",
+          str(updated)[:200])
+    r = s.get(f"{api}/campaigns/")
+    check("mcp: pause visible through the REST API",
+          r.status_code == 200 and any(c.get("id") == mcp_cid
+                                       and c.get("status") == "paused"
+                                       for c in r.json()), r.text[:150])
+    r, body, is_err, updated = mcp_tool("campaigns.set_status",
+                                        {"campaign_id": mcp_cid, "status": "active"})
+    check("mcp: set_status active",
+          r.status_code == 200 and not is_err and (updated or {}).get("status") == "active",
+          str(updated)[:200])
+
+    # protocol + tool error paths
+    r, body = mcp_call("no.such.method")
+    check("mcp: unknown method -> -32601",
+          (body.get("error") or {}).get("code") == -32601, r.text[:150])
+    r, body = mcp_call("tools/call", {"name": "no.such.tool", "arguments": {}})
+    check("mcp: unknown tool -> -32602",
+          (body.get("error") or {}).get("code") == -32602, r.text[:150])
+    r, body = mcp_call("tools/call", {"name": "campaigns.get", "arguments": {}})
+    check("mcp: missing arguments -> -32602",
+          (body.get("error") or {}).get("code") == -32602, r.text[:150])
+    r, body, is_err, _ = mcp_tool("campaigns.set_status",
+                                  {"campaign_id": mcp_cid, "status": "bogus"})
+    check("mcp: invalid status value -> tool error", is_err, r.text[:150])
+    r, body, is_err, _ = mcp_tool("campaigns.get", {"campaign_id": 999999999})
+    check("mcp: unknown campaign -> tool error", is_err, r.text[:150])
+
+    r = s.post(mcp_url, json={"jsonrpc": "2.0", "method": "notifications/initialized"})
+    check("mcp: notification accepted without a response body",
+          r.status_code in (200, 202, 204), str(r.status_code))
+    r = s.get(mcp_url)
+    check("mcp: GET not allowed (405)", r.status_code == 405, str(r.status_code))
+
+    print("== MCP cleanup ==")
+    if mcp_cid:
+        r = s.delete(f"{api}/campaigns/{mcp_cid}")
+        check("mcp: delete scratch campaign", r.status_code == 200, r.text[:120])
 
     print("== Cleanup ==")
     if conv_id:

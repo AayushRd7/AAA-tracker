@@ -65,6 +65,32 @@
             </v-col>
         </v-row>
 
+        <!-- G56: anomaly insights (admin; hidden silently with zero findings) -->
+        <v-row dense v-if="insightsSummary">
+            <v-col cols="12">
+                <v-card class="pa-4 stat-card insights-card" @click="goToInsights">
+                    <div class="d-flex align-center flex-wrap">
+                        <v-avatar :color="insightsSummary.critical ? '#dc26261f' : '#f59e0b1f'" size="40" class="mr-3">
+                            <v-icon small :color="insightsSummary.critical ? '#dc2626' : '#f59e0b'">mdi-brain</v-icon>
+                        </v-avatar>
+                        <div class="font-weight-medium mr-4">Insights</div>
+                        <span v-if="insightsSummary.critical" class="caption mr-4">
+                            <span class="status-chip status-chip--danger">{{ insightsSummary.critical }} critical</span>
+                        </span>
+                        <span v-if="insightsSummary.warning" class="caption mr-4">
+                            <span class="status-chip status-chip--warning">{{ insightsSummary.warning }} warning</span>
+                        </span>
+                        <span v-if="insightsSummary.info" class="caption grey--text mr-4">{{ insightsSummary.info }} info</span>
+                        <span class="caption grey--text">last run {{ insightsSummary.run_at ? $formatDate(insightsSummary.run_at) : '—' }}</span>
+                        <v-spacer></v-spacer>
+                        <v-btn text small color="primary" @click.stop="goToInsights">
+                            Review findings<v-icon small class="ml-1">mdi-arrow-right</v-icon>
+                        </v-btn>
+                    </div>
+                </v-card>
+            </v-col>
+        </v-row>
+
         <!-- Filters -->
         <v-card class="mt-4 pa-4">
             <div class="filter-bar align-center">
@@ -337,6 +363,7 @@
             return {
                 loading: false,
                 fraudSummary: null,
+                insightsSummary: null,
                 liveMode: false,
                 liveTimer: null,
                 livePanelOpen: false,
@@ -459,6 +486,7 @@
             this.loadData();
             this.loadAnnotations();
             this.loadFraudSummary();
+            this.loadInsightsSummary();
             document.addEventListener('visibilitychange', this.onVisibilityChange);
             this.$root.$on('load-dashboard', this.loadData);
         },
@@ -543,6 +571,33 @@
             },
             goToFraud() {
                 window.location.href = '/backend/fraud';
+            },
+            // --- G56 insights card (admin-only endpoint; hidden otherwise/empty) ---
+            loadInsightsSummary() {
+                fetch('/backend/api/insights/latest', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        const counts = {critical: 0, warning: 0, info: 0};
+                        (data.findings || []).forEach(f => {
+                            if (counts[f.severity] != null) counts[f.severity] += 1;
+                        });
+                        // hide silently when there is nothing worth surfacing
+                        if (!counts.critical && !counts.warning) {
+                            this.insightsSummary = null;
+                            return;
+                        }
+                        this.insightsSummary = {
+                            critical: counts.critical, warning: counts.warning,
+                            info: counts.info, run_at: data.run_at || null,
+                        };
+                    })
+                    .catch(() => {
+                        this.insightsSummary = null;
+                    });
+            },
+            goToInsights() {
+                window.location.href = '/backend/fraud';
+                try { localStorage.setItem('fraud_tab', 'insights'); } catch (e) {}
             },
             // --- G51: live click feed ---
             onVisibilityChange() {

@@ -81,47 +81,38 @@
         </div>
 
         <v-dialog v-model="dialog" persistent>
-            <v-card class="pa-4 dialog-xl">
-                <v-row>
-                    <v-col cols="12" class="ma-4">
+            <v-card class="pa-4 dialog-xl campaign-editor">
+                <div class="campaign-editor-head">
+                    <h3>{{ isEdit ? 'Edit campaign' : 'New campaign' }}</h3>
+                    <v-select label="Type" v-model="form.type" :items="types"
+                              outlined
+                              dense
+                              class="campaign-editor-type"></v-select>
+                </div>
+                <div class="campaign-editor-body">
+                    <v-tabs vertical v-model="tab" class="campaign-editor-tabs">
+                        <v-tab><v-icon small>mdi-tune</v-icon>General</v-tab>
+                        <v-tab><v-icon small>mdi-cash-multiple</v-icon>Cost</v-tab>
+                        <v-tab><v-icon small>mdi-crosshairs-gps</v-icon>Tracking</v-tab>
+                        <v-tab><v-icon small>mdi-form-textbox</v-icon>Parameters</v-tab>
+                        <v-tab><v-icon small>mdi-webhook</v-icon>S2S postbacks</v-tab>
+                        <v-tab><v-icon small>mdi-sitemap</v-icon>Flows</v-tab>
+                        <v-tab><v-icon small>mdi-shield-outline</v-icon>Shield</v-tab>
+                        <v-tab><v-icon small>mdi-stairs</v-icon>Funnel</v-tab>
+                        <v-tab><v-icon small>mdi-note-outline</v-icon>Notes</v-tab>
+                    </v-tabs>
 
-                        <v-row dense class="mt-2">
-                            <v-col cols="12" md="6">
-                                <h3>{{ isEdit ? 'Edit campaign' : 'New campaign' }}</h3>
-                            </v-col>
-                        </v-row>
-                        <v-row dense class="mt-2">
-                            <v-col cols="12" md="4">
-                                <v-text-field label="Name" v-model="form.name" outlined
-                                              dense></v-text-field>
-                            </v-col>
-
-
-                            <v-col cols="12" md="2">
-                                <v-select label="Type" v-model="form.type" :items="types"
-                                          outlined
-                                          dense></v-select>
-                            </v-col>
-                        </v-row>
-                        <v-row class="mt-0">
-                            <v-col cols="12" md="6">
-                                <v-tabs v-model="tab">
-                                    <v-tab>General</v-tab>
-                                    <v-tab>Cost</v-tab>
-                                    <v-tab>Tracking</v-tab>
-                                    <v-tab>Parameters</v-tab>
-                                    <v-tab>S2S postbacks</v-tab>
-                                    <v-tab>Shield</v-tab>
-                                    <v-tab>Funnel</v-tab>
-                                    <v-tab>Notes</v-tab>
-                                </v-tabs>
-
-                                <v-tabs-items v-model="tab">
+                    <v-tabs-items v-model="tab" class="campaign-editor-panes">
                                     <!-- GENERAL -->
                                     <v-tab-item>
-                                        <v-card flat>
-                                            <v-container>
-                                                <v-row dense>
+                                        <div class="campaign-editor-pane">
+                                            <v-row dense>
+                                                <v-col cols="12">
+                                                    <v-text-field label="Name" v-model="form.name" outlined
+                                                                  dense></v-text-field>
+                                                </v-col>
+                                            </v-row>
+                                            <v-row dense>
 
                                                     <v-col cols="12" class="mt-2">
                                                         <v-switch
@@ -194,14 +185,12 @@
                                                     </v-col>
 
                                                 </v-row>
-                                            </v-container>
-                                        </v-card>
+                                        </div>
                                     </v-tab-item>
 
                                     <!-- COST -->
                                     <v-tab-item>
-                                        <v-card flat>
-                                            <v-container>
+                                        <div class="campaign-editor-pane">
                                                 <v-row dense>
                                                     <v-col cols="12">
                                                         <v-select label="Cost model" v-model="form.cost_model"
@@ -231,14 +220,12 @@
                                                         </v-col>
                                                     </v-col>
                                                 </v-row>
-                                            </v-container>
-                                        </v-card>
+                                        </div>
                                     </v-tab-item>
 
                                     <!-- TRACKING -->
                                     <v-tab-item>
-                                        <v-card flat>
-                                            <v-container>
+                                        <div class="campaign-editor-pane">
                                                 <v-row dense>
                                                     <v-col cols="12">
                                                         <v-text-field
@@ -352,14 +339,12 @@
                                                         ></v-textarea>
                                                     </v-col>
                                                 </v-row>
-                                            </v-container>
-                                        </v-card>
+                                        </div>
                                     </v-tab-item>
 
                                     <!-- PARAMETERS -->
                                     <v-tab-item>
-                                        <v-card flat>
-                                            <v-container>
+                                        <div class="campaign-editor-pane">
                                                 <v-row class="mb-4">
                                                     <v-col cols="12" class="text-right">
                                                         <v-btn small color="primary" @click="addParameter">Add</v-btn>
@@ -416,15 +401,13 @@
                                                         </v-btn>
                                                     </v-col>
                                                 </v-row>
-                                            </v-container>
-                                        </v-card>
+                                        </div>
                                     </v-tab-item>
 
 
                                     <!-- POSTBACKS -->
                                     <v-tab-item>
-                                        <v-card flat>
-                                            <v-container>
+                                        <div class="campaign-editor-pane">
                                                 <!-- Existing postbacks -->
                                                 <v-row
                                                         dense
@@ -507,15 +490,115 @@
                                                         </v-btn>
                                                     </v-col>
                                                 </v-row>
-                                            </v-container>
+                                        </div>
+                                    </v-tab-item>
 
-                                        </v-card>
+                                    <!-- FLOWS -->
+                                    <v-tab-item>
+                                        <div class="campaign-editor-pane" v-if="form.type=='campaign'">
+                                            <h3 class="mb-2 mt-2">Flow configuration</h3>
+
+                                            <v-alert v-if="form.funnel && form.funnel.enabled" type="warning" dense outlined class="mb-3">
+                                                Funnel mode is active — these flows are inactive and ignored while the funnel is enabled.
+                                            </v-alert>
+
+                                            <v-row>
+                                                <v-col cols="12" md="5">
+                                                    <v-select
+                                                            v-model="form.flowScheme"
+                                                            :items="[{text: 'Position (first match wins)', value: 'position'}, {text: 'Weight % (random split)', value: 'weight'}]"
+                                                            label="Distribution"
+                                                            outlined
+                                                            dense
+                                                            hint="Weight % splits visitors across flows by their weight — e.g. 70/30"
+                                                            persistent-hint></v-select>
+                                                </v-col>
+                                            </v-row>
+
+                                            <v-row dense v-for="(flow, index) in form.flows" :key="index" class="mb-2 mr-5">
+                                                <v-col cols="12">
+                                                    <v-card
+                                                            :class="
+                                                            flow.type === 'forced'
+                                                                ? 'flow-card flow-card--forced'
+                                                                : flow.type === 'default'
+                                                                ? 'flow-card flow-card--default'
+                                                                : 'flow-card'"
+                                                            flat
+                                                    >
+                                                        <v-card-title class="d-flex justify-space-between align-center">
+                                                            <v-col cols="2">
+                                                                <v-btn icon small @click="moveFlowUp(index)"
+                                                                       :disabled="index === 0">
+                                                                    <v-icon>mdi-arrow-up</v-icon>
+                                                                </v-btn>
+                                                                <v-btn icon small @click="moveFlowDown(index)"
+                                                                       :disabled="index === form.flows.length - 1">
+                                                                    <v-icon>mdi-arrow-down</v-icon>
+                                                                </v-btn>
+                                                                <span class="status-chip ml-1" :class="flow.enabled ? 'status-chip--success' : 'status-chip--neutral'">{{ flow.enabled ? 'On' : 'Off' }}</span>
+                                                            </v-col>
+                                                            <v-col cols="7">
+                                                                <strong>{{ flow.name }}</strong>
+                                                                <span class="ml-2 grey--text">({{ flow.type }})</span>
+                                                            </v-col>
+                                                            <v-col cols="3" class="text-right">
+                                                                <v-btn text color="primary" @click="openFlowEdit(flow, index)">
+                                                                    Edit
+                                                                </v-btn>
+                                                                <v-btn text color="red" @click="removeFlow(index)">Delete</v-btn>
+                                                            </v-col>
+                                                        </v-card-title>
+
+                                                        <v-card-text>
+                                                            <div>
+                                                                <span class="mr-3">Position: <b>{{ flow.position }}</b></span>
+                                                                <span class="mr-3">Weight: <b>{{ flow.weight }}%</b></span>
+                                                                <span class="mr-3">Schema: <b>{{ flow.schema }}</b></span>
+                                                                <span>Status: <b>{{ flow.enabled ? 'On' : 'Off' }}</b></span>
+                                                            </div>
+                                                            <div>
+                                                              <span class="mr-3">
+                                                                Landing:
+                                                                <b>{{ landingMap[flow.landing] || '—' }}</b>
+                                                              </span>
+                                                              <span class="mr-3">
+                                                                    Offer:
+                                                                    <b>{{ offerMap[flow.offer] || '—' }}</b>
+                                                                  </span>
+                                                            </div>
+                                                            <div>
+                                                              <span v-if="flowFiltersSummary(flow).length" class="d-block mt-2">
+                                                                Filters:
+                                                                <ul class="pl-4 mb-0">
+                                                                  <li v-for="(line, i) in flowFiltersSummary(flow)" :key="i">{{ line }}</li>
+                                                                </ul>
+                                                              </span>
+                                                            </div>
+                                                            <div v-if="flow.schedule">
+                                                              <span class="mr-3">Schedule: <b>{{ flowScheduleSummary(flow.schedule) }}</b></span>
+                                                            </div>
+                                                            <div v-if="flow.caps && (flow.caps.per_hour || flow.caps.per_day || flow.caps.total)">
+                                                              <span class="mr-3">Caps: <b>{{ flowCapsSummary(flow.caps) }}</b></span>
+                                                            </div>
+                                                            <div v-if="flow.notes">
+                                                              <span class="mr-3">
+                                                                Notes:
+                                                                <b>{{ flow.notes || '—' }}</b>
+                                                              </span>
+                                                            </div>
+                                                        </v-card-text>
+                                                    </v-card>
+                                                </v-col>
+                                            </v-row>
+
+                                            <v-btn small color="primary" @click="openFlowEdit()">Add flow</v-btn>
+                                        </div>
                                     </v-tab-item>
 
                                     <!-- SHIELD -->
                                     <v-tab-item>
-                                        <v-card flat>
-                                            <v-container>
+                                        <div class="campaign-editor-pane">
                                                 <v-row dense>
                                                     <v-col cols="12" class="mt-2">
                                                         <v-switch
@@ -588,14 +671,12 @@
                                                         ></v-text-field>
                                                     </v-col>
                                                 </v-row>
-                                            </v-container>
-                                        </v-card>
+                                        </div>
                                     </v-tab-item>
 
                                     <!-- FUNNEL (G10) -->
                                     <v-tab-item>
-                                        <v-card flat>
-                                            <v-container>
+                                        <div class="campaign-editor-pane">
                                                 <v-row dense>
                                                     <v-col cols="12" class="mt-2">
                                                         <v-switch
@@ -659,130 +740,20 @@
                                                     </v-row>
                                                     <v-btn small color="primary" @click="addFunnelStep">Add step</v-btn>
                                                 </template>
-                                            </v-container>
-                                        </v-card>
+                                        </div>
                                     </v-tab-item>
 
                                     <!-- NOTES -->
                                     <v-tab-item>
-                                        <v-card flat>
-                                            <v-container>
+                                        <div class="campaign-editor-pane">
                                                 <v-textarea v-model="form.notes" label="Internal notes" outlined dense
                                                             rows="5"
                                                             auto-grow></v-textarea>
-                                            </v-container>
-                                        </v-card>
+                                        </div>
                                     </v-tab-item>
-                                </v-tabs-items>
-
-                            </v-col>
-
-
-                            <!-- RIGHT: Flow Configuration -->
-                            <v-col cols="12" md="6" v-if="form.type=='campaign'">
-                                <h3 class="mb-2 mt-2">Flow configuration</h3>
-
-                                <v-alert v-if="form.funnel && form.funnel.enabled" type="warning" dense outlined class="mb-3">
-                                    Funnel mode is active — these flows are inactive and ignored while the funnel is enabled.
-                                </v-alert>
-
-                                <v-row>
-                                    <v-col cols="12" md="5">
-                                        <v-select
-                                                v-model="form.flowScheme"
-                                                :items="[{text: 'Position (first match wins)', value: 'position'}, {text: 'Weight % (random split)', value: 'weight'}]"
-                                                label="Distribution"
-                                                outlined
-                                                dense
-                                                hint="Weight % splits visitors across flows by their weight — e.g. 70/30"
-                                                persistent-hint></v-select>
-                                    </v-col>
-                                </v-row>
-
-                                <v-row dense v-for="(flow, index) in form.flows" :key="index" class="mb-2 mr-5">
-                                    <v-col cols="12">
-                                        <v-card
-                                                :class="
-                                                flow.type === 'forced'
-                                                    ? 'flow-card flow-card--forced'
-                                                    : flow.type === 'default'
-                                                    ? 'flow-card flow-card--default'
-                                                    : 'flow-card'"
-                                                flat
-                                        >
-                                            <v-card-title class="d-flex justify-space-between align-center">
-                                                <v-col cols="2">
-                                                    <v-btn icon small @click="moveFlowUp(index)"
-                                                           :disabled="index === 0">
-                                                        <v-icon>mdi-arrow-up</v-icon>
-                                                    </v-btn>
-                                                    <v-btn icon small @click="moveFlowDown(index)"
-                                                           :disabled="index === form.flows.length - 1">
-                                                        <v-icon>mdi-arrow-down</v-icon>
-                                                    </v-btn>
-                                                    <span class="status-chip ml-1" :class="flow.enabled ? 'status-chip--success' : 'status-chip--neutral'">{{ flow.enabled ? 'On' : 'Off' }}</span>
-                                                </v-col>
-                                                <v-col cols="7">
-                                                    <strong>{{ flow.name }}</strong>
-                                                    <span class="ml-2 grey--text">({{ flow.type }})</span>
-                                                </v-col>
-                                                <v-col cols="3" class="text-right">
-                                                    <v-btn text color="primary" @click="openFlowEdit(flow, index)">
-                                                        Edit
-                                                    </v-btn>
-                                                    <v-btn text color="red" @click="removeFlow(index)">Delete</v-btn>
-                                                </v-col>
-                                            </v-card-title>
-
-                                            <v-card-text>
-                                                <div>
-                                                    <span class="mr-3">Position: <b>{{ flow.position }}</b></span>
-                                                    <span class="mr-3">Weight: <b>{{ flow.weight }}%</b></span>
-                                                    <span class="mr-3">Schema: <b>{{ flow.schema }}</b></span>
-                                                    <span>Status: <b>{{ flow.enabled ? 'On' : 'Off' }}</b></span>
-                                                </div>
-                                                <div>
-                                                  <span class="mr-3">
-                                                    Landing:
-                                                    <b>{{ landingMap[flow.landing] || '—' }}</b>
-                                                  </span>
-                                                    <span class="mr-3">
-                                                        Offer:
-                                                        <b>{{ offerMap[flow.offer] || '—' }}</b>
-                                                      </span>
-                                                </div>
-                                                <div>
-                                                  <span v-if="flowFiltersSummary(flow).length" class="d-block mt-2">
-                                                    Filters:
-                                                    <ul class="pl-4 mb-0">
-                                                      <li v-for="(line, i) in flowFiltersSummary(flow)" :key="i">{{ line }}</li>
-                                                    </ul>
-                                                  </span>
-                                                </div>
-                                                <div v-if="flow.schedule">
-                                                  <span class="mr-3">Schedule: <b>{{ flowScheduleSummary(flow.schedule) }}</b></span>
-                                                </div>
-                                                <div v-if="flow.caps && (flow.caps.per_hour || flow.caps.per_day || flow.caps.total)">
-                                                  <span class="mr-3">Caps: <b>{{ flowCapsSummary(flow.caps) }}</b></span>
-                                                </div>
-                                                <div v-if="flow.notes">
-                                                  <span class="mr-3">
-                                                    Notes:
-                                                    <b>{{ flow.notes || '—' }}</b>
-                                                  </span>
-                                                </div>
-                                            </v-card-text>
-                                        </v-card>
-                                    </v-col>
-                                </v-row>
-
-                                <v-btn small color="primary" @click="openFlowEdit()">Add flow</v-btn>
-                            </v-col>
-
-                        </v-row>
-                    </v-col>
-                </v-row>
-                <v-card-actions>
+                    </v-tabs-items>
+                </div>
+                <v-card-actions class="campaign-editor-actions">
                     <v-spacer></v-spacer>
                     <v-btn text color="grey" @click="confirmCancel">Cancel</v-btn>
                     <v-btn text color="primary" @click="update">Update</v-btn>

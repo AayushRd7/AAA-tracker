@@ -1129,3 +1129,342 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
   position: static;
   flex: none;
 }
+
+/* Campaign editor */
+/* Fixed-height, non-scrolling campaign dialog card with an internal vertical-tab
+   layout. Overrides the global ".v-dialog > .v-card { overflow-y: auto }" scroll
+   rule for this card only, which also removes the corner shadow artifact. */
+.v-dialog > .v-card.campaign-editor {
+  height: min(860px, calc(100vh - 56px));
+  max-height: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.campaign-editor-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: 8px;
+}
+.campaign-editor-head h3 {
+  margin: 0;
+}
+.campaign-editor-type {
+  max-width: 200px;
+  flex: none;
+}
+.campaign-editor-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.campaign-editor-tabs {
+  flex: none;
+  width: 190px;
+  border-right: 1px solid var(--border-soft);
+}
+.campaign-editor-tabs .v-tab {
+  justify-content: flex-start;
+  text-transform: none;
+  letter-spacing: 0;
+  height: 42px;
+  border-radius: var(--radius-sm);
+  margin: 1px 8px;
+  max-width: none;
+}
+.campaign-editor-tabs .v-tab--active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.campaign-editor-tabs .v-tab .v-icon {
+  margin-right: 10px;
+}
+.campaign-editor-tabs > .v-tabs-bar {
+  border-right: none;
+  width: 100%;
+}
+.campaign-editor-panes {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  background: transparent;
+}
+.campaign-editor-panes > .v-window__container,
+.campaign-editor-panes .v-window-item {
+  height: 100%;
+}
+.campaign-editor-pane {
+  height: 100%;
+  overflow-y: auto;
+  padding: 4px 20px 20px;
+}
+.campaign-editor-actions {
+  flex: none;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 12px;
+}
+
+/* ============================================================
+   Documentation hub (about page component)
+   ============================================================ */
+
+.doc-tabs {
+  border-bottom: 1px solid var(--border-soft);
+  flex: none;
+}
+.doc-tabs-items {
+  background: transparent;
+  /* Vuetify sets overflow-y:hidden on v-tabs-items, which turns it into the
+     sticky rail's scroll container and breaks stickiness — let it clip nothing. */
+  overflow: visible;
+}
+.doc-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6, 32px);
+}
+
+/* Left index rail — sticky, collapses to a dropdown on mobile */
+.doc-rail {
+  flex: 0 0 240px;
+  width: 240px;
+  position: sticky;
+  top: var(--space-4, 16px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding-right: var(--space-2, 8px);
+}
+.doc-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card-bg);
+}
+.doc-rail-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-3, 12px);
+  padding-bottom: var(--space-4, 16px);
+}
+.doc-rail-link {
+  display: flex;
+  align-items: center;
+  padding: 7px var(--space-3, 12px);
+  border-radius: var(--radius-sm, 8px);
+  font-size: var(--fs-13, 13px);
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: background var(--t-fast, 0.15s), color var(--t-fast, 0.15s);
+}
+.doc-rail-link:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.doc-rail-link--active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-left-color: var(--accent);
+  font-weight: 600;
+}
+.doc-rail-empty {
+  padding: var(--space-3, 12px);
+  font-size: var(--fs-12, 12px);
+  color: var(--text-secondary);
+}
+.doc-rail-mobile {
+  display: none;
+}
+
+/* Right content column */
+.doc-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 860px;
+}
+.doc-section {
+  margin-bottom: var(--space-7, 48px);
+  scroll-margin-top: var(--space-4, 16px);
+}
+.doc-h2 {
+  font-size: var(--fs-20, 20px);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 var(--space-4, 16px);
+  padding-bottom: var(--space-2, 8px);
+  border-bottom: 1px solid var(--border-soft);
+}
+.doc-h3 {
+  font-size: var(--fs-16, 16px);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: var(--space-6, 32px) 0 var(--space-3, 12px);
+}
+.doc-section p {
+  font-size: var(--fs-14, 14px);
+  line-height: 1.65;
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-4, 16px);
+}
+.doc-section b,
+.doc-section strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.doc-section code,
+.doc-code {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: var(--fs-12, 12px);
+}
+.doc-section code {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 1px 6px;
+  color: var(--accent);
+  word-break: break-word;
+}
+.doc-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+.doc-link:hover {
+  text-decoration: underline;
+}
+.doc-list {
+  margin: 0 0 var(--space-4, 16px);
+  padding-left: var(--space-5, 24px);
+}
+.doc-list li {
+  font-size: var(--fs-14, 14px);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2, 8px);
+}
+.doc-steps {
+  margin: 0 0 var(--space-4, 16px);
+  padding-left: var(--space-5, 24px);
+  counter-reset: docstep;
+}
+.doc-steps li {
+  font-size: var(--fs-14, 14px);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2, 8px);
+}
+.doc-steps li::marker {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* Small reference tables */
+.doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 var(--space-5, 24px);
+  font-size: var(--fs-13, 13px);
+}
+.doc-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+}
+.doc-table td {
+  color: var(--text-secondary);
+  border: 1px solid var(--border-soft);
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  vertical-align: top;
+  line-height: 1.5;
+}
+.doc-table tbody tr:nth-child(even) td {
+  background: var(--surface-hover);
+}
+
+/* Code blocks */
+.doc-code {
+  display: block;
+  background: var(--chrome, #151d2b);
+  color: #d6deeb;
+  border-radius: var(--radius-sm, 8px);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  margin: 0 0 var(--space-5, 24px);
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.55;
+}
+
+/* Callouts */
+.doc-callout {
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  font-size: var(--fs-13, 13px);
+  line-height: 1.6;
+  margin: 0 0 var(--space-5, 24px);
+}
+.doc-callout--info {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  border-left-color: var(--accent);
+}
+.doc-callout--warning {
+  background: var(--status-warning-bg);
+  color: var(--text-primary);
+  border-left-color: var(--status-warning);
+}
+.doc-note {
+  font-size: var(--fs-13, 13px);
+  color: var(--text-secondary);
+  border-left: 2px solid var(--border);
+  padding-left: var(--space-3, 12px);
+}
+
+/* System status tab container */
+.doc-status {
+  max-width: 860px;
+}
+
+/* Mobile: rail becomes a top dropdown */
+@media (max-width: 959px) {
+  .doc-layout {
+    flex-direction: column;
+    gap: var(--space-4, 16px);
+  }
+  .doc-rail {
+    display: none;
+  }
+  .doc-rail-mobile {
+    display: block;
+    width: 100%;
+  }
+  .doc-content {
+    max-width: 100%;
+  }
+}
+
+/* --- G56: anomaly insights --------------------------------------------- */
+.insights-card {
+    cursor: pointer;
+    border-left: 3px solid var(--status-warning, #f59e0b);
+}
+.insight-campaign-link {
+    color: var(--accent, #2563eb);
+    text-decoration: none;
+}
+.insight-campaign-link:hover {
+    text-decoration: underline;
+}
+.tabular {
+    font-variant-numeric: tabular-nums;
+}

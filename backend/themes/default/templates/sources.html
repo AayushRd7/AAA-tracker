@@ -242,6 +242,19 @@
                             :items-per-page="10"
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
                     >
+                        <template v-slot:item.name="{ item }">
+                            <div class="aff-name-cell">
+                                <template v-if="presetFor(item.name) && (presetFor(item.name).logo_url || presetFor(item.name).logo_domain) && !item._logoBroken">
+                                    <div class="aff-logo-wrap">
+                                        <img :src="presetFor(item.name).logo_url || ('/backend/api/sources/favicon/' + encodeURIComponent(presetFor(item.name).logo_domain))"
+                                             width="20" height="20" alt="" class="aff-table-logo"
+                                             @load="tableLogoLoaded(item, $event)" @error="$set(item, '_logoBroken', true)">
+                                    </div>
+                                </template>
+                                <span v-else class="aff-table-logo-fallback aff-table-logo-solo">{{ item.name.charAt(0) }}</span>
+                                <span>{{ item.name }}</span>
+                            </div>
+                        </template>
                         <template v-slot:item.s2s_postback_statuses="{ item }">
                             {{ Object.keys(item.s2s_postback_statuses).filter(k =>
                             item.s2s_postback_statuses[k]).join(', ') }}
@@ -337,9 +350,15 @@
         mounted() {
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadSources();
+            this.loadPresets();
             this.$root.$on('load-sources', this.loadSources);
         },
         computed: {
+            presetByName() {
+                const map = {};
+                this.presets.forEach(p => { map[p.name] = p; });
+                return map;
+            },
             // Catalog cards: search + API filter, sources with capabilities
             // first (alphabetical inside each group), "Other" always pinned last.
             catalogPresets() {
@@ -482,12 +501,18 @@
             logoLoaded(p, e) {
                 if (e.target.naturalWidth <= 1) this.$set(p, '_logoBroken', true);
             },
+            presetFor(name) {
+                return this.presetByName[name] || null;
+            },
+            tableLogoLoaded(item, e) {
+                if (e.target.naturalWidth <= 1) this.$set(item, '_logoBroken', true);
+            },
 
             addPreset(preset) {
                 const payload = {
                     name: preset.name,
                     traffic_loss: 0,
-                    s2s_postback: '',
+                    s2s_postback: (preset.postback || '').replace(/YOUR-TRACKER-DOMAIN/gi, window.location.host),
                     s2s_postback_statuses: {sale: true, lead: false, rejected: false, upsale: false},
                     additional_settings: {},
                     settings: preset.params || []

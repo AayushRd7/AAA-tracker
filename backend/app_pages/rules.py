@@ -228,6 +228,14 @@ async def auto_rules_loop():
                     _loop_last_run = datetime.utcnow()
                 finally:
                     ch.close()
+            # G56 — anomaly insights share this 15-min cadence (no separate loop)
+            try:
+                from app_pages import insights
+                summary = await asyncio.to_thread(insights.run_analysis, "auto_rules_loop")
+                if summary.get("telegram_sent"):
+                    print(f"Insights: new critical findings alerted via Telegram")
+            except Exception as e:
+                print("Insights run error:", e)
         except Exception as e:
             print("Auto rules loop error:", e)
         await asyncio.sleep(LOOP_INTERVAL_SECONDS)

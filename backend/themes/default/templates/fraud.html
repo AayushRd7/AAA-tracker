@@ -11,6 +11,13 @@
             </v-btn>
         </div>
 
+        <v-tabs v-model="mainTab" class="mb-4">
+            <v-tab href="#overview">Overview</v-tab>
+            <v-tab href="#insights">Insights</v-tab>
+        </v-tabs>
+        <v-tabs-items v-model="mainTab">
+        <v-tab-item value="overview">
+
         <!-- Summary cards -->
         <v-row dense>
             <v-col v-for="card in summaryCards" :key="card.title" cols="6" sm="4" md="2">
@@ -320,6 +327,63 @@
                 </v-card>
             </v-col>
         </v-row>
+
+        </v-tab-item>
+        <v-tab-item value="insights">
+
+        <!-- G56: anomaly insights -->
+        <v-row>
+            <v-col cols="12">
+                <v-card>
+                    <div class="d-flex align-center pa-4 pb-3">
+                        <div class="font-weight-medium mr-3">Anomaly insights</div>
+                        <span class="caption grey--text">last 24h vs the previous 7-day average per active campaign</span>
+                        <v-spacer></v-spacer>
+                        <span v-if="insights && insights.run_at" class="caption grey--text mr-3">
+                            Last run: {{ fmtRunAt(insights.run_at) }}
+                        </span>
+                        <v-btn color="primary" elevation="0" small :loading="insightsRunning" @click="runInsights">
+                            <v-icon small class="mr-1">mdi-play-circle-outline</v-icon>Run now
+                        </v-btn>
+                    </div>
+                    <v-data-table :headers="insightHeaders" :items="insightFindings" :items-per-page="15" dense>
+                        <template v-slot:item.severity="{ item }">
+                            <span class="status-chip" :class="severityChipClass(item.severity)">{{ item.severity }}</span>
+                        </template>
+                        <template v-slot:item.campaign_name="{ item }">
+                            <a class="insight-campaign-link" @click.prevent="goToCampaign(item.campaign_id)" href="#">
+                                {{ item.campaign_name }} <span class="grey--text">#{{ item.campaign_id }}</span>
+                            </a>
+                        </template>
+                        <template v-slot:item.detail="{ item }">
+                            <span class="tabular">{{ fmtDetail(item) }}</span>
+                        </template>
+                        <template v-slot:item.change="{ item }">
+                            <span v-if="item.detail.baseline" class="tabular"
+                                  :class="item.detail.change_pct < 0 ? 'num-neg' : 'num-pos'">
+                                {{ item.detail.change_pct > 0 ? '+' : '' }}{{ item.detail.change_pct }}%
+                            </span>
+                            <span v-else class="grey--text">—</span>
+                        </template>
+                        <template v-slot:item.detected_at="{ item }">
+                            {{ fmtRunAt(item.detected_at) }}
+                        </template>
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-check-decagram-outline</v-icon>
+                                <div class="mt-2">No anomalies detected in the last run</div>
+                                <div v-if="insights && insights.campaigns_analyzed != null" class="caption grey--text mt-1">
+                                    {{ insights.campaigns_analyzed }} campaign(s) analyzed
+                                </div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        </v-tab-item>
+        </v-tabs-items>
     </div>
 </script>
 
@@ -329,6 +393,18 @@
         data() {
             return {
                 loading: false,
+                mainTab: 'overview',
+                insights: null,
+                insightsRunning: false,
+                insightHeaders: [
+                    {text: 'Severity', value: 'severity'},
+                    {text: 'Campaign', value: 'campaign_name'},
+                    {text: 'Type', value: 'type'},
+                    {text: 'Message', value: 'message'},
+                    {text: 'Current vs baseline', value: 'detail', align: 'end'},
+                    {text: 'Change', value: 'change', align: 'end'},
+                    {text: 'Detected', value: 'detected_at'},
+                ],
                 summary: {
                     total_clicks: 0, bot_clicks: 0, bot_share_pct: 0,
                     avg_fraud_score: 0, est_savings: 0, top_ips: [], top_uas: [],
@@ -406,6 +482,9 @@
             };
         },
         computed: {
+            insightFindings() {
+                return (this.insights && this.insights.findings) || [];
+            },
             summaryCards() {
                 const s = this.summary;
                 return [
@@ -418,9 +497,17 @@
             },
         },
         mounted() {
+            try {
+                if (localStorage.getItem('fraud_tab') === 'insights') {
+                    this.mainTab = 'insights';
+                    localStorage.removeItem('fraud_tab');
+                }
+            } catch (e) {}
             this.loadAll();
+            this.loadInsights();
             this.startFeed();
             this.$root.$on('load-fraud', this.loadAll);
+            this.$root.$on('load-fraud', this.loadInsights);
             document.addEventListener('visibilitychange', this.onVisibility);
         },
         beforeDestroy() {
@@ -428,6 +515,64 @@
             document.removeEventListener('visibilitychange', this.onVisibility);
         },
         methods: {
+            // --- G56 anomaly insights ---
+            loadInsights() {
+                fetch('/backend/api/insights/latest', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        this.insights = data;
+                    })
+                    .catch(() => {
+                        this.insights = null;
+                    });
+            },
+            runInsights() {
+                this.insightsRunning = true;
+                fetch('/backend/api/insights/run', {method: 'POST', credentials: 'include'})
+                    .then(async res => {
+                        if (!res.ok) {
+                            let msg = 'HTTP ' + res.status;
+                            try {
+                                msg = (await res.json()).detail || msg;
+                            } catch (e) {}
+                            throw new Error(msg);
+                        }
+                        return res.json();
+                    })
+                    .then(data => {
+                        this.insights = data;
+                        const n = (data.findings || []).length;
+                        this.$root.$emit('show-message', {
+                            type: n ? 'info' : 'success',
+                            text: n ? n + ' anomal' + (n === 1 ? 'y' : 'ies') + ' detected' : 'No anomalies detected',
+                        });
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.insightsRunning = false;
+                    });
+            },
+            severityChipClass(sev) {
+                if (sev === 'critical') return 'status-chip--danger';
+                if (sev === 'warning') return 'status-chip--warning';
+                return 'status-chip--info';
+            },
+            fmtRunAt(ts) {
+                return ts ? this.$formatDate(ts) : '—';
+            },
+            fmtDetail(item) {
+                const d = item.detail || {};
+                const cur = Number(d.current || 0), base = Number(d.baseline || 0);
+                const money = (item.type === 'cost_spike' || item.type === 'zero_conversion_spend'
+                               || item.type === 'revenue_stop');
+                const fmt = v => money ? '$' + v.toFixed(2) : (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
+                return fmt(cur) + ' / ' + fmt(base);
+            },
+            goToCampaign() {
+                window.location.href = '/backend/campaigns';
+            },
             fmtInt(v) {
                 return Number(v || 0).toLocaleString();
             },

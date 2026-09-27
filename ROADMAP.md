@@ -60,6 +60,13 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 - [x] **34. Lander grabber (G73)** — grab any URL into a local landing with asset-URL rewriting, SSRF guards (private-IP rejection, redirect re-validation), size/type caps, operator opt-in for internal targets.
 - [x] **35. Domains DNS guidance** — per-domain "Check DNS" chips (points here / resolves elsewhere / no DNS), A-record/CNAME instruction banner with detected server IP, and fail-fast cert requests with human-readable errors instead of 10-minute certbot timeouts.
 
+## 🧠 Wave 9 — Insights, MCP, docs hub, campaign editor (2026-09-27)
+
+- [x] **36. Anomaly insights (G56)** — read-only detectors compare each active campaign's last 24h against the trailing 7-day average and surface findings (ctr_drop, cost_spike, click_drop, bot_surge, revenue_stop, zero_conversion_spend) with severity + magnitude; cached in settings, Run-now button, one Telegram alert per new critical batch; rides the 15-min auto-rules cadence.
+- [x] **37. MCP / AI-agent access (G76)** — `POST /api/mcp` speaks JSON-RPC 2.0 (initialize / ping / tools/list / tools/call) behind the same auth plane (Bearer API token or admin session). Nine tools: campaigns.list/get/metrics/set_status, offers.list, sources.list, reports.summary, conversions.recent, insights.latest. `campaigns.set_status` is the only mutator and is audit-logged; business errors come back as isError results, protocol errors as standard JSON-RPC codes.
+- [x] **38. In-app documentation hub** — About page rebuilt as a searchable Documentation center: 14 sections from Getting started through API reference and background jobs, live search filter, in-page anchors.
+- [x] **39. Campaign editor redesign** — create/edit dialog rebuilt as a centered editor with a vertical left rail of nine tabs (General, Cost, Tracking, Parameters, S2S postbacks, Flows, Shield, Funnel, Notes) instead of the crammed horizontal tab strip; internal scroll so the dialog never wobbles or overflows.
+
 ### Bug log (wave 7)
 
 - Fixed: Vuetify's elevation-24 shadow painted on the full-width `.v-dialog` wrapper — every dialog showed a giant shadow band across the page.
