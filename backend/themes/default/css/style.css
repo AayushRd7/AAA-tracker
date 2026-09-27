@@ -1409,6 +1409,37 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
   color: var(--text-primary);
   margin: var(--space-6, 32px) 0 var(--space-3, 12px);
 }
+
+/* "Why AAA Tracker" feature cards on the docs hub */
+.doc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-3, 12px);
+  margin: 0 0 var(--space-5, 20px);
+}
+
+.doc-card {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md, 10px);
+  padding: var(--space-4, 16px);
+}
+
+.doc-card-title {
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-14, 14px);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-2, 8px);
+}
+
+.doc-section .doc-card p {
+  font-size: var(--fs-13, 13px);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: 0;
+}
 .doc-section p {
   font-size: var(--fs-14, 14px);
   line-height: 1.65;

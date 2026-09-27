@@ -59,13 +59,69 @@
                         <section class="doc-section" id="getting-started" data-doc-id="getting-started">
                             <h2 class="doc-h2">Getting started</h2>
                             <p>
-                                AAA Tracker is a self-hosted click tracker and analytics platform for affiliate
-                                marketing. You run it on your own server; the app keeps your campaign configuration
-                                in <b>Postgres</b>, streams every click, visit and impression into
-                                <b>ClickHouse</b> for fast analytics, and uses <b>nginx</b> as the public edge
-                                (reverse proxy, SSL termination) with <b>certbot</b> issuing per-domain
-                                certificates.
+                                AAA Tracker is a self-hosted tracking and analytics platform built for affiliate
+                                marketers who want full control: your data lives on your server, every click is
+                                accounted for, and nothing is metered, tiered or shared with a third party.
+                                Connect a traffic source, bind your offers, and watch campaigns route, convert
+                                and report in real time.
                             </p>
+
+                            <h3 class="doc-h3">Why AAA Tracker</h3>
+                            <div class="doc-grid">
+                                <div class="doc-card">
+                                    <div class="doc-card-title"><v-icon small color="primary" class="mr-1">mdi-shield-check</v-icon>Fraud &amp; cloaking suite</div>
+                                    <p>Every click gets a 0–100 fraud score. Honeypot traps, verified-crawler
+                                    detection, per-campaign shields (IP / referrer / UA allowlists with blank or
+                                    404 actions), global bot rules and named blacklists — bot clicks and their
+                                    cost are visible in every report.</p>
+                                </div>
+                                <div class="doc-card">
+                                    <div class="doc-card-title"><v-icon small color="primary" class="mr-1">mdi-auto-fix</v-icon>AI auto-optimizer</div>
+                                    <p>Every 15 minutes the optimizer reweights your flows toward the best
+                                    performer by CR, EPC, profit or revenue — with an exploration floor and
+                                    young-flow protection, so winners scale and losers starve automatically.</p>
+                                </div>
+                                <div class="doc-card">
+                                    <div class="doc-card-title"><v-icon small color="primary" class="mr-1">mdi-brain</v-icon>Anomaly insights</div>
+                                    <p>Six always-on detectors compare each campaign's last 24 hours against its
+                                    own baseline and flag conversion drops, cost spikes, click outages and bot
+                                    surges — with a Telegram alert the moment a new critical appears.</p>
+                                </div>
+                                <div class="doc-card">
+                                    <div class="doc-card-title"><v-icon small color="primary" class="mr-1">mdi-stairs</v-icon>Multi-step funnels</div>
+                                    <p>Chain landings and offers into ordered steps. Visitors advance via a signed
+                                    bind, and you get per-step visits, click-outs, conversions, revenue and
+                                    drop-off in one report.</p>
+                                </div>
+                                <div class="doc-card">
+                                    <div class="doc-card-title"><v-icon small color="primary" class="mr-1">mdi-download-outline</v-icon>Lander grabber</div>
+                                    <p>Import any URL as a local landing in one click — assets rewritten, private
+                                    and internal targets guarded, served from your own domains.</p>
+                                </div>
+                                <div class="doc-card">
+                                    <div class="doc-card-title"><v-icon small color="primary" class="mr-1">mdi-flask-outline</v-icon>Traffic simulation</div>
+                                    <p>Dry-run up to 1,000 synthetic visitors through the real routing pipeline —
+                                    filters, schedules, weights and caps — with zero side effects before you
+                                    spend a cent.</p>
+                                </div>
+                                <div class="doc-card">
+                                    <div class="doc-card-title"><v-icon small color="primary" class="mr-1">mdi-book-open-page-variant</v-icon>Ready-to-run catalogs</div>
+                                    <p>187 traffic-source presets and 100+ affiliate networks with doc-verified,
+                                    copy-paste S2S postbacks and brand logos — set up in minutes, not evenings.</p>
+                                </div>
+                                <div class="doc-card">
+                                    <div class="doc-card-title"><v-icon small color="primary" class="mr-1">mdi-robot-outline</v-icon>AI-agent access</div>
+                                    <p>A built-in MCP endpoint lets AI assistants pull live metrics, list
+                                    campaigns and pause the losers for you — with the same token auth and audit
+                                    trail as everything else.</p>
+                                </div>
+                                <div class="doc-card">
+                                    <div class="doc-card-title"><v-icon small color="primary" class="mr-1">mdi-lock-outline</v-icon>Security as standard</div>
+                                    <p>Two-factor auth with backup codes, per-section permissions, owner-scoped
+                                    campaigns, a full audit log, postback secret keys and GDPR tools — included,
+                                    not upsold.</p>
+                                </div>
+                            </div>
                             <h3 class="doc-h3">Logging in</h3>
                             <p>
                                 Open <code>/backend</code> in your browser and sign in with the admin account
@@ -167,7 +223,7 @@
                             </p>
                             <p>
                                 <b>Click caps</b> per flow — <code>per_hour</code>, <code>per_day</code>,
-                                <code>total</code> — are counted from ClickHouse; once a cap is hit the flow stops
+                                <code>total</code> — are counted live from the incoming click stream; once a cap is hit the flow stops
                                 matching.
                             </p>
 
@@ -251,7 +307,7 @@
                                 <code>POST /simulate/{alias}</code> (admin session required) runs
                                 <code>count</code> (1–1000) synthetic visitors through the real routing pipeline
                                 in memory — filters, schedules, stickiness-independent selection and caps are
-                                evaluated for real. It is fully side-effect free: no ClickHouse/Postgres writes, no
+                                evaluated for real. It is fully side-effect free: nothing is written anywhere, no
                                 redirects, no postbacks. Returns flow/schema/offer distributions plus counters for
                                 rejected-by-filters, capped, scheduled-out, fallback and bot-blocked. An optional
                                 <code>profile</code> pins country / OS / browser / device / IP prefix; a
@@ -402,7 +458,7 @@
                                 <code>CPM</code>, <code>CPA</code>, <code>CPS</code>, <code>RevShare</code> or
                                 <code>Auto</code>. Per-click cost arrives as the <code>cost</code> parameter (map
                                 the source's token to <code>cost</code> in paramsIdMapping, e.g.
-                                <code>cost → cost</code>) and is stored on the ClickHouse row; otherwise the
+                                <code>cost → cost</code>) and is stored on the click itself; otherwise the
                                 campaign's cost value is used for the whole period.
                             </p>
                         </section>
@@ -421,7 +477,7 @@
 
                             <h3 class="doc-h3">Report builder</h3>
                             <p>
-                                The Reports page builds drill-down tables over ClickHouse. Stack multiple
+                                The Reports page builds drill-down tables over your live click stream, in real time. Stack multiple
                                 <b>dimensions</b> (e.g. Campaign → SubID 1 → SubID 2) from: date, hour, campaign,
                                 offer, landing, country, region, city, device type, OS, browser, language, traffic
                                 source, UTM source/medium/campaign/creative, keyword, SubIDs 1–10, hour of day,
@@ -600,11 +656,11 @@
                                 Before a certificate can be issued the domain must point at this server — create
                                 an <b>A record</b> (or a <b>CNAME</b>) to the server's IP. Once DNS propagates, use
                                 <b>Check DNS</b> (confirms the domain resolves here) and then <b>Update SSL for 90
-                                days</b> to issue the certificate via certbot.
+                                days</b> to issue the certificate automatically.
                             </p>
                             <div class="doc-callout doc-callout--warning">
                                 Certificates are issued for 90 days. Renewal is not automatic for every setup —
-                                re-run <b>Update SSL</b> before expiry, or wire the certbot renewal timer on the
+                                re-run <b>Update SSL</b> before expiry, or enable the renewal timer on the
                                 host. A lapsed certificate breaks HTTPS redirects for that domain.
                             </div>
                         </section>
@@ -729,7 +785,7 @@
                             <h3 class="doc-h3">Postback security</h3>
                             <p>Optionally require a <b>secret key</b> (query param) and/or an <b>IP allowlist</b> for inbound <code>/pb/…</code> postbacks — denied postbacks return 403.</p>
                             <h3 class="doc-h3">Data retention</h3>
-                            <p>Auto-delete ClickHouse tracking data older than a chosen number of days (daily prune).</p>
+                            <p>Auto-delete tracking data older than a chosen number of days (daily prune).</p>
                             <h3 class="doc-h3">Bot rules</h3>
                             <p>Global click-level bot filtering: User-Agent regex, IP CIDR ranges or IP lists, each rule block (404) or mark (flag) with an enable switch.</p>
                             <h3 class="doc-h3">Custom statuses</h3>
@@ -795,9 +851,9 @@
                                 <thead><tr><th>Loop</th><th>Cadence</th><th>What it does</th></tr></thead>
                                 <tbody>
                                 <tr><td>Monitor</td><td>every 15 min (first pass ~1 min after boot)</td><td>Walks all active campaigns' flow URLs, records status/latency in <code>monitor_state</code>; after <b>3 consecutive failures</b> it can auto-disable the flow (Settings → Monitoring, default off) and alert.</td></tr>
-                                <tr><td>Auto rules</td><td>every few minutes</td><td>Evaluates every enabled rule against ClickHouse metrics over its lookback window: metrics <code>roi</code>, <code>profit</code>, <code>cost</code>, <code>conversions</code>, <code>clicks</code>, <code>revenue</code>; conditions compare (e.g. ROI &lt; −20% over 6h); when <b>all</b> conditions match the action fires: <code>pause_campaign</code>, <code>alert_telegram</code> or <code>alert_email</code>. Alert actions fire <b>once per continuous match</b> and re-arm after the condition breaks.</td></tr>
+                                <tr><td>Auto rules</td><td>every few minutes</td><td>Evaluates every enabled rule against live campaign metrics over its lookback window: metrics <code>roi</code>, <code>profit</code>, <code>cost</code>, <code>conversions</code>, <code>clicks</code>, <code>revenue</code>; conditions compare (e.g. ROI &lt; −20% over 6h); when <b>all</b> conditions match the action fires: <code>pause_campaign</code>, <code>alert_telegram</code> or <code>alert_email</code>. Alert actions fire <b>once per continuous match</b> and re-arm after the condition breaks.</td></tr>
                                 <tr><td>Optimizer</td><td>periodic</td><td>For campaigns with the optimizer on, recomputes flow weights from the chosen metric over the lookback window, respecting min clicks, max shift %, the exploration boost and the weight floor.</td></tr>
-                                <tr><td>Retention prune</td><td>daily</td><td>Deletes ClickHouse clicks older than the configured retention window (Settings → Data retention).</td></tr>
+                                <tr><td>Retention prune</td><td>daily</td><td>Deletes raw clicks older than the configured retention window (Settings → Data retention).</td></tr>
                                 <tr><td>Email reports</td><td>periodic</td><td>Sends the daily summary email and due saved-report schedules (recipients + UTC hour from the schedule, SMTP/Brevo from Settings).</td></tr>
                                 </tbody>
                             </table>
@@ -898,8 +954,8 @@
                 });
                 return [
                     {title: 'Version', value: s.version || '—', colorClass: '', hint: ''},
-                    dbCard('Postgres', s.postgres || {}),
-                    dbCard('ClickHouse', s.clickhouse || {}),
+                    dbCard('Database', s.postgres || {}),
+                    dbCard('Analytics', s.clickhouse || {}),
                     {title: 'Clicks (24h)', value: Number(s.clicks_24h || 0).toLocaleString(), colorClass: '', hint: ''},
                     {title: 'Conversions (24h)', value: Number(s.conversions_24h || 0).toLocaleString(), colorClass: '', hint: ''},
                 ];

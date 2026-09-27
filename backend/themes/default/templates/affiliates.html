@@ -163,24 +163,24 @@
                                 </div>
                                 <span v-else class="aff-table-logo-fallback aff-table-logo-solo">{{ item.name.charAt(0) }}</span>
                                 <span>{{ item.name }}</span>
+                                <v-tooltip bottom v-if="presetNames.includes(item.name)">
+                                    <template v-slot:activator="{ on, attrs }">
+                                        <v-chip
+                                                x-small
+                                                label
+                                                outlined
+                                                color="primary"
+                                                class="ml-1"
+                                                v-bind="attrs"
+                                                v-on="on"
+                                                @click="openEdit(item)"
+                                        >
+                                            Preset
+                                        </v-chip>
+                                    </template>
+                                    <span>Built-in preset — click to open and edit</span>
+                                </v-tooltip>
                             </div>
-                            <v-tooltip bottom v-if="presetNames.includes(item.name)">
-                                <template v-slot:activator="{ on, attrs }">
-                                    <v-chip
-                                            x-small
-                                            label
-                                            outlined
-                                            color="primary"
-                                            class="ml-1"
-                                            v-bind="attrs"
-                                            v-on="on"
-                                            @click="openEdit(item)"
-                                    >
-                                        Preset
-                                    </v-chip>
-                                </template>
-                                <span>Built-in preset — click to open and edit</span>
-                            </v-tooltip>
                         </template>
 
                         <template v-slot:item.s2s_postback="{ item }">
