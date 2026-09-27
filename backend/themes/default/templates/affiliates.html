@@ -340,7 +340,7 @@
             },
             logoSrc(x) {
                 const p = (x.logo_domain !== undefined) ? x : this.presetByName[x.name];
-                return p.logo_url || ('/backend/api/affiliate-networks/favicon/' + faviconB64(p.logo_domain));
+                return p.logo_url || ('/backend/api/affiliate-networks/favicon/' + this.faviconB64(p.logo_domain));
             },
             // The favicon proxy returns a 1×1 transparent PNG for missing
             // favicons (HTTP 200, so @error never fires) — treat that as broken.

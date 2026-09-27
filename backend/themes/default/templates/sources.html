@@ -507,7 +507,7 @@
                 return !!(p.logo_url || p.logo_domain) && !p._logoBroken;
             },
             logoSrc(p) {
-                return p.logo_url || ('/backend/api/sources/favicon/' + faviconB64(p.logo_domain));
+                return p.logo_url || ('/backend/api/sources/favicon/' + this.faviconB64(p.logo_domain));
             },
             // The favicon proxy returns a 1×1 transparent PNG for missing
             // favicons (HTTP 200, so @error never fires) — treat that as broken.

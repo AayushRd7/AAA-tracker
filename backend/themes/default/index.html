@@ -81,6 +81,15 @@
       };
       return new Date(dateStr).toLocaleString(locale, options);
     };
+
+    // Ad-blockers block any URL whose path contains a known ad-network domain
+    // (ERR_BLOCKED_BY_CLIENT on the favicon proxy), so the domain travels
+    // base64url-encoded behind a "~" marker; the proxy decodes it.
+    // Registered on the prototype (not as a window global): Vue 2's render
+    // proxy does not fall through to globals inside template expressions.
+    Vue.prototype.faviconB64 = function(domain) {
+        return '~' + btoa(String(domain)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    };
 </script>
 <script type="application/javascript">
     Vue.component('toast-list-component', {
