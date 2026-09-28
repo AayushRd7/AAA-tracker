@@ -5745,6 +5745,518 @@ print("ESCAPED-OK")
         if _sr:
             s.delete(f"{api}/sources/{_sr}")
 
+    # ===== Meta Conversions API (CAPI): mock receiver end-to-end =====
+    import time as _capi_time
+    import threading as _capi_threading
+    import http.server as _capi_httpserver
+    import socketserver as _capi_socketserver
+    import hashlib as _capi_hashlib
+
+    capi_pid = os.getpid()
+    capi_port = 20000 + (capi_pid % 1000)
+    capi_captured = []
+    _capi_socketserver.TCPServer.allow_reuse_address = True
+
+    class _CapiReceiver(_capi_httpserver.BaseHTTPRequestHandler):
+        def _handle(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length).decode("utf-8", "ignore") if length else ""
+            try:
+                body = json.loads(raw) if raw else {}
+            except Exception:
+                body = {"_raw": raw}
+            capi_captured.append({"path": self.path, "body": body})
+            # dataset ids containing "fail500" simulate a transient Graph outage
+            if "fail500" in self.path:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(b"server error")
+            else:
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"events_received":1}')
+
+        do_GET = _handle
+        do_POST = _handle
+
+        def log_message(self, *args):
+            pass
+
+    capi_srv = _capi_socketserver.TCPServer(("0.0.0.0", capi_port), _CapiReceiver)
+    capi_srv.daemon_threads = True
+    _capi_threading.Thread(target=capi_srv.serve_forever, daemon=True).start()
+    capi_base = f"http://host.docker.internal:{capi_port}"
+
+    capi_probe = ""
+    try:
+        capi_probe = subprocess.run(
+            ["docker", "exec", "tracker_frontend", "curl", "-s", "-m", "3", f"{capi_base}/ready"],
+            capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        pass
+    check("meta-capi: mock receiver reachable from the frontend container",
+          "events_received" in capi_probe, capi_probe[:80])
+
+    def capi_paths(marker):
+        return [c["path"] for c in capi_captured if marker in c["path"]]
+
+    def capi_click_count(click):
+        return sum(1 for c in capi_captured for ev in (c["body"].get("data") or [])
+                   if ev.get("event_id") == click)
+
+    def capi_wait_click(click, n, timeout=20):
+        end = _capi_time.time() + timeout
+        while _capi_time.time() < end:
+            if capi_click_count(click) >= n:
+                break
+            _capi_time.sleep(0.3)
+        return capi_click_count(click)
+
+    def capi_body_for(click):
+        for c in capi_captured:
+            for ev in (c["body"].get("data") or []):
+                if ev.get("event_id") == click:
+                    return c["body"]
+        return None
+
+    def capi_seed(click, cid=None, fbc="", fbp=""):
+        fbc_sql = f"'{fbc}'" if fbc else "NULL"
+        fbp_sql = f"'{fbp}'" if fbp else "NULL"
+        pg_exec("INSERT INTO conversions_data (received_at, click_id, campaign_id, status, "
+                f"payout, revenue, profit, fbc, fbp) VALUES (now(), '{click}', "
+                f"{cid if cid else 'NULL'}, 'lead', 0, 0, 0, {fbc_sql}, {fbp_sql})")
+
+    def capi_set(**over):
+        cfg = {
+            "enabled": True,
+            "dataset_id": f"smoke-meta-live-{capi_pid}",
+            "access_token": f"tok-{capi_pid}",
+            "test_event_code": f"smoke-test-code-{capi_pid}",
+            "default_currency": "USD",
+            "api_version": "v21.0",
+            "graph_base_url": capi_base,
+            "dry_run": False,
+            "status_events": {"sale": "Purchase", "lead": "Lead", "upsale": "Subscribe"},
+            "send_statuses": ["lead", "sale", "upsale"],
+            "include_customer_match": True,
+            "pixel_overrides": {},
+        }
+        cfg.update(over)
+        return s.post(f"{api}/settings/", json={"settings": {"meta_capi": cfg}})
+
+    capi_saved = (s.get(f"{api}/settings/").json().get("settings") or {}).get("meta_capi")
+
+    # -- disabled -> nothing is ever sent (cache already holds the default) --
+    capi_dis_click = f"smoke-meta-dis-{capi_pid}"
+    capi_seed(capi_dis_click)
+    r = capi_set(enabled=False, dry_run=True, dataset_id=f"smoke-meta-dis-{capi_pid}")
+    check("meta-capi: disabled config saved", r.status_code == 200, r.text[:120])
+    requests.get(f"{BASE}/pb/{capi_dis_click}/sale/5", verify=not INSECURE)
+    _capi_time.sleep(2.5)
+    check("meta-capi: disabled sends nothing",
+          capi_paths(f"smoke-meta-dis-{capi_pid}") == [], str(capi_paths(""))[:150])
+
+    # -- dry_run -> payload built + logged, no HTTP call --
+    capi_dry_click = f"smoke-meta-dry-{capi_pid}"
+    capi_seed(capi_dry_click, fbc="fb.1.1.smokedryfbc", fbp="fb.1.2.smokedryfbp")
+    r = capi_set(enabled=True, dry_run=True, dataset_id=f"smoke-meta-dry-{capi_pid}")
+    check("meta-capi: dry-run config saved", r.status_code == 200, r.text[:120])
+    settle_settings_cache()
+    requests.get(f"{BASE}/pb/{capi_dry_click}/sale/5", verify=not INSECURE)
+    _capi_time.sleep(2.5)
+    check("meta-capi: dry-run makes no HTTP call",
+          capi_paths(f"smoke-meta-dry-{capi_pid}") == [], str(capi_paths(""))[:150])
+    dry_rows = pg_exec_out(f"SELECT count(*) FROM meta_capi_log WHERE click_id='{capi_dry_click}' "
+                           f"AND outcome='dry_run'")
+    check("meta-capi: dry-run records the built payload", dry_rows.strip() == "1", dry_rows)
+    dbg = s.get(f"{BASE}/_aaa_tracker_debug")
+    check("meta-capi: dry-run visible in the tracking log",
+          "Meta CAPI dry-run" in dbg.text, dbg.text[:120])
+
+    # -- enabled + live -> full payload shape on the mock receiver --
+    capi_live_ds = f"smoke-meta-live-{capi_pid}"
+    r = capi_set(enabled=True, dry_run=False, dataset_id=capi_live_ds)
+    check("meta-capi: live config saved", r.status_code == 200, r.text[:120])
+    settle_settings_cache()
+
+    capi_live_click = f"smoke-meta-live-{capi_pid}"
+    capi_seed(capi_live_click, fbc="fb.1.111.smokefbc", fbp="fb.1.222.smokefbp")
+    r = requests.get(f"{BASE}/pb/{capi_live_click}/sale/5",
+                     params={"email": "User@Example.com", "phone": "+15551230000"},
+                     verify=not INSECURE)
+    check("meta-capi: /pb still returns 200 while CAPI fires", r.status_code == 200, r.text[:120])
+    capi_wait_click(capi_live_click, 1)
+    body = capi_body_for(capi_live_click) or {}
+    ev = (body.get("data") or [{}])[0]
+    ud = ev.get("user_data") or {}
+    cd = ev.get("custom_data") or {}
+    live_paths = capi_paths(capi_live_ds)
+    check("meta-capi: live send reached the receiver", len(live_paths) >= 1, str(live_paths)[:150])
+    check("meta-capi: sale maps to Purchase", ev.get("event_name") == "Purchase", str(ev)[:150])
+    check("meta-capi: event_id equals click_id", ev.get("event_id") == capi_live_click,
+          str(ev.get("event_id")))
+    check("meta-capi: action_source is website", ev.get("action_source") == "website",
+          str(ev.get("action_source")))
+    check("meta-capi: fbc passthrough", ud.get("fbc") == "fb.1.111.smokefbc", str(ud.get("fbc")))
+    check("meta-capi: fbp passthrough", ud.get("fbp") == "fb.1.222.smokefbp", str(ud.get("fbp")))
+    check("meta-capi: email hashed (trim+lower)",
+          ud.get("em") == [_capi_hashlib.sha256(b"user@example.com").hexdigest()],
+          str(ud.get("em")))
+    check("meta-capi: phone hashed (digits only)",
+          ud.get("ph") == [_capi_hashlib.sha256(b"15551230000").hexdigest()],
+          str(ud.get("ph")))
+    check("meta-capi: client ip + user agent included",
+          bool(ud.get("client_ip_address")) and bool(ud.get("client_user_agent")), str(ud)[:150])
+    check("meta-capi: value + currency", cd.get("value") == 5.0 and cd.get("currency") == "USD",
+          str(cd))
+    check("meta-capi: test_event_code included",
+          body.get("test_event_code") == f"smoke-test-code-{capi_pid}",
+          str(body.get("test_event_code")))
+    check("meta-capi: access token passed to Graph",
+          len(live_paths) >= 1 and f"tok-{capi_pid}" in live_paths[0], str(live_paths[:1])[:150])
+
+    # -- status outside send_statuses -> no send --
+    capi_rej_click = f"smoke-meta-rej-{capi_pid}"
+    capi_seed(capi_rej_click)
+    before_rej = len(capi_paths(capi_live_ds))
+    requests.get(f"{BASE}/pb/{capi_rej_click}/rejected/1", verify=not INSECURE)
+    _capi_time.sleep(2.5)
+    check("meta-capi: status outside send_statuses is not sent",
+          len(capi_paths(capi_live_ds)) == before_rej, str(capi_paths(capi_live_ds))[:150])
+
+    # -- duplicate click_id+status -> exactly one send --
+    capi_dup_click = f"smoke-meta-dup-{capi_pid}"
+    capi_seed(capi_dup_click)
+    requests.get(f"{BASE}/pb/{capi_dup_click}/sale/5", verify=not INSECURE)
+    capi_wait_click(capi_dup_click, 1)
+    # different payout => not a row-level duplicate, but the CAPI (click,status)
+    # dedupe must still suppress the second send
+    requests.get(f"{BASE}/pb/{capi_dup_click}/sale/9", verify=not INSECURE)
+    _capi_time.sleep(2.5)
+    check("meta-capi: duplicate click_id+status sends exactly once",
+          capi_click_count(capi_dup_click) == 1,
+          f"count={capi_click_count(capi_dup_click)}")
+
+    # -- campaign-level meta_pixel_id override + receiver 500 -> bounded retry --
+    capi_fail_ds = f"fail500-{capi_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"smoke-meta-fail-{capi_pid}", "alias": f"smoke-meta-fail-{capi_pid}",
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "config": {"flows": [], "postbacks": [], "hide_referrer": False,
+                   "meta_pixel_id": capi_fail_ds}})
+    capi_fail_cid = r.json().get("id")
+    check("meta-capi: campaign pixel override created", bool(capi_fail_cid), r.text[:150])
+    capi_fail_click = f"smoke-meta-fail-{capi_pid}"
+    capi_seed(capi_fail_click, cid=capi_fail_cid)
+    r = requests.get(f"{BASE}/pb/{capi_fail_click}/sale/3", verify=not INSECURE)
+    check("meta-capi: Graph 500 does not change the /pb response", r.status_code == 200,
+          r.text[:150])
+    capi_wait_click(capi_fail_click, 1)
+    _capi_time.sleep(3)
+    fail_attempts = capi_click_count(capi_fail_click)
+    check("meta-capi: transient 500 retried then given up (2-3 attempts)",
+          2 <= fail_attempts <= 3, f"attempts={fail_attempts}")
+    check("meta-capi: campaign override used the fail500 dataset",
+          capi_paths(capi_fail_ds) != [], str(capi_paths(capi_fail_ds))[:150])
+    fail_log = pg_exec_out(f"SELECT count(*) FROM meta_capi_log WHERE click_id='{capi_fail_click}' "
+                           f"AND outcome='failed'")
+    check("meta-capi: failed send recorded in meta_capi_log", fail_log.strip() != "0", fail_log)
+
+    # -- access token: real for admin, masked for a settings-reading non-admin --
+    r = s.get(f"{api}/settings/")
+    capi_admin_cfg = (r.json().get("settings") or {}).get("meta_capi") or {}
+    check("meta-capi: admin sees the real token",
+          capi_admin_cfg.get("access_token") == f"tok-{capi_pid}",
+          str(capi_admin_cfg.get("access_token"))[:40])
+    capi_user = f"smoke-meta-user-{capi_pid}"
+    r = s.post(f"{api}/users/", json={
+        "username": capi_user, "password": "smokepass1",
+        "permissions": {"sections": {"settings": True}, "write": False}})
+    capi_uid = r.json().get("id")
+    check("meta-capi: restricted settings-reader created", r.status_code == 200, r.text[:150])
+    capi_user_sess = requests.Session()
+    capi_user_sess.verify = not INSECURE
+    r = capi_user_sess.post(f"{api}/login", json={"username": capi_user, "password": "smokepass1"})
+    check("meta-capi: restricted user login", r.status_code == 200, r.text[:120])
+    r = capi_user_sess.get(f"{api}/settings/")
+    check("meta-capi: non-admin GET does not leak the token",
+          f"tok-{capi_pid}" not in r.text, r.text[:150])
+    capi_masked = ((r.json().get("settings") or {}).get("meta_capi") or {}).get("access_token")
+    check("meta-capi: non-admin sees a masked token",
+          bool(capi_masked) and capi_masked != f"tok-{capi_pid}" and "\u2022" in capi_masked,
+          str(capi_masked)[:40])
+
+    # -- meta-capi cleanup --
+    if capi_saved is None:
+        s.post(f"{api}/settings/", json={"settings": {"meta_capi": None}})
+    else:
+        s.post(f"{api}/settings/", json={"settings": {"meta_capi": capi_saved}})
+    pg_exec(f"DELETE FROM conversions_data WHERE click_id LIKE 'smoke-meta-%-{capi_pid}%' "
+            f"OR click_id LIKE 'smoke-meta-{capi_pid}%'")
+    pg_exec(f"DELETE FROM meta_capi_sent WHERE click_id LIKE 'smoke-meta-%-{capi_pid}%'")
+    pg_exec(f"DELETE FROM meta_capi_log WHERE click_id LIKE 'smoke-meta-%-{capi_pid}%'")
+    if capi_fail_cid:
+        s.delete(f"{api}/campaigns/{capi_fail_cid}")
+    if capi_uid:
+        s.delete(f"{api}/users/{capi_uid}")
+    try:
+        capi_srv.shutdown()
+        capi_srv.server_close()
+    except Exception:
+        pass
+
+    # ===== CAPI pixel records: CRUD, bindings, per-pixel resolution =====
+    # Self-contained: the block above restores/tears down its own receiver, so
+    # start a fresh mock receiver on the next port and reuse its capture list.
+    _px_pid = os.getpid()
+    _px_port = capi_port + 1
+    _px_srv = _capi_socketserver.TCPServer(("0.0.0.0", _px_port), _CapiReceiver)
+    _px_srv.daemon_threads = True
+    _capi_threading.Thread(target=_px_srv.serve_forever, daemon=True).start()
+    _px_base = f"http://host.docker.internal:{_px_port}"
+
+    _px_probe = ""
+    try:
+        _px_probe = subprocess.run(
+            ["docker", "exec", "tracker_frontend", "curl", "-s", "-m", "3", f"{_px_base}/ready"],
+            capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        pass
+    check("capi-pixels: pixel receiver reachable from the frontend container",
+          "events_received" in _px_probe, _px_probe[:80])
+
+    px_tag = f"smoke-px-{_px_pid}"
+
+    def px_seed(click, cid=None, offer_id=None, status="sale", payout=5):
+        pg_exec("INSERT INTO conversions_data (received_at, click_id, campaign_id, offer_id, "
+                f"status, payout, revenue, profit) VALUES (now(), '{click}', "
+                f"{cid if cid else 'NULL'}, {offer_id if offer_id else 'NULL'}, "
+                f"'{status}', {payout}, {payout}, {payout})")
+
+    def px_mk(title, dataset, **over):
+        body = {"title": title, "platform": "meta", "pixel_id": dataset,
+                "access_token": f"{px_tag}-tok-{dataset}", "default_event_name": "Lead",
+                "action_source": "website", "status": "active",
+                "custom_matching": False, "conversion_matching": [],
+                "payout_customisations": []}
+        body.update(over)
+        return s.post(f"{api}/settings/capi-pixels", json=body)
+
+    def px_bind(scope, scope_id, ids, **over):
+        body = {"scope": scope, "scope_id": scope_id, "pixel_ids": ids}
+        body.update(over)
+        return s.put(f"{api}/settings/capi-bindings", json=body)
+
+    # -- fixtures: traffic channel + two campaigns (one channel-bound) + offer --
+    r = s.post(f"{api}/sources/", json={"name": f"{px_tag}-src"})
+    px_src = r.json().get("id")
+    check("capi-pixels: channel fixture created", bool(px_src), r.text[:120])
+    r = s.post(f"{api}/sources/", json={"name": f"{px_tag}-src2"})
+    px_src2 = r.json().get("id")
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"{px_tag}-chan", "alias": f"{px_tag}-chan", "type": "campaign",
+        "status": "active", "redirect_mode": "position", "traffic_source_id": px_src,
+        "config": {"flows": [], "postbacks": [], "hide_referrer": False}})
+    px_chan_cid = r.json().get("id")
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"{px_tag}-plain", "alias": f"{px_tag}-plain", "type": "campaign",
+        "status": "active", "redirect_mode": "position",
+        "config": {"flows": [], "postbacks": [], "hide_referrer": False}})
+    px_plain_cid = r.json().get("id")
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"{px_tag}-off", "alias": f"{px_tag}-off", "type": "campaign",
+        "status": "active", "redirect_mode": "position", "traffic_source_id": px_src2,
+        "config": {"flows": [], "postbacks": [], "hide_referrer": False}})
+    px_off_cid = r.json().get("id")
+    r = s.post(f"{api}/offers/", json={"name": f"{px_tag}-offer",
+                                       "url": "https://example.com/px", "payout": 10})
+    px_offer = r.json().get("id")
+    check("capi-pixels: offer fixture created", bool(px_offer), r.text[:120])
+
+    # Global CAPI config gates the send; point it at the pixel receiver.
+    px_saved = (s.get(f"{api}/settings/").json().get("settings") or {}).get("meta_capi")
+    r = s.post(f"{api}/settings/", json={"settings": {"meta_capi": {
+        "enabled": True, "dry_run": False, "graph_base_url": _px_base,
+        "dataset_id": "", "access_token": "", "test_event_code": "",
+        "default_currency": "USD", "send_statuses": ["lead", "sale", "upsale"],
+        "include_customer_match": True, "status_events": {}, "pixel_overrides": {}}}})
+    check("capi-pixels: global CAPI config saved", r.status_code == 200, r.text[:120])
+    settle_settings_cache()
+
+    # -- create: per-pixel mapping + payout customisation ride along --
+    r = px_mk("A", f"{px_tag}-dsA", default_event_name="Lead", custom_matching=True,
+              conversion_matching=[{"conversion_type": "sale", "event_name": "Purchase"}],
+              payout_customisations=[{"conversion_type": "sale", "value": 42.5,
+                                      "currency": "EUR"}])
+    pxa = r.json().get("pixel") or {}
+    check("capi-pixels: create returns the record", r.status_code == 200 and pxa.get("id"),
+          r.text[:200])
+    check("capi-pixels: create keeps action_source/mapping/payout",
+          pxa.get("custom_matching") is True
+          and pxa.get("conversion_matching", [{}])[0].get("event_name") == "Purchase"
+          and pxa.get("payout_customisations", [{}])[0].get("value") == 42.5,
+          str(pxa)[:250])
+    r = px_mk("B", f"{px_tag}-dsB", default_event_name="Lead")
+    pxb = r.json().get("pixel") or {}
+    r = px_mk("C", f"{px_tag}-dsC", default_event_name="Lead", status="inactive")
+    pxc = r.json().get("pixel") or {}
+
+    # -- list shows title + pixel id + status --
+    r = s.get(f"{api}/settings/capi-pixels")
+    listed = {p["title"]: p for p in (r.json().get("pixels") or []) if p["title"] in ("A", "B", "C")}
+    check("capi-pixels: list returns title, pixel_id and status",
+          listed.get("A", {}).get("pixel_id") == f"{px_tag}-dsA"
+          and listed.get("A", {}).get("status") == "active"
+          and listed.get("C", {}).get("status") == "inactive",
+          str(listed)[:250])
+
+    # -- update / delete round-trip --
+    r = s.put(f"{api}/settings/capi-pixels/{pxa['id']}", json={
+        "title": "A2", "platform": "meta", "pixel_id": f"{px_tag}-dsA",
+        "default_event_name": "Lead", "custom_matching": False})
+    check("capi-pixels: update changes the title",
+          r.status_code == 200 and (r.json().get("pixel") or {}).get("title") == "A2",
+          r.text[:150])
+    # restore A's mapping for the send assertions
+    s.put(f"{api}/settings/capi-pixels/{pxa['id']}", json={
+        "title": "A", "platform": "meta", "pixel_id": f"{px_tag}-dsA",
+        "default_event_name": "Lead", "custom_matching": True,
+        "conversion_matching": [{"conversion_type": "sale", "event_name": "Purchase"}],
+        "payout_customisations": [{"conversion_type": "sale", "value": 42.5,
+                                   "currency": "EUR"}]})
+
+    # -- channel binding: only that channel's conversions use the pixel --
+    r = px_bind("channel", px_src, [pxa["id"]], active=True, impression_cost_sync=True)
+    check("capi-pixels: channel binding saved",
+          r.status_code == 200 and r.json().get("pixel_ids") == [pxa["id"]], r.text[:150])
+    r = s.get(f"{api}/settings/capi-bindings", params={"scope": "channel", "scope_id": px_src})
+    check("capi-pixels: channel binding + toggles round-trip",
+          r.json().get("pixel_ids") == [pxa["id"]]
+          and r.json().get("active") is True
+          and r.json().get("impression_cost_sync") is True, r.text[:150])
+
+    px_chan_click = f"{px_tag}-chan-click"
+    px_seed(px_chan_click, cid=px_chan_cid, status="sale", payout=5)
+    requests.get(f"{BASE}/pb/{px_chan_click}/sale/5", verify=not INSECURE)
+    capi_wait_click(px_chan_click, 1)
+    check("capi-pixels: channel-bound conversion sent to its pixel",
+          capi_click_count(px_chan_click) == 1, f"count={capi_click_count(px_chan_click)}")
+    _chan_body = capi_body_for(px_chan_click) or {}
+    _chan_ev = (_chan_body.get("data") or [{}])[0]
+    check("capi-pixels: per-pixel conversion-type→event mapping honored",
+          _chan_ev.get("event_name") == "Purchase", str(_chan_ev.get("event_name")))
+    check("capi-pixels: per-pixel payout customisation applied",
+          (_chan_ev.get("custom_data") or {}).get("value") == 42.5
+          and (_chan_ev.get("custom_data") or {}).get("currency") == "EUR",
+          str(_chan_ev.get("custom_data")))
+    check("capi-pixels: sent dataset is the bound pixel's",
+          capi_paths(f"{px_tag}-dsA") != [], str(capi_paths(px_tag))[:150])
+
+    # A conversion with no channel/offer binding sends nothing (no global fallback
+    # once any pixel record exists).
+    px_none_click = f"{px_tag}-none-click"
+    px_seed(px_none_click, cid=px_plain_cid, status="sale", payout=5)
+    before_none = len(capi_captured)
+    requests.get(f"{BASE}/pb/{px_none_click}/sale/5", verify=not INSECURE)
+    _capi_time.sleep(2.0)
+    check("capi-pixels: unbound conversion sends nothing",
+          capi_click_count(px_none_click) == 0, f"count={capi_click_count(px_none_click)}")
+
+    # -- offer binding: all of that offer's conversions use the pixel --
+    r = px_bind("offer", px_offer, [pxb["id"]])
+    check("capi-pixels: offer binding saved", r.status_code == 200, r.text[:150])
+    px_offer_click = f"{px_tag}-offer-click"
+    px_seed(px_offer_click, cid=px_plain_cid, offer_id=px_offer, status="sale", payout=5)
+    requests.get(f"{BASE}/pb/{px_offer_click}/sale/5", verify=not INSECURE)
+    capi_wait_click(px_offer_click, 1)
+    check("capi-pixels: offer-bound conversion sent to its pixel",
+          capi_click_count(px_offer_click) == 1
+          and capi_paths(f"{px_tag}-dsB") != [],
+          f"count={capi_click_count(px_offer_click)} paths={capi_paths(px_tag)}")
+
+    # -- bound at both levels -> exactly one send (channel resolves first) --
+    px_both_click = f"{px_tag}-both-click"
+    px_seed(px_both_click, cid=px_chan_cid, offer_id=px_offer, status="sale", payout=5)
+    requests.get(f"{BASE}/pb/{px_both_click}/sale/5", verify=not INSECURE)
+    capi_wait_click(px_both_click, 1)
+    _capi_time.sleep(1.5)
+    check("capi-pixels: pixel bound at both levels sends exactly once",
+          capi_click_count(px_both_click) == 1,
+          f"count={capi_click_count(px_both_click)}")
+
+    # -- inactive pixel skipped --
+    r = px_bind("channel", px_src2, [pxc["id"]], active=True)
+    px_off_click = f"{px_tag}-off-click"
+    px_seed(px_off_click, cid=px_off_cid, status="sale", payout=5)
+    requests.get(f"{BASE}/pb/{px_off_click}/sale/5", verify=not INSECURE)
+    _capi_time.sleep(2.0)
+    check("capi-pixels: inactive pixel skipped",
+          capi_click_count(px_off_click) == 0, f"count={capi_click_count(px_off_click)}")
+
+    # -- dry-run sends nothing even with a bound pixel --
+    s.post(f"{api}/settings/", json={"settings": {"meta_capi": {
+        "enabled": True, "dry_run": True, "graph_base_url": _px_base,
+        "send_statuses": ["lead", "sale", "upsale"], "include_customer_match": True,
+        "default_currency": "USD", "dataset_id": "", "access_token": ""}}})
+    settle_settings_cache()
+    px_dry_click = f"{px_tag}-dry-click"
+    px_seed(px_dry_click, cid=px_chan_cid, status="sale", payout=5)
+    requests.get(f"{BASE}/pb/{px_dry_click}/sale/5", verify=not INSECURE)
+    _capi_time.sleep(2.0)
+    check("capi-pixels: dry-run sends nothing",
+          capi_click_count(px_dry_click) == 0, f"count={capi_click_count(px_dry_click)}")
+    s.post(f"{api}/settings/", json={"settings": {"meta_capi": {"dry_run": False}}})
+
+    # -- secret not leaked to a settings-reading non-admin --
+    r = s.get(f"{api}/settings/capi-pixels")
+    check("capi-pixels: admin sees the real token",
+          any(p["id"] == pxa["id"] and p.get("access_token") == f"{px_tag}-tok-{px_tag}-dsA"
+              for p in (r.json().get("pixels") or [])), r.text[:150])
+    px_user = f"{px_tag}-user"
+    r = s.post(f"{api}/users/", json={
+        "username": px_user, "password": "smokepass1",
+        "permissions": {"sections": {"settings": True}, "write": False}})
+    px_uid = r.json().get("id")
+    check("capi-pixels: restricted settings-reader created", r.status_code == 200, r.text[:150])
+    px_sess = requests.Session()
+    px_sess.verify = not INSECURE
+    px_sess.post(f"{api}/login", json={"username": px_user, "password": "smokepass1"})
+    r = px_sess.get(f"{api}/settings/capi-pixels")
+    check("capi-pixels: non-admin GET does not leak the token",
+          f"{px_tag}-tok-{px_tag}-dsA" not in r.text, r.text[:150])
+    check("capi-pixels: non-admin sees a masked token",
+          any("\u2022" in (p.get("access_token") or "")
+              for p in (r.json().get("pixels") or [])), r.text[:150])
+
+    # -- delete --
+    r = s.delete(f"{api}/settings/capi-pixels/{pxc['id']}")
+    check("capi-pixels: delete removes the record", r.status_code == 200, r.text[:150])
+
+    # -- pixel block cleanup --
+    for _pid in (pxa.get("id"), pxb.get("id")):
+        if _pid:
+            s.delete(f"{api}/settings/capi-pixels/{_pid}")
+    s.post(f"{api}/settings/", json={"settings": {"meta_capi": px_saved}})
+    pg_exec(f"DELETE FROM capi_channel_settings WHERE source_id IN ({px_src}, {px_src2})")
+    pg_exec(f"DELETE FROM capi_pixel_sent WHERE click_id LIKE '{px_tag}%'")
+    pg_exec(f"DELETE FROM meta_capi_log WHERE click_id LIKE '{px_tag}%'")
+    pg_exec(f"DELETE FROM conversions_data WHERE click_id LIKE '{px_tag}%'")
+    for _cid in (px_chan_cid, px_plain_cid, px_off_cid):
+        if _cid:
+            s.delete(f"{api}/campaigns/{_cid}")
+    if px_offer:
+        s.delete(f"{api}/offers/{px_offer}")
+    for _sid in (px_src, px_src2):
+        if _sid:
+            s.delete(f"{api}/sources/{_sid}")
+    if px_uid:
+        s.delete(f"{api}/users/{px_uid}")
+    try:
+        _px_srv.shutdown()
+        _px_srv.server_close()
+    except Exception:
+        pass
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

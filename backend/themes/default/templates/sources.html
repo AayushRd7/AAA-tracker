@@ -186,6 +186,59 @@
                         <v-icon small class="mr-1">mdi-plus</v-icon>Add parameter
                     </v-btn>
 
+                    <v-divider class="my-4"></v-divider>
+                    <v-subheader class="pl-0">CAPI integration</v-subheader>
+                    <v-switch
+                            v-model="capiActive"
+                            label="Active"
+                            inset dense hide-details
+                            hint="When off, this channel sends no conversions to its pixel."
+                            persistent-hint
+                    ></v-switch>
+                    <div class="d-flex align-center mt-3">
+                        <v-select
+                                label="CAPI pixel"
+                                :items="capiPixelOptions"
+                                v-model="capiPixelId"
+                                outlined dense hide-details
+                                clearable
+                                class="bot-rule-grow"
+                                hint="Bind a pixel to this channel so only conversions attributed to it are sent."
+                                persistent-hint
+                        ></v-select>
+                        <v-tooltip bottom>
+                            <template v-slot:activator="{ on, attrs }">
+                                <v-btn icon small class="ml-1" v-bind="attrs" v-on="on"
+                                       :disabled="!capiPixelId" @click="editCapiPixel">
+                                    <v-icon small>mdi-pencil-outline</v-icon>
+                                </v-btn>
+                            </template>
+                            <span>Edit pixels in CAPI integrations (Settings)</span>
+                        </v-tooltip>
+                        <v-tooltip bottom>
+                            <template v-slot:activator="{ on, attrs }">
+                                <v-btn icon small v-bind="attrs" v-on="on"
+                                       :disabled="!capiPixelId" @click="deleteCapiPixel">
+                                    <v-icon small color="red">mdi-delete-outline</v-icon>
+                                </v-btn>
+                            </template>
+                            <span>Delete this pixel</span>
+                        </v-tooltip>
+                    </div>
+                    <v-btn x-small text color="primary" class="mt-1" @click="openQuickPixel">
+                        <v-icon x-small class="mr-1">mdi-plus</v-icon>Add pixel
+                    </v-btn>
+
+                    <v-switch
+                            v-model="capiCostSync"
+                            label="Impression cost sync"
+                            inset dense hide-details class="mt-3"
+                    ></v-switch>
+                    <div class="caption grey--text mb-1">
+                        Cost sync needs the system currency set so costs are assigned
+                        correctly — configure it under Settings → General.
+                    </div>
+
                 </v-card-text>
 
                 <v-card-actions>
@@ -196,6 +249,30 @@
             </v-card>
         </v-dialog>
 
+
+        <v-dialog v-model="capiQuickDialog" max-width="520">
+            <v-card>
+                <v-card-title>Add pixel</v-card-title>
+                <v-card-text>
+                    <v-text-field label="Title" v-model="capiQuickForm.title" outlined dense></v-text-field>
+                    <v-text-field label="Pixel / Dataset ID" v-model="capiQuickForm.pixel_id"
+                                  outlined dense></v-text-field>
+                    <v-text-field label="API key / Access token" v-model="capiQuickForm.access_token"
+                                  type="password" outlined dense></v-text-field>
+                    <v-text-field label="Default event name" v-model="capiQuickForm.default_event_name"
+                                  outlined dense></v-text-field>
+                    <div class="caption grey--text">
+                        Full options (custom conversion matching, payout customisation, action source,
+                        data quality token) are in Settings → CAPI integrations.
+                    </div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="capiQuickDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" @click="saveQuickPixel">Add</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
 
         <v-dialog v-model="catalogDialog" scrollable>
             <v-card class="dialog-lg">
@@ -379,7 +456,13 @@
                     additional_settings: {},
                     additionalSettingsList: [],
                     settings: []
-                }
+                },
+                capiPixels: [],
+                capiPixelId: null,
+                capiActive: true,
+                capiCostSync: false,
+                capiQuickDialog: false,
+                capiQuickForm: {title: '', pixel_id: '', access_token: '', default_event_name: 'Purchase'}
 
 
             }
@@ -412,6 +495,12 @@
                     return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
                 });
                 return list;
+            },
+            capiPixelOptions() {
+                return this.capiPixels.map(p => ({
+                    text: `${p.title} — ${p.pixel_id}${p.status === 'inactive' ? ' (inactive)' : ''}`,
+                    value: p.id
+                }));
             }
         },
         methods: {
@@ -452,6 +541,104 @@
 
             removeSetting(index) {
                 this.form.settings.splice(index, 1);
+            },
+            async loadCapiPixels() {
+                try {
+                    const res = await fetch("/backend/api/settings/capi-pixels",
+                                            {credentials: "include"});
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    this.capiPixels = (data.pixels || []).filter(p => p.status === 'active');
+                } catch (e) {
+                    /* non-fatal */
+                }
+            },
+            async loadCapiBinding(sourceId) {
+                this.capiPixelId = null;
+                this.capiActive = true;
+                this.capiCostSync = false;
+                if (!sourceId) return;
+                try {
+                    const res = await fetch(
+                        `/backend/api/settings/capi-bindings?scope=channel&scope_id=${sourceId}`,
+                        {credentials: "include"});
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    this.capiPixelId = (data.pixel_ids || [])[0] || null;
+                    this.capiActive = data.active !== false;
+                    this.capiCostSync = !!data.impression_cost_sync;
+                } catch (e) {
+                    /* non-fatal */
+                }
+            },
+            async saveCapiBinding(sourceId) {
+                if (!sourceId) return;
+                try {
+                    await fetch("/backend/api/settings/capi-bindings", {
+                        method: "PUT",
+                        credentials: "include",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({
+                            scope: "channel", scope_id: sourceId,
+                            pixel_ids: this.capiPixelId ? [this.capiPixelId] : [],
+                            active: !!this.capiActive,
+                            impression_cost_sync: !!this.capiCostSync
+                        })
+                    });
+                } catch (e) {
+                    /* binding is best-effort; the source itself already saved */
+                }
+            },
+            openQuickPixel() {
+                this.capiQuickForm = {title: '', pixel_id: '', access_token: '',
+                                      default_event_name: 'Purchase'};
+                this.capiQuickDialog = true;
+            },
+            async saveQuickPixel() {
+                const f = this.capiQuickForm;
+                if (!f.title || !f.pixel_id) {
+                    this.$root.$emit("show-message", {type: "error",
+                        text: "Title and Pixel / Dataset ID are required."});
+                    return;
+                }
+                try {
+                    const res = await fetch("/backend/api/settings/capi-pixels", {
+                        method: "POST",
+                        credentials: "include",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify(Object.assign(
+                            {platform: "meta", action_source: "website",
+                             custom_matching: false, conversion_matching: [],
+                             payout_customisations: []}, f))
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        this.$root.$emit("show-message", {type: "error",
+                            text: sanitizeToastMessage(data.detail || "Could not add the pixel")});
+                        return;
+                    }
+                    this.capiQuickDialog = false;
+                    await this.loadCapiPixels();
+                    const created = data.pixel || {};
+                    if (created.id) this.capiPixelId = created.id;
+                } catch (e) {
+                    this.$root.$emit("show-message", {type: "error",
+                        text: sanitizeToastMessage(e.message)});
+                }
+            },
+            editCapiPixel() {
+                window.location.href = "/backend/settings";
+            },
+            async deleteCapiPixel() {
+                if (!this.capiPixelId) return;
+                const pixel = this.capiPixels.find(p => p.id === this.capiPixelId);
+                if (!window.confirm(`Delete pixel “${(pixel && pixel.title) || this.capiPixelId}”?`)) return;
+                const res = await fetch(`/backend/api/settings/capi-pixels/${this.capiPixelId}`,
+                                        {method: "DELETE", credentials: "include"});
+                if (res.ok) {
+                    this.capiPixelId = null;
+                    await this.loadCapiPixels();
+                }
             },
             addAdditionalSetting() {
                 this.form.additionalSettingsList.push({key: '', value: ''});
@@ -613,6 +800,8 @@
                     additionalSettingsList: [],
                     settings: this.getDefaultSettings()
                 };
+                this.loadCapiPixels();
+                this.loadCapiBinding(null);
             },
 
             openEdit(source) {
@@ -640,6 +829,8 @@
                     additionalSettingsList: this.toAdditionalSettingsList(extra),
                     settings: source.settings || []
                 };
+                this.loadCapiPixels();
+                this.loadCapiBinding(source.id);
             },
 
             save() {
@@ -679,15 +870,16 @@
                 })
                     .then(async res => {
                         const text = await res.text();
-                        if (!res.ok) {
-                            let msg = text;
-                            try {
-                                const err = JSON.parse(text);
-                                msg = err.detail || msg;
-                            } catch {
-                            }
-                            throw new Error(msg);
+                        let created = {};
+                        try {
+                            created = JSON.parse(text);
+                        } catch {
                         }
+                        if (!res.ok) {
+                            throw new Error(created.detail || text);
+                        }
+                        const savedId = (created && created.id) || this.form.id;
+                        await this.saveCapiBinding(savedId);
                         this.dialog = false;
                         this.$root.$emit("show-message", {
                             type: "success",

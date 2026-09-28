@@ -20,7 +20,43 @@ app = FastAPI(
 app.state = SimpleNamespace()
 
 
-@app.on_event("startup")
+def _ensure_capi_tables(conn):
+    """Idempotent CAPI schema (pixels, bindings, channel toggles)."""
+    from sqlalchemy import text
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS capi_pixels (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            platform VARCHAR(32) NOT NULL DEFAULT 'meta',
+            pixel_id VARCHAR(255) NOT NULL DEFAULT '',
+            access_token TEXT,
+            default_event_name VARCHAR(100) NOT NULL DEFAULT 'Purchase',
+            event_url TEXT,
+            action_source VARCHAR(64) NOT NULL DEFAULT 'website',
+            data_quality_token TEXT,
+            custom_matching BOOLEAN NOT NULL DEFAULT false,
+            conversion_matching JSONB NOT NULL DEFAULT '[]'::jsonb,
+            payout_customisations JSONB NOT NULL DEFAULT '[]'::jsonb,
+            status VARCHAR(16) NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            updated_at TIMESTAMP NOT NULL DEFAULT now()
+        )"""))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS capi_pixel_bindings (
+            id SERIAL PRIMARY KEY,
+            pixel_id INTEGER NOT NULL REFERENCES capi_pixels(id) ON DELETE CASCADE,
+            scope VARCHAR(16) NOT NULL,
+            scope_id INTEGER NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            UNIQUE (pixel_id, scope, scope_id)
+        )"""))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS capi_channel_settings (
+            source_id INTEGER PRIMARY KEY,
+            active BOOLEAN NOT NULL DEFAULT true,
+            impression_cost_sync BOOLEAN NOT NULL DEFAULT false,
+            updated_at TIMESTAMP NOT NULL DEFAULT now()
+        )"""))
 async def startup():
     # Lightweight schema migration for installs created before a column existed.
     # Idempotent — safe to run on every boot.
@@ -91,6 +127,10 @@ async def startup():
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     PRIMARY KEY (group_id, user_id)
                 )"""))
+            # CAPI integration records: pixels, channel/offer bindings and
+            # per-channel toggles. The tracking plane (frontend/app.py) creates
+            # the same tables on its own startup so either service can boot first.
+            _ensure_capi_tables(conn)
             conn.commit()
     except Exception as e:
         print("startup migration:", e)

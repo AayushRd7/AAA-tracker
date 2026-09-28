@@ -179,6 +179,23 @@
                             persistent-hint
                     ></v-combobox>
 
+                    <v-divider class="my-4"></v-divider>
+                    <v-subheader class="pl-0">CAPI integration</v-subheader>
+                    <v-select
+                            label="CAPI pixel"
+                            :items="capiPixelOptions"
+                            v-model="capiPixelId"
+                            outlined
+                            dense
+                            hide-details
+                            clearable
+                            hint="Bind at the offer/website level to send every conversion of this offer, from any channel. Configure a pixel in ONE place (offer or channel) to avoid duplicate events."
+                            persistent-hint
+                    ></v-select>
+                    <div class="caption grey--text mt-1">
+                        Pixels are managed in Settings → CAPI integrations.
+                    </div>
+
                 </v-card-text>
 
                 <v-card-actions>
@@ -430,6 +447,8 @@
                     daily_conversions_cap: null,
                     overflow_offer_id: null
                 },
+                capiPixels: [],
+                capiPixelId: null,
                 countryOptions: [
                     {code: 'AF', name: 'Afghanistan'}, {code: 'AX', name: 'Aland Islands'}, {code: 'AL', name: 'Albania'},
                     {code: 'DZ', name: 'Algeria'}, {code: 'AS', name: 'American Samoa'}, {code: 'AD', name: 'Andorra'},
@@ -540,6 +559,13 @@
                     return this.offers.filter(o => !this.isArchived(o));
                 }
                 ,
+                capiPixelOptions() {
+                    return this.capiPixels.map(p => ({
+                        text: `${p.title} — ${p.pixel_id}${p.status === 'inactive' ? ' (inactive)' : ''}`,
+                        value: p.id
+                    }));
+                }
+                ,
             }
         ,
         mounted() {
@@ -549,6 +575,47 @@
             this.$root.$on('load-offers', this.loadOffers);
         },
         methods: {
+            async loadCapiPixels() {
+                try {
+                    const res = await fetch("/backend/api/settings/capi-pixels",
+                                            {credentials: "include"});
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    this.capiPixels = (data.pixels || []).filter(p => p.status === 'active');
+                } catch (e) {
+                    /* non-fatal */
+                }
+            },
+            async loadCapiBinding(offerId) {
+                this.capiPixelId = null;
+                if (!offerId) return;
+                try {
+                    const res = await fetch(
+                        `/backend/api/settings/capi-bindings?scope=offer&scope_id=${offerId}`,
+                        {credentials: "include"});
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    this.capiPixelId = (data.pixel_ids || [])[0] || null;
+                } catch (e) {
+                    /* non-fatal */
+                }
+            },
+            async saveCapiBinding(offerId) {
+                if (!offerId) return;
+                try {
+                    await fetch("/backend/api/settings/capi-bindings", {
+                        method: "PUT",
+                        credentials: "include",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({
+                            scope: "offer", scope_id: offerId,
+                            pixel_ids: this.capiPixelId ? [this.capiPixelId] : []
+                        })
+                    });
+                } catch (e) {
+                    /* binding is best-effort; the offer itself already saved */
+                }
+            },
             isArchived(item) {
                 return this.archivedIds.indexOf(item.id) >= 0;
             },
@@ -810,6 +877,8 @@
                     daily_conversions_cap: null,
                     overflow_offer_id: null
                 };
+                this.loadCapiPixels();
+                this.capiPixelId = null;
             },
 
             openEdit(offer) {
@@ -831,6 +900,8 @@
                     daily_conversions_cap: offer.daily_conversions_cap || null,
                     overflow_offer_id: offer.overflow_offer_id || null
                 };
+                this.loadCapiPixels();
+                this.loadCapiBinding(offer.id);
             },
 
             save() {
@@ -870,15 +941,16 @@
                 })
                     .then(async res => {
                         const text = await res.text();
-                        if (!res.ok) {
-                            let message = text;
-                            try {
-                                const json = JSON.parse(text);
-                                message = json.detail || message;
-                            } catch {
-                            }
-                            throw new Error(message);
+                        let created = {};
+                        try {
+                            created = JSON.parse(text);
+                        } catch {
                         }
+                        if (!res.ok) {
+                            throw new Error(created.detail || text);
+                        }
+                        const savedId = (created && created.id) || this.form.id;
+                        await this.saveCapiBinding(savedId);
                         this.dialog = false;
                         this.$root.$emit("show-message", {
                             type: "success",

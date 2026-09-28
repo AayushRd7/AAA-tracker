@@ -38,6 +38,8 @@ from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
 
 import uuid
 
+import meta_capi
+
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "tracker_postgres")
 POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5432")
 POSTGRES_DB = os.environ.get("POSTGRES_DB", "db")
@@ -145,7 +147,11 @@ async def ensure_schema():
                 ADD COLUMN IF NOT EXISTS last_postback_at TIMESTAMP,
                 ADD COLUMN IF NOT EXISTS flow_index INTEGER,
                 ADD COLUMN IF NOT EXISTS funnel_step INTEGER,
-                ADD COLUMN IF NOT EXISTS events JSONB NOT NULL DEFAULT '[]'::jsonb
+                ADD COLUMN IF NOT EXISTS events JSONB NOT NULL DEFAULT '[]'::jsonb,
+                -- Meta Conversions API click identifiers captured at click time
+                -- (fbc from ?fbclid= / _fbc cookie, fbp from the _fbp cookie).
+                ADD COLUMN IF NOT EXISTS fbc TEXT,
+                ADD COLUMN IF NOT EXISTS fbp TEXT
             """)
             # Custom conversion statuses need values beyond the built-in enum
             await conn.execute(
@@ -171,6 +177,81 @@ async def ensure_schema():
                 CREATE INDEX IF NOT EXISTS honeypot_hits_visitor_key_idx
                 ON honeypot_hits (visitor_key)
             """)
+            # Meta CAPI dedupe: one send per (click_id, status), persisted so
+            # restarts and repeated postbacks can never double-fire.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS meta_capi_sent (
+                    click_id VARCHAR(100) NOT NULL,
+                    status VARCHAR(50) NOT NULL,
+                    sent_at TIMESTAMP NOT NULL DEFAULT now(),
+                    PRIMARY KEY (click_id, status)
+                )
+            """)
+            # Audit-style trail of every CAPI attempt (incl. dry-runs/failures)
+            # so missing conversions are visible, not silent.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS meta_capi_log (
+                    id BIGSERIAL PRIMARY KEY,
+                    at TIMESTAMP NOT NULL DEFAULT now(),
+                    click_id VARCHAR(100),
+                    status VARCHAR(50),
+                    event_name VARCHAR(100),
+                    dataset_id VARCHAR(100),
+                    outcome VARCHAR(32),
+                    attempt INTEGER DEFAULT 1,
+                    response_status INTEGER,
+                    detail TEXT
+                )
+            """)
+            # CAPI integrations: pixels as first-class records, bindings to a
+            # traffic channel or an offer, per-channel toggles, and per-pixel
+            # dedupe (the legacy meta_capi_sent stays for the global fallback).
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS capi_pixels (
+                    id SERIAL PRIMARY KEY,
+                    title VARCHAR(255) NOT NULL,
+                    platform VARCHAR(32) NOT NULL DEFAULT 'meta',
+                    pixel_id VARCHAR(255) NOT NULL DEFAULT '',
+                    access_token TEXT,
+                    default_event_name VARCHAR(100) NOT NULL DEFAULT 'Purchase',
+                    event_url TEXT,
+                    action_source VARCHAR(64) NOT NULL DEFAULT 'website',
+                    data_quality_token TEXT,
+                    custom_matching BOOLEAN NOT NULL DEFAULT false,
+                    conversion_matching JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    payout_customisations JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    status VARCHAR(16) NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMP NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT now()
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS capi_pixel_bindings (
+                    id SERIAL PRIMARY KEY,
+                    pixel_id INTEGER NOT NULL REFERENCES capi_pixels(id) ON DELETE CASCADE,
+                    scope VARCHAR(16) NOT NULL,
+                    scope_id INTEGER NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT now(),
+                    UNIQUE (pixel_id, scope, scope_id)
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS capi_channel_settings (
+                    source_id INTEGER PRIMARY KEY,
+                    active BOOLEAN NOT NULL DEFAULT true,
+                    impression_cost_sync BOOLEAN NOT NULL DEFAULT false,
+                    updated_at TIMESTAMP NOT NULL DEFAULT now()
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS capi_pixel_sent (
+                    click_id VARCHAR(100) NOT NULL,
+                    status VARCHAR(50) NOT NULL,
+                    pixel_id INTEGER NOT NULL,
+                    sent_at TIMESTAMP NOT NULL DEFAULT now(),
+                    PRIMARY KEY (click_id, status, pixel_id)
+                )
+            """)
     except Exception as e:
         log_track(f"Schema migration error: {e}")
 
@@ -194,7 +275,10 @@ async def ensure_ch_schema():
             "ADD COLUMN IF NOT EXISTS click_id String DEFAULT '', "
             # Full client address (v4 or v6) — the `ip` column is IPv4-typed,
             # so IPv6 visitors were stored as 0.0.0.0 with no recoverable address.
-            "ADD COLUMN IF NOT EXISTS ip_full String DEFAULT ''")
+            "ADD COLUMN IF NOT EXISTS ip_full String DEFAULT '', "
+            # Meta CAPI click identifiers (analytics mirror of the PG columns).
+            "ADD COLUMN IF NOT EXISTS fbc String DEFAULT '', "
+            "ADD COLUMN IF NOT EXISTS fbp String DEFAULT ''")
     except Exception as e:
         release_ch(ch, failed=True)
         log_track(f"ClickHouse schema migration error: {e}")
@@ -396,6 +480,19 @@ async def enrich_meta(request: Request, params_id_mapping: list = None) -> dict:
         if k not in meta:  # don't overwrite the base keys
             meta[k] = v
 
+    # Meta CAPI click identifiers: the _fbc/_fbp first-party cookies when the
+    # browser sent them, otherwise derive fbc from the ad click's ?fbclid= in
+    # Meta's required format fb.1.<unix_ms>.<fbclid>.
+    meta["fbp"] = str(cookies.get("_fbp") or combined.get("fbp") or "").strip()[:1024] or None
+    fbc = str(cookies.get("_fbc") or "").strip()
+    if not fbc:
+        fbc = str(combined.get("fbc") or "").strip()
+    if not fbc:
+        fbclid = str(query_params.get("fbclid") or post_data.get("fbclid") or "").strip()
+        if fbclid:
+            fbc = f"fb.1.{int(time.time() * 1000)}.{fbclid}"
+    meta["fbc"] = fbc[:1024] or None
+
     if params_id_mapping:
         for param in params_id_mapping:
             param_key = param.get("parameter")  # e.g.: sub_id_2
@@ -499,6 +596,8 @@ async def save_click_to_clickhouse(meta: dict, campaign_alias: str):
             "click": True,
             "visitor_id": str(meta.get("visitor_id") or ""),
             "flow_index": int(meta.get("flow_index") or 0),
+            "fbc": str(meta.get("fbc") or ""),
+            "fbp": str(meta.get("fbp") or ""),
         }
         _CLICK_ROW_EXCLUDED = ("cost", "is_bot", "fraud_score", "status", "revenue", "profit")
         for k, v in meta.items():
@@ -778,7 +877,8 @@ async def save_click_to_db(meta: dict):
         "sub_id_1", "sub_id_2", "sub_id_3", "sub_id_4", "sub_id_5",
         "sub_id_6", "sub_id_7", "sub_id_8", "sub_id_9", "sub_id_10",
         "utm_campaign", "utm_creative", "utm_source", "traffic_source_name",
-        "os", "isp", "is_using_proxy", "is_bot", "device_type", "flow_index", "funnel_step"
+        "os", "isp", "is_using_proxy", "is_bot", "device_type", "flow_index", "funnel_step",
+        "fbc", "fbp"
     }
 
     # keep only the allowed fields
@@ -1901,7 +2001,8 @@ async def sync_conversion_to_clickhouse(click_id: str):
 
 async def record_conversion(click_id: str, status: str, payout_value: float, request: Request,
                             background_tasks: BackgroundTasks, extra_fields: dict = None,
-                            source: str = "postback") -> dict:
+                            source: str = "postback", identity: dict = None,
+                            campaign_id: int = None) -> dict:
     """Shared conversion core for the /pb postback and the /p pixel.
 
     LTV semantics (G23): a non-duplicate repeat conversion for the same click
@@ -1984,6 +2085,15 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
         vals = ["$1", "$2", "$3", "$3", "$3", "1", "NOW()", "$4::jsonb"]
         args = [click_id_value, status, payout_value, json.dumps([event])]
         idx = 5
+        # Meta CAPI identifiers from the conversion request (a direct-tracking
+        # click may have no PG row until now).
+        _fbc, _fbp = meta_click_identifiers(request, None)
+        for _k, _v in (("fbc", _fbc), ("fbp", _fbp)):
+            if _v:
+                cols.append(_k)
+                vals.append(f"${idx}")
+                args.append(_v)
+                idx += 1
         for k, v in extra_fields.items():
             cols.append(k)
             vals.append(f"${idx}")
@@ -2001,6 +2111,49 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
         """
         if cid and str(cid).strip().lower() not in ("", "none", "0"):
             background_tasks.add_task(sync_conversion_to_clickhouse, str(cid))
+
+    def schedule_meta_capi(cid: str, row=None) -> None:
+        """Queue the Meta CAPI send for a fresh (non-duplicate) conversion.
+
+        Values are captured now (request headers/cookies/body are not readable
+        once the response is sent); the task itself runs off the request path.
+        """
+        if not load_meta_capi_config().get("enabled"):
+            return
+        fbc, fbp = meta_click_identifiers(request, row)
+        email, phone = meta_customer_identity(identity or {})
+        if not email and not phone:
+            email, phone = meta_customer_identity(dict(request.query_params))
+        currency = None
+        campaign_config = None
+        traffic_source_id = None
+        offer_id = None
+        if row is not None:
+            try:
+                rowd = dict(row)
+            except Exception as e:
+                log_track(f"Meta CAPI row read error: {e!r}")
+                rowd = {}
+            currency = rowd.get("currency")
+            campaign_config = rowd.get("campaign_config")
+            traffic_source_id = rowd.get("traffic_source_id")
+            offer_id = rowd.get("offer_id")
+        conv = {
+            "click_id": str(cid),
+            "status": status,
+            "payout": payout_value,
+            "currency": currency or load_meta_capi_config().get("default_currency") or "USD",
+            "fbc": fbc, "fbp": fbp,
+            "client_ip": resolve_client_ip(request),
+            "user_agent": request.headers.get("user-agent", "") or "",
+            "email": email, "phone": phone,
+            "campaign_id": campaign_id,
+            "campaign_config": campaign_config,
+            "traffic_source_id": traffic_source_id,
+            "offer_id": offer_id,
+            "event_time": int(time.time()),
+        }
+        background_tasks.add_task(send_meta_capi, conv)
 
     JOINED_CLICK_QUERY = """
         SELECT c.*, ca.config AS campaign_config, ca.name AS campaign_name,
@@ -2109,6 +2262,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                         notify_telegram_conversion_async, row["click_id"], status, payout_value, dict(row))
                     await fanout(conn, row, row["click_id"])
                     schedule_ch_sync(row["click_id"])
+                    schedule_meta_capi(row["click_id"], row)
                 return {"status": "ok", "click_id": row["click_id"],
                         "updated_status": status, "duplicate": is_duplicate,
                         "clickless": True, "attributed": True}
@@ -2123,6 +2277,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             # so no conversions_data row exists for them — create one
             await insert_row(conn, click_id)
             schedule_ch_sync(click_id)
+            schedule_meta_capi(click_id, None)
             return {"status": "ok", "click_id": click_id,
                     "updated_status": status, "duplicate": False}
 
@@ -2135,6 +2290,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                 notify_telegram_conversion_async, click_id, status, payout_value, dict(row))
             await fanout(conn, row, click_id)
             schedule_ch_sync(click_id)
+            schedule_meta_capi(click_id, row)
 
     return {"status": "ok", "click_id": click_id, "updated_status": status,
             "duplicate": is_duplicate}
@@ -2222,7 +2378,7 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
 
     extra_fields = {k: v for k, v in params.items() if k in PIXEL_EXTRA_FIELDS}
     return await record_conversion(click_id, status, payout_value, request, background_tasks,
-                                   extra_fields or None, source="postback")
+                                   extra_fields or None, source="postback", identity=params)
 
 
 @app.get("/pb/{click_id}/{status}/{payout}")
@@ -2291,7 +2447,9 @@ async def conversion_pixel(campaign_alias: str, request: Request, background_tas
         return respond(status_code=400, detail="Invalid payout format")
 
     result = await record_conversion(click_id or "none", status, payout_value, request,
-                                     background_tasks, extra_fields or None, source="pixel")
+                                     background_tasks, extra_fields or None, source="pixel",
+                                     identity=dict(request.query_params),
+                                     campaign_id=campaign["id"])
     return respond(result=result)
 
 
@@ -3696,6 +3854,12 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
     if vid and not result_row.get("visitor_id"):
         result_row["visitor_id"] = str(vid)
 
+    # Meta CAPI click identifiers (from enrich_meta) — written to the CH row too
+    # so the analytics plane carries the same fbc/fbp as the PG conversion row.
+    for _id_key in ("fbc", "fbp"):
+        if meta_data.get(_id_key) and not result_row.get(_id_key):
+            result_row[_id_key] = str(meta_data[_id_key])
+
     # Bot rule with "mark" action — flag the click but keep tracking it
     if getattr(request.state, "bot_marked", None):
         result_row["is_bot"] = True
@@ -3956,6 +4120,316 @@ def tracking_prefetch_filter_enabled() -> bool:
 
 def tracking_skip_bot_costs() -> bool:
     return bool(load_tracking_settings().get("skip_bot_costs", False))
+
+
+# ─── Meta Conversions API (CAPI) ────────────────────────────────────
+# The settings block 'meta_capi' (30s TTL cache, same idiom as the other
+# blocks). Conversions recorded for a send-status are POSTed to Meta off the
+# request path; the visitor redirect and the /pb response are never touched.
+META_CAPI_DEFAULTS = {
+    "enabled": False,
+    "dataset_id": "",
+    "access_token": "",
+    "test_event_code": "",
+    "default_currency": "USD",
+    "api_version": "v21.0",
+    # Test-only override of https://graph.facebook.com so the smoke suite can
+    # point the integration at a local mock receiver.
+    "graph_base_url": "",
+    "dry_run": True,
+    "status_events": {"sale": "Purchase", "lead": "Lead", "upsale": "Subscribe"},
+    "send_statuses": ["lead", "sale", "upsale"],
+    "include_customer_match": True,
+    "pixel_overrides": {},
+}
+
+
+def load_meta_capi_config() -> dict:
+    """Read the meta_capi block, merged over the defaults (30s TTL cache)."""
+    raw = _settings_block("meta_capi", default={})
+    cfg = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
+           for k, v in META_CAPI_DEFAULTS.items()}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            if v is None:
+                continue
+            cfg[k] = v
+    for nested in ("status_events", "pixel_overrides"):
+        if not isinstance(cfg.get(nested), dict):
+            cfg[nested] = dict(META_CAPI_DEFAULTS[nested])
+    if not isinstance(cfg.get("send_statuses"), list):
+        cfg["send_statuses"] = list(META_CAPI_DEFAULTS["send_statuses"])
+    return cfg
+
+
+def meta_click_identifiers(request: Request, row=None) -> tuple:
+    """(fbc, fbp) — stored conversion row first, then request cookies/params.
+
+    fbc is derived from ?fbclid= in Meta's required form fb.1.<unix_ms>.<fbclid>
+    when no _fbc cookie is present."""
+    fbc = fbp = ""
+    if row is not None:
+        try:
+            keys = row.keys()
+            fbc = str(row["fbc"] or "") if "fbc" in keys else ""
+            fbp = str(row["fbp"] or "") if "fbp" in keys else ""
+        except Exception:
+            fbc = fbp = ""
+    if not fbp:
+        fbp = str(request.cookies.get("_fbp") or request.query_params.get("fbp") or "").strip()
+    if not fbc:
+        fbc = str(request.cookies.get("_fbc") or request.query_params.get("fbc") or "").strip()
+    if not fbc:
+        fbclid = str(request.query_params.get("fbclid") or "").strip()
+        if fbclid:
+            fbc = f"fb.1.{int(time.time() * 1000)}.{fbclid}"
+    return fbc[:1024], fbp[:1024]
+
+
+def meta_customer_identity(params: dict) -> tuple:
+    """(email, phone) from conventional postback/pixel params, or (None, None)."""
+    params = params or {}
+    email = params.get("email") or params.get("em") or params.get("customer_email")
+    phone = (params.get("phone") or params.get("ph")
+             or params.get("customer_phone") or params.get("tel"))
+    return (str(email).strip() if email else None,
+            str(phone).strip() if phone else None)
+
+
+def meta_capi_resolve_dataset(cfg: dict, campaign_config=None,
+                              traffic_source_id=None, campaign_id=None) -> str:
+    """Dataset id: campaign config meta_pixel_id > pixel_overrides > global."""
+    if isinstance(campaign_config, str):
+        try:
+            campaign_config = json.loads(campaign_config or "{}")
+        except Exception:
+            campaign_config = {}
+    if isinstance(campaign_config, dict) and campaign_config.get("meta_pixel_id"):
+        return str(campaign_config["meta_pixel_id"]).strip()
+    overrides = cfg.get("pixel_overrides") or {}
+    for key in ((str(campaign_id) if campaign_id is not None else None),
+                (str(traffic_source_id) if traffic_source_id is not None else None)):
+        if key and overrides.get(key):
+            return str(overrides[key]).strip()
+    return str(cfg.get("dataset_id") or "").strip()
+
+
+async def _meta_capi_claim(click_id: str, status: str) -> bool:
+    """Atomically claim (click_id, status); False when already sent/reclaimed."""
+    try:
+        async with app.state.pg.acquire() as conn:
+            res = await conn.execute(
+                "INSERT INTO meta_capi_sent (click_id, status) VALUES ($1, $2) "
+                "ON CONFLICT (click_id, status) DO NOTHING", str(click_id), str(status))
+        return res == "INSERT 0 1"
+    except Exception as e:
+        log_track(f"Meta CAPI dedupe claim error: {e}")
+        return False
+
+
+async def _meta_capi_audit(conv: dict, dataset_id: str, event_name: str,
+                           outcome: str, attempts: list):
+    """Persist every attempt outcome so CAPI failures are visible, not silent."""
+    try:
+        async with app.state.pg.acquire() as conn:
+            for a in attempts or [{"attempt": 1}]:
+                detail = a.get("response") or a.get("error") or ""
+                await conn.execute(
+                    "INSERT INTO meta_capi_log (click_id, status, event_name, dataset_id, "
+                    "outcome, attempt, response_status, detail) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+                    str(conv.get("click_id") or "")[:100], str(conv.get("status") or "")[:50],
+                    str(event_name or "")[:100], str(dataset_id or "")[:100],
+                    str(outcome)[:32], int(a.get("attempt") or 1), a.get("status_code"),
+                    str(detail)[:2000])
+    except Exception as e:
+        log_track(f"Meta CAPI audit write error: {e}")
+
+
+async def _capi_pixels_configured() -> bool:
+    """True once at least one pixel record exists (then the pixel model governs;
+    the legacy single-global config is only the fallback when none exist)."""
+    try:
+        async with app.state.pg.acquire() as conn:
+            n = await conn.fetchval("SELECT count(*) FROM capi_pixels")
+        return bool(n)
+    except Exception as e:
+        log_track(f"Meta CAPI pixel count error: {e}")
+        return False
+
+
+async def _resolve_capi_pixels(conv: dict) -> list:
+    """Applicable pixel records: channel-bound first, else offer-bound.
+
+    Channel scope wins (a conversion attributed to a bound channel only uses
+    that channel's pixels); offer scope is the fallback so all of an offer's
+    conversions are covered regardless of channel. Only active pixels fire."""
+    channel_id = conv.get("traffic_source_id")
+    offer_id = conv.get("offer_id")
+
+    def _row_to_pixel(r) -> dict:
+        p = dict(r)
+        # asyncpg hands JSONB back as a string (no codec registered) — decode so
+        # the sender sees real lists.
+        for field in ("conversion_matching", "payout_customisations"):
+            v = p.get(field)
+            if isinstance(v, str):
+                try:
+                    v = json.loads(v)
+                except Exception:
+                    v = []
+            p[field] = v if isinstance(v, list) else []
+        return p
+
+    try:
+        async with app.state.pg.acquire() as conn:
+            if channel_id:
+                active = await conn.fetchval(
+                    "SELECT active FROM capi_channel_settings WHERE source_id = $1",
+                    int(channel_id))
+                if active is not False:
+                    rows = await conn.fetch(
+                        "SELECT p.* FROM capi_pixels p "
+                        "JOIN capi_pixel_bindings b ON b.pixel_id = p.id "
+                        "WHERE b.scope = 'channel' AND b.scope_id = $1 "
+                        "AND p.status = 'active' ORDER BY p.id", int(channel_id))
+                    if rows:
+                        return [_row_to_pixel(r) for r in rows]
+            if offer_id:
+                rows = await conn.fetch(
+                    "SELECT p.* FROM capi_pixels p "
+                    "JOIN capi_pixel_bindings b ON b.pixel_id = p.id "
+                    "WHERE b.scope = 'offer' AND b.scope_id = $1 "
+                    "AND p.status = 'active' ORDER BY p.id", int(offer_id))
+                return [_row_to_pixel(r) for r in rows]
+    except Exception as e:
+        log_track(f"Meta CAPI pixel resolve error: {e}")
+    return []
+
+
+async def _meta_capi_pixel_claim(click_id: str, status: str, pixel_id) -> bool:
+    """Atomically claim (click_id, status, pixel_id); once per pixel per event."""
+    try:
+        async with app.state.pg.acquire() as conn:
+            res = await conn.execute(
+                "INSERT INTO capi_pixel_sent (click_id, status, pixel_id) "
+                "VALUES ($1, $2, $3) ON CONFLICT (click_id, status, pixel_id) DO NOTHING",
+                str(click_id), str(status), int(pixel_id))
+        return res == "INSERT 0 1"
+    except Exception as e:
+        log_track(f"Meta CAPI pixel dedupe claim error: {e}")
+        return False
+
+
+async def _send_meta_capi_pixel(conv: dict, pixel: dict, cfg: dict):
+    """One pixel's send: build with per-pixel mapping/payout, dedupe, retry, audit."""
+    status = str(conv.get("status") or "")
+    click_id = str(conv.get("click_id") or "")
+    platform = str(pixel.get("platform") or "meta").strip().lower()
+    if platform not in ("", "meta"):
+        # Other platforms (Snapchat/TikTok/Google/…) are selectable records whose
+        # senders land later with real credentials — stub only, no invented API.
+        log_track(f"Meta CAPI: not implemented for {platform} — "
+                  f"pixel '{pixel.get('title')}' skipped ({status} {click_id})")
+        await _meta_capi_audit(conv, pixel.get("pixel_id"), None, "not_implemented",
+                               [{"attempt": 1}])
+        return
+    payload = meta_capi.build_pixel_payload(pixel, conv, cfg)
+    if payload is None:
+        log_track(f"Meta CAPI: pixel '{pixel.get('title')}' has no event name for "
+                  f"status '{status}' — skipped")
+        return
+    event_name = payload["data"][0]["event_name"]
+    _url, dataset_id, params = meta_capi.pixel_endpoint(cfg, pixel)
+    if not dataset_id or not params.get("access_token"):
+        log_track(f"⚠ Meta CAPI: pixel '{pixel.get('title')}' missing dataset/access "
+                  f"token — {status} for {click_id} not sent")
+        await _meta_capi_audit(conv, dataset_id, event_name, "not_configured",
+                               [{"attempt": 1}])
+        return
+    if cfg.get("dry_run", True):
+        log_track(f"🧪 Meta CAPI dry-run {click_id}/{status} -> {event_name} "
+                  f"[pixel {pixel.get('id')}]: {json.dumps(payload)[:500]}")
+        await _meta_capi_audit(conv, dataset_id, event_name, "dry_run", [{"attempt": 1}])
+        return
+    if not await _meta_capi_pixel_claim(click_id, status, pixel["id"]):
+        log_track(f"↩ Meta CAPI duplicate suppressed for {click_id}/{status} "
+                  f"pixel {pixel.get('id')}")
+        return
+    pcfg = dict(cfg)
+    pcfg["params"] = params
+    result = await asyncio.to_thread(meta_capi.post_event, pcfg, payload, dataset_id)
+    for a in result["attempts"]:
+        log_track(f"{'✅' if result['ok'] else '❌'} Meta CAPI {event_name} "
+                  f"{click_id}/{status} pixel {pixel.get('id')} attempt {a['attempt']}: "
+                  f"HTTP {a.get('status_code')} {a.get('error') or ''}")
+    await _meta_capi_audit(conv, dataset_id, event_name,
+                           "sent" if result["ok"] else "failed", result["attempts"])
+
+
+async def send_meta_capi(conv: dict):
+    """Background task: build + POST one conversion to the CAPI plane.
+
+    With pixels configured, each applicable pixel record is sent once
+    (channel-bound first, else offer-bound) with its own event mapping, payout
+    customisation and credentials. With none configured the legacy single-global
+    config applies. Honors enabled/dry_run and records every outcome — a failure
+    never surfaces to the visitor path."""
+    try:
+        cfg = load_meta_capi_config()
+        if not cfg.get("enabled"):
+            return
+        status = str(conv.get("status") or "")
+        if status not in (cfg.get("send_statuses") or []):
+            return
+        click_id = str(conv.get("click_id") or "")
+        if not click_id or click_id.lower() in ("none", "0"):
+            log_track(f"Meta CAPI: '{click_id}' has no matchable click id — skipped")
+            return
+
+        if await _capi_pixels_configured():
+            pixels = await _resolve_capi_pixels(conv)
+            if not pixels:
+                log_track(f"Meta CAPI: no pixel bound for {status} {click_id} "
+                          f"(channel={conv.get('traffic_source_id')}, "
+                          f"offer={conv.get('offer_id')}) — skipped")
+                return
+            for pixel in pixels:
+                await _send_meta_capi_pixel(conv, pixel, cfg)
+            return
+
+        payload = meta_capi.build_payload(cfg, conv)
+        if payload is None:
+            log_track(f"Meta CAPI: status '{status}' has no event mapping — skipped")
+            return
+        event_name = payload["data"][0]["event_name"]
+        dataset_id = meta_capi_resolve_dataset(
+            cfg, conv.get("campaign_config"), conv.get("traffic_source_id"),
+            conv.get("campaign_id"))
+        token = str(cfg.get("access_token") or "").strip()
+        if not dataset_id or not token:
+            log_track(f"⚠ Meta CAPI: dataset_id/access_token not configured — "
+                      f"{status} for {click_id} not sent")
+            await _meta_capi_audit(conv, dataset_id, event_name, "not_configured",
+                                   [{"attempt": 1}])
+            return
+        if cfg.get("dry_run", True):
+            log_track(f"🧪 Meta CAPI dry-run {click_id}/{status} -> {event_name}: "
+                      f"{json.dumps(payload)[:500]}")
+            await _meta_capi_audit(conv, dataset_id, event_name, "dry_run", [{"attempt": 1}])
+            return
+        if not await _meta_capi_claim(click_id, status):
+            log_track(f"↩ Meta CAPI duplicate suppressed for {click_id}/{status}")
+            return
+        result = await asyncio.to_thread(meta_capi.post_event, cfg, payload, dataset_id)
+        for a in result["attempts"]:
+            log_track(f"{'✅' if result['ok'] else '❌'} Meta CAPI {event_name} "
+                      f"{click_id}/{status} attempt {a['attempt']}: "
+                      f"HTTP {a.get('status_code')} {a.get('error') or ''}")
+        await _meta_capi_audit(conv, dataset_id, event_name,
+                               "sent" if result["ok"] else "failed", result["attempts"])
+    except Exception as e:
+        log_track(f"❌ Meta CAPI send error: {e}")
 
 
 # ─── rDNS (reverse DNS) filter field ────────────────────────────────
@@ -4502,12 +4976,17 @@ async def click_api(campaign_alias: str, request: Request) -> Response:
     # with apply_tracking_gate).
     bl_query = urlencode({k: str(v) for k, v in body.items()
                           if k in BLACKLIST_FIELDS and v is not None})
+    # Meta CAPI click identifiers supplied in the JSON body flow through the
+    # synthetic query so the stored click row carries them (no cookies here).
+    id_query = urlencode({k: str(body[k]) for k in ("fbclid", "fbc", "fbp")
+                          if body.get(k)})
+    synth_query = "&".join(x for x in (bl_query, id_query) if x)
     synth = _synthetic_request(
         ip=ip, ua=ua,
         referrer=str(body.get("referrer") or ""),
         language=str(body.get("language") or ""),
         path=f"/click-api/{campaign_alias}", method="POST",
-        query_string=bl_query.encode("utf-8"))
+        query_string=synth_query.encode("utf-8"))
 
     rule, blocked = await apply_bot_rules(synth)
     if rule:
@@ -4748,6 +5227,54 @@ async def simulate_traffic(campaign_alias: str, request: Request) -> Response:
 async def show_logs(request: Request):
     await require_admin(request)
     return JSONResponse(content=jsonable_encoder(TRACK_LOG[-50:]))
+
+
+@app.post("/meta-capi/test")
+async def meta_capi_test(request: Request):
+    """Admin: send one synthetic event through the configured Meta CAPI setup.
+
+    Returns the Graph API response inline (endpoint + payload + attempts). With
+    dry_run on (the default) no HTTP request is made and the built payload is
+    returned instead. Uses test_event_code when set."""
+    await require_admin(request)
+    cfg = load_meta_capi_config()
+    send_statuses = cfg.get("send_statuses") or ["sale"]
+    status = str(send_statuses[0]) if send_statuses else "sale"
+    conv = {
+        "click_id": f"aaa-test-{uuid.uuid4().hex[:16]}",
+        "status": status,
+        "payout": 1.0,
+        "currency": cfg.get("default_currency") or "USD",
+        "client_ip": resolve_client_ip(request),
+        "user_agent": request.headers.get("user-agent", "") or "",
+        "email": "test@example.com",
+        "phone": "+15551234567",
+        "fbc": f"fb.1.{int(time.time() * 1000)}.testfbclid",
+        "fbp": "fb.1.1700000000.123456789",
+        "event_time": int(time.time()),
+    }
+    payload = meta_capi.build_payload(cfg, conv)
+    if payload is None:
+        raise HTTPException(status_code=400,
+                            detail=f"Status '{status}' has no event mapping")
+    dataset_id = meta_capi_resolve_dataset(cfg)
+    endpoint = meta_capi.endpoint_url(cfg, dataset_id)
+    if not cfg.get("enabled"):
+        return {"status": "disabled", "message": "Meta CAPI is disabled — nothing sent",
+                "endpoint": endpoint, "payload": payload}
+    if cfg.get("dry_run", True):
+        return {"status": "dry_run",
+                "message": "Dry-run is on — payload built, no request sent",
+                "endpoint": endpoint, "payload": payload}
+    if not dataset_id or not str(cfg.get("access_token") or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="Dataset ID and access token are required to send")
+    result = await asyncio.to_thread(meta_capi.post_event, cfg, payload, dataset_id)
+    return {"status": "ok" if result["ok"] else "error",
+            "attempts": result["attempts"],
+            "response_status": result.get("status_code"),
+            "response": result.get("response"),
+            "endpoint": endpoint, "payload": payload}
 
 
 # track and do campaign rules
