@@ -1,7 +1,18 @@
-import psycopg2
+"""AAA Tracker database initializer.
+
+Idempotent by default: the schema SQL uses IF NOT EXISTS / ON CONFLICT, so running
+this on an existing install creates whatever is missing and changes nothing else.
+
+    python3 install.py              # ensure schema (safe to re-run)
+    python3 install.py --recreate   # DROP every table first, then create (destroys data)
+
+Exits non-zero on failure so callers (make install) notice.
+"""
+import argparse
 import os
-import shutil
 import sys
+
+import psycopg2
 from clickhouse_connect import get_client
 
 DB_HOST = os.getenv("POSTGRES_HOST", "tracker_postgres")
@@ -19,115 +30,96 @@ def connect_db():
         user=DB_USER,
         password=DB_PASSWORD,
         host=DB_HOST,
-        port=DB_PORT
+        port=DB_PORT,
     )
 
 
-conn = connect_db()
+def existing_tables(cur):
+    cur.execute("""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                ORDER BY table_name;
+                """)
+    return [row[0] for row in cur.fetchall()]
 
 
-def check_and_reset_database():
-    # return
-    try:
-        conn.autocommit = True
-        cur = conn.cursor()
+def drop_all_tables(cur, tables):
+    print("\n🗑️  Dropping all tables (--recreate)...")
+    for table in tables:
+        cur.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE;')
+    print("✅ All tables dropped.\n")
 
-        # Check for existing tables
-        cur.execute("""
-                    SELECT table_name
-                    FROM information_schema.tables
-                    WHERE table_schema = 'public';
-                    """)
-        tables = cur.fetchall()
 
-        if tables:
-            print("\n⚠️  Tables found in the database:\n")
-            for table in tables:
-                print(f" - {table[0]}")
-            confirm = input(
-                "\n❓ Do you really want to DROP ALL TABLES? Type 'yes' to confirm: ").strip()
+def run_postgres_install(recreate: bool):
+    conn = connect_db()
+    conn.autocommit = True
+    cur = conn.cursor()
 
-            if confirm.lower() == "yes":
-                print("\n🗑️ Dropping all tables...")
-                for table in tables:
-                    cur.execute(f'DROP TABLE IF EXISTS "{table[0]}" CASCADE;')
-                print("✅ All tables dropped successfully.\n")
-            else:
-                print("\n❌ Operation cancelled. The database was left unchanged.\n")
-                sys.exit(1)
-
+    tables = existing_tables(cur)
+    if tables:
+        print(f"\nℹ️  Found {len(tables)} existing table(s): {', '.join(tables)}")
+        if recreate:
+            drop_all_tables(cur, tables)
         else:
-            print("ℹ️  No tables in the database. Continuing installation...\n")
+            print("   Ensuring the schema is complete — nothing is dropped.")
+            print("   (use --recreate to wipe and start over)\n")
+    else:
+        print("ℹ️  No tables yet — creating the schema...\n")
 
-        cur.close()
-        conn.close()
+    with open(INIT_SQL_FILE, "r", encoding="utf-8") as f:
+        cur.execute(f.read())
 
-    except psycopg2.OperationalError as e:
-        print(f"\n🚫 Failed to connect to the database: {e}\n")
-        sys.exit(1)
-
-
-def run_install():
-    try:
-        check_and_reset_database()
-        # Connect to the database
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD
-        )
-        conn.autocommit = True
-        cursor = conn.cursor()
-
-        # Read init.sql
-        with open(INIT_SQL_FILE, "r", encoding="utf-8") as f:
-            sql_commands = f.read()
-
-        # Execute every statement
-        cursor.execute(sql_commands)
-
-        print("✅ Postgres database initialized successfully.")
-
-        cursor.close()
-        conn.close()
-
-        run_clickhouse_install()
-
-        print('\n✅ Installation complete. ClickHouse database initialized.')
-
-    except Exception as e:
-        print(f"❌ Installation error: {e}")
+    cur.close()
+    conn.close()
+    print("✅ PostgreSQL schema ready.")
 
 
 def run_clickhouse_install():
     print("Connecting to ClickHouse...")
-
     client = get_client(
         host=os.getenv("CLICKHOUSE_HOST", "tracker_clickhouse"),
         username=os.getenv("CLICKHOUSE_USER", "user"),
         password=os.getenv("CLICKHOUSE_PASSWORD", "_".join(["password"] * 3)),
-        port=int(os.getenv("CLICKHOUSE_PORT", 8123)),
-        secure=False
+        port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+        secure=False,
     )
 
-    sql_file_path = os.path.join(os.path.dirname(__file__), 'sql/clickHouse.sql')
+    sql_file_path = os.path.join(os.path.dirname(__file__), "sql/clickHouse.sql")
     if not os.path.exists(sql_file_path):
         raise FileNotFoundError(f"SQL file not found: {sql_file_path}")
 
-    with open(sql_file_path, 'r', encoding='utf-8') as f:
+    with open(sql_file_path, "r", encoding="utf-8") as f:
         raw_sql = f.read()
 
-    # Split on ; and drop empty statements
-    statements = [s.strip() for s in raw_sql.split(';') if s.strip()]
-
+    statements = [s.strip() for s in raw_sql.split(";") if s.strip()]
     for statement in statements:
-        print(f"\nExecuting:\n{statement}")
         client.command(statement)
 
-    print("\n✅ ClickHouse install complete.")
+    print("✅ ClickHouse schema ready.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Initialize the AAA Tracker databases.")
+    parser.add_argument(
+        "--recreate",
+        action="store_true",
+        help="drop every table before creating the schema (destroys all tracking data)",
+    )
+    args = parser.parse_args()
+
+    try:
+        run_postgres_install(args.recreate)
+        run_clickhouse_install()
+    except psycopg2.OperationalError as e:
+        print(f"\n🚫 Failed to connect to PostgreSQL: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n❌ Installation error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print("\n✅ Installation complete — PostgreSQL and ClickHouse are ready.")
 
 
 if __name__ == "__main__":
-    run_install()
+    main()

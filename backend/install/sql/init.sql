@@ -1,15 +1,39 @@
-CREATE TYPE landing_mood AS ENUM ('link', 'mirror', 'local_file');
-CREATE TYPE status_mood AS ENUM ('pending', 'success', 'error');
-CREATE TYPE domain_error_handle_mood AS ENUM ('handle', 'error');
-CREATE TYPE campaign_type AS ENUM ('campaign', 'tracking_only');
-CREATE TYPE campaign_status AS ENUM ('active', 'paused');
-CREATE TYPE redirect_mode AS ENUM ('position', 'weight');
-CREATE TYPE ssl_status_mood AS ENUM ('not_started', 'pending', 'success', 'error');
+DO $$ BEGIN
+    CREATE TYPE landing_mood AS ENUM ('link', 'mirror', 'local_file');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE status_mood AS ENUM ('pending', 'success', 'error');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE domain_error_handle_mood AS ENUM ('handle', 'error');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE campaign_type AS ENUM ('campaign', 'tracking_only');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE campaign_status AS ENUM ('active', 'paused');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE redirect_mode AS ENUM ('position', 'weight');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE ssl_status_mood AS ENUM ('not_started', 'pending', 'success', 'error');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE conversion_status AS ENUM ('lead', 'sale', 'upsale', 'rejected', 'hold', 'trash');
+DO $$ BEGIN
+    CREATE TYPE conversion_status AS ENUM ('lead', 'sale', 'upsale', 'rejected', 'hold', 'trash');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Create the users table
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     created_at TIMESTAMP DEFAULT now(),
     updated_at TIMESTAMP DEFAULT now(),
@@ -24,7 +48,7 @@ CREATE TABLE users (
 
 
 
-CREATE TABLE domains (
+CREATE TABLE IF NOT EXISTS domains (
     id SERIAL PRIMARY KEY,
     domain VARCHAR(255) UNIQUE NOT NULL,                  -- domain address
     redirect_https BOOLEAN DEFAULT TRUE,                  -- whether to redirect to https
@@ -40,9 +64,9 @@ CREATE TABLE domains (
 -- Add a demo domain
 INSERT INTO domains (domain, redirect_https, handle_404, default_campaign_id, group_name, status, created_at, updated_at)
 VALUES
-('demo.example.com', TRUE, 'error', NULL, 'Demo Group', 'pending', NOW(), NOW());
+('demo.example.com', TRUE, 'error', NULL, 'Demo Group', 'pending', NOW(), NOW()) ON CONFLICT (domain) DO NOTHING;
 
-CREATE TABLE landings (
+CREATE TABLE IF NOT EXISTS landings (
     id SERIAL PRIMARY KEY,
     folder VARCHAR(255) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL UNIQUE,
@@ -55,10 +79,10 @@ CREATE TABLE landings (
 
 INSERT INTO landings (folder, name, link, type, tags, created_at, updated_at)
 VALUES
-('demo_folder', 'Demo Landing', 'https://example.com/demo', 'link', 'demo,example', now(), now());
+('demo_folder', 'Demo Landing', 'https://example.com/demo', 'link', 'demo,example', now(), now()) ON CONFLICT (folder) DO NOTHING;
 
 
-CREATE TABLE affiliate_networks (
+CREATE TABLE IF NOT EXISTS affiliate_networks (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,
     offer_parameters VARCHAR(1024),
@@ -68,7 +92,7 @@ CREATE TABLE affiliate_networks (
 );
 
 
-CREATE TABLE offers (
+CREATE TABLE IF NOT EXISTS offers (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,
     url TEXT NOT NULL,
@@ -91,7 +115,7 @@ VALUES
  '[{"code": "US", "priority": 1}, {"code": "CA"}]'::jsonb, 10.00, 'USD', 'active', '{"token1": "value1"}'::jsonb, 'This is a demo offer 1', ARRAY['tag1', 'tag2']),
 ('Demo Offer 2', 'https://example.com/offer2',
  (SELECT id FROM affiliate_networks WHERE name = 'ClickDealer'),
- '[{"code": "UK", "priority": 1}, {"code": "AU"}]'::jsonb, 15.50, 'USD', 'active', '{"token2": "value2"}'::jsonb, 'This is a demo offer 2', ARRAY['tag3', 'tag4']);
+ '[{"code": "UK", "priority": 1}, {"code": "AU"}]'::jsonb, 15.50, 'USD', 'active', '{"token2": "value2"}'::jsonb, 'This is a demo offer 2', ARRAY['tag3', 'tag4']) ON CONFLICT (name) DO NOTHING;
 
 
 -- Add demo networks
@@ -105,7 +129,7 @@ VALUES
 ('ClickDealer', 'aff_sub={subid}&click_id={cid}', 'https://clickdealer.com/pb?cid={cid}&conversion={conversion_status}')
 ON CONFLICT (name) DO NOTHING;
 
-CREATE TABLE sources (
+CREATE TABLE IF NOT EXISTS sources (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,
     traffic_loss FLOAT,
@@ -127,7 +151,7 @@ VALUES
   {"name": "Sub id 1", "parameter": "sub_id_1", "token": "", "editable_name": true},
   {"name": "Sub id 2", "parameter": "sub_id_2", "token": "", "editable_name": true}
  ]'::jsonb,
- '{}'::jsonb);
+ '{}'::jsonb) ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS settings (
     id SERIAL PRIMARY KEY,
@@ -135,7 +159,7 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
-CREATE TABLE campaigns (
+CREATE TABLE IF NOT EXISTS campaigns (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,
     alias VARCHAR(255) NOT NULL UNIQUE,
@@ -151,7 +175,7 @@ CREATE TABLE campaigns (
     updated_at TIMESTAMP DEFAULT now()
 );
 
-CREATE TABLE conversions_data (
+CREATE TABLE IF NOT EXISTS conversions_data (
     id SERIAL PRIMARY KEY,
     received_at TIMESTAMP DEFAULT NOW(),
     click_id VARCHAR(100),
@@ -191,12 +215,14 @@ CREATE TABLE conversions_data (
     is_bot BOOLEAN,
     device_type VARCHAR(50),
     postback_count INTEGER DEFAULT 0,          -- how many postbacks this conversion received
-    last_postback_at TIMESTAMP                 -- time of the most recent postback
+    last_postback_at TIMESTAMP,                -- time of the most recent postback
+    fbc TEXT,                                  -- Meta click id (fb.1.<ms>.<fbclid>)
+    fbp TEXT                                   -- Meta browser cookie (_fbp)
 );
 
-CREATE INDEX idx_conversions_received_at ON conversions_data(received_at);
-CREATE INDEX idx_conversions_click_id ON conversions_data(click_id);
-CREATE INDEX idx_conversions_status ON conversions_data(status);
+CREATE INDEX IF NOT EXISTS idx_conversions_received_at ON conversions_data(received_at);
+CREATE INDEX IF NOT EXISTS idx_conversions_click_id ON conversions_data(click_id);
+CREATE INDEX IF NOT EXISTS idx_conversions_status ON conversions_data(status);
 
 
 -- Add initial data
@@ -240,28 +266,34 @@ VALUES (
     '5dfc9a6ef90c0908795b917ae279e90a', /* akm_ + admin */
     TRUE,
     TRUE
-);
+) ON CONFLICT (username) DO NOTHING;
 
-INSERT INTO campaigns (
-    name,alias, type, status, redirect_mode, domain_id, traffic_source_id, config, notes, created_at, updated_at
-) VALUES (
-    'Campaign Demo 1', 'alias1', 'campaign', 'active', 'position', 1, 1,
+INSERT INTO campaigns (name,alias, type, status, redirect_mode, domain_id, traffic_source_id, config, notes, created_at, updated_at)
+SELECT
+    'Campaign Demo 1', 'alias1', 'campaign', 'active', 'position',
+    (SELECT id FROM domains ORDER BY id LIMIT 1),
+    (SELECT id FROM sources ORDER BY id LIMIT 1),
     '{"integration_method": "php", "send_se_referrer": true, "use_title_as_keyword": true, "send_query_params": true, "bind_method": "full", "bind_ttl_hours": 24, "cost_model": "cpc", "traffic_loss_percent": 0, "cost": 0, "cost_currency": "USD", "cost_from_cost_parameter": false, "paramsIdMapping": [{"name": "Keyword", "parameter": "keyword", "token": ""}, {"name": "Cost", "parameter": "cost", "token": ""}, {"name": "Currency", "parameter": "currency", "token": ""}, {"name": "External ID", "parameter": "external_id", "token": ""}, {"name": "Creative ID", "parameter": "utm_creative", "token": "{{ad.name}}"}, {"name": "AD Campaign ID", "parameter": "utm_campaign", "token": "{{campaign.name}}"}, {"name": "Site", "parameter": "utm_source", "token": "{{site_source_name}}"}], "postbacks": [], "flows": []}',
     'Demo notes for campaign 1', '2025-05-01 00:00:00', '2025-05-01 00:00:00'
-);
+WHERE NOT EXISTS (SELECT 1 FROM campaigns WHERE alias = 'alias1')
+ON CONFLICT (name) DO NOTHING;
 
-INSERT INTO campaigns (
-    name, alias, type, status, redirect_mode, domain_id, traffic_source_id, config, notes, created_at, updated_at
-) VALUES (
-    'Campaign Demo 2', 'alias2', 'campaign', 'active', 'position', 1, 1,
+INSERT INTO campaigns (name, alias, type, status, redirect_mode, domain_id, traffic_source_id, config, notes, created_at, updated_at)
+SELECT
+    'Campaign Demo 2', 'alias2', 'campaign', 'active', 'position',
+    (SELECT id FROM domains ORDER BY id LIMIT 1),
+    (SELECT id FROM sources ORDER BY id LIMIT 1),
     '{"integration_method": "php", "send_se_referrer": true, "use_title_as_keyword": true, "send_query_params": true, "bind_method": "full", "bind_ttl_hours": 24, "cost_model": "cpc", "traffic_loss_percent": 0, "cost": 0, "cost_currency": "USD", "cost_from_cost_parameter": false, "paramsIdMapping": [{"name": "Keyword", "parameter": "keyword", "token": ""}, {"name": "Cost", "parameter": "cost", "token": ""}, {"name": "Currency", "parameter": "currency", "token": ""}, {"name": "External ID", "parameter": "external_id", "token": ""}, {"name": "Creative ID", "parameter": "utm_creative", "token": "{{ad.name}}"}, {"name": "AD Campaign ID", "parameter": "utm_campaign", "token": "{{campaign.name}}"}, {"name": "Site", "parameter": "utm_source", "token": "{{site_source_name}}"}], "postbacks": [], "flows": []}',
     'Demo notes for campaign 2', '2025-05-01 00:00:00', '2025-05-01 00:00:00'
-);
+WHERE NOT EXISTS (SELECT 1 FROM campaigns WHERE alias = 'alias2')
+ON CONFLICT (name) DO NOTHING;
 
-INSERT INTO campaigns (
-    name,alias,  type, status, redirect_mode, domain_id, traffic_source_id, config, notes, created_at, updated_at
-) VALUES (
-    'Campaign Demo 3', 'alias3', 'campaign', 'active', 'position', 1, 1,
+INSERT INTO campaigns (name,alias,  type, status, redirect_mode, domain_id, traffic_source_id, config, notes, created_at, updated_at)
+SELECT
+    'Campaign Demo 3', 'alias3', 'campaign', 'active', 'position',
+    (SELECT id FROM domains ORDER BY id LIMIT 1),
+    (SELECT id FROM sources ORDER BY id LIMIT 1),
     '{"integration_method": "php", "send_se_referrer": true, "use_title_as_keyword": true, "send_query_params": true, "bind_method": "full", "bind_ttl_hours": 24, "cost_model": "cpc", "traffic_loss_percent": 0, "cost": 0, "cost_currency": "USD", "cost_from_cost_parameter": false, "paramsIdMapping": [{"name": "Keyword", "parameter": "keyword", "token": ""}, {"name": "Cost", "parameter": "cost", "token": ""}, {"name": "Currency", "parameter": "currency", "token": ""}, {"name": "External ID", "parameter": "external_id", "token": ""}, {"name": "Creative ID", "parameter": "utm_creative", "token": "{{ad.name}}"}, {"name": "AD Campaign ID", "parameter": "utm_campaign", "token": "{{campaign.name}}"}, {"name": "Site", "parameter": "utm_source", "token": "{{site_source_name}}"}], "postbacks": [], "flows": []}',
     'Demo notes for campaign 3', '2025-05-01 00:00:00', '2025-05-01 00:00:00'
-);
+WHERE NOT EXISTS (SELECT 1 FROM campaigns WHERE alias = 'alias3')
+ON CONFLICT (name) DO NOTHING;

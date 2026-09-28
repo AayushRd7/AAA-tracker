@@ -126,10 +126,20 @@ previous attempt (or a checkout you deleted) still hold the fixed names this sta
 clears them automatically before starting (`make preclean` does it on its own) — **data volumes are not
 touched**. If you want to start truly from scratch instead:
 
+**`❓ Do you really want to DROP ALL TABLES? … EOF when reading a line`** — the installer used to require an
+interactive confirmation, which `docker exec` cannot provide. It is now **non-interactive and idempotent**: the
+schema SQL uses `IF NOT EXISTS` / `ON CONFLICT`, so installing over an existing database adds whatever is
+missing and drops nothing. Just run it again:
+
 ```bash
-make reset      # removes containers AND data volumes — all tracking data is lost
-make install
+make install-db            # ensure schema — safe to re-run, never drops data
+make install-db-fresh      # DESTRUCTIVE: drop all tables, then recreate
 ```
+
+**`make reset`** removes containers *and* data volumes, then `make install` gives you a clean slate.
+
+**A failed install silently "succeeded"** — this is fixed: `install.py` now exits non-zero, so `make` stops
+instead of reporting success while the database was never initialised.
 
 **Containers fail to start / port already in use** — `docker compose down` (or `make stop`), then
 `make install`. Ports 80 and 443 must be free.

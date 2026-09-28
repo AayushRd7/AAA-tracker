@@ -2,7 +2,7 @@
 # older installs ship the standalone `docker-compose` binary. Detect once.
 COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; else echo "docker-compose"; fi)
 
-.PHONY: check env preclean reset install install-local install-no-sll install-prod-domain install-db \
+.PHONY: check env preclean reset install install-db-fresh install-local install-no-sll install-prod-domain install-db \
         generate-local-cert certificate stop start restart update logs reload-nginx \
         seed-demo-data start-http restart-nginx clear-logs
 
@@ -69,9 +69,15 @@ preclean: check
 		echo "  (data volumes preserved — no clicks or conversions are lost)"; \
 	fi
 
+# Ensure the database schema exists — idempotent, never drops anything.
 install-db:
 	docker exec tracker_backend pip install --no-cache-dir -r /app/install/requirements.txt
 	docker exec tracker_backend python3 /app/install/install.py
+
+# DESTRUCTIVE: drop every table and recreate the schema (all tracking data is lost).
+install-db-fresh:
+	docker exec tracker_backend pip install --no-cache-dir -r /app/install/requirements.txt
+	docker exec tracker_backend python3 /app/install/install.py --recreate
 
 install-no-sll: check env preclean
 	cp nginx/nginx.dev.conf nginx/default.conf

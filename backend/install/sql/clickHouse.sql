@@ -1,4 +1,4 @@
-CREATE TABLE clicks_data (
+CREATE TABLE IF NOT EXISTS clicks_data (
     received_at DateTime DEFAULT now(),
     campaign_id Nullable(Int),
     offer_id Nullable(Int),
@@ -44,7 +44,11 @@ CREATE TABLE clicks_data (
     flow_index UInt8 DEFAULT 0,
     utm_medium String DEFAULT '',
     impression UInt8 DEFAULT 0,
-    fraud_score UInt8 DEFAULT 0
+    fraud_score UInt8 DEFAULT 0,
+    click_id String DEFAULT '',
+    ip_full String DEFAULT '',
+    fbc String DEFAULT '',
+    fbp String DEFAULT ''
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(received_at)
