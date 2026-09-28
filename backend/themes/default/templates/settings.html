@@ -647,6 +647,63 @@
                     </v-card>
                 </v-col>
 
+                <!-- Tracking plane toggles -->
+                <v-col cols="12" md="6">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-crosshairs-gps</v-icon>
+                            Tracking
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.tracking.prefetch_filter_enabled"
+                                    label="Ignore prefetch requests"
+                                    inset dense hide-details
+                                    hint="Browser prefetch/prerender hits (Purpose: prefetch) still get the redirect but are not counted as visits or click-outs. Default on — prefetches otherwise inflate stats."
+                                    persistent-hint
+                                    class="mb-3"
+                            ></v-switch>
+                            <v-switch
+                                    v-model="settings.tracking.skip_bot_costs"
+                                    label="Do not assign costs for bot clicks"
+                                    inset dense hide-details
+                                    hint="Bot-flagged hits get cost 0 so cost reports are not inflated. Default off — existing behavior is preserved until enabled."
+                                    persistent-hint
+                                    class="mb-3"
+                            ></v-switch>
+                            <v-text-field
+                                    v-model="settings.tracking.referrer_hiding_domain"
+                                    label="Referrer-hiding domain"
+                                    outlined dense hide-details clearable
+                                    placeholder="hide.example.com"
+                                    hint="When a campaign hides the referrer, the meta-refresh hop is served from this domain instead of the campaign host. Leave empty for current behavior."
+                                    persistent-hint
+                                    class="mb-3"
+                            ></v-text-field>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
+                <!-- G90: admin login IP whitelist -->
+                <v-col cols="12" md="6">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-login-variant</v-icon>
+                            Login security
+                        </v-card-title>
+                        <v-card-text>
+                            <v-text-field
+                                    v-model="settings.login_security.ip_whitelist"
+                                    label="Admin login IP whitelist"
+                                    outlined dense hide-details clearable
+                                    placeholder="127.0.0.1/32, 10.0.0.0/8"
+                                    hint="Comma-separated IPs/CIDRs allowed to sign in. Empty = allow everyone (current behavior). A blocked IP gets 403 before credentials are checked — make sure your own address is included."
+                                    persistent-hint
+                            ></v-text-field>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+
                 <!-- G65: audit log (admin-only) -->
                 <v-col cols="12">
                     <v-card class="pa-4">
@@ -889,6 +946,14 @@
                     privacy: {
                         anonymize_ip: false,
                     },
+                    tracking: {
+                        prefetch_filter_enabled: true,
+                        skip_bot_costs: false,
+                        referrer_hiding_domain: '',
+                    },
+                    login_security: {
+                        ip_whitelist: '',
+                    },
                 },
                 subIdMapping: [
                 ],
@@ -1060,6 +1125,11 @@
                             {}, {auto_disable_flows: false}, this.settings.monitoring || {});
                         this.settings.privacy = Object.assign(
                             {}, {anonymize_ip: false}, this.settings.privacy || {});
+                        this.settings.tracking = Object.assign(
+                            {}, {prefetch_filter_enabled: true, skip_bot_costs: false,
+                                referrer_hiding_domain: ''}, this.settings.tracking || {});
+                        this.settings.login_security = Object.assign(
+                            {}, {ip_whitelist: ''}, this.settings.login_security || {});
                         if (!Array.isArray(this.settings.custom_statuses)) this.settings.custom_statuses = [];
                         if (data.subIdMapping) this.subIdMapping = data.subIdMapping;
                     });

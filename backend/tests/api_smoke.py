@@ -5454,6 +5454,297 @@ print("ESCAPED-OK")
     for _sr in g8_sources:
         s.delete(f"{api}/sources/{_sr}")
 
+    # ===== Routing criteria, prefetch/bot params, login whitelist, hiding
+    # domain, source status map =====
+    import time as _wtime
+    import threading as _wthreading
+    import http.server as _whttpserver
+    import socketserver as _wsocketserver
+
+    w_pid = os.getpid()
+    w_offers, w_campaigns, w_sources = [], [], []
+    w_offer_n = [0]
+
+    def w_offer(url):
+        # Offer names are unique — suffix each with a counter so multiple
+        # offers in this block don't collide.
+        w_offer_n[0] += 1
+        r = s.post(f"{api}/offers/", json={
+            "name": f"smoke-wave-offer-{w_pid}-{w_offer_n[0]}", "url": url})
+        oid = r.json().get("id")
+        if oid:
+            w_offers.append(oid)
+        return oid
+
+    def w_campaign(tag, flows, **kw):
+        cfg = {"flows": flows, "postbacks": [], "fallback_url": "", "hide_referrer": False}
+        cfg.update(kw.pop("config", {}))
+        r = s.post(f"{api}/campaigns/", json={
+            "name": f"smoke-wave-{tag}-{w_pid}", "alias": f"smoke-wave-{tag}-{w_pid}",
+            "type": "campaign", "status": "active", "redirect_mode": "position",
+            "config": cfg, **kw})
+        cid = r.json().get("id")
+        if cid:
+            w_campaigns.append(cid)
+        return cid
+
+    def w_group(field, op, value):
+        return {"combinator": "and", "groups": [{"logic": "and", "conditions": [
+            {"field": field, "operator": op, "value": value}]}]}
+
+    def w_curl(path, xff, headers=None, cookies=None):
+        # Direct to uvicorn (nginx rewrites X-Real-IP): X-Forwarded-For is the
+        # trusted client-IP fallback, so these hits control the resolved IP.
+        cmd = ["docker", "exec", "tracker_frontend", "curl", "-s", "-D", "-",
+               "-H", "Host: localhost", "-H", f"X-Forwarded-For: {xff}"]
+        for h in headers or []:
+            cmd += ["-H", h]
+        if cookies:
+            cmd += ["-b", cookies]
+        cmd.append(f"http://127.0.0.1:8000{path}")
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=40).stdout
+
+    w_saved_tracking = (s.get(f"{api}/settings/").json().get("settings") or {}).get("tracking")
+    w_saved_login = (s.get(f"{api}/settings/").json().get("settings") or {}).get("login_security")
+
+    # -- rDNS (reverse DNS / PTR) routing criterion --
+    w_oa = w_offer("https://example.com/wave-a?cid={click_id}")
+    w_ob = w_offer("https://example.com/wave-b?cid={click_id}")
+    w_rdns = w_campaign("rdns", [
+        {"type": "default", "position": 1, "enabled": True, "schema": "direct",
+         "offer": w_oa, "filters": w_group("rdns", "contains", "local")},
+        {"type": "default", "position": 2, "enabled": True, "schema": "direct",
+         "offer": w_ob, "filters": []}])
+    check("wave: rdns campaign created", bool(w_rdns) and bool(w_oa) and bool(w_ob),
+          f"{w_rdns}/{w_oa}/{w_ob}")
+    out = w_curl(f"/smoke-wave-rdns-{w_pid}", "127.0.0.1")
+    check("wave: rDNS filter matches the localhost PTR", "wave-a" in out, out[:200])
+    _w_t0 = _wtime.time()
+    out = w_curl(f"/smoke-wave-rdns-{w_pid}", "192.0.2.1")
+    check("wave: rDNS non-resolving IP falls through, bounded",
+          "wave-b" in out and (_wtime.time() - _w_t0) < 6,
+          f"{out[:120]} dt={_wtime.time() - _w_t0:.1f}")
+
+    # -- prefetch filtering --
+    def w_rdns_rows():
+        return ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {w_rdns}")
+
+    w_before = w_rdns_rows()
+    w_curl(f"/smoke-wave-rdns-{w_pid}", "127.0.0.1", headers=["Sec-Purpose: prefetch"])
+    w_curl(f"/smoke-wave-rdns-{w_pid}", "127.0.0.1", headers=["X-Purpose: prefetch"])
+    _wtime.sleep(1)
+    w_after = w_rdns_rows()
+    check("wave: prefetch hits are not counted (no CH rows)", w_before == w_after,
+          f"{w_before} -> {w_after}")
+
+    # -- source-declared bot param (opt-in, spoof-safe) --
+    r = s.post(f"{api}/sources/", json={
+        "name": f"smoke-wave-src-{w_pid}", "additional_settings": {"is_bot_param": "is_bot"}})
+    w_src = r.json().get("id")
+    if w_src:
+        w_sources.append(w_src)
+    w_srccamp = w_campaign("srcbot", [
+        {"type": "default", "position": 1, "enabled": True, "schema": "direct",
+         "offer": w_oa, "filters": []}], traffic_source_id=w_src)
+    check("wave: source-bot campaign created", bool(w_src) and bool(w_srccamp),
+          f"{w_src}/{w_srccamp}")
+    w_curl(f"/smoke-wave-srcbot-{w_pid}?is_bot=1", "203.0.113.9")
+    _wtime.sleep(1)
+    w_row = ch_query(f"SELECT is_bot FROM clicks_data WHERE campaign_id = {w_srccamp} "
+                     f"ORDER BY received_at DESC LIMIT 1")
+    check("wave: configured is_bot param marks the row is_bot", w_row == "true", w_row[:80])
+    w_curl(f"/smoke-wave-srcbot-{w_pid}", "203.0.113.9")
+    _wtime.sleep(1)
+    w_row = ch_query(f"SELECT is_bot FROM clicks_data WHERE campaign_id = {w_srccamp} "
+                     f"ORDER BY received_at DESC LIMIT 1")
+    check("wave: absent is_bot param stays human", w_row == "false", w_row[:80])
+    # spoof guard: a source with NO is_bot_param configured ignores ?is_bot=1
+    r = s.post(f"{api}/sources/", json={
+        "name": f"smoke-wave-src2-{w_pid}", "additional_settings": {}})
+    w_src2 = r.json().get("id")
+    if w_src2:
+        w_sources.append(w_src2)
+    w_srccamp2 = w_campaign("srcbot2", [
+        {"type": "default", "position": 1, "enabled": True, "schema": "direct",
+         "offer": w_oa, "filters": []}], traffic_source_id=w_src2)
+    w_curl(f"/smoke-wave-srcbot2-{w_pid}?is_bot=1", "203.0.113.9")
+    _wtime.sleep(1)
+    w_row = ch_query(f"SELECT is_bot FROM clicks_data WHERE campaign_id = {w_srccamp2} "
+                     f"ORDER BY received_at DESC LIMIT 1")
+    check("wave: unconfigured source ignores ?is_bot=1 (no spoof)", w_row == "false", w_row[:80])
+
+    # -- do not assign costs for bot clicks --
+    s.post(f"{api}/settings/", json={"settings": {"tracking": {"skip_bot_costs": True}}})
+    settle_settings_cache()
+    w_curl(f"/smoke-wave-srcbot-{w_pid}?is_bot=1&cost=7.5", "203.0.113.9")
+    _wtime.sleep(1)
+    w_row = ch_query(f"SELECT is_bot, toString(cost) FROM clicks_data "
+                     f"WHERE campaign_id = {w_srccamp} ORDER BY received_at DESC LIMIT 1")
+    check("wave: skip_bot_costs zeroes a bot row's cost", w_row.split("\t") == ["true", "0"],
+          w_row[:80])
+    w_curl(f"/smoke-wave-srcbot-{w_pid}?cost=7.5", "203.0.113.9")
+    _wtime.sleep(1)
+    w_row = ch_query(f"SELECT is_bot, toString(cost) FROM clicks_data "
+                     f"WHERE campaign_id = {w_srccamp} ORDER BY received_at DESC LIMIT 1")
+    check("wave: skip_bot_costs keeps a human row's cost",
+          w_row.split("\t")[0] == "false" and abs(float(w_row.split("\t")[1]) - 7.5) < 0.01,
+          w_row[:80])
+
+    # -- conversion-status routing criterion --
+    w_oc = w_offer("https://example.com/wave-ca?cid={click_id}")
+    w_od = w_offer("https://example.com/wave-cb?cid={click_id}")
+    w_convcamp = w_campaign("convst", [
+        {"type": "default", "position": 1, "enabled": True, "schema": "direct",
+         "offer": w_oc, "filters": w_group("conversion_status", "equals", "rejected")},
+        {"type": "default", "position": 2, "enabled": True, "schema": "direct",
+         "offer": w_od, "filters": []}])
+    w_vid = f"smoke-wave-vid-{w_pid}"
+    pg_exec("INSERT INTO conversions_data (received_at, click_id, campaign_id, status, "
+            f"payout, revenue, profit, visitor_id) VALUES (now(), "
+            f"'smoke-wave-convclick-{w_pid}', {w_convcamp}, 'rejected', 0, 0, 0, '{w_vid}')")
+    out = w_curl(f"/smoke-wave-convst-{w_pid}", "203.0.113.9", cookies=f"aaa_vid={w_vid}")
+    check("wave: conversion_status filter matches the prior status", "wave-ca" in out, out[:200])
+    out = w_curl(f"/smoke-wave-convst-{w_pid}", "203.0.113.9", cookies="aaa_vid=nobody-here")
+    check("wave: unknown visitor conversion_status falls through", "wave-cb" in out, out[:200])
+
+    # -- login IP whitelist (G90) --
+    r = s.post(f"{api}/settings/", json={"settings": {"login_security": {
+        "ip_whitelist": "127.0.0.1/32,172.16.0.0/12"}}})
+    check("wave: login whitelist saved", r.status_code == 200, r.text[:120])
+    r = requests.post(f"{api}/login", json={"username": USER, "password": PASS},
+                      verify=not INSECURE)
+    check("wave: whitelisted client can still log in", r.status_code == 200,
+          f"{r.status_code} {r.text[:80]}")
+    s.post(f"{api}/settings/", json={"settings": {"login_security": {
+        "ip_whitelist": "10.0.0.0/8"}}})
+    r = requests.post(f"{api}/login", json={"username": USER, "password": PASS},
+                      verify=not INSECURE)
+    check("wave: non-whitelisted login refused 403", r.status_code == 403,
+          f"{r.status_code} {r.text[:100]}")
+
+    # -- hide-referrer secondary domain (G91) --
+    s.post(f"{api}/settings/", json={"settings": {"tracking": {
+        "referrer_hiding_domain": "hide.smoke.test"}}})
+    settle_settings_cache()
+    w_hidecamp = w_campaign("hide", [
+        {"type": "default", "position": 1, "enabled": True, "schema": "direct",
+         "offer": w_oa, "filters": []}], config={"hide_referrer": True})
+    check("wave: hide-referrer campaign created", bool(w_hidecamp), str(w_hidecamp))
+    r = s.get(f"{BASE}/smoke-wave-hide-{w_pid}", allow_redirects=False)
+    loc = r.headers.get("location") or ""
+    check("wave: hide-referrer hops through the secondary domain",
+          r.status_code in (301, 302, 307, 308)
+          and "hide.smoke.test/__hide_referrer" in loc and "u=" in loc,
+          f"{r.status_code} {loc[:140]}")
+    r = requests.get(f"{BASE}/__hide_referrer", params={"u": "https://example.com/dest"},
+                     verify=not INSECURE)
+    check("wave: hop route serves the meta refresh",
+          r.status_code == 200 and 'content="no-referrer"' in r.text
+          and "example.com/dest" in r.text, r.text[:120])
+    r = requests.get(f"{BASE}/__hide_referrer", params={"u": "javascript:alert(1)"},
+                     verify=not INSECURE)
+    check("wave: hop route rejects non-http destinations", r.status_code == 404, str(r.status_code))
+
+    # Restore the global hiding domain NOW (and wait out the frontend's 30s
+    # settings cache) so a rapid re-run's earlier hide-referrer check can never
+    # see a stale configuration.
+    if w_saved_tracking is None:
+        s.post(f"{api}/settings/", json={"settings": {"tracking": None}})
+    else:
+        s.post(f"{api}/settings/", json={"settings": {"tracking": w_saved_tracking}})
+    settle_settings_cache()
+
+    # -- traffic-source status map accepts the stored spellings --
+    w_port = 19000 + (w_pid % 1000)
+    w_captured = []
+    _wsocketserver.TCPServer.allow_reuse_address = True
+
+    class _WRecv(_whttpserver.BaseHTTPRequestHandler):
+        def _ok(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            if length:
+                self.rfile.read(length)
+            w_captured.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        do_GET = _ok
+        do_POST = _ok
+
+        def log_message(self, *args):
+            pass
+
+    w_srv = _wsocketserver.TCPServer(("0.0.0.0", w_port), _WRecv)
+    w_srv.daemon_threads = True
+    _wthreading.Thread(target=w_srv.serve_forever, daemon=True).start()
+    w_recv = f"http://host.docker.internal:{w_port}"
+    r = s.post(f"{api}/sources/", json={
+        "name": f"smoke-wave-fan-{w_pid}", "s2s_postback": f"{w_recv}/fan",
+        "s2s_postback_statuses": {"sale": False, "lead": False,
+                                  "rejected": True, "upsale": True}})
+    w_fsrc = r.json().get("id")
+    if w_fsrc:
+        w_sources.append(w_fsrc)
+    w_fcamp = w_campaign("fan", [], traffic_source_id=w_fsrc)
+    check("wave: fanout source + campaign created", bool(w_fsrc) and bool(w_fcamp),
+          f"{w_fsrc}/{w_fcamp}")
+
+    def w_seed(click):
+        pg_exec("INSERT INTO conversions_data (received_at, click_id, campaign_id, status, "
+                f"payout, revenue, profit) VALUES (now(), '{click}', {w_fcamp}, 'lead', 0, 0, 0)")
+
+    w_clicks = {
+        "rejected": f"smoke-wave-fan-rej-{w_pid}",
+        "upsale": f"smoke-wave-fan-ups-{w_pid}",
+        "sale": f"smoke-wave-fan-sale-{w_pid}",
+    }
+    for _st, _ck in w_clicks.items():
+        w_seed(_ck)
+        requests.get(f"{BASE}/pb/{_ck}/{_st}/1", verify=not INSECURE)
+    _w_end = _wtime.time() + 15
+    while _wtime.time() < _w_end and len(w_captured) < 2:
+        _wtime.sleep(0.5)
+    _wtime.sleep(1)
+    check("wave: status map forwards 'rejected' (stored spelling)",
+          any("rej-" in p for p in w_captured), str(w_captured))
+    check("wave: status map forwards 'upsale' (stored spelling)",
+          any("ups-" in p for p in w_captured), str(w_captured))
+    check("wave: status map gates a disabled 'sale'",
+          not any("fan-sale-" in p for p in w_captured), str(w_captured))
+    try:
+        w_srv.shutdown()
+        w_srv.server_close()
+    except Exception:
+        pass
+
+    # ---- wave cleanup ----
+    try:
+        if w_saved_tracking is None:
+            s.post(f"{api}/settings/", json={"settings": {"tracking": None}})
+        else:
+            s.post(f"{api}/settings/", json={"settings": {"tracking": w_saved_tracking}})
+        if w_saved_login is None:
+            s.post(f"{api}/settings/", json={"settings": {"login_security": None}})
+        else:
+            s.post(f"{api}/settings/", json={"settings": {"login_security": w_saved_login}})
+    except Exception:
+        pass
+    pg_exec(f"DELETE FROM conversions_data WHERE click_id LIKE 'smoke-wave-%{w_pid}%' "
+            f"OR visitor_id = 'smoke-wave-vid-{w_pid}'")
+    if w_campaigns:
+        ch_query("ALTER TABLE clicks_data DELETE WHERE campaign_id IN (%s)"
+                 % ",".join(str(c) for c in w_campaigns if c))
+    for _c in w_campaigns:
+        if _c:
+            s.delete(f"{api}/campaigns/{_c}")
+    for _o in w_offers:
+        if _o:
+            s.delete(f"{api}/offers/{_o}")
+    for _sr in w_sources:
+        if _sr:
+            s.delete(f"{api}/sources/{_sr}")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

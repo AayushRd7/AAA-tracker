@@ -10,6 +10,7 @@ from hashlib import md5
 from datetime import datetime, timedelta
 import secrets
 import json
+import re
 import time
 import os
 
@@ -21,8 +22,61 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from models.user import UserORM
+from models.settings import SettingsORM
 
 router = APIRouter()
+
+
+# ====== Admin login IP whitelist (G90) ======
+# Settings-managed list of allowed CIDRs for /login and the TOTP step, stored
+# at settings.login_security.ip_whitelist. Empty list = current behavior.
+def _client_ip(request: Request) -> str:
+    """Real client IP — X-Real-IP (set by nginx, unforgeable) first, then the
+    peer address (uvicorn --proxy-headers resolves X-Forwarded-For)."""
+    real = (request.headers.get("x-real-ip") or "").strip()
+    if real:
+        return real
+    return request.client.host if request.client else "unknown"
+
+
+def _login_whitelist(db: Session) -> str:
+    try:
+        row = db.query(SettingsORM).filter_by(name="settings").first()
+        cfg = json.loads(row.value) if row and row.value else {}
+    except Exception:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        return ""
+    sec = cfg.get("login_security") or {}
+    if not isinstance(sec, dict):
+        return ""
+    return str(sec.get("ip_whitelist") or "").strip()
+
+
+def login_ip_allowed(db: Session, client_ip: str) -> tuple[bool, str]:
+    """(allowed, reason). Empty whitelist allows everyone; a non-empty list
+    requires the client IP to fall inside one of its CIDRs/IPs."""
+    whitelist = _login_whitelist(db)
+    if not whitelist:
+        return True, ""
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False, f"Login not allowed: '{client_ip}' is not a valid IP address"
+    for raw in re.split(r"[,\s]+", whitelist):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            if "/" in raw:
+                if addr in ipaddress.ip_network(raw, strict=False):
+                    return True, ""
+            elif addr == ipaddress.ip_address(raw):
+                return True, ""
+        except ValueError:
+            continue
+    return False, f"Login not allowed from {client_ip} — not in the admin IP whitelist"
 
 # JWT configuration (kept for compatibility; sessions are now DB-backed)
 SECRET_KEY = os.environ.get("JWT_SECRET", "your-super-secret-key-for-jwt")
@@ -344,7 +398,12 @@ def _login_limited(key: str) -> bool:
 @router.post("/login")
 async def login(request: Request, response: Response, login_data: LoginRequest, db: Session = Depends(get_db)):
     from audit_logger import audit_event
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _client_ip(request)
+    allowed, reason = login_ip_allowed(db, client_ip)
+    if not allowed:
+        audit_event(login_data.username, "login_blocked_ip", "user", login_data.username,
+                    {"reason": reason}, client_ip)
+        raise HTTPException(status_code=403, detail=reason)
     limit_key = f"{client_ip}:{login_data.username}"
     if _login_limited(limit_key):
         raise HTTPException(status_code=429, detail="Too many failed login attempts — try again in a minute.")
@@ -452,7 +511,12 @@ def _verify_totp_code(db: Session, user, code: str) -> bool:
 @router.post("/login/totp")
 async def login_totp(request: Request, response: Response, data: TotpLoginRequest, db: Session = Depends(get_db)):
     from audit_logger import audit_event
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _client_ip(request)
+    allowed, reason = login_ip_allowed(db, client_ip)
+    if not allowed:
+        audit_event("", "login_blocked_ip", "user", "", {"reason": reason, "phase": "totp"},
+                    client_ip)
+        raise HTTPException(status_code=403, detail=reason)
 
     try:
         payload = jwt.decode(data.totp_token, SECRET_KEY, algorithms=[ALGORITHM])

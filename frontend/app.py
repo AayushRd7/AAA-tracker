@@ -1,6 +1,7 @@
 import random
 import base64
 import hashlib
+import socket
 import hmac
 import ipaddress
 import secrets
@@ -376,8 +377,17 @@ async def enrich_meta(request: Request, params_id_mapping: list = None) -> dict:
         "device_brand": ua.device.brand,
         "device_model": ua.device.model,
         "is_bot": ua.is_bot or "bot" in ua_string.lower(),
+        # Reverse DNS (PTR) of the client IP — resolved off-loop with a 2s
+        # ceiling and cached; empty on failure/timeout.
+        "rdns": await reverse_dns(client_ip),
         "user_agent": ua_string,
     }
+
+    # The tracking gate (bot rules / source-declared bot / honeypot) runs before
+    # enrichment on the redirect path — surface its mark so flow filters on
+    # is_bot and the ClickHouse row see the same decision.
+    if getattr(request.state, "bot_marked", None):
+        meta["is_bot"] = True
 
     combined = {**query_params, **post_data, **cookies}
 
@@ -694,9 +704,13 @@ async def campaign_click(
         action_flow = None
         funnel_cfg = None
 
-    # 5. Save the click asynchronously — opted-out visitors (G79) get the
-    # redirect but no Postgres/ClickHouse rows and no tracking cookies.
-    if not optout:
+    # Prefetch/prerender hits (Purpose/Sec-Purpose: prefetch) are still served
+    # the redirect but must not inflate click-out stats.
+    prefetch = request_is_prefetch(request)
+
+    # 5. Save the click asynchronously — opted-out visitors (G79) and prefetch
+    # hits get the redirect but no Postgres/ClickHouse rows and no tracking cookies.
+    if not optout and not prefetch:
         background_tasks.add_task(save_click_to_db, meta_data)
 
     # 6. Build the final URL
@@ -724,7 +738,8 @@ async def campaign_click(
 
     # 7. ClickHouse click row (click=true) — awaited inline so the row is
     # observable the moment the redirect returns; failures never block it.
-    if not optout:
+    # Prefetch hits skip the write (still redirected above).
+    if not optout and not prefetch:
         await save_click_to_clickhouse(meta_data, campaign_alias)
 
     response = await flow_action_response(
@@ -1017,6 +1032,15 @@ async def direct_collect(request: Request) -> Response:
     if blocked:
         log_track(f"🤖 Blocked /t/collect visit to campaign '{c_ref}' by rule '{rule.get('type')}'")
         return Response(content="Not Found", status_code=404, media_type="text/html")
+
+    # Source-declared bot status (opt-in per source) — same trust rule as the
+    # redirect path: honored only under the source's configured param name.
+    try:
+        if source_declares_bot(request, await source_extra_settings(campaign)):
+            request.state.bot_marked = "source_is_bot"
+            request.state.source_bot = True
+    except Exception as e:
+        log_track(f"source bot-param check error: {e}")
 
     click_id = str(params.get("click_id") or request.cookies.get(DIRECT_COOKIE) or "").strip() \
         or generate_click_id()
@@ -1750,6 +1774,20 @@ async def apply_tracking_gate(request: Request, label: str, campaign=None) -> Re
             log_track(f"🤖 Blocked visit to '{label}' by rule '{rule.get('type')}'")
             return render_404_html()
 
+    # Source-declared bot status: honored ONLY when the campaign's traffic
+    # source opts in with an `is_bot_param` name (additional_settings). A
+    # free-form ?is_bot=1 from a normal visitor is ignored — otherwise anyone
+    # could spoof themselves out of tracked traffic.
+    if campaign is not None:
+        try:
+            extra = await source_extra_settings(campaign)
+            if source_declares_bot(request, extra):
+                request.state.bot_marked = "source_is_bot"
+                request.state.source_bot = True
+                log_track(f"🤖 Source-declared bot for '{label}'")
+        except Exception as e:
+            log_track(f"source bot-param check error: {e}")
+
     # G44 traffic-quality blacklists: "block" → untracked 404 (same as a bot
     # block); "mark" → bot_marked, track_event flags the row is_bot.
     bl_action = await apply_blacklists(request, campaign)
@@ -2014,8 +2052,13 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
 
                 raw_statuses = source["s2s_postback_statuses"]
                 src_statuses = json.loads(raw_statuses) if isinstance(raw_statuses, str) else (raw_statuses or {})
+                # The sources UI stores keys as rejected/upsale; older payloads
+                # may still carry reject/upsell. Accept BOTH spellings so the
+                # configured toggles actually gate (a mismatch used to leave the
+                # two per-status switches inert).
                 status_map = {"sale": "sale", "lead": "lead",
-                              "reject": "rejected", "upsell": "upsale"}
+                              "rejected": "rejected", "reject": "rejected",
+                              "upsale": "upsale", "upsell": "upsale"}
                 fire = any(tracker_status == status and src_statuses.get(src_key)
                            for src_key, tracker_status in status_map.items())
                 if not src_statuses:
@@ -2880,8 +2923,8 @@ def parse_campaign_config(campaign) -> dict:
     return cfg if isinstance(cfg, dict) else {}
 
 
-def meta_refresh_redirect(url: str) -> Response:
-    """Redirect via an HTML meta refresh so the browser sends no referrer."""
+def _meta_refresh_html(url: str) -> Response:
+    """The bare meta-refresh document (no secondary-domain hop)."""
     import html as html_module
     safe_url = html_module.escape(url, quote=True)
     html_doc = f"""<!DOCTYPE html>
@@ -2897,6 +2940,47 @@ def meta_refresh_redirect(url: str) -> Response:
 </body>
 </html>"""
     return HTMLResponse(html_doc)
+
+
+def hide_referrer_hop_url(request: Request, url: str) -> str:
+    """Secondary referrer-hiding domain: when `tracking.referrer_hiding_domain`
+    is set (and differs from the current host), the hide-referrer hop is served
+    from that domain instead of the campaign's own host, so the destination
+    never sees the campaign domain. Empty/unset = no hop (current behavior)."""
+    hiding = str(load_tracking_settings().get("referrer_hiding_domain") or "").strip()
+    if not hiding:
+        return ""
+    current_host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+    if hiding.split(":")[0].strip().lower() == current_host:
+        return ""
+    return f"https://{hiding}/__hide_referrer?" + urlencode({"u": url})
+
+
+def meta_refresh_redirect(url: str, request: Request = None) -> Response:
+    """Redirect via an HTML meta refresh so the browser sends no referrer.
+
+    With a configured referrer-hiding domain, the browser is first sent (302)
+    to that domain's /__hide_referrer hop, which then serves the meta refresh —
+    the offer never sees the campaign's own host in the referrer chain.
+    """
+    if request is not None:
+        hop = hide_referrer_hop_url(request, url)
+        if hop:
+            return RedirectResponse(hop, status_code=302)
+    return _meta_refresh_html(url)
+
+
+@app.get("/__hide_referrer")
+async def hide_referrer_hop(request: Request) -> Response:
+    """Serves the meta-refresh document for the secondary hiding domain.
+
+    The destination is validated to an http(s) URL so this endpoint can't be
+    turned into a javascript:/data: redirect gadget.
+    """
+    target = (request.query_params.get("u") or "").strip()
+    if not target.lower().startswith(("http://", "https://")):
+        return render_404_html()
+    return _meta_refresh_html(target)
 
 
 # ─── Per-flow delivery actions ─────────────────────────────────────
@@ -3092,7 +3176,7 @@ async def execute_funnel(campaign, request: Request, config: dict, meta_data: di
 
     if config.get("hide_referrer"):
         def campaign_redirect(url):
-            return meta_refresh_redirect(url)
+            return meta_refresh_redirect(url, request)
     else:
         def campaign_redirect(url):
             return RedirectResponse(url)
@@ -3150,6 +3234,15 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
 
     paramsIdMapping = get_params_id_mapping_from_campaign(campaign)
     meta_data = await enrich_meta(request, paramsIdMapping)
+
+    # Prior conversion status for THIS visitor+campaign — the field flows can
+    # filter on (e.g. only re-show an offer to visitors whose last status was
+    # "rejected"). Bounded TTL cache; empty when the visitor is unknown.
+    visitor_id = meta_data.get("visitor_id") or request.cookies.get(VISITOR_COOKIE)
+    if visitor_id:
+        meta_data["conversion_status"] = await conversion_status_for(visitor_id, campaign["id"])
+    else:
+        meta_data.setdefault("conversion_status", "")
 
     # use the referring page's <title> as keyword when no keyword param came in
     if config.get("use_title_as_keyword") and not meta_data.get("keyword"):
@@ -3272,7 +3365,7 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
         fallback_url = (config.get("fallback_url") or "").strip()
         if fallback_url:
             if config.get("hide_referrer"):
-                response = meta_refresh_redirect(fallback_url)
+                response = meta_refresh_redirect(fallback_url, request)
             else:
                 response = RedirectResponse(fallback_url)
         else:
@@ -3286,7 +3379,7 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
         # Respect per-campaign "hide referrer" on outbound redirects
         if config.get("hide_referrer"):
             def campaign_redirect(url):
-                return meta_refresh_redirect(url)
+                return meta_refresh_redirect(url, request)
         else:
             def campaign_redirect(url):
                 return RedirectResponse(url)
@@ -3529,6 +3622,11 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
     extra_meta: extra validated (VALID_PARAMS) fields merged into the row.
     """
 
+    # Prefetch/prerender hits never count as real visits — no ClickHouse row.
+    if request_is_prefetch(request):
+        log_track("🙈 Prefetch hit — skipping track_event row")
+        return
+
     try:
         campaign_alias = campaign["alias"]
         log_track(f"🔁 New track data call for '{campaign_alias}'")
@@ -3623,6 +3721,12 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
     # Live rows always carry an explicit bot flag — reports treat NULL as
     # human, but the fraud feed and regression checks expect a crisp false.
     result_row.setdefault("is_bot", False)
+
+    # "Do not assign costs for bot clicks" (default off): a bot-flagged row
+    # carries cost 0, so cost aggregations (SUM(cost) in clickHouse.py, no
+    # is_bot filter) are unaffected without touching that module.
+    if result_row.get("is_bot") and tracking_skip_bot_costs() and "cost" in result_row:
+        result_row["cost"] = 0.0
 
     if click is not None:
         result_row["click"] = bool(click)
@@ -3832,6 +3936,176 @@ def load_privacy_settings() -> dict:
     separate deliverable; the engine only reads this key.
     """
     return _settings_block("privacy")
+
+
+# ─── Tracking-plane toggles (prefetch / bot costs / hiding domain) ──
+def load_tracking_settings() -> dict:
+    """Read the tracking block from the settings row (30s TTL cache).
+
+    Shape (all optional):
+      {"prefetch_filter_enabled": bool (default True),
+       "skip_bot_costs": bool (default False),
+       "referrer_hiding_domain": str (default "")}
+    """
+    return _settings_block("tracking")
+
+
+def tracking_prefetch_filter_enabled() -> bool:
+    return bool(load_tracking_settings().get("prefetch_filter_enabled", True))
+
+
+def tracking_skip_bot_costs() -> bool:
+    return bool(load_tracking_settings().get("skip_bot_costs", False))
+
+
+# ─── rDNS (reverse DNS) filter field ────────────────────────────────
+# The PTR name of the client IP is resolved in a worker thread with a hard 2s
+# ceiling so a hostile/unroutable IP can never block the event loop and stall
+# the redirect path; results (including negatives) are memoized in a bounded,
+# TTL'd process-local map. On failure/timeout the field is empty and filters
+# simply don't match.
+_rdns_cache: dict = {}
+_RDNS_TTL = 300.0
+_RDNS_CACHE_CAP = 10_000
+
+
+def _rdns_lookup_sync(ip: str) -> str:
+    try:
+        name, _aliases, _addrs = socket.gethostbyaddr(str(ip))
+        return name or ""
+    except Exception:
+        return ""
+
+
+async def reverse_dns(ip: str) -> str:
+    ip = (ip or "").strip()
+    if not ip:
+        return ""
+    now = time.monotonic()
+    hit = _rdns_cache.get(ip)
+    if hit is not None and now < hit[0]:
+        return hit[1]
+    name = ""
+    try:
+        name = await asyncio.wait_for(
+            asyncio.to_thread(_rdns_lookup_sync, ip), timeout=2.0)
+    except asyncio.TimeoutError:
+        log_track(f"⏱ rDNS lookup timed out (2s) for {ip}; field left empty")
+        name = ""
+    except Exception:
+        name = ""
+    if len(_rdns_cache) >= _RDNS_CACHE_CAP:
+        _rdns_cache.clear()
+    _rdns_cache[ip] = (now + _RDNS_TTL, name)
+    return name
+
+
+# ─── Prior conversion status filter field ───────────────────────────
+# The visitor's LAST conversion status for THIS campaign, keyed on the
+# first-party visitor cookie. A single bounded, TTL'd lookup keeps a hot
+# redirect from hammering Postgres; a miss is cached too so repeated hits on a
+# non-converting visitor stay cheap.
+_conv_status_cache: dict = {}
+_CONV_STATUS_TTL = 60.0
+_CONV_STATUS_CACHE_CAP = 20_000
+
+
+async def conversion_status_for(visitor_id: str, campaign_id) -> str:
+    visitor_id = str(visitor_id or "").strip()
+    if not visitor_id or campaign_id in (None, ""):
+        return ""
+    key = f"{visitor_id}|{campaign_id}"
+    now = time.monotonic()
+    hit = _conv_status_cache.get(key)
+    if hit is not None and now < hit[0]:
+        return hit[1]
+    status = ""
+    try:
+        async with app.state.pg.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT status FROM conversions_data "
+                "WHERE visitor_id = $1 AND campaign_id = $2 "
+                "ORDER BY id DESC LIMIT 1",
+                visitor_id, int(campaign_id))
+            if row and row["status"]:
+                status = str(row["status"])
+    except Exception as e:
+        log_track(f"conversion_status lookup error: {e}")
+    if len(_conv_status_cache) >= _CONV_STATUS_CACHE_CAP:
+        _conv_status_cache.clear()
+    _conv_status_cache[key] = (now + _CONV_STATUS_TTL, status)
+    return status
+
+
+# ─── Prefetch-request filtering ─────────────────────────────────────
+def request_is_prefetch(request: Request) -> bool:
+    """True when the hit is a browser prefetch/prerender, not a real visit.
+
+    Honors the standard `Purpose: prefetch` / `Sec-Purpose: prefetch` headers
+    plus the legacy `X-Purpose` / `X-Moz` variants. Toggle default ON because
+    prefetches otherwise inflate visit/click-out stats.
+    """
+    if not tracking_prefetch_filter_enabled():
+        return False
+    for header in ("purpose", "sec-purpose", "x-purpose", "x-moz"):
+        value = (request.headers.get(header) or "").lower()
+        if value and "prefetch" in value:
+            return True
+    return False
+
+
+# ─── Source-declared bot flag (opt-in per source) ───────────────────
+_source_extra_cache: dict = {}
+_SOURCE_EXTRA_TTL = 30.0
+_SOURCE_EXTRA_CACHE_CAP = 5_000
+
+
+async def source_extra_settings(campaign) -> dict:
+    """Cached `additional_settings` of the campaign's traffic source.
+
+    The source may declare a request-param name via `is_bot_param`; only that
+    configured mapping is honored (a free-form ?is_bot=1 is ignored unless a
+    source opts in), so a normal visitor cannot spoof bot exclusion.
+    """
+    try:
+        source_id = (campaign.get("traffic_source_id") if hasattr(campaign, "get")
+                     else campaign["traffic_source_id"])
+    except Exception:
+        source_id = None
+    if not source_id:
+        return {}
+    now = time.monotonic()
+    hit = _source_extra_cache.get(source_id)
+    if hit is not None and now < hit[0]:
+        return hit[1]
+    extra: dict = {}
+    try:
+        async with app.state.pg.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT additional_settings FROM sources WHERE id = $1", int(source_id))
+        raw = row["additional_settings"] if row else None
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        if isinstance(raw, dict):
+            extra = raw
+    except Exception as e:
+        log_track(f"source additional_settings load error: {e}")
+    if len(_source_extra_cache) >= _SOURCE_EXTRA_CACHE_CAP:
+        _source_extra_cache.clear()
+    _source_extra_cache[source_id] = (now + _SOURCE_EXTRA_TTL, extra)
+    return extra
+
+
+def source_declares_bot(request: Request, extra: dict) -> bool:
+    """True when the request carries a truthy value under the source's
+    configured `is_bot_param` (opt-in; empty/unset = ignore)."""
+    param = str((extra or {}).get("is_bot_param") or "").strip()
+    if not param:
+        return False
+    value = request.query_params.get(param)
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes", "on", "bot")
 
 
 @app.get("/optout")
