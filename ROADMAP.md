@@ -157,6 +157,52 @@ Model: pixels are records in **CAPI Integrations**; a **traffic source (channel)
 - [ ] Meta/Snapchat/TikTok/Pinterest senders; AppLovin + OpenAI once their docs/tokens are confirmed.
 - [ ] Optional 7th: Google Ads (needs a developer token application).
 
+## 🗂 Wave 17 — Logs & observability (queued, high value)
+
+Everything here is data we already write; the gap is that there is no surface to audit it.
+
+- [ ] **Logs area in the sidebar** with sub-tabs, each filterable + exportable (CSV) and using the standard table chrome:
+  - **Clicks** and **Conversions** (the existing click log / conversion log move here and keep working)
+  - **S2S postbacks** — every inbound postback: ref/click id, status, payout, matched or rejected (incl. rule rejects), source IP, raw URL
+  - **API postbacks** — outbound CAPI delivery: pixel/destination, platform, event name, HTTP status, response, attempt count (backed by the existing `meta_capi_log` / `capi_pixel_sent` tables)
+  - **Click forwarding** — per click: chosen flow, schema, offer, forwarded URL, status (this is the "why did this click go there / why did it not work" view)
+  - **Cost updates** — who changed cost, for which campaign/period, how many rows
+- [ ] **Conversion health** additions to the system status page: last successful postback per source, CAPI failure counts, and links to the offending row.
+
+## 🧰 Wave 18 — Tools grouping + saved filters (queued)
+
+- [ ] Sidebar **Tools** group holding Domains, Scripts, Conversion tracking, Integrations, Filter presets, Fallback URL, Blacklist bots (pure information-architecture change — no new pages except the two below).
+- [ ] **Global fallback URL** with the full token palette, used when no flow matches or caps/filters block a click (today fallback is per campaign only).
+- [ ] **Saved filter presets** — name a filter set on any log/report and reapply it later.
+- [ ] **Script library** — reusable titled snippets (tracking script, pixel, custom JS) with copy, injected into landers.
+- [ ] **Funnel templates** — save a campaign's funnel steps as a reusable template and apply it to a new campaign.
+
+## 📊 Wave 19 — Report & table depth (queued)
+
+- [ ] **Column-set templates** (save/load which columns a table shows) + **custom columns**.
+- [ ] **Conditional row colouring** by column value (threshold bands) and **number formatting** (decimal places, thousands divider) as workspace settings.
+- [ ] **Report template gallery** for saved reports, plus an **IP report** mode (single-day, per-IP).
+- [ ] **Conversion status lifecycle** for networks that approve conversions: pending / approved / declined / other, with approval and decline rates as report columns and an approval status per conversion row.
+- [ ] Conversions log: **duplicate-status column**, **deduplicate token**, **bulk status change**, and **manual conversion add** (we have import + single-row edit today).
+- [ ] Google Ads offline-conversion export format (blocked on the Ads API token, like G39/G40).
+
+## 🔐 Wave 20 — Account & operations (queued)
+
+- [ ] **Session management** — list active sessions per user (IP, geo, device, OS, browser, last seen) with "log out everywhere" (DB-backed sessions already exist).
+- [ ] **Audit log filters** — by object type, title/id, user and date range in the UI.
+- [ ] **Workspace settings** — decimal places, divider, default table template, grouping-view toggle.
+- [ ] **Health-center style incidents** — see Wave 17's conversion health item.
+
+## 🏢 Wave 21 — Publisher / network-side portal (needs a product decision)
+
+Only if we want to serve the supply side, not just media buyers:
+
+- [ ] **Publishers** entity with a balance ledger (campaign earnings / referral / total).
+- [ ] **Payout workflow** — requested / paid / pending amounts, payment date, status, note, invoice attachment.
+- [ ] **Whitelabel publisher portal** (branded domain for affiliates).
+- [ ] **Referral commissions** — multi-step percentages with approval states.
+- [ ] Publisher statistics + publisher-scoped custom domains.
+
 ## 🔜 Queued — will be completed later
 
 - **Remaining G95 leftovers**: Google Safe Browsing checks (needs an API key) · server-side GeoIP DB (needs a MaxMind license or equivalent) — both implemented as opt-in settings the moment a key/license exists.
