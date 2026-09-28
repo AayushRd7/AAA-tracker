@@ -5021,6 +5021,439 @@ print("ESCAPED-OK")
             r = s.delete(f"{api}/campaigns/{_c}")
             check("hd-cleanup: campaign deleted", r.status_code == 200, r.text[:150])
 
+    # ----- Reports depth: click-log tag filter, pagination tiebreak, offer pause, click_date round-trip -----
+    rt_pid = os.getpid()
+    rt_tag_a = f"smoke-rt-tag-a-{rt_pid}"
+    rt_tag_b = f"smoke-rt-tag-b-{rt_pid}"
+    rt_today = str(datetime.now(timezone.utc).date())
+
+    def _rt_campaign(suffix):
+        rt_alias = f"smoke-rt-{suffix}-{rt_pid}"
+        rr = s.post(f"{api}/campaigns/", json={
+            "name": rt_alias, "alias": rt_alias, "type": "campaign", "status": "active",
+            "redirect_mode": "position",
+            "config": {"flows": [], "postbacks": [], "hide_referrer": False,
+                       "fallback_url": f"https://example.com/smoke-rt-{suffix}-{rt_pid}-fb"}})
+        return rr.json().get("id") if rr.status_code == 200 else None
+
+    rt_cid_a = _rt_campaign("a")
+    rt_cid_b = _rt_campaign("b")
+    rt_cid_page = _rt_campaign("page")  # noqa: F841
+    check("rt-tags: campaigns created", all([rt_cid_a, rt_cid_b, rt_cid_page]),
+          f"{rt_cid_a},{rt_cid_b},{rt_cid_page}")
+    if rt_cid_a:
+        s.patch(f"{api}/campaigns/{rt_cid_a}/tags", json={"tags": [rt_tag_a]})
+    if rt_cid_b:
+        s.patch(f"{api}/campaigns/{rt_cid_b}/tags", json={"tags": [rt_tag_b]})
+
+    if rt_cid_a and rt_cid_b:
+        ch_query(
+            f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, click_id, url, country, cost) "
+            f"SELECT now(), {rt_cid_a}, NULL, '', 'smoke-rt-{rt_pid}-a-' || toString(number), "
+            f"'smoke-rt-{rt_pid}-a-' || toString(number), "
+            f"'https://example.com/smoke-rt-{rt_pid}-a-' || toString(number), 'US', 0.01 FROM numbers(3)")
+        ch_query(
+            f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, click_id, url, country, cost) "
+            f"SELECT now(), {rt_cid_b}, NULL, '', 'smoke-rt-{rt_pid}-b-' || toString(number), "
+            f"'smoke-rt-{rt_pid}-b-' || toString(number), "
+            f"'https://example.com/smoke-rt-{rt_pid}-b-' || toString(number), 'US', 0.01 FROM numbers(2)")
+
+        r_tag = s.post(f"{api}/dashboard/click-log", json={
+            "campaign_tags": [rt_tag_a], "limit": 50, "offset": 0})
+        tagged = r_tag.json().get("items") if r_tag.status_code == 200 else []
+        check("rt-tags: click-log tag filter returns only campaigns with the tag",
+              r_tag.status_code == 200 and len(tagged) == 3
+              and all(x.get("campaign_id") == rt_cid_a for x in tagged),
+              r_tag.text[:200])
+        check("rt-tags: tag-filtered count matches rows",
+              r_tag.status_code == 200 and r_tag.json().get("total") == len(tagged),
+              r_tag.text[:200])
+        r_notag = s.post(f"{api}/dashboard/click-log", json={
+            "campaigns": [rt_cid_a, rt_cid_b], "limit": 50, "offset": 0})
+        notag = r_notag.json().get("items") if r_notag.status_code == 200 else []
+        check("rt-tags: untagged query sees both campaigns' clicks",
+              r_notag.status_code == 200 and {x.get("campaign_id") for x in notag} == {rt_cid_a, rt_cid_b},
+              r_notag.text[:200])
+        r_exp = s.post(f"{api}/dashboard/click-log/export", json={"campaign_tags": [rt_tag_a]})
+        exported = (sum(1 for ln in r_exp.text.splitlines() if f"smoke-rt-{rt_pid}-a-" in ln)
+                    if r_exp.status_code == 200 else -1)
+        check("rt-tags: export honours the tag filter", r_exp.status_code == 200 and exported == 3,
+              f"{r_exp.status_code} {exported}")
+
+    # Pagination tiebreak: 25 rows sharing received_at/visitor_id, unique click_id.
+    if rt_cid_page:
+        ch_query(
+            f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, click_id, url, country, cost) "
+            f"SELECT toDateTime('2026-01-01 00:00:00'), {rt_cid_page}, NULL, '', '', "
+            f"'smoke-rt-{rt_pid}-page-' || leftPad(toString(number), 2, '0'), "
+            f"'https://example.com/smoke-rt-{rt_pid}-page-' || leftPad(toString(number), 2, '0'), 'US', 0.01 "
+            f"FROM numbers(25)")
+        rt_seen = []
+        rt_total = None
+        rt_ok_pages = True
+        for rt_off in (0, 10, 20):
+            rr = s.post(f"{api}/dashboard/click-log", json={
+                "campaigns": [rt_cid_page], "limit": 10, "offset": rt_off})
+            if rr.status_code != 200:
+                rt_ok_pages = False
+                break
+            body = rr.json()
+            rt_total = body.get("total")
+            rt_seen.extend(x.get("url") for x in body.get("items", []))
+        check("rt-page: identical-timestamp rows page cleanly (total 25, no dups/gaps)",
+              rt_ok_pages and rt_total == 25 and len(rt_seen) == 25 and len(set(rt_seen)) == 25
+              and all(u for u in rt_seen),
+              f"total={rt_total} seen={len(rt_seen)} uniq={len(set(rt_seen))}")
+
+    # Pause/resume offer endpoint behaviour.
+    r = s.post(f"{api}/offers/", json={
+        "name": f"Smoke RT Offer {rt_pid}", "url": f"https://example.com/smoke-rt-offer-{rt_pid}",
+        "status": "active"})
+    rt_oid = r.json().get("id") if r.status_code == 200 else None
+    check("rt-pause: offer created", r.status_code == 200 and bool(rt_oid), r.text[:150])
+    if rt_oid:
+        r = s.post(f"{api}/offers/{rt_oid}/status", json={"status": "paused"})
+        check("rt-pause: pause accepted", r.status_code == 200 and r.json().get("status") == "paused",
+              r.text[:150])
+        check("rt-pause: DB reflects paused",
+              pg_query(f"SELECT status FROM offers WHERE id = {rt_oid}") == "paused",
+              pg_query(f"SELECT status FROM offers WHERE id = {rt_oid}"))
+        r = s.post(f"{api}/offers/{rt_oid}/status", json={"status": "active"})
+        check("rt-pause: resume accepted", r.status_code == 200 and r.json().get("status") == "active",
+              r.text[:150])
+        r = s.post(f"{api}/offers/{rt_oid}/status", json={"status": "bogus"})
+        check("rt-pause: invalid status -> 400", r.status_code == 400, str(r.status_code))
+        r = s.post(f"{api}/offers/999999999/status", json={"status": "paused"})
+        check("rt-pause: unknown offer -> 404", r.status_code == 404, str(r.status_code))
+
+    # click_date basis still attributes by the CLICK date after the bounded round-trip.
+    if rt_cid_a:
+        ch_query(
+            f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, click_id, country, cost) "
+            f"VALUES (now(), {rt_cid_a}, true, '', 'smoke-rt-{rt_pid}-conv-today', "
+            f"'smoke-rt-{rt_pid}-conv-today', 'US', 0.1)")
+        ch_query(
+            f"INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, click_id, country, cost) "
+            f"VALUES (toDateTime(now()) - INTERVAL 10 DAY, {rt_cid_a}, true, '', 'smoke-rt-{rt_pid}-conv-old', "
+            f"'smoke-rt-{rt_pid}-conv-old', 'US', 0.1)")
+        pg_exec(
+            f"INSERT INTO conversions_data (received_at, click_id, campaign_id, offer_id, status, payout, revenue, profit, visitor_id) "
+            f"VALUES (now() - interval '1 day', 'smoke-rt-{rt_pid}-conv-today', {rt_cid_a}, 5, 'sale', 4, 4, 4, "
+            f"'smoke-rt-{rt_pid}-conv-today')")
+        pg_exec(
+            f"INSERT INTO conversions_data (received_at, click_id, campaign_id, offer_id, status, payout, revenue, profit, visitor_id) "
+            f"VALUES (now(), 'smoke-rt-{rt_pid}-conv-old', {rt_cid_a}, 5, 'sale', 4, 4, 4, "
+            f"'smoke-rt-{rt_pid}-conv-old')")
+        r_tk = s.get(f"{api}/reports/", params={
+            "date_from": rt_today, "date_to": rt_today, "date_basis": "click_date",
+            "click_id": f"smoke-rt-{rt_pid}-conv-today"})
+        r_old = s.get(f"{api}/reports/", params={
+            "date_from": rt_today, "date_to": rt_today, "date_basis": "click_date",
+            "click_id": f"smoke-rt-{rt_pid}-conv-old"})
+        check("rt-conv: click_date keeps a conversion that landed after its today click",
+              r_tk.status_code == 200
+              and any(c["click_id"] == f"smoke-rt-{rt_pid}-conv-today" for c in r_tk.json()),
+              r_tk.text[:200])
+        check("rt-conv: click_date hides a conversion whose click is outside the window",
+              r_old.status_code == 200
+              and not any(c["click_id"] == f"smoke-rt-{rt_pid}-conv-old" for c in r_old.json()),
+              r_old.text[:200])
+
+    # ----- rt cleanup -----
+    ch_query(f"ALTER TABLE clicks_data DELETE WHERE click_id LIKE 'smoke-rt-{rt_pid}-%'")
+    pg_exec(f"DELETE FROM conversions_data WHERE click_id LIKE 'smoke-rt-{rt_pid}-%'")
+    if rt_oid:
+        s.delete(f"{api}/offers/{rt_oid}")
+    for _c in (rt_cid_a, rt_cid_b, rt_cid_page):
+        if _c:
+            s.delete(f"{api}/campaigns/{_c}")
+
+    # ===== G85/G86/G87: postback rules, fanout controls, /pb hardening =====
+    import time as _g8time
+    import threading as _g8threading
+    import http.server as _g8httpserver
+    import socketserver as _g8socketserver
+    import urllib.parse as _g8urlparse
+    import hashlib as _g8hashlib
+
+    g8_pid = os.getpid()
+
+    def g8_db(sql):
+        return subprocess.run(
+            ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-tAc", sql],
+            capture_output=True, text=True, timeout=30).stdout.strip()
+
+    # Local HTTP receiver the frontend container reaches via host.docker.internal —
+    # lets these checks observe the outgoing postback payload the tracking plane fires.
+    g8_port = 18000 + (g8_pid % 1000)
+    g8_captured = []
+    _g8socketserver.TCPServer.allow_reuse_address = True
+
+    class _G8Receiver(_g8httpserver.BaseHTTPRequestHandler):
+        def _ok(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length).decode("utf-8", "ignore") if length else ""
+            g8_captured.append({"method": self.command, "path": self.path, "body": body})
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        do_GET = _ok
+        do_POST = _ok
+
+        def log_message(self, *args):
+            pass
+
+    g8_srv = _g8socketserver.TCPServer(("0.0.0.0", g8_port), _G8Receiver)
+    g8_srv.daemon_threads = True
+    _g8threading.Thread(target=g8_srv.serve_forever, daemon=True).start()
+    g8_recv = f"http://host.docker.internal:{g8_port}"
+
+    g8_probe = ""
+    try:
+        g8_probe = subprocess.run(
+            ["docker", "exec", "tracker_frontend", "curl", "-s", "-m", "3", f"{g8_recv}/ready"],
+            capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        pass
+    check("g87: postback receiver reachable from the frontend container", "ok" in g8_probe,
+          g8_probe[:80])
+
+    def g8_paths(marker):
+        return [c["path"] for c in g8_captured if marker in c["path"]]
+
+    def g8_wait(marker, n, timeout=20):
+        end = _g8time.time() + timeout
+        while _g8time.time() < end:
+            if len(g8_paths(marker)) >= n:
+                break
+            _g8time.sleep(0.5)
+        return g8_paths(marker)
+
+    g8_campaigns, g8_sources = [], []
+
+    def g8_new_campaign(tag, **kw):
+        config = {"flows": [], "postbacks": [], "hide_referrer": False}
+        config.update(kw.pop("config", {}))
+        r = s.post(f"{api}/campaigns/", json={
+            "name": f"{tag}-{g8_pid}", "alias": f"{tag}-{g8_pid}", "type": "campaign",
+            "status": "active", "redirect_mode": "position", "config": config, **kw})
+        cid_ = r.json().get("id")
+        if cid_:
+            g8_campaigns.append(cid_)
+        return cid_
+
+    def g8_seed(click, cid):
+        g8_db("INSERT INTO conversions_data (received_at, click_id, campaign_id, status, payout, "
+              f"revenue, profit) VALUES (now(), '{click}', {cid}, 'lead', 0, 0, 0)")
+
+    # --- G85: global postback-processing rules (settings.postback_rules) ---
+    g8_saved_pr = (s.get(f"{api}/settings/").json().get("settings") or {}).get("postback_rules")
+    g8_rules = [
+        {"enabled": True, "name": "g8 reject", "conditions": [
+            {"field": "click_id", "operator": "starts_with", "value": f"g85rej-{g8_pid}"}],
+         "action": {"type": "reject"}},
+        {"enabled": True, "name": "g8 remap", "conditions": [
+            {"field": "click_id", "operator": "equals", "value": f"g85status-{g8_pid}"}],
+         "action": {"type": "set_status", "value": "rejected"}},
+        {"enabled": True, "name": "g8 abs", "conditions": [
+            {"field": "click_id", "operator": "equals", "value": f"g85payout-{g8_pid}"}],
+         "action": {"type": "set_payout", "value": 12.5}},
+        {"enabled": True, "name": "g8 mult", "conditions": [
+            {"field": "click_id", "operator": "equals", "value": f"g85mult-{g8_pid}"}],
+         "action": {"type": "set_payout", "mode": "multiplier", "value": 3}},
+        {"enabled": False, "name": "g8 disabled", "conditions": [
+            {"field": "click_id", "operator": "equals", "value": f"g85dis-{g8_pid}"}],
+         "action": {"type": "reject"}},
+    ]
+    r = s.post(f"{api}/settings/", json={"settings": {"postback_rules": g8_rules}})
+    check("g85: postback rules saved", r.status_code == 200, r.text[:120])
+    # the tracking plane caches settings blocks for 30s — wait out the TTL
+    settle_settings_cache()
+
+    g8_cid_tok = g8_new_campaign("smoke-g8tok", config={"postbacks": [{
+        "url": f"{g8_recv}/tok?cid={{click_id}}&md5={{_md5}}&u={{unixconversiontime}}"
+               "&s2={status2}&e1={event_1}&payout=auto",
+        "method": "GET", "status": {}}]})
+    check("g85/g87: token campaign created", bool(g8_cid_tok), str(g8_cid_tok))
+
+    # reject: fresh click -> no row written; seeded click -> no fanout
+    g8_rej = f"g85rej-{g8_pid}"
+    r = requests.get(f"{BASE}/pb/{g8_rej}/sale/5", verify=not INSECURE)
+    g8_rej_body = r.json() if "json" in r.headers.get("content-type", "") else {}
+    check("g85: reject returns 200 with a clear reason",
+          r.status_code == 200 and g8_rej_body.get("status") == "rejected"
+          and bool(g8_rej_body.get("reason")), r.text[:160])
+    check("g85: reject writes no conversion row",
+          g8_db(f"SELECT count(*) FROM conversions_data WHERE click_id='{g8_rej}'") == "0",
+          g8_db(f"SELECT count(*) FROM conversions_data WHERE click_id='{g8_rej}'"))
+    if g8_cid_tok:
+        g8_rej2 = f"g85rej-{g8_pid}-fan"
+        g8_seed(g8_rej2, g8_cid_tok)
+        g8_captured.clear()
+        requests.get(f"{BASE}/pb/{g8_rej2}/sale/5", verify=not INSECURE)
+        _g8time.sleep(3)
+        check("g85: reject suppresses fanout", g8_paths(g8_rej2) == [], str(g8_paths(g8_rej2)))
+
+    g8_ss = f"g85status-{g8_pid}"
+    requests.get(f"{BASE}/pb/{g8_ss}/sale/5", verify=not INSECURE)
+    check("g85: set_status remaps the written status",
+          g8_db(f"SELECT status FROM conversions_data WHERE click_id='{g8_ss}'") == "rejected",
+          g8_db(f"SELECT status FROM conversions_data WHERE click_id='{g8_ss}'"))
+
+    g8_pa = f"g85payout-{g8_pid}"
+    requests.get(f"{BASE}/pb/{g8_pa}/sale/2", verify=not INSECURE)
+    check("g85: set_payout absolute value applied",
+          g8_db(f"SELECT payout FROM conversions_data WHERE click_id='{g8_pa}'") == "12.5",
+          g8_db(f"SELECT payout FROM conversions_data WHERE click_id='{g8_pa}'"))
+    g8_pm = f"g85mult-{g8_pid}"
+    requests.get(f"{BASE}/pb/{g8_pm}/sale/2", verify=not INSECURE)
+    check("g85: set_payout multiplier applied",
+          g8_db(f"SELECT payout FROM conversions_data WHERE click_id='{g8_pm}'") == "6",
+          g8_db(f"SELECT payout FROM conversions_data WHERE click_id='{g8_pm}'"))
+
+    g8_dis = f"g85dis-{g8_pid}"
+    r = requests.get(f"{BASE}/pb/{g8_dis}/sale/5", verify=not INSECURE)
+    check("g85: disabled rule ignored (postback processed normally)",
+          r.status_code == 200 and r.json().get("duplicate") is False
+          and g8_db(f"SELECT count(*) FROM conversions_data WHERE click_id='{g8_dis}'") == "1",
+          r.text[:160])
+
+    # --- G86: traffic-source conversion fanout controls (additional_settings) ---
+    r = s.post(f"{api}/sources/", json={
+        "name": f"smoke-g8sample-{g8_pid}", "s2s_postback": f"{g8_recv}/sample",
+        "additional_settings": {"sample_percent": 50}})
+    g8_src_sample = r.json().get("id")
+    if g8_src_sample:
+        g8_sources.append(g8_src_sample)
+    r = s.post(f"{api}/sources/", json={
+        "name": f"smoke-g8upsell-{g8_pid}", "s2s_postback": f"{g8_recv}/upsell",
+        "additional_settings": {"disable_upsell": True, "sample_percent": 100}})
+    g8_src_upsell = r.json().get("id")
+    if g8_src_upsell:
+        g8_sources.append(g8_src_upsell)
+    check("g86: sources created", bool(g8_src_sample) and bool(g8_src_upsell), r.text[:150])
+
+    g8_cid_sample = g8_new_campaign("smoke-g8sample", traffic_source_id=g8_src_sample) \
+        if g8_src_sample else None
+    g8_cid_upsell = g8_new_campaign("smoke-g8upsell", traffic_source_id=g8_src_upsell) \
+        if g8_src_upsell else None
+    check("g86: source-linked campaigns created", bool(g8_cid_sample) and bool(g8_cid_upsell),
+          f"{g8_cid_sample}/{g8_cid_upsell}")
+
+    if g8_cid_sample:
+        # determinism: the same click_id must yield the same decision twice
+        g8_captured.clear()
+        det_clicks = [f"g86det-{g8_pid}-a", f"g86det-{g8_pid}-b"]
+        for cl in det_clicks:
+            g8_seed(cl, g8_cid_sample)
+            requests.get(f"{BASE}/pb/{cl}/lead/1", verify=not INSECURE)
+            requests.get(f"{BASE}/pb/{cl}/sale/2", verify=not INSECURE)
+        _g8time.sleep(4)
+        det_counts = {cl: len(g8_paths(cl)) for cl in det_clicks}
+        check("g86: sampling decision is deterministic per click_id",
+              all(n in (0, 2) for n in det_counts.values()), str(det_counts))
+
+        # distribution roughly matches the configured share over many ids
+        dist_ids = [f"g86dist-{g8_pid}-{i}" for i in range(40)]
+        g8_db("INSERT INTO conversions_data (received_at, click_id, campaign_id, status, payout, "
+              "revenue, profit) VALUES " + ",".join(
+                  f"(now(), '{i}', {g8_cid_sample}, 'lead', 0, 0, 0)" for i in dist_ids))
+        g8_captured.clear()
+        for cl in dist_ids:
+            requests.get(f"{BASE}/pb/{cl}/sale/1", verify=not INSECURE)
+        end = _g8time.time() + 25
+        while _g8time.time() < end:
+            if sum(1 for c in g8_captured if "g86dist-" in c["path"]) >= 40:
+                break
+            _g8time.sleep(0.5)
+        dist_n = sum(1 for c in g8_captured if "g86dist-" in c["path"])
+        check("g86: sample_percent ~50% distribution over many ids", 8 <= dist_n <= 32,
+              f"{dist_n}/40 forwarded")
+
+    if g8_cid_upsell:
+        g8_captured.clear()
+        su = f"g86up-sale-{g8_pid}"
+        g8_seed(su, g8_cid_upsell)
+        requests.get(f"{BASE}/pb/{su}/sale/1", verify=not INSECURE)
+        uu = f"g86up-ups-{g8_pid}"
+        g8_seed(uu, g8_cid_upsell)
+        requests.get(f"{BASE}/pb/{uu}/upsale/1", verify=not INSECURE)
+        g8_wait(su, 1, timeout=8)
+        _g8time.sleep(1)
+        check("g86: disable_upsell keeps the sale forward", len(g8_paths(su)) == 1,
+              str(g8_paths(su)))
+        check("g86: disable_upsell skips the upsell forward", g8_paths(uu) == [],
+              str(g8_paths(uu)))
+
+    # --- G87: /pb hardening + extra tokens ---
+    if g8_cid_tok:
+        g8_tok = f"g87tok-{g8_pid}"
+        g8_seed(g8_tok, g8_cid_tok)
+        g8_captured.clear()
+        requests.get(f"{BASE}/pb/{g8_tok}/sale/7.5", verify=not INSECURE)
+        tok_paths = g8_wait(g8_tok, 1, timeout=8)
+        g8_q = _g8urlparse.parse_qs(_g8urlparse.urlparse(tok_paths[-1]).query) if tok_paths else {}
+        check("g87: {_md5} token substituted in the fired postback",
+              g8_q.get("md5", [""])[0] == _g8hashlib.md5(g8_tok.encode()).hexdigest(),
+              str(g8_q.get("md5")))
+        check("g87: {unixconversiontime} token substituted",
+              g8_q.get("u", [""])[0].isdigit(), str(g8_q.get("u")))
+        check("g87: {status2}/{event_1} resolve to empty, not literal",
+              g8_q.get("s2", [""])[0] == "" and g8_q.get("e1", [""])[0] == "", str(g8_q))
+        check("g87: payout=auto resolves to the fired payout",
+              g8_q.get("payout", [""])[0] == "7.5", str(g8_q.get("payout")))
+
+    g8_head = f"g87head-{g8_pid}"
+    r = requests.head(f"{BASE}/pb/{g8_head}/sale/1.5", verify=not INSECURE, allow_redirects=False)
+    check("g87: HEAD /pb returns 200", r.status_code == 200, str(r.status_code))
+    check("g87: HEAD /pb writes nothing",
+          g8_db(f"SELECT count(*) FROM conversions_data WHERE click_id='{g8_head}'") == "0",
+          g8_db(f"SELECT count(*) FROM conversions_data WHERE click_id='{g8_head}'"))
+    r = requests.head(f"{BASE}/pb/{g8_head}/definitely_not_a_status/1.5", verify=not INSECURE)
+    check("g87: HEAD /pb keeps status validation (400)", r.status_code == 400, str(r.status_code))
+
+    g8_postj = f"g87postj-{g8_pid}"
+    r = requests.post(f"{BASE}/pb/{g8_postj}/sale/2.25",
+                      json={"sub_id_1": f"json-{g8_pid}"}, verify=not INSECURE)
+    check("g87: POST /pb with JSON body accepted",
+          r.status_code == 200 and r.json().get("updated_status") == "sale", r.text[:160])
+    check("g87: POST JSON extra field recorded",
+          g8_db(f"SELECT sub_id_1 FROM conversions_data WHERE click_id='{g8_postj}'")
+          == f"json-{g8_pid}",
+          g8_db(f"SELECT sub_id_1 FROM conversions_data WHERE click_id='{g8_postj}'"))
+    g8_postf = f"g87postf-{g8_pid}"
+    r = requests.post(f"{BASE}/pb/{g8_postf}/lead/1.25",
+                      data={"sub_id_1": f"form-{g8_pid}"}, verify=not INSECURE)
+    check("g87: POST /pb with form body accepted",
+          r.status_code == 200 and r.json().get("updated_status") == "lead", r.text[:160])
+    check("g87: POST form extra field recorded",
+          g8_db(f"SELECT sub_id_1 FROM conversions_data WHERE click_id='{g8_postf}'")
+          == f"form-{g8_pid}",
+          g8_db(f"SELECT sub_id_1 FROM conversions_data WHERE click_id='{g8_postf}'"))
+
+    # --- g8 cleanup (campaigns before sources: a linked source can't be deleted) ---
+    try:
+        g8_srv.shutdown()
+        g8_srv.server_close()
+    except Exception:
+        pass
+    try:
+        if g8_saved_pr:
+            s.post(f"{api}/settings/", json={"settings": {"postback_rules": g8_saved_pr}})
+        else:
+            s.post(f"{api}/settings/", json={"settings": {"postback_rules": None}})
+    except Exception:
+        pass
+    g8_db(f"DELETE FROM conversions_data WHERE click_id LIKE 'g85rej-{g8_pid}%' "
+          f"OR click_id LIKE 'g85status-{g8_pid}%' OR click_id LIKE 'g85payout-{g8_pid}%' "
+          f"OR click_id LIKE 'g85mult-{g8_pid}%' OR click_id LIKE 'g85dis-{g8_pid}%' "
+          f"OR click_id LIKE 'g86%{g8_pid}%' OR click_id LIKE 'g87%{g8_pid}%'")
+    for _c in g8_campaigns:
+        s.delete(f"{api}/campaigns/{_c}")
+    for _sr in g8_sources:
+        s.delete(f"{api}/sources/{_sr}")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

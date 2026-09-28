@@ -705,6 +705,14 @@ async def campaign_click(
         placeholder = f"{{{key}}}"
         if placeholder in offer_url:
             offer_url = offer_url.replace(placeholder, str(value))
+    # G87 extra offer-URL macros: {_md5} (md5 of the click id) and {payout}
+    # (this offer's payout).
+    if "{_md5}" in offer_url:
+        offer_url = offer_url.replace(
+            "{_md5}", hashlib.md5(str(meta_data["click_id"]).encode()).hexdigest())
+    if "{payout}" in offer_url:
+        offer_url = offer_url.replace(
+            "{payout}", str(offer["payout"] if offer["payout"] is not None else ""))
 
     # 2. Always append click_id as ?click_id=...
     parsed = urlparse(offer_url)
@@ -1273,6 +1281,20 @@ def load_custom_statuses() -> list:
     raw = _settings_block("custom_statuses", default=[])
     return [s for s in raw
             if isinstance(s, dict) and str(s.get("name") or "").strip()]
+
+
+def load_postback_rules() -> list:
+    """Read the global postback_rules array from the settings row (30s TTL cache).
+
+    G85: an ordered list of {enabled, name, conditions: [{field, operator,
+    value, condition?}], action: {type, ...}} evaluated on every inbound /pb
+    postback BEFORE the conversion row is written/updated and before fanout.
+    Absent/empty = no behavior change.
+    """
+    raw = _settings_block("postback_rules", default=[])
+    if not isinstance(raw, list):
+        return []
+    return [r for r in raw if isinstance(r, dict)]
 
 
 def normalize_status(status: str) -> str:
@@ -1974,6 +1996,22 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
         if traffic_source_id:
             source = await conn.fetchrow("SELECT * FROM sources WHERE id = $1", traffic_source_id)
             if source and source["s2s_postback"]:
+                # G86 source-level fanout controls ride in the source's
+                # additional_settings JSON (the field the source API/UI already
+                # round-trips); campaign postbacks above are unaffected.
+                source_extra = source["additional_settings"] if "additional_settings" in source.keys() else None
+                if isinstance(source_extra, str):
+                    try:
+                        source_extra = json.loads(source_extra)
+                    except Exception:
+                        source_extra = {}
+                if not isinstance(source_extra, dict):
+                    source_extra = {}
+
+                # (a) disable_upsell — never forward upsell conversions to the source.
+                if status == "upsale" and source_extra.get("disable_upsell"):
+                    return
+
                 raw_statuses = source["s2s_postback_statuses"]
                 src_statuses = json.loads(raw_statuses) if isinstance(raw_statuses, str) else (raw_statuses or {})
                 status_map = {"sale": "sale", "lead": "lead",
@@ -1982,6 +2020,10 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                            for src_key, tracker_status in status_map.items())
                 if not src_statuses:
                     fire = True
+                # (b) sample_percent — deterministic per click_id so a retry of
+                # the same postback never alternates.
+                if fire and not _sample_allows(cid, source_extra.get("sample_percent")):
+                    fire = False
                 if fire:
                     # Fresh status/payout overwrite the stale pre-update row values.
                     src_data = {k: v for k, v in dict(row).items()
@@ -2055,9 +2097,50 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             "duplicate": is_duplicate}
 
 
-@app.get("/pb/{click_id}/{status}/{payout}")
-async def postback_receive(click_id: str, status: str, payout: str, request: Request,
-                           background_tasks: BackgroundTasks):
+async def _postback_request_params(request: Request) -> dict:
+    """Incoming postback params: query string merged with a POST form/JSON body.
+
+    G87: POST bodies (form-encoded or JSON) must behave exactly like the GET
+    query string — external_id/transaction_id/sub_id extra fields and the data
+    the rules engine sees all read from here. Query params win on key clashes.
+    """
+    params = dict(request.query_params)
+    if request.method not in ("POST", "PUT", "PATCH"):
+        return params
+    ctype = (request.headers.get("content-type") or "").lower()
+    body = None
+    if "json" in ctype:
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+    elif "form-urlencoded" in ctype or "multipart/form-data" in ctype:
+        try:
+            body = dict(await request.form())
+        except Exception:
+            body = None
+    else:
+        # No/unknown content type: accept a JSON body first, then a form body.
+        try:
+            body = await request.json()
+        except Exception:
+            try:
+                body = dict(await request.form())
+            except Exception:
+                body = None
+    if isinstance(body, dict):
+        for k, v in body.items():
+            params.setdefault(str(k), "" if v is None else str(v))
+    return params
+
+
+async def _process_postback(click_id: str, status: str, payout: str, request: Request,
+                            background_tasks: BackgroundTasks, write: bool = True) -> dict:
+    """Shared /pb core for GET, POST and HEAD.
+
+    write=False (HEAD) runs the full validation/security/rules path but writes
+    nothing and schedules no fanout — it only reports the GET status code.
+    """
     status = normalize_status(status)
     # Built-ins (lead/sale/upsale/rejected/hold/trash) + configured custom statuses
     if status not in valid_conversion_statuses():
@@ -2078,9 +2161,42 @@ async def postback_receive(click_id: str, status: str, payout: str, request: Req
         log_track(f"🚫 Postback denied for {click_id}: {deny_reason}")
         raise HTTPException(status_code=403, detail=deny_reason)
 
-    extra_fields = {k: v for k, v in request.query_params.items() if k in PIXEL_EXTRA_FIELDS}
-    result = await record_conversion(click_id, status, payout_value, request, background_tasks,
-                                     extra_fields or None, source="postback")
+    params = await _postback_request_params(request)
+
+    # G85: global postback-processing rules run BEFORE the row is written and
+    # before fanout; the first matching rule wins and `reject` is terminal.
+    rule_data = dict(params)
+    rule_data["click_id"] = click_id
+    rule_result = apply_postback_rules(status, payout_value, rule_data, request)
+    if rule_result["rejected"]:
+        log_track(f"🚫 Postback rejected by rule for {click_id}: {rule_result['reason']}")
+        return {"rejected": True, "reason": rule_result["reason"], "click_id": click_id}
+    status = rule_result["status"]
+    payout_value = rule_result["payout"]
+
+    if not write:
+        return {"status": "ok", "click_id": click_id, "updated_status": status, "head": True}
+
+    extra_fields = {k: v for k, v in params.items() if k in PIXEL_EXTRA_FIELDS}
+    return await record_conversion(click_id, status, payout_value, request, background_tasks,
+                                   extra_fields or None, source="postback")
+
+
+@app.get("/pb/{click_id}/{status}/{payout}")
+@app.post("/pb/{click_id}/{status}/{payout}")
+@app.head("/pb/{click_id}/{status}/{payout}")
+async def postback_receive(click_id: str, status: str, payout: str, request: Request,
+                           background_tasks: BackgroundTasks):
+    is_head = request.method == "HEAD"
+    result = await _process_postback(click_id, status, payout, request, background_tasks,
+                                     write=not is_head)
+    if is_head:
+        # HEAD mirrors GET's status but has no body and writes nothing.
+        return Response(status_code=200)
+    if result.get("rejected"):
+        return JSONResponse(status_code=200,
+                            content={"status": "rejected", "reason": result["reason"],
+                                     "click_id": result["click_id"]})
     return JSONResponse(content=result)
 
 
@@ -2651,6 +2767,94 @@ def check_filters(meta: dict, filters: list, request: Request) -> bool:
     return bool(result)
 
 
+def _postback_rule_payout(action: dict, current: float) -> float:
+    """Resolve a set_payout action value.
+
+    `action.value` is an absolute payout unless `action.mode == "multiplier"`,
+    in which case it is a factor applied to the current payout (payout * value).
+    A missing/non-numeric value leaves the payout unchanged.
+    """
+    try:
+        if str(action.get("mode") or "").lower() == "multiplier":
+            return float(current) * float(action.get("value"))
+        return float(action.get("value"))
+    except (TypeError, ValueError):
+        return current
+
+
+def apply_postback_rules(status: str, payout_value: float, data: dict,
+                         request: Request) -> dict:
+    """Evaluate the global postback-processing rules (settings.postback_rules).
+
+    Runs on every inbound /pb postback BEFORE the conversion row is written and
+    before fanout. Conditions reuse the flow-filter engine (check_filters) over
+    the postback data dict — status, payout, click_id, sub_id_1..10 and any
+    passthrough params. First matching rule wins; a terminal `reject` action
+    stops the evaluation. Returns {"rejected", "reason", "status", "payout"}.
+    """
+    result = {"rejected": False, "reason": "", "status": status, "payout": payout_value}
+    rules = load_postback_rules()
+    if not rules:
+        return result
+
+    meta = {str(k): ("" if v is None else str(v)) for k, v in dict(data or {}).items()}
+    meta["status"] = status
+    meta["payout"] = payout_value
+
+    for rule in rules:
+        if rule.get("enabled") is False:
+            continue
+        filters = [{
+            "key": c.get("field") if c.get("field") is not None else c.get("key"),
+            "operator": c.get("operator"),
+            "value": c.get("value"),
+            "condition": c.get("condition") or "and",
+        } for c in (rule.get("conditions") or []) if isinstance(c, dict)]
+        if filters and not check_filters(meta, filters, request):
+            continue
+
+        action = rule.get("action") or {}
+        atype = str(action.get("type") or "").lower()
+        if atype == "reject":
+            result["rejected"] = True
+            result["reason"] = str(rule.get("name") or "Rejected by postback rule")
+            return result
+        if atype == "set_status":
+            new_status = normalize_status(action.get("value"))
+            # Only remap to a status the engine accepts — an unknown value would
+            # otherwise poison the later INSERT/UPDATE against the status enum.
+            if new_status and new_status in valid_conversion_statuses():
+                result["status"] = new_status
+                meta["status"] = new_status
+        elif atype == "set_payout":
+            result["payout"] = _postback_rule_payout(action, result["payout"])
+            meta["payout"] = result["payout"]
+
+    return result
+
+
+def _sample_allows(click_id, percent) -> bool:
+    """G86 deterministic traffic-source sampling.
+
+    Empty/unset percent = forward everything (current behavior). Otherwise the
+    same click_id always yields the same decision — md5(click_id) mod 100,
+    never RNG — so a retried postback cannot alternate. percent >= 100 always
+    forwards, <= 0 never does.
+    """
+    if percent is None or (isinstance(percent, str) and not percent.strip()):
+        return True
+    try:
+        pct = float(percent)
+    except (TypeError, ValueError):
+        return True
+    if pct >= 100:
+        return True
+    if pct <= 0:
+        return False
+    digest = hashlib.md5(str(click_id or "").encode()).hexdigest()
+    return (int(digest, 16) % 100) < pct
+
+
 def get_params_id_mapping_from_campaign(campaign: dict) -> list:
     config_str = campaign.get("config")
     if not config_str:
@@ -3142,6 +3346,9 @@ async def execute_flow_schema(campaign, request: Request, config: dict, meta_dat
             offer_url = offer_url.replace("{click_id}", click_id)
         else:
             offer_url = merge_query_params(offer_url, {"click_id": click_id})
+        # G87: {_md5} = md5 hex of the click id in offer URLs.
+        if "{_md5}" in offer_url:
+            offer_url = offer_url.replace("{_md5}", hashlib.md5(str(click_id).encode()).hexdigest())
         if config.get("send_query_params"):
             offer_url = merge_query_params(offer_url, request.query_params)
         if config.get("send_se_referrer") and meta_data.get("referrer"):
@@ -3299,6 +3506,13 @@ async def get_real_offer_url(offer_id: str, offer_vars: list = None) -> str:
                 if offer_vars:
                     for var in offer_vars:
                         offer_url = offer_url.replace(f"{{{var}}}", str(offer_row.get(var, "")))
+
+                # G87: a {payout} macro in an offer URL resolves to this offer's
+                # payout (payout=auto is the postback-URL equivalent).
+                if "{payout}" in offer_url:
+                    offer_payout = offer_row.get("payout")
+                    offer_url = offer_url.replace(
+                        "{payout}", str(offer_payout if offer_payout is not None else ""))
 
                 # log_track(f"🔁 offer_url - '{offer_url}'")
                 return offer_url
@@ -3512,6 +3726,51 @@ def fill_postback_template(url: str, mapping: dict) -> str:
     return re.sub(r"\{([^{}]*)\}", _sub, url)
 
 
+def _to_unix_seconds(value) -> str:
+    """Epoch seconds as a string from a datetime / ISO string / number, else ''."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, (int, float)):
+        try:
+            return str(int(value))
+        except (TypeError, ValueError, OverflowError):
+            return ""
+    try:
+        if isinstance(value, datetime):
+            dt = value
+        else:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+        return str(int((dt - datetime(1970, 1, 1)).total_seconds()))
+    except Exception:
+        return ""
+
+
+def _postback_token_map(data: dict) -> dict:
+    """Token map for {placeholder} substitution in postback URLs.
+
+    Extends the row fields with G87 tokens: {_md5} (md5 hex of the click id),
+    {status2} (secondary status when the row carries one, else ''), 
+    {unixconversiontime} and event_1..event_30 (custom conversion event params,
+    empty when the row stores none). Missing tokens resolve to empty string
+    rather than staying literal; unknown tokens are left untouched by
+    fill_postback_template.
+    """
+    tokens = {k: str(v) for k, v in dict(data or {}).items() if v is not None}
+    tokens["_md5"] = hashlib.md5(str(data.get("click_id") or "").encode()).hexdigest()
+    tokens.setdefault("status2", "")
+    tokens["unixconversiontime"] = _to_unix_seconds(
+        data.get("last_postback_at") or data.get("received_at")
+        or data.get("conversion_time"))
+    for i in range(1, 31):
+        key = f"event_{i}"
+        tokens.setdefault(key, str(data.get(key) or ""))
+    return tokens
+
+
 async def send_postback(url: str, data: dict, post: bool = False):
     VALID_PARAMS = [
         'payout', 'status', 'click_id', 'browser', 'campaign_id', 'city', 'connection_type', 'currency',
@@ -3530,8 +3789,15 @@ async def send_postback(url: str, data: dict, post: bool = False):
     # be logged and skipped, never abort the BackgroundTasks queue (Telegram →
     # campaign/source postbacks → ClickHouse sync for this conversion).
     try:
-        filled_url = fill_postback_template(
-            url, {k: str(v) for k, v in data.items() if v is not None})
+        tokens = _postback_token_map(data)
+        filled_url = fill_postback_template(url, tokens)
+
+        # `payout=auto` is a literal an admin may put where a payout number is
+        # expected: it is replaced by the payout actually being fired (the offer
+        # payout on campaign postbacks, the conversion payout otherwise). Scope:
+        # postback URLs only — offer/lander URLs use their own builders.
+        if "payout=auto" in filled_url:
+            filled_url = filled_url.replace("payout=auto", f"payout={tokens.get('payout', '')}")
 
         # Redact: only the origin+path goes into the debug log, never the query
         # string (it carries click ids, tokens and payouts).
@@ -3542,7 +3808,10 @@ async def send_postback(url: str, data: dict, post: bool = False):
             if post:
                 response = await client.post(filled_url, json=safe_data)
             else:
-                response = await client.get(filled_url, params=safe_data)
+                # httpx REPLACES a URL's query string when params= is passed, which
+                # silently dropped admin-authored macros from the URL. Merge the
+                # row params into the templated URL instead (admin URL keys win).
+                response = await client.get(merge_query_params(filled_url, safe_data))
 
         if response.status_code != 200:
             log_track(f"❌ Postback failed: {response.status_code} - {response.text}")
@@ -3827,6 +4096,9 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
             offer_url = offer_url.replace("{click_id}", click_id)
         else:
             offer_url = merge_query_params(offer_url, {"click_id": click_id})
+        # G87: {_md5} = md5 hex of the click id in offer URLs.
+        if "{_md5}" in offer_url:
+            offer_url = offer_url.replace("{_md5}", hashlib.md5(str(click_id).encode()).hexdigest())
         if config.get("send_query_params"):
             offer_url = merge_query_params(offer_url, request.query_params)
         if config.get("send_se_referrer") and meta_data.get("referrer"):

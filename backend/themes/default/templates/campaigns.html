@@ -490,6 +490,84 @@
                                                         </v-btn>
                                                     </v-col>
                                                 </v-row>
+
+                                                <v-divider class="my-4"></v-divider>
+                                                <h3>Global postback rules</h3>
+                                                <div class="caption grey--text mb-2">
+                                                    These rules are <b>global</b> (they apply to every inbound
+                                                    postback, for every campaign). The first matching rule wins;
+                                                    "Reject" drops the postback without recording it. One condition
+                                                    per rule here — an empty field/value matches nothing.
+                                                </div>
+                                                <v-row dense v-for="(rule, ri) in postbackRules"
+                                                       :key="'pbr_' + ri" align="center" class="mb-1">
+                                                    <v-col cols="1">
+                                                        <v-checkbox v-model="rule.enabled" dense hide-details></v-checkbox>
+                                                    </v-col>
+                                                    <v-col cols="3">
+                                                        <v-text-field v-model="rule.name" label="Rule name" outlined dense
+                                                                      hide-details></v-text-field>
+                                                    </v-col>
+                                                    <v-col cols="3">
+                                                        <v-select v-model="rule.conditions[0].field"
+                                                                  :items="postbackRuleFields" label="Field"
+                                                                  outlined dense hide-details></v-select>
+                                                    </v-col>
+                                                    <v-col cols="2">
+                                                        <v-select v-model="rule.conditions[0].operator"
+                                                                  :items="postbackRuleOperators" label="Operator"
+                                                                  outlined dense hide-details></v-select>
+                                                    </v-col>
+                                                    <v-col cols="3">
+                                                        <v-text-field v-model="rule.conditions[0].value" label="Value"
+                                                                      outlined dense hide-details></v-text-field>
+                                                    </v-col>
+                                                    <v-col cols="12" class="pt-0">
+                                                        <v-row dense align="center">
+                                                            <v-col cols="4">
+                                                                <v-select v-model="rule.action.type"
+                                                                          :items="postbackRuleActions" item-text="text"
+                                                                          item-value="value" label="Action"
+                                                                          outlined dense hide-details></v-select>
+                                                            </v-col>
+                                                            <v-col cols="4"
+                                                                   v-if="rule.action.type === 'set_status'">
+                                                                <v-text-field v-model="rule.action.value"
+                                                                              label="New status" outlined dense
+                                                                              hide-details></v-text-field>
+                                                            </v-col>
+                                                            <v-col cols="4"
+                                                                   v-if="rule.action.type === 'set_payout'">
+                                                                <v-text-field v-model="rule.action.value"
+                                                                              label="Payout (absolute value)" type="number"
+                                                                              outlined dense hide-details></v-text-field>
+                                                            </v-col>
+                                                            <v-col cols="4"
+                                                                   v-if="rule.action.type === 'set_payout'">
+                                                                <v-select v-model="rule.action.mode"
+                                                                          :items="[{text: 'Absolute', value: 'absolute'}, {text: 'Multiplier', value: 'multiplier'}]"
+                                                                          label="Mode" outlined dense
+                                                                          hide-details></v-select>
+                                                            </v-col>
+                                                            <v-col cols="4" class="text-right">
+                                                                <v-btn icon small color="red"
+                                                                       @click="postbackRules.splice(ri, 1)">
+                                                                    <v-icon>mdi-delete</v-icon>
+                                                                </v-btn>
+                                                            </v-col>
+                                                        </v-row>
+                                                    </v-col>
+                                                </v-row>
+                                                <div class="d-flex align-center mt-2">
+                                                    <v-btn small text color="primary" @click="addPostbackRule">
+                                                        <v-icon small class="mr-1">mdi-plus</v-icon>Add rule
+                                                    </v-btn>
+                                                    <v-btn small color="primary" elevation="0" class="ml-2"
+                                                           :loading="postbackRulesSaving"
+                                                           @click="savePostbackRules">
+                                                        Save global rules
+                                                    </v-btn>
+                                                </div>
                                         </div>
                                     </v-tab-item>
 
@@ -2021,8 +2099,24 @@
                         'search_engine', 'sample', 'revenue', 'parent_campaign_id', 'previous_status', 'profit',
                         'referrer', 'region', 'os_version', 'os', 'original_status', 'operator', 'offer_value', 'keyword',
                         'landing_id', 'language', 'offer', 'offer_id', 'offer_name', 'isp', 'is_using_proxy', 'ip',
-                        'is_bot', 'from_file', 'external_id', 'device_type', 'current_domain', 'date', 'debug', 'destination'
-                    ]
+                        'is_bot', 'from_file', 'external_id', 'device_type', 'current_domain', 'date', 'debug', 'destination',
+                        '_md5', 'status2', 'unixconversiontime', 'event_1', 'event_2', 'event_3'
+                    ],
+                // Global postback-processing rules (settings.postback_rules) —
+                // edited here but applied to every inbound postback, not just
+                // this campaign's.
+                postbackRules: [],
+                postbackRulesSaving: false,
+                postbackRuleFields:
+                    ['status', 'payout', 'click_id', 'sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5',
+                     'sub_id_6', 'sub_id_7', 'sub_id_8', 'sub_id_9', 'sub_id_10', 'external_id', 'transaction_id'],
+                postbackRuleOperators:
+                    ['equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with', 'greater', 'less',
+                     'in', 'not_in'],
+                postbackRuleActions:
+                    [{text: 'Set status', value: 'set_status'},
+                     {text: 'Set payout', value: 'set_payout'},
+                     {text: 'Reject (drop postback)', value: 'reject'}]
             }
         },
         computed: {
@@ -2359,6 +2453,20 @@
                         if (data.subIdMapping) {
                             this.baseParamsIdMapping = JSON.parse(JSON.stringify(data.subIdMapping));
                             this.form.paramsIdMapping = JSON.parse(JSON.stringify(this.baseParamsIdMapping));
+                        }
+                        const rules = data.settings && data.settings.postback_rules;
+                        if (Array.isArray(rules)) {
+                            this.postbackRules = rules.map(r => Object.assign({
+                                enabled: true, name: '',
+                                conditions: [{field: 'status', operator: 'equals', value: ''}],
+                                action: {type: 'set_status', value: '', mode: 'absolute'}
+                            }, r, {
+                                conditions: (r.conditions && r.conditions.length)
+                                    ? [Object.assign({field: 'status', operator: 'equals', value: ''},
+                                        r.conditions[0])] : [{field: 'status', operator: 'equals', value: ''}],
+                                action: Object.assign({type: 'set_status', value: '', mode: 'absolute'},
+                                    r.action || {})
+                            }));
                         }
                     });
             },
@@ -3514,6 +3622,38 @@
                         hold: false
                     }
                 };
+            },
+            addPostbackRule() {
+                this.postbackRules.push({
+                    enabled: true,
+                    name: '',
+                    conditions: [{field: 'status', operator: 'equals', value: ''}],
+                    action: {type: 'set_status', value: '', mode: 'absolute'}
+                });
+            },
+            savePostbackRules() {
+                this.postbackRulesSaving = true;
+                fetch('/backend/api/settings/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({settings: {postback_rules: this.postbackRules}})
+                })
+                    .then(r => r.json())
+                    .then(() => {
+                        this.$root.$emit('show-message', {
+                            type: 'success',
+                            text: 'Global postback rules saved (may take up to 30s to apply)'
+                        });
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {
+                            type: 'error', text: sanitizeToastMessage(err.message)
+                        });
+                    })
+                    .finally(() => {
+                        this.postbackRulesSaving = false;
+                    });
             },
             openPostbackEditor(i = null) {
                 this.postbackEditorIndex = i;

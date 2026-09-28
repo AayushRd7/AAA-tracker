@@ -133,6 +133,9 @@ def _click_log_where(filters: dict) -> Tuple[str, dict]:
         params["date_from"] = date_from
         params["date_to"] = date_to
 
+    # `campaign_tags` is resolved to a campaign-id list in the dashboard endpoint
+    # (tags live on Postgres campaigns, not in clicks_data) and arrives here as
+    # `campaigns`. Any = a click matches if its campaign carries any given tag.
     campaigns = filters.get("campaigns")
     if campaigns:
         conditions.append("campaign_id IN %(campaigns)s")
@@ -173,11 +176,13 @@ def _click_log_where(filters: dict) -> Tuple[str, dict]:
 
 # Deterministic newest-first order shared by every click-log query — the
 # secondary keys keep OFFSET pages stable when received_at ties (batched
-# inserts share one timestamp). The order applies to the wrapped query in
+# inserts share one timestamp). click_id is a unique per-click uuid and is the
+# final tiebreak, so two otherwise-identical rows (empty visitor_id, 0.0.0.0)
+# can never swap between pages. The order applies to the wrapped query in
 # get_click_log, where the display address column is ip_display (ordering by
 # the output alias `ip` would collide with the source IPv4 `ip` column that
 # the search filter references — AMBIGUOUS_COLUMN_NAME).
-CLICK_LOG_ORDER_BY = "received_at DESC, visitor_id DESC, ip_display DESC"
+CLICK_LOG_ORDER_BY = "received_at DESC, visitor_id DESC, ip_display DESC, click_id DESC"
 
 
 def get_click_log(client, filters: dict, limit: int = 500, offset: int = 0) -> List[Dict[str, Any]]:
@@ -207,6 +212,7 @@ def get_click_log(client, filters: dict, limit: int = 500, offset: int = 0) -> L
         (
             SELECT
                 received_at,
+                click_id,
                 toString(ip) AS ip_v4_str,
                 empty(ip_full) ? ip_v4_str : ip_full AS ip_display,
                 country, region, city, device_type, os, browser,
@@ -520,7 +526,7 @@ def get_report_breakdown_multi(
             FROM clicks_data
             {where_clause}
             GROUP BY {', '.join(f'd{i}' for i in range(level))}
-            ORDER BY {sql_sort} {'DESC' if desc else 'ASC'}
+            ORDER BY {sql_sort} {'DESC' if desc else 'ASC'}, {', '.join(f'd{i} ASC' for i in range(level))}
             LIMIT %(limit)s OFFSET %(offset)s
         """
         qparams = dict(params, limit=limit, offset=offset)

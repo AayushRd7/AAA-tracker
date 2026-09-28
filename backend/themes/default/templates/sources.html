@@ -60,6 +60,28 @@
                         </v-col>
                     </v-row>
 
+                    <v-subheader class="pl-0">Conversion fanout controls</v-subheader>
+                    <v-checkbox
+                            label="Don't forward upsell conversions to this source"
+                            v-model="form.disable_upsell"
+                            dense
+                            hide-details
+                            hint="Sale/lead forwards are unaffected; campaign postbacks are unaffected."
+                            persistent-hint
+                    ></v-checkbox>
+                    <v-text-field
+                            label="Forward only this share of conversions (%)"
+                            v-model="form.sample_percent"
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="1"
+                            outlined
+                            dense
+                            hint="Leave empty to forward every conversion. The same click id always gets the same decision."
+                            persistent-hint
+                    ></v-text-field>
+
                     <div class="d-flex align-center mt-2">
                         <v-subheader class="pl-0">Additional settings (API keys, etc.)</v-subheader>
                     </div>
@@ -352,6 +374,8 @@
                         rejected: false,
                         upsale: false
                     },
+                    disable_upsell: false,
+                    sample_percent: null,
                     additional_settings: {},
                     additionalSettingsList: [],
                     settings: []
@@ -583,6 +607,8 @@
                         rejected: false,
                         upsale: false
                     },
+                    disable_upsell: false,
+                    sample_percent: null,
                     additional_settings: {},
                     additionalSettingsList: [],
                     settings: this.getDefaultSettings()
@@ -592,15 +618,26 @@
             openEdit(source) {
                 this.isEdit = true;
                 this.dialog = true;
+                // Fanout controls live inside additional_settings; pull them out
+                // into their own fields and leave the free-form list for the rest.
                 const additional = source.additional_settings || {};
+                const extra = Object.assign({}, additional);
+                const disableUpsell = !!extra.disable_upsell;
+                const samplePercent = (extra.sample_percent === undefined
+                    || extra.sample_percent === null || extra.sample_percent === '')
+                    ? null : extra.sample_percent;
+                delete extra.disable_upsell;
+                delete extra.sample_percent;
                 this.form = {
                     id: source.id,
                     name: source.name,
                     traffic_loss: source.traffic_loss,
                     s2s_postback: source.s2s_postback,
                     s2s_postback_statuses: source.s2s_postback_statuses || {},
+                    disable_upsell: disableUpsell,
+                    sample_percent: samplePercent,
                     additional_settings: additional,
-                    additionalSettingsList: this.toAdditionalSettingsList(additional),
+                    additionalSettingsList: this.toAdditionalSettingsList(extra),
                     settings: source.settings || []
                 };
             },
@@ -611,12 +648,21 @@
                     return;
                 }
 
+                const additional = this.toAdditionalSettingsObject(this.form.additionalSettingsList);
+                if (this.form.disable_upsell) {
+                    additional.disable_upsell = true;
+                }
+                const samplePercent = this.form.sample_percent;
+                if (samplePercent !== null && samplePercent !== '' && samplePercent !== undefined) {
+                    additional.sample_percent = Number(samplePercent);
+                }
+
                 const payload = {
                     name: this.form.name,
                     traffic_loss: this.form.traffic_loss,
                     s2s_postback: this.form.s2s_postback,
                     s2s_postback_statuses: this.form.s2s_postback_statuses,
-                    additional_settings: this.toAdditionalSettingsObject(this.form.additionalSettingsList),
+                    additional_settings: additional,
                     settings: this.form.settings
                 };
 

@@ -9,7 +9,7 @@ from clickHouse import (
 )
 from schemas import Filters
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case
+from sqlalchemy import func, case, text
 from db import get_db
 from models.user import UserORM
 from models.campaigns import CampaignORM
@@ -60,6 +60,11 @@ class ClickLogFilters(BaseModel):
     status: Optional[str] = None
     search: Optional[str] = None
     fraud_score: Optional[int] = None
+    # Restrict rows to clicks on campaigns carrying ANY of these tags. Tags live
+    # on the Postgres campaigns table; ClickHouse has no campaigns join, so the
+    # endpoint resolves them to campaign ids before querying (see
+    # _apply_campaign_tags). Empty list = no tag filter.
+    campaign_tags: List[str] = []
     limit: Optional[int] = 500   # explicit cap; None → server default
     offset: Optional[int] = None  # presence switches the response to {items, total}
 
@@ -209,6 +214,30 @@ def _apply_click_scope(f: dict, scope: Optional[List[int]]):
         return False
     requested = set(f.get("campaigns") or [])
     f["campaigns"] = sorted(requested & set(scope)) if requested else list(scope)
+    return True
+
+
+def _apply_campaign_tags(f: dict, db: Session) -> bool:
+    """Resolve the click-log `campaign_tags` filter to a campaign-id list.
+
+    Semantics: ANY of the given tags matches (JSONB `?|`), intersected with any
+    campaign restriction already on the filter dict. Tags live on Postgres
+    campaigns, so this must run before the ClickHouse query; it rewrites
+    f["campaigns"] and drops `campaign_tags`. Returns False when the filter can
+    match nothing (the caller must return an empty result — an empty campaigns
+    list would otherwise mean 'no filter' downstream)."""
+    tags = [str(t).strip() for t in (f.pop("campaign_tags", None) or []) if str(t).strip()]
+    if not tags:
+        return True
+    rows = db.query(CampaignORM.id).filter(text("tags ?| :tagarr")) \
+             .params(tagarr=tags).all()
+    ids = {r[0] for r in rows}
+    current = f.get("campaigns")
+    if current:
+        ids &= set(current)
+    if not ids:
+        return False
+    f["campaigns"] = sorted(ids)
     return True
 
 
@@ -422,12 +451,12 @@ async def get_click_log_view(request: Request, filters: ClickLogFilters,
         if filters.offset is not None:
             limit = min(max(int(filters.limit or 50), 1), 5000)
             offset = max(int(filters.offset or 0), 0)
-            if not _apply_click_scope(f, scope):
+            if not _apply_click_scope(f, scope) or not _apply_campaign_tags(f, db):
                 return {"items": [], "total": 0, "limit": limit, "offset": offset}
             rows = get_click_log(ch, f, limit=limit, offset=offset)
             total = get_click_log_total(ch, f)
             return {"items": rows, "total": total, "limit": limit, "offset": offset}
-        if not _apply_click_scope(f, scope):
+        if not _apply_click_scope(f, scope) or not _apply_campaign_tags(f, db):
             return []
         rows = get_click_log(ch, f, limit=min(max(int(filters.limit or 500), 1), 5000))
         return rows
@@ -460,7 +489,8 @@ async def export_click_log(request: Request, filters: ClickLogFilters,
     try:
         ch = request.state.ch
         f = filters.dict()
-        if not _apply_click_scope(f, _click_scope_campaign_ids(request, db)):
+        if not _apply_click_scope(f, _click_scope_campaign_ids(request, db)) \
+                or not _apply_campaign_tags(f, db):
             rows = []
         else:
             rows = get_click_log(ch, f, limit=CLICK_LOG_EXPORT_MAX)

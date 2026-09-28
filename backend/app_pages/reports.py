@@ -67,6 +67,12 @@ class Conversion(Base):
 
 VALID_STATUSES = {"lead", "sale", "upsale", "rejected", "hold", "trash"}
 
+# Upper bound on the visitor ids pulled from ClickHouse for click_date
+# attribution. Above this the id set is truncated (with a loud log) so a busy
+# window can never turn the conversions list/export into a giant Postgres
+# IN(...) that exhausts memory.
+CONVERSION_CLICK_WINDOW_ID_CAP = 50_000
+
 
 def _escape_like(term: str) -> str:
     """Escape SQL LIKE wildcards so user text matches literally (Postgres's
@@ -219,15 +225,40 @@ def _build_conversions_query(request: Request, db: Session):
     visitor_ids_in_window = None
     if date_from and date_to and date_basis == "click_date":
         ch = request.state.ch
+        # G63 click_date basis: attribute each conversion to the date of the
+        # CLICK it came from (visitor cookie join). The click window lives in
+        # ClickHouse, conversions in Postgres, so we collect the window's
+        # visitor ids and filter the PG side with an IN(...) — an unbounded set
+        # here used to build a millions-element query (OOM footgun) on every
+        # list page and CSV export. We keep the correct join semantics (a
+        # conversion may land days after its click and must still count on the
+        # click's date) but bound the id set to CONVERSION_CLICK_WINDOW_ID_CAP
+        # and degrade loudly rather than silently, instead of pushing the
+        # conversion's own received_at window onto the PG side — that would
+        # hide exactly the late-landing conversions click_date is meant to keep.
         try:
             res = ch.query(
                 "SELECT DISTINCT visitor_id FROM clicks_data "
                 "WHERE toDate(received_at) BETWEEN toDate(%(df)s) AND toDate(%(dt)s) "
-                "AND visitor_id != ''",
-                parameters={"df": date_from, "dt": date_to},
+                "AND visitor_id != '' "
+                "LIMIT %(cap)s",
+                parameters={"df": date_from, "dt": date_to,
+                            "cap": CONVERSION_CLICK_WINDOW_ID_CAP + 1},
             )
-            visitor_ids_in_window = {row[0] for row in res.result_rows}
-        except Exception:
+            ids = [row[0] for row in res.result_rows if row and row[0]]
+            if len(ids) > CONVERSION_CLICK_WINDOW_ID_CAP:
+                print(f"CONVERSIONS CLICK WINDOW CAPPED: click window "
+                      f"{date_from}..{date_to} has more than "
+                      f"{CONVERSION_CLICK_WINDOW_ID_CAP} visitor ids — "
+                      f"click_date attribution is truncated; narrow the date range")
+                ids = ids[:CONVERSION_CLICK_WINDOW_ID_CAP]
+            visitor_ids_in_window = set(ids)
+        except Exception as e:
+            # Never silently empty the list: log loudly and fall back to the
+            # legacy own-date window for NULL-visitor rows only.
+            print("CONVERSIONS CLICK WINDOW ERROR: ClickHouse visitor-id lookup "
+                  f"failed ({e!r}) — falling back to conversion-date window for "
+                  f"{date_from}..{date_to}")
             visitor_ids_in_window = set()
 
     query = db.query(Conversion)

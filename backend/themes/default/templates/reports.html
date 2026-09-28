@@ -232,6 +232,14 @@
                         </v-btn>
                         <span v-else class="dim-cell__leaf"></span>
                         <span class="dim-value" role="button" @click="toggleRow(item)">{{ item.value || '(empty)' }}</span>
+                        <v-btn
+                                v-if="$root.roleLabel === 'admin' && item.dim === 'offer_id' && isNumericId(item.value) && !offerArchived(item.value)"
+                                icon x-small class="ml-1 offer-pause-btn"
+                                :title="offerPaused(item.value) ? 'Resume offer' : 'Pause offer'"
+                                @click.stop="toggleOfferPause(item)"
+                        >
+                            <v-icon small>{{ offerPaused(item.value) ? 'mdi-play-circle-outline' : 'mdi-pause-circle-outline' }}</v-icon>
+                        </v-btn>
                     </div>
                 </template>
                 <template v-slot:item.visits="{ item }">
@@ -540,6 +548,14 @@
                         label="Status"
                         outlined dense hide-details clearable
                         class="log-filter-status"
+                ></v-select>
+                <v-select
+                        v-model="logFilters.campaign_tags"
+                        :items="campaignTagOptions"
+                        label="Campaign tags (any)"
+                        multiple chips small-chips deletable-chips
+                        outlined dense hide-details clearable
+                        class="log-filter-tags"
                 ></v-select>
                 <v-text-field
                         v-model="logFilters.search"
@@ -1013,8 +1029,10 @@
                     device_type: '',
                     os: '',
                     status: '',
+                    campaign_tags: [],
                     search: '',
                 },
+                offersById: {},
                 clickLogHeaders: [
                     {text: 'Time', value: 'received_at'},
                     {text: 'IP', value: 'ip'},
@@ -1060,6 +1078,13 @@
             customMetricNames() {
                 return this.customMetrics.map(m => m.name);
             },
+            campaignTagOptions() {
+                // Distinct tags across the campaigns the caller can see — the
+                // click-log tag filter matches campaigns carrying ANY of these.
+                const set = new Set();
+                (this.campaigns || []).forEach(c => (c.tags || []).forEach(t => t && set.add(t)));
+                return Array.from(set).sort();
+            },
             shareReportName() {
                 const r = this.savedReports.find(x => x.id === this.savedReportId);
                 return r ? r.name : '';
@@ -1097,7 +1122,8 @@
             },
             logFiltersActive() {
                 const f = this.logFilters;
-                return !!(f.country || f.device_type || f.os || f.status || f.search);
+                return !!(f.country || f.device_type || f.os || f.status || f.search
+                          || (f.campaign_tags && f.campaign_tags.length));
             },
             convFiltersActive() {
                 const f = this.convFilters;
@@ -1117,6 +1143,7 @@
             this.loadClickLog();
             this.loadCustomStatuses();
             this.loadSavedReports();
+            if (this.$root.roleLabel === 'admin') this.loadOffers();
             this.$root.$on('load-reports', () => { this.loadCampaigns(); this.loadReports(); this.loadClickLog(); });
         },
         methods: {
@@ -1464,7 +1491,7 @@
                     .finally(() => { this.emailScheduleTesting = false; });
             },
             clearLogFilters() {
-                this.logFilters = {country: '', device_type: '', os: '', status: '', search: ''};
+                this.logFilters = {country: '', device_type: '', os: '', status: '', campaign_tags: [], search: ''};
                 this.logPage = 1;
                 this.loadClickLog();
             },
@@ -1562,6 +1589,57 @@
                     .then(data => { this.campaigns = Array.isArray(data) ? data : []; })
                     .catch(err => { this.campaigns = []; });
             },
+            // --- admin: pause/resume an offer straight from a report row ---
+            loadOffers() {
+                fetch('/backend/api/offers/', {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        const map = {};
+                        (data || []).forEach(o => { map[String(o.id)] = o; });
+                        this.offersById = map;
+                    })
+                    .catch(() => { this.offersById = {}; });
+            },
+            isNumericId(value) {
+                return /^\d+$/.test(String(value == null ? '' : value));
+            },
+            offerPaused(value) {
+                const o = this.offersById[String(value)];
+                return !!(o && o.status === 'paused');
+            },
+            offerArchived(value) {
+                const o = this.offersById[String(value)];
+                return !!(o && o.archived);
+            },
+            async toggleOfferPause(item) {
+                const id = String(item.value);
+                const offer = this.offersById[id] || {};
+                const pausing = !this.offerPaused(id);
+                const name = offer.name || ('offer #' + id);
+                const ok = await this.$refs.confirm.open(
+                    (pausing ? 'Pause ' : 'Resume ') + name + '?',
+                    pausing
+                        ? 'Paused offers stop receiving click-outs immediately. Resume them here or in Offers.'
+                        : 'This offer will start receiving click-outs again.',
+                    pausing ? 'Pause' : 'Resume'
+                );
+                if (!ok) return;
+                fetch('/backend/api/offers/' + encodeURIComponent(id) + '/status', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({status: pausing ? 'paused' : 'active'}),
+                })
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        if (this.offersById[id]) this.offersById[id].status = data.status;
+                        this.$root.$emit('show-message', {
+                            type: 'success', text: 'Offer ' + (pausing ? 'paused' : 'resumed')});
+                        this.runReport();
+                    })
+                    .catch(err => this.$root.$emit('show-message', {
+                        type: 'error', text: 'Offer update failed: ' + sanitizeToastMessage(err.message)}));
+            },
             runReport() {
                 this.loading = true;
                 this.expanded = {};
@@ -1630,6 +1708,8 @@
                     device_type: this.logFilters.device_type || null,
                     os: this.logFilters.os || null,
                     status: this.logFilters.status || null,
+                    campaign_tags: (this.logFilters.campaign_tags || []).length
+                        ? this.logFilters.campaign_tags : null,
                     search: this.logFilters.search || null,
                 };
                 Object.keys(payload).forEach(k => payload[k] === null && delete payload[k]);
@@ -1986,6 +2066,9 @@
     }
     .log-filter-status {
         max-width: 140px;
+    }
+    .log-filter-tags {
+        min-width: 200px;
     }
     .log-filter-search {
         min-width: 260px;

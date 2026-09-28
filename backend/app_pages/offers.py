@@ -98,6 +98,37 @@ def update_offer(offer_id: int, offer: OfferIn, request: Request, db: Session = 
                 {"fields": changed}, _client_ip(request))
     return {"message": "Offer updated"}
 
+class OfferStatusIn(BaseModel):
+    status: str
+
+
+@router.post("/{offer_id}/status")
+def set_offer_status(offer_id: int, data: OfferStatusIn, request: Request,
+                     db: Session = Depends(get_db)):
+    """Pause/resume an offer from the report builder.
+
+    Flips the existing `status` column (the tracking plane refuses any offer
+    whose status != 'active' or archived = true). No schema change — this is the
+    same field the offers form edits, exposed as a focused action so the reports
+    page doesn't have to round-trip a full OfferIn payload."""
+    from audit_logger import audit_event
+    status = str(data.status or "").strip().lower()
+    if status not in ("active", "paused"):
+        raise HTTPException(status_code=400, detail="status must be 'active' or 'paused'")
+
+    db_offer = db.query(OfferORM).filter_by(id=offer_id).first()
+    if not db_offer:
+        raise HTTPException(status_code=404, detail="Offer not found")
+
+    db_offer.status = status
+    db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "offers", str(offer_id),
+                {"fields": ["status"], "status": status}, _client_ip(request))
+    return {"message": f"Offer {status}", "id": offer_id, "status": status}
+
+
 @router.delete("/{offer_id}")
 def delete_offer(offer_id: int, request: Request, db: Session = Depends(get_db)):
     from audit_logger import audit_event
