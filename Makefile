@@ -104,6 +104,9 @@ install-db:
 	@# run — restart them now that the schema is in place, then prove they came back.
 	@printf '  $(C)$(B)▸$(R) restarting services to apply runtime migrations\n'
 	@$(COMPOSE) restart backend frontend >/dev/null 2>&1 || printf '  $(Y)$(B)!$(R) restart command failed\n'
+	@# nginx resolves upstream names when it loads its config; reload so it picks up the
+	@# restarted containers' addresses (a stale one makes every /backend/ request 502).
+	@docker exec tracker_nginx nginx -s reload >/dev/null 2>&1 || true
 	@if scripts/wait-for-backend.sh; then \
 		printf '  $(C)$(B)▸$(R) backend is up (auth gate answering)\n'; \
 	else \

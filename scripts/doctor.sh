@@ -63,6 +63,16 @@ code443=$(curl -sk -o /dev/null -m 5 -w '%{http_code}' https://localhost/backend
 root=$(curl -s -o /dev/null -m 5 -w '%{http_code}' http://localhost/ 2>/dev/null || echo "---")
 case "$root" in 301|302) ok "bare host -> dashboard redirect ($root)" ;; *) warn "bare host returned $root (expected 3xx)" ;; esac
 
+# A 502 through nginx while the backend is healthy almost always means nginx cached the
+# upstream address from before a container recreate.
+if [ "$code80" = "502" ] || [ "$code443" = "502" ]; then
+    inside=$(docker exec tracker_nginx sh -c "wget -q -O- -S http://tracker_backend:8501/api/status 2>&1 | head -1" 2>/dev/null | tr -d '\r')
+    case "$inside" in
+        *401*) bad "nginx cannot reach the backend, but the backend answers directly — stale upstream address; run: make reload-nginx" ;;
+        *)     bad "the backend is unreachable from the nginx container too — see the backend log below" ;;
+    esac
+fi
+
 hdr "login"
 probe_login() {
     # prints its report on stderr and the bare HTTP code on stdout (captured by the caller)
