@@ -144,6 +144,16 @@ instead of reporting success while the database was never initialised.
 **Containers fail to start / port already in use** — `docker compose down` (or `make stop`), then
 `make install`. Ports 80 and 443 must be free.
 
+### Troubleshooting first stop
+
+```bash
+make doctor
+```
+
+Checks containers, backend→database reachability, the auth gate on HTTP and HTTPS, the
+bare-host redirect, and runs a real login probe on both schemes — printing the backend
+traceback when login returns 500.
+
 ### Restart
 
 ```bash

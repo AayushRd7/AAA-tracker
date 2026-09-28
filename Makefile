@@ -26,7 +26,7 @@ warn = @printf '  $(Y)$(B)!$(R) %s\n' "$(1)"
 
 SCHEME ?= http
 
-.PHONY: banner check env preclean reset summary install install-db install-db-fresh \
+.PHONY: banner check env preclean reset summary doctor install install-db install-db-fresh \
         install-local install-no-sll install-http install-prod-domain generate-local-cert \
         certificate stop start restart update logs reload-nginx seed-demo-data start-http \
         restart-nginx clear-logs
@@ -178,6 +178,9 @@ update: banner check env preclean
 	@$(call step,pulling the latest code)
 	@git pull
 	@$(MAKE) --no-print-directory restart
+
+doctor: check
+	@bash scripts/doctor.sh
 
 logs: check
 	@$(COMPOSE) logs -f

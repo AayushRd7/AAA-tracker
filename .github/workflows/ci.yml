@@ -44,8 +44,10 @@ jobs:
       - name: Makefile dry-run (parses, no docker needed)
         run: make -n install >/dev/null && echo "ok: make install parses"
 
-      - name: Shell syntax (installer)
-        run: bash -n setup.sh && echo "ok: setup.sh syntax"
+      - name: Shell syntax (installer + doctor)
+        run: |
+          bash -n setup.sh && echo "ok: setup.sh syntax"
+          bash -n scripts/doctor.sh && echo "ok: scripts/doctor.sh syntax"
 
       - name: First-run config guard
         run: |
