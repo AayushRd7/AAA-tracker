@@ -226,9 +226,11 @@ reset: banner check
 	for n in $$names; do docker rm -f "$$n" >/dev/null 2>&1 || true; done; \
 	printf '  $(G)$(B)✓$(R) reset complete — run $(B)make install$(R) for a clean setup\n\n'
 
-reload-nginx:
-	@docker exec tracker_nginx nginx -s reload
-	@printf '  $(G)$(B)✓$(R) nginx reloaded\n'
+reload-nginx: banner
+	@# nginx refuses to load a missing or mismatched certificate, so repair it first.
+	@$(MAKE) --no-print-directory generate-local-cert
+	@docker exec tracker_nginx nginx -s reload && printf '  $(G)$(B)✓$(R) nginx reloaded\n' || \
+		printf '  $(Y)$(B)!$(R) nginx reload failed — run: make doctor\n'
 
 seed-demo-data:
 	@docker exec -it tracker_frontend python3 /app/scripts/seed_demo.py

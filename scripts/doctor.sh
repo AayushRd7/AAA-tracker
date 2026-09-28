@@ -83,7 +83,14 @@ if [ -s ssl/selfsigned.crt ] && [ -s ssl/selfsigned.key ]; then
         bad "certificate and key do NOT match — nginx cannot reload (emerg: key values mismatch). Fix: rm -f ssl/selfsigned.crt ssl/selfsigned.key && make generate-local-cert && make reload-nginx"
     fi
 elif [ ! -s ssl/selfsigned.crt ]; then
-    warn "no self-signed pair on disk (expected only if you use a real domain certificate)"
+    warn "no self-signed pair in ./ssl (regenerated on the next: make restart / make reload-nginx)"
+fi
+
+in_container=$(docker exec tracker_nginx sh -c 'ls /etc/nginx/ssl/selfsigned.crt /etc/nginx/ssl/selfsigned.key 2>/dev/null | wc -l' 2>/dev/null || echo 0)
+if [ "${in_container:-0}" = "2" ]; then
+    ok "the nginx container sees both certificate files"
+else
+    bad "the nginx container cannot see /etc/nginx/ssl/selfsigned.{crt,key} — run: make restart (it rebuilds nginx, which self-generates the pair)"
 fi
 
 hdr "login"

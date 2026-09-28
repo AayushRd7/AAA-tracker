@@ -49,6 +49,7 @@ jobs:
           bash -n setup.sh && echo "ok: setup.sh syntax"
           bash -n scripts/doctor.sh && echo "ok: scripts/doctor.sh syntax"
           bash -n scripts/wait-for-backend.sh && echo "ok: scripts/wait-for-backend.sh syntax"
+          sh -n nginx/docker-entrypoint.d/10-selfsigned.sh && echo "ok: nginx entrypoint script syntax"
 
       - name: First-run config guard
         run: |
