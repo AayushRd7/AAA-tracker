@@ -145,7 +145,7 @@
                                 <li><b>Fire a test hit</b> — open the campaign URL with test parameters and confirm
                                     the click lands in the Dashboard live feed and the report builder.</li>
                                 <li><b>Test the postback</b> — send a test conversion to
-                                    <code>/pb/{click_id}/{status}/{payout}</code> and check the conversion log.</li>
+                                    <code>/pb?clickid={clickid}&amp;payout={payout}&amp;status={status}</code> and check the conversion log.</li>
                             </ol>
                             <div class="doc-callout doc-callout--info">
                                 Use the built-in <b>traffic simulation</b> (campaign row → simulate button) before
@@ -381,14 +381,12 @@
 
                             <h3 class="doc-h3">S2S postback</h3>
                             <p>
-                                Networks fire conversions into one endpoint in two equivalent forms — the
-                                path form and the query form (no path segments, easiest to fill with a
-                                network's own macros):
+                                Networks fire conversions into one endpoint with query parameters
+                                (no path segments, easiest to fill with a network's own macros):
                             </p>
-                            <pre class="doc-code">GET /pb/{click_id}/{status}/{payout}
-GET /pb?clickid={click_id}&amp;status={status}&amp;payout={payout}</pre>
+                            <pre class="doc-code">GET /pb?clickid={clickid}&amp;payout={payout}&amp;status={status}&amp;tid={tid}</pre>
                             <p>
-                                Parameter names in the query form are matched <b>case-insensitively</b> and the
+                                Parameter names are matched <b>case-insensitively</b> and the
                                 first non-empty alias wins:
                             </p>
                             <table class="doc-table">
@@ -401,9 +399,9 @@ GET /pb?clickid={click_id}&amp;status={status}&amp;payout={payout}</pre>
                                 </tbody>
                             </table>
                             <p>
-                                The query form accepts <code>GET</code> and <code>POST</code> (form-encoded or JSON
+                                The endpoint accepts <code>GET</code> and <code>POST</code> (form-encoded or JSON
                                 body); passthrough fields (<code>sub_id_1..10</code>, <code>key</code> and custom
-                                parameters) may ride in the query string or the body in either form. Missing
+                                parameters) may ride in the query string or the body. Missing
                                 <code>status</code> defaults to <code>lead</code>, missing <code>payout</code> to
                                 <code>0</code>, and a missing click id takes the clickless path. Built-in statuses:
                                 <code>lead</code>, <code>sale</code>, <code>upsale</code>, <code>rejected</code>,
@@ -764,7 +762,7 @@ GET /pb?clickid={click_id}&amp;status={status}&amp;payout={payout}</pre>
                             </p>
                             <ul class="doc-list">
                                 <li><b>Offer parameters</b> — the network's subid macro appended to every offer URL, e.g. <code>s1={click_id}</code> or <code>subid={click_id}</code>, so the network echoes your click id back in postbacks.</li>
-                                <li><b>S2S postback template</b> — pre-filled per network with the placeholders <code>https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}</code>; paste it into the network's panel so conversions land in AAA Tracker.</li>
+                                <li><b>S2S postback template</b> — pre-filled per network with the placeholders <code>https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&amp;payout={payout}&amp;status={status}&amp;tid={tid}</code>; paste it into the network's panel so conversions land in AAA Tracker.</li>
                             </ul>
                         </section>
 
@@ -845,7 +843,7 @@ GET /pb?clickid={click_id}&amp;status={status}&amp;payout={payout}</pre>
                             <h3 class="doc-h3">Email reports / SMTP</h3>
                             <p>Daily report scheduling: SMTP host/port/login/password or a Brevo API key, "from" name/address, recipients and the UTC send hour. Powers the report email schedules created on the Reports page; includes a test send.</p>
                             <h3 class="doc-h3">Postback security</h3>
-                            <p>Optionally require a <b>secret key</b> (query param) and/or an <b>IP allowlist</b> for inbound <code>/pb/…</code> postbacks — denied postbacks return 403.</p>
+                            <p>Optionally require a <b>secret key</b> (query param) and/or an <b>IP allowlist</b> for inbound <code>/pb</code> postbacks — denied postbacks return 403.</p>
                             <h3 class="doc-h3">Data retention</h3>
                             <p>Auto-delete tracking data older than a chosen number of days (daily prune).</p>
                             <h3 class="doc-h3">Bot rules</h3>
@@ -874,8 +872,7 @@ GET /pb?clickid={click_id}&amp;status={status}&amp;payout={payout}</pre>
                                 <tbody>
                                 <tr><td>GET/POST</td><td><code>/{alias}</code></td><td>Campaign URL — main tracking hit</td><td>none</td></tr>
                                 <tr><td>GET</td><td><code>/c/{alias}/{offer_id}</code></td><td>Click-out to an offer</td><td>none</td></tr>
-                                <tr><td>GET</td><td><code>/pb/{click_id}/{status}/{payout}</code></td><td>S2S conversion postback (path form)</td><td>optional key / IP list</td></tr>
-                                <tr><td>GET/POST</td><td><code>/pb?clickid=…&amp;status=…&amp;payout=…</code></td><td>S2S conversion postback (query form)</td><td>optional key / IP list</td></tr>
+                                <tr><td>GET/POST</td><td><code>/pb?clickid=…&amp;status=…&amp;payout=…</code></td><td>S2S conversion postback</td><td>optional key / IP list</td></tr>
                                 <tr><td>GET</td><td><code>/p/{alias}</code></td><td>Conversion pixel (GIF / <code>fmt=json</code>)</td><td>none</td></tr>
                                 <tr><td>GET</td><td><code>/i/{alias}</code></td><td>Impression pixel</td><td>none</td></tr>
                                 <tr><td>GET/POST</td><td><code>/t/collect</code></td><td>Direct-tracking visit collection</td><td>none</td></tr>
@@ -910,11 +907,9 @@ GET /pb?clickid={click_id}&amp;status={status}&amp;payout={payout}</pre>
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
        "params":{"name":"campaigns.metrics","arguments":{"period":"7d"}}}'</pre>
                             <h3 class="doc-h3">Examples</h3>
-                            <p>S2S postback from a network (path form):</p>
-                            <pre class="doc-code">curl "https://your-domain.com/pb/9f2c1a7e/sale/25.50?transaction_id=T123"</pre>
-                            <p>S2S postback, query form with a network's own macros (here <code>{clickid}</code>,
+                            <p>S2S postback with a network's own macros (here <code>{clickid}</code>,
                                 <code>{sum}</code> and <code>{txn}</code>):</p>
-                            <pre class="doc-code">curl "https://your-domain.com/pb?clickid={clickid}&amp;status=sale&amp;sum={sum}&amp;tid={txn}"</pre>
+                            <pre class="doc-code">curl "https://your-domain.com/pb?clickid={clickid}&amp;payout={sum}&amp;status=sale&amp;tid={txn}"</pre>
                             <p>Server-to-server click decision:</p>
                             <pre class="doc-code">curl -X POST "https://your-domain.com/click-api/my-campaign" \
   -H "Content-Type: application/json" \

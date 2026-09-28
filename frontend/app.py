@@ -2357,10 +2357,9 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             "duplicate": is_duplicate}
 
 
-# Query-style postbacks (/pb?…) accept the parameter names affiliate networks
-# natively expose with their own macros. Matching is case-insensitive and the
-# first non-empty alias in each list wins. The path form
-# /pb/{click_id}/{status}/{payout} is untouched.
+# The canonical postback endpoint is /pb with query parameters; it accepts the
+# parameter names affiliate networks natively expose with their own macros.
+# Matching is case-insensitive and the first non-empty alias in each list wins.
 POSTBACK_CLICK_ID_ALIASES = ("click_id", "clickid", "click", "subid", "sub_id", "cid")
 POSTBACK_STATUS_ALIASES = ("status", "type", "event", "conversion_type")
 POSTBACK_PAYOUT_ALIASES = ("payout", "sum", "amount", "revenue", "price")
@@ -2476,33 +2475,15 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
                                    extra_fields or None, source="postback", identity=params)
 
 
-@app.get("/pb/{click_id}/{status}/{payout}")
-@app.post("/pb/{click_id}/{status}/{payout}")
-@app.head("/pb/{click_id}/{status}/{payout}")
-async def postback_receive(click_id: str, status: str, payout: str, request: Request,
-                           background_tasks: BackgroundTasks):
-    is_head = request.method == "HEAD"
-    result = await _process_postback(click_id, status, payout, request, background_tasks,
-                                     write=not is_head)
-    if is_head:
-        # HEAD mirrors GET's status but has no body and writes nothing.
-        return Response(status_code=200)
-    if result.get("rejected"):
-        return JSONResponse(status_code=200,
-                            content={"status": "rejected", "reason": result["reason"],
-                                     "click_id": result["click_id"]})
-    return JSONResponse(content=result)
-
-
 @app.get("/pb")
 @app.post("/pb")
 @app.head("/pb")
 async def postback_receive_query(request: Request, background_tasks: BackgroundTasks):
-    """Query-style S2S form: /pb?clickid=…&status=…&payout=… (no path segments).
+    """Canonical S2S postback: /pb?clickid=…&status=…&payout=… (no path segments).
 
     Accepts the parameter aliases networks fill with their own macros
     (see POSTBACK_*_ALIASES) from the query string or a POST form/JSON body,
-    and reuses the exact path-form core. Missing status defaults to 'lead',
+    and reuses the shared /pb core. Missing status defaults to 'lead',
     missing payout to 0, and a missing click id takes the clickless path.
     """
     params = await _postback_request_params(request)

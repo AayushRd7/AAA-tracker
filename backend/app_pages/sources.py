@@ -1421,7 +1421,7 @@ _SOURCE_LOGO_DOMAINS = {
 _SOURCE_LOGO_URLS = {
     "Ad2games": "https://files.startupranking.com/startup/thumb/59015_fc7ff7df388c24b028de73095f314dc93eac6179_ad2games_l.png",
 }
-_SOURCE_POSTBACK_TEMPLATE = "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"
+_SOURCE_POSTBACK_TEMPLATE = "https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&payout={payout}&status={status}&tid={tid}"
 # Sources whose conversion postback is keyed on a sub-id rather than the
 # external-id slot (verified against each platform's postback docs pattern).
 _SOURCE_POSTBACK_MACRO_OVERRIDES = {
@@ -1430,8 +1430,8 @@ _SOURCE_POSTBACK_MACRO_OVERRIDES = {
 
 
 def _source_preset_postback(preset: dict) -> str:
-    """Ready-to-hand-to-the-source S2S postback: the tracker's /pb/ URL with
-    the SOURCE's own click-id macro in place of {click_id}. Empty when the
+    """Ready-to-hand-to-the-source S2S postback: the tracker's /pb query URL
+    with the SOURCE's own click-id macro in place of {clickid}. Empty when the
     preset doesn't map a click macro (better blank than a wrong URL). The
     YOUR-TRACKER-DOMAIN placeholder is resolved by the UI at copy/create."""
     name = preset.get("name", "")
@@ -1443,7 +1443,7 @@ def _source_preset_postback(preset: dict) -> str:
                 break
     if not macro:
         return ""
-    return _SOURCE_POSTBACK_TEMPLATE.replace("{click_id}", macro)
+    return _SOURCE_POSTBACK_TEMPLATE.replace("{clickid}", macro)
 
 
 for _preset in SOURCE_PRESETS:

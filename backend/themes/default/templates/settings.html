@@ -464,7 +464,7 @@
 
                             <div class="caption grey--text mt-2">
                                 Custom statuses appear in the conversion-log status filter and edit dialog,
-                                and in the postback URL <code>/pb/{click_id}/{status}/{payout}</code>.
+                                and in the postback URL <code>/pb?clickid=…&amp;status=…&amp;payout=…</code>.
                             </div>
                         </v-card-text>
                     </v-card>
@@ -1403,10 +1403,10 @@
         },
         computed:{
               postbackUrl() {
-                return `${window.location.origin}/pb/{click_id}/{status}/{payout}`;
+                return `${window.location.origin}/pb?clickid={clickid}&payout={payout}&status={status}&tid={tid}`;
               },
               postbackUrlDemo() {
-                return `${window.location.origin}/pb/d8f8d388-356b-4063-90ef-6137258b59c1/sale/202.15`;
+                return `${window.location.origin}/pb?clickid=d8f8d388-356b-4063-90ef-6137258b59c1&payout=202.15&status=sale&tid=TXN-90210`;
               },
               optoutUrl() {
                 return `${window.location.origin}/optout`;

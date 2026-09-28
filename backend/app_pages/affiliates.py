@@ -20,7 +20,7 @@ router = APIRouter()
 
 # Built-in affiliate network presets, shipped out of the box.
 # {click_id} is replaced by the network's subid macro value.
-_POSTBACK = "https://YOUR-TRACKER-DOMAIN/pb/{click_id}/{status}/{payout}"
+_POSTBACK = "https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&payout={payout}&status={status}&tid={tid}"
 
 
 def _p(name, offer_parameters, verticals, logo_domain):

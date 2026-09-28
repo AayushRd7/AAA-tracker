@@ -165,7 +165,7 @@ def main():
 
     print("== Regression: postback upsert ==")
     pb_click = f"smoke-pb-{os.getpid()}"
-    r = requests.get(f"{BASE}/pb/{pb_click}/sale/1.25", verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid={pb_click}&status=sale&payout=1.25", verify=not INSECURE)
     check("postback for unknown click upserts (no 404)",
           r.status_code == 200 and r.json().get("status") == "ok", r.text[:150])
     r = s.get(f"{api}/reports/", params={"click_id": pb_click})
@@ -173,7 +173,7 @@ def main():
     check("upserted conversion recorded", bool(rec), r.text[:150])
     conv_id = rec[0]["id"] if rec else None
 
-    r = requests.get(f"{BASE}/pb/{pb_click}/sale/1.25", verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid={pb_click}&status=sale&payout=1.25", verify=not INSECURE)
     check("identical postback within 60s flagged duplicate",
           r.status_code == 200 and r.json().get("duplicate") is True, r.text[:150])
 
@@ -278,7 +278,7 @@ def main():
                     params={"status": "sale", "payout": "3.25", "fmt": "json"})
     check("pixel refire within 60s flagged duplicate",
           r.status_code == 200 and r.json().get("duplicate") is True, r.text[:150])
-    r = requests.get(f"{BASE}/pb/{dt_click}/sale/3.25", verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid={dt_click}&status=sale&payout=3.25", verify=not INSECURE)
     check("postback against pixel-fired conversion dedupes",
           r.status_code == 200 and r.json().get("duplicate") is True, r.text[:150])
 
@@ -515,13 +515,13 @@ def main():
 
     # -- G23: LTV / rebill accumulation --
     ltv_click = f"smoke-ltv-{os.getpid()}"
-    r = requests.get(f"{BASE}/pb/{ltv_click}/sale/5", verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid={ltv_click}&status=sale&payout=5", verify=not INSECURE)
     check("LTV: first sale postback ok", r.status_code == 200 and r.json().get("duplicate") is False,
           r.text[:150])
-    r = requests.get(f"{BASE}/pb/{ltv_click}/sale/5", verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid={ltv_click}&status=sale&payout=5", verify=not INSECURE)
     check("LTV: identical refire within 60s dedupes", r.status_code == 200
           and r.json().get("duplicate") is True, r.text[:150])
-    r = requests.get(f"{BASE}/pb/{ltv_click}/sale/5",
+    r = requests.get(f"{BASE}/pb?clickid={ltv_click}&status=sale&payout=5",
                      params={"transaction_id": f"ltv-tid-{os.getpid()}"}, verify=not INSECURE)
     check("LTV: repeat sale with unique transaction id accumulates", r.status_code == 200
           and r.json().get("duplicate") is False, r.text[:150])
@@ -547,7 +547,7 @@ def main():
     check("custom status saved via settings API", r.status_code == 200, r.text[:150])
     settle_settings_cache()  # frontend settings cache (30s TTL)
     cs_click = f"smoke-cs-{os.getpid()}"
-    r = requests.get(f"{BASE}/pb/{cs_click}/Registration%20Bonus/2.5", verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid={cs_click}&status=Registration%20Bonus&payout=2.5", verify=not INSECURE)
     check("postback accepts custom status (weird casing/spaces)", r.status_code == 200
           and r.json().get("status") == "ok", r.text[:150])
     rec = poll_first({"click_id": cs_click})
@@ -555,7 +555,7 @@ def main():
           str(rec and rec.get("status")))
     if rec:
         econ_conv_ids.append(rec["id"])
-    r = requests.get(f"{BASE}/pb/{cs_click}/definitely_not_a_status/1", verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid={cs_click}&status=definitely_not_a_status&payout=1", verify=not INSECURE)
     check("unknown status still rejected", r.status_code == 400, f"{r.status_code} {r.text[:80]}")
     r = s.get(f"{api}/reports/", params={"status": "registration_bonus"})
     check("reports filters by custom status", r.status_code == 200
@@ -563,7 +563,7 @@ def main():
 
     # -- G20: clickless conversions --
     cl_tid = f"smoke-clickless-{os.getpid()}"
-    r = requests.get(f"{BASE}/pb/none/sale/2", params={"transaction_id": cl_tid}, verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid=none&status=sale&payout=2", params={"transaction_id": cl_tid}, verify=not INSECURE)
     check("clickless postback accepted", r.status_code == 200 and r.json().get("clickless") is True
           and r.json().get("attributed") is False, r.text[:150])
     rec = poll_first({"search": cl_tid})
@@ -580,7 +580,7 @@ def main():
     sub_match = re.search(r"click_id=([^&]+)", r.headers.get("location") or "")
     check("sub_id click-out recorded", r.status_code in (301, 302, 307, 308) and bool(sub_match),
           f"got {r.status_code}")
-    r = requests.get(f"{BASE}/pb/none/sale/4", params={"sub_id_1": sub_token}, verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid=none&status=sale&payout=4", params={"sub_id_1": sub_token}, verify=not INSECURE)
     check("clickless postback attributes via sub_id", r.status_code == 200
           and r.json().get("attributed") is True, r.text[:150])
     rec = poll_first({"sub_id_1": sub_token})
@@ -628,7 +628,7 @@ def main():
     cap_match = re.search(r"click_id=([^&]+)", r.headers.get("location") or "")
     check("offer cap: click-out for capped offer", bool(cap_match), r.headers.get("location", ""))
     if cap_match:
-        requests.get(f"{BASE}/pb/{cap_match.group(1)}/sale/5", verify=not INSECURE)
+        requests.get(f"{BASE}/pb?clickid={cap_match.group(1)}&status=sale&payout=5", verify=not INSECURE)
         rec = poll_first({"click_id": cap_match.group(1)})
         check("offer cap: confirmed conversion recorded", bool(rec) and rec["status"] == "sale"
               and rec["offer_id"] == cap_a, str(rec))
@@ -656,7 +656,7 @@ def main():
     r = requests.get(f"{BASE}/c/{capb_alias}/{cap_b}", verify=not INSECURE, allow_redirects=False)
     capb_match = re.search(r"click_id=([^&]+)", r.headers.get("location") or "")
     if capb_match:
-        requests.get(f"{BASE}/pb/{capb_match.group(1)}/sale/5", verify=not INSECURE)
+        requests.get(f"{BASE}/pb?clickid={capb_match.group(1)}&status=sale&payout=5", verify=not INSECURE)
         rec = poll_first({"click_id": capb_match.group(1)})
         if rec:
             econ_conv_ids.append(rec["id"])
@@ -1963,7 +1963,7 @@ def main():
     r = s.get(f"{api}/search", params={"q": "x"})
     check("search: short query -> 400", r.status_code == 400, str(r.status_code))
     pb_click = f"smoke-ap-search-{ap_pid}"
-    requests.get(f"{BASE}/pb/{pb_click}/sale/2", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={pb_click}&status=sale&payout=2", verify=not INSECURE)
     rec = None
     for _ in range(10):
         r2 = s.get(f"{api}/reports/", params={"click_id": pb_click})
@@ -2360,12 +2360,12 @@ def main():
     # -- 4. concurrent identical postbacks accumulate exactly once --
     import threading
     conc_click = f"smoke-au-conc-{au_pid}"
-    requests.get(f"{BASE}/pb/{conc_click}/sale/2.5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={conc_click}&status=sale&payout=2.5", verify=not INSECURE)
     errors = []
 
     def fire_pb():
         try:
-            requests.get(f"{BASE}/pb/{conc_click}/sale/2.5", verify=not INSECURE, timeout=30)
+            requests.get(f"{BASE}/pb?clickid={conc_click}&status=sale&payout=2.5", verify=not INSECURE, timeout=30)
         except Exception as e:
             errors.append(str(e))
 
@@ -2944,7 +2944,7 @@ print("ESCAPED-OK")
 
     # (g) postback on the step-1 click marks a conversion; funnel report aggregates per step
     if len(fn_click_ids) >= 2:
-        r = requests.get(f"{BASE}/pb/{fn_click_ids[1]}/sale/9.5", verify=not INSECURE)
+        r = requests.get(f"{BASE}/pb?clickid={fn_click_ids[1]}&status=sale&payout=9.5", verify=not INSECURE)
         check("funnel: postback on step-1 click accepted", r.status_code == 200, r.text[:150])
         r = s.get(f"{api}/reports/funnel/{fn_cid}")
         steps = (r.json().get("steps") or []) if r.status_code == 200 else []
@@ -3610,7 +3610,7 @@ print("ESCAPED-OK")
 
     # 2. Live postback must update the CH click row (conversions + revenue)
     if cp_click_id:
-        r = requests.get(f"{BASE}/pb/{cp_click_id}/sale/10", verify=not INSECURE)
+        r = requests.get(f"{BASE}/pb?clickid={cp_click_id}&status=sale&payout=10", verify=not INSECURE)
         check("cp: postback 200", r.status_code == 200, f"{r.status_code} {r.text[:80]}")
         ok = False
         for _ in range(10):
@@ -3645,7 +3645,7 @@ print("ESCAPED-OK")
 
     # 4. Comma-decimal payout accepted on the postback
     if cp_click_id:
-        r = requests.get(f"{BASE}/pb/{cp_click_id}/sale/2,25", verify=not INSECURE)
+        r = requests.get(f"{BASE}/pb?clickid={cp_click_id}&status=sale&payout=2,25", verify=not INSECURE)
         check("cp: comma-decimal postback accepted", r.status_code == 200, f"{r.status_code} {r.text[:80]}")
 
     # 5. Accept-Language filter matches primary subtag
@@ -3733,7 +3733,7 @@ print("ESCAPED-OK")
         r = requests.get(f"{BASE}/c/{cp_alias}/{cap_oid}", verify=not INSECURE, allow_redirects=False)
         m = re.search(r"[?&]click_id=([^&]+)", r.headers.get("location") or "")
         if m:
-            requests.get(f"{BASE}/pb/{m.group(1)}/sale/5", verify=not INSECURE)
+            requests.get(f"{BASE}/pb?clickid={m.group(1)}&status=sale&payout=5", verify=not INSECURE)
         r = requests.get(f"{BASE}/c/{cp_alias}/{cap_oid}", verify=not INSECURE, allow_redirects=False)
         check("cp: capped offer click-out refused after cap reached", r.status_code == 404, str(r.status_code))
         s.delete(f"{api}/offers/{cap_oid}")
@@ -3779,7 +3779,7 @@ print("ESCAPED-OK")
     if own2_uid and own_cid:
         pg_exec(f"UPDATE campaigns SET owner_id = {own2_uid} WHERE id = {own_cid}")
         # a conversion on the ADMIN-owned campaign (cp_cid) must be invisible
-        requests.get(f"{BASE}/pb/smoke-cpadmin-conv-{cp_pid}/sale/7", verify=not INSECURE)
+        requests.get(f"{BASE}/pb?clickid=smoke-cpadmin-conv-{cp_pid}&status=sale&payout=7", verify=not INSECURE)
         r = ou2.get(f"{api}/reports/", params={"click_id": f"smoke-cpadmin-conv-{cp_pid}"})
         check("cp: scoped user cannot read others' conversions",
               r.status_code in (200, 403) and
@@ -4548,7 +4548,7 @@ print("ESCAPED-OK")
                                                 "url": "https://landing.example/sec"})
     check("sec: /t/collect accepted with explicit click_id",
           r.status_code == 200 and r.json().get("click_id") == fx_ch_click, r.text[:120])
-    r = fx_anon.get(f"{BASE}/pb/{fx_ch_click}/sale/3.5")
+    r = fx_anon.get(f"{BASE}/pb?clickid={fx_ch_click}&status=sale&payout=3.5")
     check("sec: /pb conversion for direct click accepted",
           r.status_code == 200 and r.json().get("status") == "ok", r.text[:120])
     fx_ch_row = ""
@@ -4565,9 +4565,9 @@ print("ESCAPED-OK")
     check("sec: CH row synced to the conversion status", "sale" in fx_ch_row, fx_ch_row[:150])
 
     # --- P2: NaN / Infinity payouts rejected 400 ---
-    r = fx_anon.get(f"{BASE}/pb/smoke-sec-nan-{fx_pid}/sale/nan")
+    r = fx_anon.get(f"{BASE}/pb?clickid=smoke-sec-nan-{fx_pid}&status=sale&payout=nan")
     check("sec: /pb NaN payout -> 400", r.status_code == 400, str(r.status_code))
-    r = fx_anon.get(f"{BASE}/pb/smoke-sec-inf-{fx_pid}/sale/Infinity")
+    r = fx_anon.get(f"{BASE}/pb?clickid=smoke-sec-inf-{fx_pid}&status=sale&payout=Infinity")
     check("sec: /pb Infinity payout -> 400", r.status_code == 400, str(r.status_code))
     r = fx_anon.get(f"{BASE}/p/{fx_alias}",
                     params={"click_id": f"smoke-sec-pnan-{fx_pid}", "payout": "nan", "fmt": "json"})
@@ -4575,7 +4575,7 @@ print("ESCAPED-OK")
 
     # --- P2: over-long click_id / sub_id values accepted and truncated ---
     fx_long = "L" * 300
-    r = fx_anon.get(f"{BASE}/pb/{fx_long}/sale/1", params={"sub_id_1": "S" * 200})
+    r = fx_anon.get(f"{BASE}/pb?clickid={fx_long}&status=sale&payout=1", params={"sub_id_1": "S" * 200})
     check("sec: over-long click_id/sub_id postback accepted (no 500)",
           r.status_code == 200, f"{r.status_code} {r.text[:120]}")
     fx_long_rec = poll_first({"click_id": fx_long[:100]})
@@ -4590,9 +4590,9 @@ print("ESCAPED-OK")
     r = s.post(f"{api}/settings/", json={"settings": fx_cfg})
     check("sec: postback secret saved", r.status_code == 200, r.text[:120])
     settle_settings_cache()
-    r = fx_anon.get(f"{BASE}/pb/smoke-sec-key1-{fx_pid}/sale/1", params={"key": "é"})
+    r = fx_anon.get(f"{BASE}/pb?clickid=smoke-sec-key1-{fx_pid}&status=sale&payout=1", params={"key": "é"})
     check("sec: non-ASCII postback key -> 403 (not 500)", r.status_code == 403, str(r.status_code))
-    r = fx_anon.get(f"{BASE}/pb/smoke-sec-key2-{fx_pid}/sale/1", params={"key": "smoke-sec-key"})
+    r = fx_anon.get(f"{BASE}/pb?clickid=smoke-sec-key2-{fx_pid}&status=sale&payout=1", params={"key": "smoke-sec-key"})
     check("sec: correct postback key accepted", r.status_code == 200, f"{r.status_code} {r.text[:120]}")
     fx_cfg["postback_security"] = fx_saved_sec
     r = s.post(f"{api}/settings/", json={"settings": fx_cfg})
@@ -5279,7 +5279,7 @@ print("ESCAPED-OK")
 
     # reject: fresh click -> no row written; seeded click -> no fanout
     g8_rej = f"g85rej-{g8_pid}"
-    r = requests.get(f"{BASE}/pb/{g8_rej}/sale/5", verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid={g8_rej}&status=sale&payout=5", verify=not INSECURE)
     g8_rej_body = r.json() if "json" in r.headers.get("content-type", "") else {}
     check("g85: reject returns 200 with a clear reason",
           r.status_code == 200 and g8_rej_body.get("status") == "rejected"
@@ -5291,29 +5291,29 @@ print("ESCAPED-OK")
         g8_rej2 = f"g85rej-{g8_pid}-fan"
         g8_seed(g8_rej2, g8_cid_tok)
         g8_captured.clear()
-        requests.get(f"{BASE}/pb/{g8_rej2}/sale/5", verify=not INSECURE)
+        requests.get(f"{BASE}/pb?clickid={g8_rej2}&status=sale&payout=5", verify=not INSECURE)
         _g8time.sleep(3)
         check("g85: reject suppresses fanout", g8_paths(g8_rej2) == [], str(g8_paths(g8_rej2)))
 
     g8_ss = f"g85status-{g8_pid}"
-    requests.get(f"{BASE}/pb/{g8_ss}/sale/5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={g8_ss}&status=sale&payout=5", verify=not INSECURE)
     check("g85: set_status remaps the written status",
           g8_db(f"SELECT status FROM conversions_data WHERE click_id='{g8_ss}'") == "rejected",
           g8_db(f"SELECT status FROM conversions_data WHERE click_id='{g8_ss}'"))
 
     g8_pa = f"g85payout-{g8_pid}"
-    requests.get(f"{BASE}/pb/{g8_pa}/sale/2", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={g8_pa}&status=sale&payout=2", verify=not INSECURE)
     check("g85: set_payout absolute value applied",
           g8_db(f"SELECT payout FROM conversions_data WHERE click_id='{g8_pa}'") == "12.5",
           g8_db(f"SELECT payout FROM conversions_data WHERE click_id='{g8_pa}'"))
     g8_pm = f"g85mult-{g8_pid}"
-    requests.get(f"{BASE}/pb/{g8_pm}/sale/2", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={g8_pm}&status=sale&payout=2", verify=not INSECURE)
     check("g85: set_payout multiplier applied",
           g8_db(f"SELECT payout FROM conversions_data WHERE click_id='{g8_pm}'") == "6",
           g8_db(f"SELECT payout FROM conversions_data WHERE click_id='{g8_pm}'"))
 
     g8_dis = f"g85dis-{g8_pid}"
-    r = requests.get(f"{BASE}/pb/{g8_dis}/sale/5", verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid={g8_dis}&status=sale&payout=5", verify=not INSECURE)
     check("g85: disabled rule ignored (postback processed normally)",
           r.status_code == 200 and r.json().get("duplicate") is False
           and g8_db(f"SELECT count(*) FROM conversions_data WHERE click_id='{g8_dis}'") == "1",
@@ -5347,8 +5347,8 @@ print("ESCAPED-OK")
         det_clicks = [f"g86det-{g8_pid}-a", f"g86det-{g8_pid}-b"]
         for cl in det_clicks:
             g8_seed(cl, g8_cid_sample)
-            requests.get(f"{BASE}/pb/{cl}/lead/1", verify=not INSECURE)
-            requests.get(f"{BASE}/pb/{cl}/sale/2", verify=not INSECURE)
+            requests.get(f"{BASE}/pb?clickid={cl}&status=lead&payout=1", verify=not INSECURE)
+            requests.get(f"{BASE}/pb?clickid={cl}&status=sale&payout=2", verify=not INSECURE)
         _g8time.sleep(4)
         det_counts = {cl: len(g8_paths(cl)) for cl in det_clicks}
         check("g86: sampling decision is deterministic per click_id",
@@ -5361,7 +5361,7 @@ print("ESCAPED-OK")
                   f"(now(), '{i}', {g8_cid_sample}, 'lead', 0, 0, 0)" for i in dist_ids))
         g8_captured.clear()
         for cl in dist_ids:
-            requests.get(f"{BASE}/pb/{cl}/sale/1", verify=not INSECURE)
+            requests.get(f"{BASE}/pb?clickid={cl}&status=sale&payout=1", verify=not INSECURE)
         end = _g8time.time() + 25
         while _g8time.time() < end:
             if sum(1 for c in g8_captured if "g86dist-" in c["path"]) >= 40:
@@ -5375,10 +5375,10 @@ print("ESCAPED-OK")
         g8_captured.clear()
         su = f"g86up-sale-{g8_pid}"
         g8_seed(su, g8_cid_upsell)
-        requests.get(f"{BASE}/pb/{su}/sale/1", verify=not INSECURE)
+        requests.get(f"{BASE}/pb?clickid={su}&status=sale&payout=1", verify=not INSECURE)
         uu = f"g86up-ups-{g8_pid}"
         g8_seed(uu, g8_cid_upsell)
-        requests.get(f"{BASE}/pb/{uu}/upsale/1", verify=not INSECURE)
+        requests.get(f"{BASE}/pb?clickid={uu}&status=upsale&payout=1", verify=not INSECURE)
         g8_wait(su, 1, timeout=8)
         _g8time.sleep(1)
         check("g86: disable_upsell keeps the sale forward", len(g8_paths(su)) == 1,
@@ -5391,7 +5391,7 @@ print("ESCAPED-OK")
         g8_tok = f"g87tok-{g8_pid}"
         g8_seed(g8_tok, g8_cid_tok)
         g8_captured.clear()
-        requests.get(f"{BASE}/pb/{g8_tok}/sale/7.5", verify=not INSECURE)
+        requests.get(f"{BASE}/pb?clickid={g8_tok}&status=sale&payout=7.5", verify=not INSECURE)
         tok_paths = g8_wait(g8_tok, 1, timeout=8)
         g8_q = _g8urlparse.parse_qs(_g8urlparse.urlparse(tok_paths[-1]).query) if tok_paths else {}
         check("g87: {_md5} token substituted in the fired postback",
@@ -5405,16 +5405,16 @@ print("ESCAPED-OK")
               g8_q.get("payout", [""])[0] == "7.5", str(g8_q.get("payout")))
 
     g8_head = f"g87head-{g8_pid}"
-    r = requests.head(f"{BASE}/pb/{g8_head}/sale/1.5", verify=not INSECURE, allow_redirects=False)
+    r = requests.head(f"{BASE}/pb?clickid={g8_head}&status=sale&payout=1.5", verify=not INSECURE, allow_redirects=False)
     check("g87: HEAD /pb returns 200", r.status_code == 200, str(r.status_code))
     check("g87: HEAD /pb writes nothing",
           g8_db(f"SELECT count(*) FROM conversions_data WHERE click_id='{g8_head}'") == "0",
           g8_db(f"SELECT count(*) FROM conversions_data WHERE click_id='{g8_head}'"))
-    r = requests.head(f"{BASE}/pb/{g8_head}/definitely_not_a_status/1.5", verify=not INSECURE)
+    r = requests.head(f"{BASE}/pb?clickid={g8_head}&status=definitely_not_a_status&payout=1.5", verify=not INSECURE)
     check("g87: HEAD /pb keeps status validation (400)", r.status_code == 400, str(r.status_code))
 
     g8_postj = f"g87postj-{g8_pid}"
-    r = requests.post(f"{BASE}/pb/{g8_postj}/sale/2.25",
+    r = requests.post(f"{BASE}/pb?clickid={g8_postj}&status=sale&payout=2.25",
                       json={"sub_id_1": f"json-{g8_pid}"}, verify=not INSECURE)
     check("g87: POST /pb with JSON body accepted",
           r.status_code == 200 and r.json().get("updated_status") == "sale", r.text[:160])
@@ -5423,7 +5423,7 @@ print("ESCAPED-OK")
           == f"json-{g8_pid}",
           g8_db(f"SELECT sub_id_1 FROM conversions_data WHERE click_id='{g8_postj}'"))
     g8_postf = f"g87postf-{g8_pid}"
-    r = requests.post(f"{BASE}/pb/{g8_postf}/lead/1.25",
+    r = requests.post(f"{BASE}/pb?clickid={g8_postf}&status=lead&payout=1.25",
                       data={"sub_id_1": f"form-{g8_pid}"}, verify=not INSECURE)
     check("g87: POST /pb with form body accepted",
           r.status_code == 200 and r.json().get("updated_status") == "lead", r.text[:160])
@@ -5701,7 +5701,7 @@ print("ESCAPED-OK")
     }
     for _st, _ck in w_clicks.items():
         w_seed(_ck)
-        requests.get(f"{BASE}/pb/{_ck}/{_st}/1", verify=not INSECURE)
+        requests.get(f"{BASE}/pb?clickid={_ck}&status={_st}&payout=1", verify=not INSECURE)
     _w_end = _wtime.time() + 15
     while _wtime.time() < _w_end and len(w_captured) < 2:
         _wtime.sleep(0.5)
@@ -5851,7 +5851,7 @@ print("ESCAPED-OK")
     capi_seed(capi_dis_click)
     r = capi_set(enabled=False, dry_run=True, dataset_id=f"smoke-meta-dis-{capi_pid}")
     check("meta-capi: disabled config saved", r.status_code == 200, r.text[:120])
-    requests.get(f"{BASE}/pb/{capi_dis_click}/sale/5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={capi_dis_click}&status=sale&payout=5", verify=not INSECURE)
     _capi_time.sleep(2.5)
     check("meta-capi: disabled sends nothing",
           capi_paths(f"smoke-meta-dis-{capi_pid}") == [], str(capi_paths(""))[:150])
@@ -5862,7 +5862,7 @@ print("ESCAPED-OK")
     r = capi_set(enabled=True, dry_run=True, dataset_id=f"smoke-meta-dry-{capi_pid}")
     check("meta-capi: dry-run config saved", r.status_code == 200, r.text[:120])
     settle_settings_cache()
-    requests.get(f"{BASE}/pb/{capi_dry_click}/sale/5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={capi_dry_click}&status=sale&payout=5", verify=not INSECURE)
     _capi_time.sleep(2.5)
     check("meta-capi: dry-run makes no HTTP call",
           capi_paths(f"smoke-meta-dry-{capi_pid}") == [], str(capi_paths(""))[:150])
@@ -5881,7 +5881,7 @@ print("ESCAPED-OK")
 
     capi_live_click = f"smoke-meta-live-{capi_pid}"
     capi_seed(capi_live_click, fbc="fb.1.111.smokefbc", fbp="fb.1.222.smokefbp")
-    r = requests.get(f"{BASE}/pb/{capi_live_click}/sale/5",
+    r = requests.get(f"{BASE}/pb?clickid={capi_live_click}&status=sale&payout=5",
                      params={"email": "User@Example.com", "phone": "+15551230000"},
                      verify=not INSECURE)
     check("meta-capi: /pb still returns 200 while CAPI fires", r.status_code == 200, r.text[:120])
@@ -5919,7 +5919,7 @@ print("ESCAPED-OK")
     capi_rej_click = f"smoke-meta-rej-{capi_pid}"
     capi_seed(capi_rej_click)
     before_rej = len(capi_paths(capi_live_ds))
-    requests.get(f"{BASE}/pb/{capi_rej_click}/rejected/1", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={capi_rej_click}&status=rejected&payout=1", verify=not INSECURE)
     _capi_time.sleep(2.5)
     check("meta-capi: status outside send_statuses is not sent",
           len(capi_paths(capi_live_ds)) == before_rej, str(capi_paths(capi_live_ds))[:150])
@@ -5927,11 +5927,11 @@ print("ESCAPED-OK")
     # -- duplicate click_id+status -> exactly one send --
     capi_dup_click = f"smoke-meta-dup-{capi_pid}"
     capi_seed(capi_dup_click)
-    requests.get(f"{BASE}/pb/{capi_dup_click}/sale/5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={capi_dup_click}&status=sale&payout=5", verify=not INSECURE)
     capi_wait_click(capi_dup_click, 1)
     # different payout => not a row-level duplicate, but the CAPI (click,status)
     # dedupe must still suppress the second send
-    requests.get(f"{BASE}/pb/{capi_dup_click}/sale/9", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={capi_dup_click}&status=sale&payout=9", verify=not INSECURE)
     _capi_time.sleep(2.5)
     check("meta-capi: duplicate click_id+status sends exactly once",
           capi_click_count(capi_dup_click) == 1,
@@ -5948,7 +5948,7 @@ print("ESCAPED-OK")
     check("meta-capi: campaign pixel override created", bool(capi_fail_cid), r.text[:150])
     capi_fail_click = f"smoke-meta-fail-{capi_pid}"
     capi_seed(capi_fail_click, cid=capi_fail_cid)
-    r = requests.get(f"{BASE}/pb/{capi_fail_click}/sale/3", verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb?clickid={capi_fail_click}&status=sale&payout=3", verify=not INSECURE)
     check("meta-capi: Graph 500 does not change the /pb response", r.status_code == 200,
           r.text[:150])
     capi_wait_click(capi_fail_click, 1)
@@ -6137,7 +6137,7 @@ print("ESCAPED-OK")
 
     px_chan_click = f"{px_tag}-chan-click"
     px_seed(px_chan_click, cid=px_chan_cid, status="sale", payout=5)
-    requests.get(f"{BASE}/pb/{px_chan_click}/sale/5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={px_chan_click}&status=sale&payout=5", verify=not INSECURE)
     capi_wait_click(px_chan_click, 1)
     check("capi-pixels: channel-bound conversion sent to its pixel",
           capi_click_count(px_chan_click) == 1, f"count={capi_click_count(px_chan_click)}")
@@ -6157,7 +6157,7 @@ print("ESCAPED-OK")
     px_none_click = f"{px_tag}-none-click"
     px_seed(px_none_click, cid=px_plain_cid, status="sale", payout=5)
     before_none = len(capi_captured)
-    requests.get(f"{BASE}/pb/{px_none_click}/sale/5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={px_none_click}&status=sale&payout=5", verify=not INSECURE)
     _capi_time.sleep(2.0)
     check("capi-pixels: unbound conversion sends nothing",
           capi_click_count(px_none_click) == 0, f"count={capi_click_count(px_none_click)}")
@@ -6167,7 +6167,7 @@ print("ESCAPED-OK")
     check("capi-pixels: offer binding saved", r.status_code == 200, r.text[:150])
     px_offer_click = f"{px_tag}-offer-click"
     px_seed(px_offer_click, cid=px_plain_cid, offer_id=px_offer, status="sale", payout=5)
-    requests.get(f"{BASE}/pb/{px_offer_click}/sale/5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={px_offer_click}&status=sale&payout=5", verify=not INSECURE)
     capi_wait_click(px_offer_click, 1)
     check("capi-pixels: offer-bound conversion sent to its pixel",
           capi_click_count(px_offer_click) == 1
@@ -6177,7 +6177,7 @@ print("ESCAPED-OK")
     # -- bound at both levels -> exactly one send (channel resolves first) --
     px_both_click = f"{px_tag}-both-click"
     px_seed(px_both_click, cid=px_chan_cid, offer_id=px_offer, status="sale", payout=5)
-    requests.get(f"{BASE}/pb/{px_both_click}/sale/5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={px_both_click}&status=sale&payout=5", verify=not INSECURE)
     capi_wait_click(px_both_click, 1)
     _capi_time.sleep(1.5)
     check("capi-pixels: pixel bound at both levels sends exactly once",
@@ -6188,7 +6188,7 @@ print("ESCAPED-OK")
     r = px_bind("channel", px_src2, [pxc["id"]], active=True)
     px_off_click = f"{px_tag}-off-click"
     px_seed(px_off_click, cid=px_off_cid, status="sale", payout=5)
-    requests.get(f"{BASE}/pb/{px_off_click}/sale/5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={px_off_click}&status=sale&payout=5", verify=not INSECURE)
     _capi_time.sleep(2.0)
     check("capi-pixels: inactive pixel skipped",
           capi_click_count(px_off_click) == 0, f"count={capi_click_count(px_off_click)}")
@@ -6201,7 +6201,7 @@ print("ESCAPED-OK")
     settle_settings_cache()
     px_dry_click = f"{px_tag}-dry-click"
     px_seed(px_dry_click, cid=px_chan_cid, status="sale", payout=5)
-    requests.get(f"{BASE}/pb/{px_dry_click}/sale/5", verify=not INSECURE)
+    requests.get(f"{BASE}/pb?clickid={px_dry_click}&status=sale&payout=5", verify=not INSECURE)
     _capi_time.sleep(2.0)
     check("capi-pixels: dry-run sends nothing",
           capi_click_count(px_dry_click) == 0, f"count={capi_click_count(px_dry_click)}")
@@ -6369,12 +6369,19 @@ print("ESCAPED-OK")
     check("qp: invalid payout still 400", r.status_code == 400, str(r.status_code))
 
     qp_path = f"{qp_tag}-path"
-    r = requests.get(f"{BASE}/pb/{qp_path}/sale/1.25", verify=not INSECURE)
-    check("qp: path-style /pb still works",
+    r = requests.get(f"{BASE}/pb?clickid={qp_path}&status=sale&payout=1.25", verify=not INSECURE)
+    check("qp: canonical /pb works",
           r.status_code == 200 and r.json().get("duplicate") is False, r.text[:150])
-    r = requests.get(f"{BASE}/pb/{qp_path}/sale/1.25", verify=not INSECURE)
-    check("qp: path-style identical refire still dedupes",
+    r = requests.get(f"{BASE}/pb?clickid={qp_path}&status=sale&payout=1.25", verify=not INSECURE)
+    check("qp: canonical identical refire still dedupes",
           r.status_code == 200 and r.json().get("duplicate") is True, r.text[:150])
+
+    # the legacy path form is removed: unmatched routes 404 and write nothing
+    r = requests.get(f"{BASE}/pb/{qp_tag}-gone/sale/1", verify=not INSECURE)
+    check("qp: legacy path-style /pb is gone (404)", r.status_code == 404, str(r.status_code))
+    r = requests.get(f"{BASE}/pb/{qp_path}/sale/1.25", verify=not INSECURE)
+    check("qp: path-style /pb for an existing click still 404s",
+          r.status_code == 404, str(r.status_code))
 
     # -- per-status Mode: 'new' inserts an extra row, 'repeated' accumulates --
     print("== Postback Mode (new vs repeated) ==")
@@ -6390,9 +6397,9 @@ print("ESCAPED-OK")
     qp_rep_status = qp_rep_name.replace(" ", "_")
 
     qp_new_click = f"{qp_tag}-new"
-    requests.get(f"{BASE}/pb/{qp_new_click}/{qp_new_status}/2",
+    requests.get(f"{BASE}/pb?clickid={qp_new_click}&status={qp_new_status}&payout=2",
                  params={"transaction_id": f"{qp_tag}-n1"}, verify=not INSECURE)
-    r = requests.get(f"{BASE}/pb/{qp_new_click}/{qp_new_status}/3",
+    r = requests.get(f"{BASE}/pb?clickid={qp_new_click}&status={qp_new_status}&payout=3",
                      params={"transaction_id": f"{qp_tag}-n2"}, verify=not INSECURE)
     check("qp: mode=new writes a second conversion row",
           r.status_code == 200 and r.json().get("duplicate") is False and qp_count(qp_new_click) == "2",
@@ -6401,22 +6408,22 @@ print("ESCAPED-OK")
                           f"FROM conversions_data WHERE click_id='{qp_new_click}'")
     check("qp: mode=new keeps both payouts on separate rows", qp_payouts == "2,3", qp_payouts)
 
-    r = requests.get(f"{BASE}/pb/{qp_new_click}/{qp_new_status}/3",
+    r = requests.get(f"{BASE}/pb?clickid={qp_new_click}&status={qp_new_status}&payout=3",
                      params={"transaction_id": f"{qp_tag}-n2"}, verify=not INSECURE)
     check("qp: mode=new still dedupes a repeated transaction id",
           r.status_code == 200 and r.json().get("duplicate") is True and qp_count(qp_new_click) == "2",
           f"{r.text[:100]} rows={qp_count(qp_new_click)}")
 
-    r = requests.get(f"{BASE}/pb/{qp_new_click}/{qp_new_status}/3",
+    r = requests.get(f"{BASE}/pb?clickid={qp_new_click}&status={qp_new_status}&payout=3",
                      params={"transaction_id": f"{qp_tag}-n3"}, verify=not INSECURE)
     check("qp: mode=new fresh transaction id not swallowed by the 60s dedupe",
           r.status_code == 200 and r.json().get("duplicate") is False and qp_count(qp_new_click) == "3",
           f"{r.text[:100]} rows={qp_count(qp_new_click)}")
 
     qp_rep_click = f"{qp_tag}-rep"
-    requests.get(f"{BASE}/pb/{qp_rep_click}/{qp_rep_status}/2",
+    requests.get(f"{BASE}/pb?clickid={qp_rep_click}&status={qp_rep_status}&payout=2",
                  params={"transaction_id": f"{qp_tag}-r1"}, verify=not INSECURE)
-    r = requests.get(f"{BASE}/pb/{qp_rep_click}/{qp_rep_status}/3",
+    r = requests.get(f"{BASE}/pb?clickid={qp_rep_click}&status={qp_rep_status}&payout=3",
                      params={"transaction_id": f"{qp_tag}-r2"}, verify=not INSECURE)
     check("qp: mode=repeated updates in place (one row, accumulated)",
           r.status_code == 200 and qp_count(qp_rep_click) == "1"
