@@ -73,6 +73,19 @@ if [ "$code80" = "502" ] || [ "$code443" = "502" ]; then
     esac
 fi
 
+hdr "tls"
+if [ -s ssl/selfsigned.crt ] && [ -s ssl/selfsigned.key ]; then
+    cm=$(openssl x509 -noout -modulus -in ssl/selfsigned.crt 2>/dev/null | openssl md5)
+    km=$(openssl rsa  -noout -modulus -in ssl/selfsigned.key 2>/dev/null | openssl md5)
+    if [ -n "$cm" ] && [ "$cm" = "$km" ]; then
+        ok "self-signed certificate and key match"
+    else
+        bad "certificate and key do NOT match — nginx cannot reload (emerg: key values mismatch). Fix: rm -f ssl/selfsigned.crt ssl/selfsigned.key && make generate-local-cert && make reload-nginx"
+    fi
+elif [ ! -s ssl/selfsigned.crt ]; then
+    warn "no self-signed pair on disk (expected only if you use a real domain certificate)"
+fi
+
 hdr "login"
 probe_login() {
     # prints its report on stderr and the bare HTTP code on stdout (captured by the caller)

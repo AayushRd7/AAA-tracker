@@ -155,12 +155,32 @@ install: banner check env preclean
 
 install-local: install
 
+# Generate the self-signed pair unless a VALID, matching pair is already present.
+# (The two files must always come from the same openssl run: a certificate restored by
+# git/backup next to a different key makes nginx fail to reload with "key values mismatch".)
 generate-local-cert:
 	@mkdir -p ssl
-	@openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-		-keyout ssl/selfsigned.key \
-		-out ssl/selfsigned.crt \
-		-subj "/C=US/ST=Local/L=Local/O=Dev/OU=Dev/CN=localhost" 2>/dev/null
+	@if [ -s ssl/selfsigned.crt ] && [ -s ssl/selfsigned.key ] && \
+	    [ "$$(openssl x509 -noout -modulus -in ssl/selfsigned.crt 2>/dev/null | openssl md5)" = \
+	      "$$(openssl rsa  -noout -modulus -in ssl/selfsigned.key 2>/dev/null | openssl md5)" ]; then \
+		printf '  $(C)$(B)▸$(R) tls: existing self-signed pair is valid — kept\n'; \
+	else \
+		ip=$$(hostname -I 2>/dev/null | awk '{print $$1}'); \
+		san="DNS:localhost,IP:127.0.0.1"; \
+		[ -n "$$ip" ] && san="$$san,IP:$$ip"; \
+		rm -f ssl/selfsigned.crt ssl/selfsigned.key; \
+		openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+			-keyout ssl/selfsigned.key \
+			-out ssl/selfsigned.crt \
+			-subj "/C=US/ST=Local/L=Local/O=Dev/OU=Dev/CN=localhost" \
+			-addext "subjectAltName=$$san" 2>/dev/null; \
+		if [ "$$(openssl x509 -noout -modulus -in ssl/selfsigned.crt 2>/dev/null | openssl md5)" = \
+		     "$$(openssl rsa  -noout -modulus -in ssl/selfsigned.key 2>/dev/null | openssl md5)" ]; then \
+			printf '  $(C)$(B)▸$(R) tls: self-signed certificate generated (SAN: %s)\n' "$$san"; \
+		else \
+			printf '  $(Y)$(B)!$(R) tls: generated certificate and key do not match — check openssl\n'; \
+		fi; \
+	fi
 
 certificate:
 	@docker exec tracker_nginx certbot --nginx
