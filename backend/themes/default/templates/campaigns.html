@@ -1455,14 +1455,27 @@
                         </span>
                     </div>
                 </v-card-text>
-                <v-card-text v-if="simulateData.stats">
+                <v-card-text v-if="simulateLoading">
+                    <div class="py-4 text-center grey--text">
+                        <v-progress-circular indeterminate size="20" width="2"
+                                             color="primary" class="mr-2"></v-progress-circular>
+                        Running {{ simulateProfile.count }} simulated visitors…
+                    </div>
+                </v-card-text>
+                <v-card-text v-else-if="simulateData.stats">
+                    <div v-if="!simulateEnabledFlowCount()" class="caption orange--text mb-2">
+                        This campaign has no enabled flows — every simulated visitor falls back.
+                    </div>
                     <div class="caption grey--text mb-2">
+                        <span v-if="simulateLastRun" class="font-weight-medium">Last run {{ simulateLastRun }} · </span>
                         {{ simulateData.count }} synthetic visitors through the routing pipeline (no side effects).
                         <span v-if="simulateData.stats.rejected_by_filters">Rejected by filters: {{ simulateData.stats.rejected_by_filters }}.</span>
                         <span v-if="simulateData.stats.fallback">Fallback URL: {{ simulateData.stats.fallback }}.</span>
                         <span v-if="simulateData.stats.capped">Capped: {{ simulateData.stats.capped }}.</span>
                     </div>
                     <div class="subtitle-2 mb-1">Flow distribution</div>
+                    <div v-if="!Object.keys(simulateData.stats.flow_distribution || {}).length"
+                         class="caption grey--text">No flow matched (see the fallback count above).</div>
                     <div v-for="(n, idx) in simulateData.stats.flow_distribution" :key="'f' + idx" class="sim-row">
                         <span class="sim-label">{{ simulateFlowName(idx) }}</span>
                         <div class="sim-bar-track">
@@ -1471,6 +1484,8 @@
                         <span class="sim-count">{{ n }}</span>
                     </div>
                     <div class="subtitle-2 mt-3 mb-1">Schema distribution</div>
+                    <div v-if="!Object.keys(simulateData.stats.schema_distribution || {}).length"
+                         class="caption grey--text">No schema was reached.</div>
                     <div v-for="(n, sch) in simulateData.stats.schema_distribution" :key="'s' + sch" class="sim-row">
                         <span class="sim-label">{{ sch }}</span>
                         <div class="sim-bar-track">
@@ -1479,6 +1494,8 @@
                         <span class="sim-count">{{ n }}</span>
                     </div>
                     <div class="subtitle-2 mt-3 mb-1">Offer distribution</div>
+                    <div v-if="!Object.keys(simulateData.stats.offer_distribution || {}).length"
+                         class="caption grey--text">No offer was reached.</div>
                     <div v-for="(n, oid) in simulateData.stats.offer_distribution" :key="'o' + oid" class="sim-row">
                         <span class="sim-label">{{ offerMap[oid] || ('Offer #' + oid) }}</span>
                         <div class="sim-bar-track">
@@ -1487,8 +1504,8 @@
                         <span class="sim-count">{{ n }}</span>
                     </div>
                 </v-card-text>
-                <v-card-text v-else-if="simulateLoading">
-                    <div class="pa-4 text-center grey--text">Running simulation…</div>
+                <v-card-text v-else>
+                    <div class="pa-4 text-center grey--text">Press Run to simulate traffic.</div>
                 </v-card-text>
                 <v-card-actions>
                     <v-spacer></v-spacer>
@@ -1784,6 +1801,7 @@
                 simulateData: {},
                 simulateItem: null,
                 simulateLoading: false,
+                simulateLastRun: '',
                 simulateProfile: {count: 100, country: '', os: '', browser: '',
                                   device: '', ip_prefix: '', seed: ''},
                 simCountries: [{value: '', text: 'Random mix'}].concat(
@@ -2402,6 +2420,12 @@
             async runSimulate() {
                 if (!this.simulateItem) return;
                 this.simulateLoading = true;
+                // Clear the previous result first: the results block is v-if'd on
+                // stats, so without this a re-run keeps showing the stale (often
+                // identical) output and looks like nothing happened.
+                this.simulateData = {};
+                this.simulateLastRun = '';
+                const startedAt = Date.now();
                 const p = this.simulateProfile;
                 const profile = {};
                 if (p.country) profile.country = p.country;
@@ -2422,7 +2446,12 @@
                     });
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    // keep the running state perceptible even on a fast response
+                    const elapsed = Date.now() - startedAt;
+                    if (elapsed < 450)
+                        await new Promise(r => setTimeout(r, 450 - elapsed));
                     this.simulateData = data;
+                    this.simulateLastRun = new Date().toLocaleTimeString();
                 } catch (err) {
                     this.simulateDialog = false;
                     this.$root.$emit('show-message', {type: 'error',
@@ -2430,6 +2459,10 @@
                 } finally {
                     this.simulateLoading = false;
                 }
+            },
+            simulateEnabledFlowCount() {
+                const flows = ((this.simulateItem || {}).config || {}).flows || [];
+                return flows.filter(f => f && f.enabled).length;
             },
             simulateFlowName(idx) {
                 const flows = ((this.simulateItem || {}).config || {}).flows || [];
