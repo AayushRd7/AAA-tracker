@@ -2,7 +2,7 @@
 # older installs ship the standalone `docker-compose` binary. Detect once.
 COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; else echo "docker-compose"; fi)
 
-.PHONY: check install install-local install-no-sll install-prod-domain install-db \
+.PHONY: check env install install-local install-no-sll install-prod-domain install-db \
         generate-local-cert certificate stop start restart update logs reload-nginx \
         seed-demo-data start-http restart-nginx clear-logs
 
@@ -24,29 +24,45 @@ check:
 		exit 1; }
 	@echo "→ compose: $(COMPOSE)"
 
+# First-run configuration: create .env from .env.example and replace the
+# placeholder credentials with generated ones. An existing .env is never touched.
+env:
+	@if [ -f .env ]; then echo "→ .env present (left unchanged)"; \
+	elif [ -f .env.example ]; then \
+		cp .env.example .env; \
+		gen() { openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'; }; \
+		sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$(gen)|" .env; \
+		sed -i.bak "s|^CLICKHOUSE_PASSWORD=.*|CLICKHOUSE_PASSWORD=$$(gen)|" .env; \
+		sed -i.bak "s|^JWT_SECRET=.*|JWT_SECRET=$$(gen)|" .env; \
+		rm -f .env.bak; \
+		echo "→ created .env from .env.example with generated secrets"; \
+	else \
+		echo "✗ No .env and no .env.example — cannot configure the stack."; exit 1; \
+	fi
+
 install-db:
 	docker exec tracker_backend pip install --no-cache-dir -r /app/install/requirements.txt
 	docker exec tracker_backend python3 /app/install/install.py
 
-install-no-sll: check
+install-no-sll: check env
 	cp nginx/nginx.dev.conf nginx/default.conf
 	$(MAKE) generate-local-cert
 	$(COMPOSE) --compatibility up --build -d
 	$(MAKE) install-db
 
-install-prod-domain: check
+install-prod-domain: check env
 	cp nginx/nginx.prod.conf nginx/default.conf
 	$(COMPOSE) --compatibility up --build -d
 	$(MAKE) certificate
 	$(MAKE) install-db
 
-install: check
+install: check env
 	cp nginx/nginx.dev.conf nginx/default.conf
 	$(MAKE) generate-local-cert
 	$(COMPOSE) --compatibility up --build -d
 	$(MAKE) install-db
 
-install-local: check
+install-local: check env
 	cp nginx/nginx.dev.conf nginx/default.conf
 	$(MAKE) generate-local-cert
 	$(COMPOSE) --compatibility up --build -d
@@ -65,13 +81,13 @@ certificate:
 stop: check
 	$(COMPOSE) down
 
-start: check
+start: check env
 	$(COMPOSE) --compatibility up --build -d
 
-restart: check
+restart: check env
 	$(COMPOSE) down && $(COMPOSE) --compatibility up --build -d
 
-update: check
+update: check env
 	git pull
 	$(MAKE) restart
 
@@ -84,7 +100,7 @@ reload-nginx:
 seed-demo-data:
 	docker exec -it tracker_frontend python3 /app/scripts/seed_demo.py
 
-start-http: check
+start-http: check env
 	$(COMPOSE) up -d nginx backend frontend
 
 restart-nginx: check

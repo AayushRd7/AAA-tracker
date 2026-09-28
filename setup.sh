@@ -67,7 +67,8 @@ cd "$APP_DIR"
 git pull --ff-only || true
 
 echo "[5/9] Env & permissions"
-cp -n .env.example .env || true
+# make env creates .env from .env.example with generated secrets (never overwrites)
+make env
 sudo chown -R "$USER":"$USER" "$APP_DIR"
 sudo chmod -R 0777 "$APP_DIR"
 

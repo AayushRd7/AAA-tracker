@@ -108,6 +108,19 @@ sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-
 
 Then `make install` again. Check what you have with `make check` (it prints which compose command is used).
 
+**`env file .env not found`** — `make install` creates `.env` from `.env.example` automatically on first run
+(with generated Postgres/ClickHouse/JWT secrets), so this should not happen on a current checkout. If you see
+it, you are on an older revision or deleted `.env` mid-setup:
+
+```bash
+git pull
+make env        # recreates .env from .env.example
+make install
+```
+
+An existing `.env` is never overwritten — delete it first if you want fresh credentials (note: an existing
+Postgres data volume keeps its old password, so only do this on a fresh install).
+
 **Containers fail to start / port already in use** — `docker compose down` (or `make stop`), then
 `make install`. Ports 80 and 443 must be free.
 

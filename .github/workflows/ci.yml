@@ -47,6 +47,17 @@ jobs:
       - name: Shell syntax (installer)
         run: bash -n setup.sh && echo "ok: setup.sh syntax"
 
+      - name: First-run config guard
+        run: |
+          # .env is gitignored, so the Makefile must be able to create it.
+          grep -q '^env:' Makefile || { echo "Makefile has no 'env' target"; exit 1; }
+          grep -qE '^install: check env' Makefile || { echo "install must depend on 'env'"; exit 1; }
+          test -f .env.example || { echo ".env.example missing"; exit 1; }
+          mkdir -p /tmp/firstrun && cp Makefile .env.example /tmp/firstrun/
+          (cd /tmp/firstrun && make env >/dev/null && grep -q '^POSTGRES_PASSWORD=' .env \
+            && ! grep -q 'password_password_password' .env)
+          echo "ok: first-run .env creation works and replaces placeholder secrets"
+
       # Live smoke tests need the full stack running — run them locally or
       # against your dev server:
       #   TEST_BASE_URL=https://localhost TEST_INSECURE=1 TEST_USER=... TEST_PASS=... \
