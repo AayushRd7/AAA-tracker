@@ -2,53 +2,79 @@
 # older installs ship the standalone `docker-compose` binary. Detect once.
 COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; else echo "docker-compose"; fi)
 
-.PHONY: check env preclean reset install install-db-fresh install-local install-no-sll install-prod-domain install-db \
-        generate-local-cert certificate stop start restart update logs reload-nginx \
-        seed-demo-data start-http restart-nginx clear-logs
+# ── presentation ────────────────────────────────────────────────────────────
+# Colour is switched off automatically when output is not a terminal (pipes, CI).
+ifeq ($(shell [ -t 1 ] && echo tty),tty)
+  B := \033[1m
+  D := \033[2m
+  G := \033[32m
+  Y := \033[33m
+  C := \033[36m
+  R := \033[0m
+else
+  B :=
+  D :=
+  G :=
+  Y :=
+  C :=
+  R :=
+endif
+
+# $(call step,text) — a single aligned progress line; keep commas out of text.
+step = @printf '  $(C)$(B)▸$(R) %s\n' "$(1)"
+warn = @printf '  $(Y)$(B)!$(R) %s\n' "$(1)"
+
+SCHEME ?= http
+
+.PHONY: banner check env preclean reset summary install install-db install-db-fresh \
+        install-local install-no-sll install-http install-prod-domain generate-local-cert \
+        certificate stop start restart update logs reload-nginx seed-demo-data start-http \
+        restart-nginx clear-logs
+
+banner:
+	@printf '\n$(B)$(C)  AAA TRACKER$(R) $(D)·$(R) $(B)setup$(R)\n'
+	@printf '$(D)  ─────────────────────────────────────────────$(R)\n\n'
 
 # Preflight: fail with an actionable message instead of "No such file or directory".
 check:
 	@command -v docker >/dev/null 2>&1 || { \
-		echo "✗ Docker is not installed. See https://docs.docker.com/engine/install/"; exit 1; }
+		printf '\n  $(Y)$(B)✗ Docker is not installed$(R)\n    https://docs.docker.com/engine/install/\n\n'; exit 1; }
 	@docker compose version >/dev/null 2>&1 || command -v docker-compose >/dev/null 2>&1 || { \
-		echo "✗ Docker Compose not found (neither 'docker compose' nor 'docker-compose')."; \
-		echo ""; \
-		echo "  Recommended — install the Compose plugin:"; \
-		echo "    Debian/Ubuntu : sudo apt-get update && sudo apt-get install -y docker-compose-plugin"; \
-		echo "    RHEL/Fedora   : sudo dnf install -y docker-compose-plugin"; \
-		echo "    Docs          : https://docs.docker.com/compose/install/linux/"; \
-		echo ""; \
-		echo "  Alternative — standalone v2 binary:"; \
-		echo "    sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose"; \
-		echo "    sudo chmod +x /usr/local/bin/docker-compose"; \
+		printf '\n  $(Y)$(B)✗ Docker Compose not found$(R) (neither "docker compose" nor "docker-compose")\n\n'; \
+		printf '    Recommended — install the Compose plugin:\n'; \
+		printf '      Debian/Ubuntu : sudo apt-get update && sudo apt-get install -y docker-compose-plugin\n'; \
+		printf '      RHEL/Fedora   : sudo dnf install -y docker-compose-plugin\n'; \
+		printf '      Docs          : https://docs.docker.com/compose/install/linux/\n\n'; \
+		printf '    Alternative — standalone v2 binary:\n'; \
+		printf '      sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose\n'; \
+		printf '      sudo chmod +x /usr/local/bin/docker-compose\n\n'; \
 		exit 1; }
-	@echo "→ compose: $(COMPOSE)"
+	$(call step,using $(COMPOSE))
 
 # First-run configuration: create .env from .env.example. An existing .env is never
 # touched. Placeholder credentials are replaced with generated ones ONLY when no
 # database volume exists yet — a database keeps the password it was first created
 # with, so rotating it out from under an existing volume would break the stack.
 env:
-	@if [ -f .env ]; then echo "→ .env present (left unchanged)"; \
+	@if [ -f .env ]; then \
+		printf '  $(C)$(B)▸$(R) configuration: .env present (left unchanged)\n'; \
 	elif [ -f .env.example ]; then \
 		cp .env.example .env; \
 		if docker volume ls --format '{{.Name}}' | grep -qx 'aaa-tracker_postgres_data' \
 		   || docker volume ls --format '{{.Name}}' | grep -qx 'postgres_data'; then \
-			echo "⚠️  A database volume already exists but .env is missing."; \
-			echo "    That volume keeps the credentials it was first created with, so the"; \
-			echo "    values from .env.example are kept to match it."; \
-			echo "    To start clean with fresh credentials instead: make reset && make install"; \
-			echo "    (make reset DELETES all tracking data)."; \
+			printf '  $(Y)$(B)!$(R) configuration: database volume found but .env was missing\n'; \
+			printf '    keeping the .env.example credentials so they match that volume.\n'; \
+			printf '    for fresh credentials instead: $(B)make reset && rm .env && make install$(R)\n'; \
 		else \
 			gen() { openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'; }; \
 			sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$(gen)|" .env; \
 			sed -i.bak "s|^CLICKHOUSE_PASSWORD=.*|CLICKHOUSE_PASSWORD=$$(gen)|" .env; \
 			sed -i.bak "s|^JWT_SECRET=.*|JWT_SECRET=$$(gen)|" .env; \
 			rm -f .env.bak; \
-			echo "→ created .env from .env.example with generated secrets"; \
+			printf '  $(C)$(B)▸$(R) configuration: .env created with generated secrets\n'; \
 		fi; \
 	else \
-		echo "✗ No .env and no .env.example — cannot configure the stack."; exit 1; \
+		printf '  $(Y)$(B)✗ No .env and no .env.example — cannot configure the stack.$(R)\n'; exit 1; \
 	fi
 
 # A previous attempt (or a deleted checkout) leaves containers holding the fixed
@@ -63,103 +89,128 @@ preclean: check
 		if docker ps -a --format '{{.Names}}' | grep -qx "$$n"; then stale="$$stale $$n"; fi; \
 	done; \
 	if [ -n "$$stale" ]; then \
-		echo "→ clearing leftover containers from a previous install:"; \
-		for n in $$stale; do echo "    $$n"; done; \
+		printf '  $(C)$(B)▸$(R) clearing containers left over from a previous install\n'; \
+		for n in $$stale; do printf '      $(D)%s$(R)\n' "$$n"; done; \
 		docker rm -f $$stale >/dev/null 2>&1 || true; \
-		echo "  (data volumes preserved — no clicks or conversions are lost)"; \
+		printf '      $(D)data volumes preserved$(R)\n'; \
 	fi
 
 # Ensure the database schema exists — idempotent, never drops anything.
 install-db:
-	docker exec tracker_backend pip install --no-cache-dir -r /app/install/requirements.txt
+	@docker exec tracker_backend pip install --no-cache-dir -q -r /app/install/requirements.txt
 	docker exec tracker_backend python3 /app/install/install.py
+	@printf '  $(C)$(B)▸$(R) databases ready\n'
 
 # DESTRUCTIVE: drop every table and recreate the schema (all tracking data is lost).
 install-db-fresh:
-	docker exec tracker_backend pip install --no-cache-dir -r /app/install/requirements.txt
+	@docker exec tracker_backend pip install --no-cache-dir -q -r /app/install/requirements.txt
 	docker exec tracker_backend python3 /app/install/install.py --recreate
 
-install-no-sll: check env preclean
-	cp nginx/nginx.dev.conf nginx/default.conf
-	$(MAKE) generate-local-cert
-	$(COMPOSE) --compatibility up --build -d --remove-orphans
-	$(MAKE) install-db
+install-no-sll: banner check env preclean
+	$(call step,nginx: dev profile (HTTP + self-signed HTTPS))
+	@cp nginx/nginx.dev.conf nginx/default.conf
+	$(call step,tls: generating a self-signed certificate)
+	@$(MAKE) --no-print-directory generate-local-cert
+	$(call step,containers: building and starting)
+	@$(COMPOSE) --compatibility up --build -d --remove-orphans
+	$(call step,database: ensuring schema)
+	@$(MAKE) --no-print-directory install-db
+	@$(MAKE) --no-print-directory summary SCHEME=http
 
-install-prod-domain: check env preclean
-	cp nginx/nginx.prod.conf nginx/default.conf
-	$(COMPOSE) --compatibility up --build -d --remove-orphans
-	$(MAKE) certificate
-	$(MAKE) install-db
+install-http: install-no-sll
 
-install: check env preclean
-	cp nginx/nginx.dev.conf nginx/default.conf
-	$(MAKE) generate-local-cert
-	$(COMPOSE) --compatibility up --build -d --remove-orphans
-	$(MAKE) install-db
+install-prod-domain: banner check env preclean
+	$(call step,nginx: production profile (HTTPS for your domain))
+	@cp nginx/nginx.prod.conf nginx/default.conf
+	$(call step,containers: building and starting)
+	@$(COMPOSE) --compatibility up --build -d --remove-orphans
+	$(call step,tls: requesting a certificate with certbot)
+	@$(MAKE) --no-print-directory certificate
+	$(call step,database: ensuring schema)
+	@$(MAKE) --no-print-directory install-db
+	@$(MAKE) --no-print-directory summary SCHEME=https
 
-install-local: check env preclean
-	cp nginx/nginx.dev.conf nginx/default.conf
-	$(MAKE) generate-local-cert
-	$(COMPOSE) --compatibility up --build -d --remove-orphans
-	$(MAKE) install-db
+install: banner check env preclean
+	$(call step,nginx: dev profile (HTTP + self-signed HTTPS))
+	@cp nginx/nginx.dev.conf nginx/default.conf
+	$(call step,tls: generating a self-signed certificate)
+	@$(MAKE) --no-print-directory generate-local-cert
+	$(call step,containers: building and starting)
+	@$(COMPOSE) --compatibility up --build -d --remove-orphans
+	$(call step,database: ensuring schema)
+	@$(MAKE) --no-print-directory install-db
+	@$(MAKE) --no-print-directory summary SCHEME=http
+
+install-local: install
 
 generate-local-cert:
-	mkdir -p ssl
-	openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+	@mkdir -p ssl
+	@openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 		-keyout ssl/selfsigned.key \
 		-out ssl/selfsigned.crt \
-		-subj "/C=US/ST=Local/L=Local/O=Dev/OU=Dev/CN=localhost"
+		-subj "/C=US/ST=Local/L=Local/O=Dev/OU=Dev/CN=localhost" 2>/dev/null
 
 certificate:
-	docker exec tracker_nginx certbot --nginx
+	@docker exec tracker_nginx certbot --nginx
+
+# Everything you need after a successful install.
+summary:
+	@ip=$$(hostname -I 2>/dev/null | awk '{print $$1}'); \
+	[ -z "$$ip" ] && ip=$$(curl -s --max-time 3 https://checkip.amazonaws.com 2>/dev/null | tr -d '\n'); \
+	[ -z "$$ip" ] && ip=localhost; \
+	printf '\n  $(G)$(B)✓ ready$(R)\n\n'; \
+	printf '  $(B)dashboard$(R)   $(SCHEME)://%s/backend\n' "$$ip"; \
+	printf '  $(B)login$(R)       tracker_admin / admin   $(Y)change it right away$(R)\n'; \
+	printf '  $(B)help$(R)        make logs · make restart · make update · make check\n\n'
 
 stop: check
-	$(COMPOSE) down
+	@$(COMPOSE) down
 
-start: check env preclean
-	$(COMPOSE) --compatibility up --build -d --remove-orphans
+start: banner check env preclean
+	@$(COMPOSE) --compatibility up --build -d --remove-orphans
 
-restart: check env preclean
-	$(COMPOSE) down && $(COMPOSE) --compatibility up --build -d --remove-orphans
+restart: banner check env preclean
+	@$(MAKE) --no-print-directory stop
+	@$(COMPOSE) --compatibility up --build -d --remove-orphans
+	@printf '\n  $(G)$(B)✓ restarted$(R)\n\n'
 
-update: check env preclean
-	git pull
-	$(MAKE) restart
+update: banner check env preclean
+	@$(call step,pulling the latest code)
+	@git pull
+	@$(MAKE) --no-print-directory restart
 
 logs: check
-	$(COMPOSE) logs -f
+	@$(COMPOSE) logs -f
 
 # DESTRUCTIVE: removes this tracker's containers AND data volumes (all clicks,
 # conversions, settings). Use it to start from scratch, not to upgrade.
-reset: check
-	@echo "⚠️  Removing containers AND data volumes for this tracker…"
-	$(COMPOSE) down --volumes --remove-orphans || true
+reset: banner check
+	$(warn,removing containers AND data volumes — all tracking data is lost)
+	@$(COMPOSE) down --volumes --remove-orphans >/dev/null 2>&1 || true
 	@names=$$(grep -h 'container_name:' docker-compose.yml docker-compose.prod.yml 2>/dev/null | awk '{print $$2}' | sort -u); \
 	for n in $$names; do docker rm -f "$$n" >/dev/null 2>&1 || true; done; \
-	echo "→ reset complete — run 'make install' for a clean setup"
+	printf '  $(G)$(B)✓$(R) reset complete — run $(B)make install$(R) for a clean setup\n\n'
 
 reload-nginx:
-	docker exec tracker_nginx nginx -s reload
+	@docker exec tracker_nginx nginx -s reload
+	@printf '  $(G)$(B)✓$(R) nginx reloaded\n'
 
 seed-demo-data:
-	docker exec -it tracker_frontend python3 /app/scripts/seed_demo.py
+	@docker exec -it tracker_frontend python3 /app/scripts/seed_demo.py
 
 start-http: check env preclean
-	$(COMPOSE) up -d nginx backend frontend
+	@$(COMPOSE) up -d nginx backend frontend
 
 restart-nginx: check
-	$(COMPOSE) restart nginx
+	@$(COMPOSE) restart nginx
 
 clear-logs: check
-	@echo "Stopping containers..."
-	$(COMPOSE) down
-	@echo "Truncating logs..."
-	sudo truncate -s 0 /var/lib/docker/containers/*/*-json.log || true
-	@echo "Clearing logs..."
-	$(COMPOSE) logs --no-color > /dev/null 2>&1 || true
-	@docker system prune -f --volumes || true
-	@echo "Logs cleared (via prune)."
-	rm -f logs/*.log || true
-	@echo "Log files removed"
-	@echo "Starting containers..."
-	$(COMPOSE) --compatibility up --build -d
+	$(call step,stopping containers)
+	@$(COMPOSE) down
+	$(call step,truncating docker logs)
+	@sudo truncate -s 0 /var/lib/docker/containers/*/*-json.log 2>/dev/null || true
+	@docker system prune -f --volumes >/dev/null 2>&1 || true
+	@rm -f logs/*.log 2>/dev/null || true
+	$(call step,starting containers)
+	@$(COMPOSE) --compatibility up --build -d
+	@printf '\n  $(G)$(B)✓$(R) logs cleared\n\n'

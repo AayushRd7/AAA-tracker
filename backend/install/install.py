@@ -45,10 +45,10 @@ def existing_tables(cur):
 
 
 def drop_all_tables(cur, tables):
-    print("\n🗑️  Dropping all tables (--recreate)...")
+    print("  ▸ postgres: dropping all tables (--recreate)")
     for table in tables:
         cur.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE;')
-    print("✅ All tables dropped.\n")
+    print("  ▸ postgres: all tables dropped\n")
 
 
 def run_postgres_install(recreate: bool):
@@ -58,25 +58,25 @@ def run_postgres_install(recreate: bool):
 
     tables = existing_tables(cur)
     if tables:
-        print(f"\nℹ️  Found {len(tables)} existing table(s): {', '.join(tables)}")
+        print(f"  ▸ postgres: {len(tables)} existing table(s) found")
         if recreate:
             drop_all_tables(cur, tables)
         else:
-            print("   Ensuring the schema is complete — nothing is dropped.")
-            print("   (use --recreate to wipe and start over)\n")
+            print("    ensuring the schema is complete — nothing is dropped")
+            print("    (use --recreate to wipe and start over)\n")
     else:
-        print("ℹ️  No tables yet — creating the schema...\n")
+        print("  ▸ postgres: no tables yet — creating the schema\n")
 
     with open(INIT_SQL_FILE, "r", encoding="utf-8") as f:
         cur.execute(f.read())
 
     cur.close()
     conn.close()
-    print("✅ PostgreSQL schema ready.")
+    print("  ▸ postgres: schema ready")
 
 
 def run_clickhouse_install():
-    print("Connecting to ClickHouse...")
+    print("  ▸ clickhouse: connecting")
     client = get_client(
         host=os.getenv("CLICKHOUSE_HOST", "tracker_clickhouse"),
         username=os.getenv("CLICKHOUSE_USER", "user"),
@@ -96,7 +96,7 @@ def run_clickhouse_install():
     for statement in statements:
         client.command(statement)
 
-    print("✅ ClickHouse schema ready.")
+    print("  ▸ clickhouse: schema ready")
 
 
 def main():
@@ -118,7 +118,7 @@ def main():
         print(f"\n❌ Installation error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print("\n✅ Installation complete — PostgreSQL and ClickHouse are ready.")
+    print("\n  ✓ databases ready\n")
 
 
 if __name__ == "__main__":

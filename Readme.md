@@ -167,6 +167,10 @@ By default:
 - API will be available at `https://localhost`
 - Dashboard will be available at `https://localhost/backend`
 
+Opening the bare host (`http://your-server-ip/`) redirects to the dashboard, so you don't
+need to remember the `/backend` path. First login is `tracker_admin` / `admin` — change it
+immediately after signing in.
+
 ---
 
 ## 🏗️ Project Structure

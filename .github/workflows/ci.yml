@@ -51,7 +51,7 @@ jobs:
         run: |
           # .env is gitignored, so the Makefile must be able to create it.
           grep -q '^env:' Makefile || { echo "Makefile has no 'env' target"; exit 1; }
-          grep -qE '^install: check env preclean' Makefile || { echo "install must depend on 'env preclean'"; exit 1; }
+          grep -qE '^install: .*check .*env .*preclean' Makefile || { echo "install must depend on check/env/preclean"; exit 1; }
           test -f .env.example || { echo ".env.example missing"; exit 1; }
           mkdir -p /tmp/firstrun && cp Makefile .env.example /tmp/firstrun/
           (cd /tmp/firstrun && make env >/dev/null && grep -q '^POSTGRES_PASSWORD=' .env)
