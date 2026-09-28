@@ -87,8 +87,19 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 - [x] **47. Simulate-dialog visitor profiles** — visitor count slider, country/OS/browser/device/IP-prefix selects (empty = random mix per visitor), optional seed (blank = entropy); backend omitted-seed default fixed from fixed `0` to true randomness.
 - [x] **48. Sources single-delete guard** — deleting a campaign-linked source now returns 409 with an actionable message (was an unhandled FK 500); confirm dialog and toast name the source.
 
-## 🔜 Next waves (queued, no external credentials needed)
+## 🌐 Wave 11 — IPv6 + ops polish (2026-09-28, 791-check suite green)
 
-- **Wave 11 — tracking-plane parity**: IPv6 ClickHouse storage (G92) · postback rules layer + fanout controls (G85/G86) · `/pb` POST/HEAD + extra postback tokens (G87) · rDNS / conversion-status / source-`is_bot` routing criteria (G88) · prefetch filtering + no-cost-for-bot-clicks (G89) · login IP whitelist (G90) · hide-referrer secondary domain (G91).
-- **Wave 12 — ops polish**: SSL-expiry warning · settings backup/export · conversion-log search by URL · Google Safe Browsing check · pause offers from report rows · server-side GeoIP DB · domain-deletion reassignment · campaign-group filter in clicklog · click-log `campaigns:'own'` scoping.
+- [x] **49. IPv6 click storage (G92)** — new `ip_full String` column on `clicks_data` (idempotent migration); every insert path (hits, click-outs, Click API, impressions, conversions) stores the full client address; click-log (list/paged/CSV/search), live feed and recent visits coalesce `ip_full` over the IPv4 column; exact-IP blacklist entries match v6 canonically; IPv4 CIDRs never mis-match v6 clients; GDPR IP anonymization now masks v6 (last 16 bits). ClickHouse alias-substitution quirk worked around via subquery (`ip_display`). Historical v6 rows remain 0.0.0.0 (no backfill, documented).
+- [x] **50. Fraud feed IPv6** — top-IPs and fraud feed surface the full address instead of 0.0.0.0.
+- [x] **51. SSL-expiry warning (G95)** — `GET /api/domains/ssl-expiry` parses live certbot certs; Domains page shows ok/warning (≤30d)/critical (≤7d)/expired/unknown chips.
+- [x] **52. Settings backup/export + restore (G95)** — export downloads `settings-backup.json` with secrets nulled (keys kept); restore deep-merges, null leaves keep live secret values; garbage rejected 400.
+- [x] **53. Conversion-log search by offer URL (G95)** — `?url=` substring filter against the offer URL, works across list/pagination/CSV; "Offer URL contains" field in the filter bar.
+- [x] **54. Domain-delete guard (G95)** — deleting a campaign-bound domain returns 409 with an actionable message (mirrors the sources guard).
+- [x] **55. Click-log + live-clicks `campaigns:'own'` scoping (G95)** — non-admin scoped users see only their own campaigns' rows in click-log (both response shapes + export) and the live feed; admins/'all' users unchanged.
+
+## 🔜 Queued — will be completed later
+
+- **Wave 12 — postback parity** (self-hosted code, no credentials needed): postback-processing rules layer (transform/filter incoming postbacks — G85) · conversion fanout controls: `disable_upsell` kill-switch + %-sampling to source (G86) · `/pb` POST/HEAD + extra tokens `{status2}`, `{unixconversiontime}`, `event_1..30`, `_md5`, `payout=auto` (G87).
+- **Wave 13 — routing depth + ops leftovers** (self-hosted code): rDNS lookup / conversion-status / source-supplied `is_bot` routing criteria (G88) · `Purpose: prefetch` filtering + no-cost-for-bot-clicks setting (G89) · login IP whitelist (G90) · hide-referrer secondary domain (G91) · Safe Browsing check, pause offers from report rows, server-side GeoIP DB, campaign-group clicklog filter (G95 leftovers).
+- **Follow-ups noted by implementation**: domain-group grants are visibility-level (binding-time enforcement pending — G84); fraud CIDR signals are v4-only (v6 visitors simply never match); true IPv6-through-nginx path untested locally.
 - **Still blocked on user input**: cost auto-sync (5) and CAPI/conversion upload to Meta/Google — need ad-platform API tokens; certbot auto-renewal verification (20).
