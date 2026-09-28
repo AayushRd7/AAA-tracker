@@ -75,6 +75,84 @@ def run_postgres_install(recreate: bool):
     print("  ▸ postgres: schema ready")
 
 
+def reconcile_columns():
+    """Add any column the ORM models declare but the live schema is missing.
+
+    The app's startup migrations cannot repair a database whose tables do not exist
+    yet (they run before the installer creates them), and CREATE TABLE IF NOT EXISTS
+    never adds columns to a table that already exists. Deriving the expected columns
+    from the models keeps every install — fresh, upgraded, or half-initialised —
+    consistent with the code.
+    """
+    try:
+        sys.path.insert(0, "/app")
+        import importlib
+        import pathlib
+
+        from sqlalchemy import inspect as sa_inspect
+        from sqlalchemy import text as sa_text
+
+        # Import every model module first so Base.metadata is fully populated
+        # (Base itself lives in models/base.py; db.py owns the engine).
+        for path in sorted(pathlib.Path("/app/models").glob("*.py")):
+            if path.stem != "__init__":
+                try:
+                    importlib.import_module(f"models.{path.stem}")
+                except Exception:
+                    pass
+
+        from db import engine
+        from models.base import Base
+    except Exception as e:  # pragma: no cover - diagnostics only
+        print(f"  ▸ schema reconcile: skipped ({type(e).__name__}: {e})")
+        return
+
+    added = []
+    inspector = sa_inspect(engine)
+    tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if table.name not in tables:
+                continue
+            present = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in present:
+                    continue
+                ddl_type = column.type.compile(engine.dialect)
+                parts = [f'"{column.name}" {ddl_type}']
+
+                # Carry over scalar model defaults so the new column is populated
+                # (and NOT NULL where the model requires a value).
+                literal = None
+                default = column.default
+                if default is not None and getattr(default, "is_scalar", False):
+                    arg = default.arg
+                    if isinstance(arg, bool):
+                        literal = "true" if arg else "false"
+                    elif isinstance(arg, (int, float)):
+                        literal = str(arg)
+                    elif isinstance(arg, str):
+                        literal = "'" + arg.replace("'", "''") + "'"
+                if literal is not None:
+                    parts.append(f"DEFAULT {literal}")
+                    if not column.nullable:
+                        parts.append("NOT NULL")
+
+                conn.execute(sa_text(
+                    f'ALTER TABLE "{table.name}" ADD COLUMN IF NOT EXISTS '
+                    + " ".join(parts)))
+                added.append(f"{table.name}.{column.name}")
+
+    if added:
+        print(f"  ▸ schema reconcile: added {len(added)} missing column(s)")
+        for item in added[:10]:
+            print(f"      {item}")
+        if len(added) > 10:
+            print(f"      … and {len(added) - 10} more")
+    else:
+        print("  ▸ schema reconcile: up to date")
+
+
 def run_clickhouse_install():
     print("  ▸ clickhouse: connecting")
     client = get_client(
@@ -110,6 +188,7 @@ def main():
 
     try:
         run_postgres_install(args.recreate)
+        reconcile_columns()
         run_clickhouse_install()
     except psycopg2.OperationalError as e:
         print(f"\n🚫 Failed to connect to PostgreSQL: {e}", file=sys.stderr)

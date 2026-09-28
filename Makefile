@@ -100,6 +100,10 @@ install-db:
 	@docker exec tracker_backend pip install --no-cache-dir -q -r /app/install/requirements.txt
 	docker exec tracker_backend python3 /app/install/install.py
 	@printf '  $(C)$(B)▸$(R) databases ready\n'
+	@# The services boot before the tables exist, so their startup migrations could not
+	@# run — restart them now that the schema is in place.
+	@$(COMPOSE) restart backend frontend >/dev/null 2>&1 || true
+	@printf '  $(C)$(B)▸$(R) services restarted (runtime migrations applied)\n'
 
 # DESTRUCTIVE: drop every table and recreate the schema (all tracking data is lost).
 install-db-fresh:

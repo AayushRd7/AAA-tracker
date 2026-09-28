@@ -41,7 +41,13 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(255) UNIQUE,
     password_hash TEXT NOT NULL,
     is_admin BOOLEAN DEFAULT FALSE,
-    active BOOLEAN DEFAULT TRUE
+    active BOOLEAN DEFAULT TRUE,
+    -- G62/G63: kept in sync with models/user.py so a fresh database is complete
+    -- even when the app's startup migrations run before the tables exist.
+    totp_secret TEXT,
+    totp_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    totp_backup JSONB,
+    permissions JSONB
 );
 
 
