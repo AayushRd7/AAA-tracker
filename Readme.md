@@ -121,6 +121,16 @@ make install
 An existing `.env` is never overwritten — delete it first if you want fresh credentials (note: an existing
 Postgres data volume keeps its old password, so only do this on a fresh install).
 
+**`Conflict. The container name "/tracker_clickhouse" is already in use`** — leftover containers from a
+previous attempt (or a checkout you deleted) still hold the fixed names this stack uses. `make install` now
+clears them automatically before starting (`make preclean` does it on its own) — **data volumes are not
+touched**. If you want to start truly from scratch instead:
+
+```bash
+make reset      # removes containers AND data volumes — all tracking data is lost
+make install
+```
+
 **Containers fail to start / port already in use** — `docker compose down` (or `make stop`), then
 `make install`. Ports 80 and 443 must be free.
 

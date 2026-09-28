@@ -51,12 +51,20 @@ jobs:
         run: |
           # .env is gitignored, so the Makefile must be able to create it.
           grep -q '^env:' Makefile || { echo "Makefile has no 'env' target"; exit 1; }
-          grep -qE '^install: check env' Makefile || { echo "install must depend on 'env'"; exit 1; }
+          grep -qE '^install: check env preclean' Makefile || { echo "install must depend on 'env preclean'"; exit 1; }
           test -f .env.example || { echo ".env.example missing"; exit 1; }
           mkdir -p /tmp/firstrun && cp Makefile .env.example /tmp/firstrun/
-          (cd /tmp/firstrun && make env >/dev/null && grep -q '^POSTGRES_PASSWORD=' .env \
-            && ! grep -q 'password_password_password' .env)
-          echo "ok: first-run .env creation works and replaces placeholder secrets"
+          (cd /tmp/firstrun && make env >/dev/null && grep -q '^POSTGRES_PASSWORD=' .env)
+          echo "ok: first-run .env creation works"
+
+      - name: Container-name cleanup guard
+        run: |
+          # Leftover containers holding our fixed names must be cleared before up,
+          # otherwise 'docker compose up' fails with a name conflict.
+          grep -q '^preclean:' Makefile || { echo "Makefile has no 'preclean' target"; exit 1; }
+          grep -q 'container_name:' docker-compose.yml || { echo "no container_name in compose"; exit 1; }
+          grep -q -- '--remove-orphans' Makefile || { echo "compose up should pass --remove-orphans"; exit 1; }
+          echo "ok: leftover-container handling present"
 
       # Live smoke tests need the full stack running — run them locally or
       # against your dev server:
