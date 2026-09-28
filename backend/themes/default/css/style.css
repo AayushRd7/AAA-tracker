@@ -1081,6 +1081,34 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 }
 
 /* ---------- Dialog width scale ---------- */
+/* Tall dialogs: the card becomes a flex column with a scrolling body and a pinned
+   action bar, so Cancel/Save stay reachable no matter how far the content scrolls.
+   (Same treatment the campaign editor uses; applies to any card with .dialog-flex.) */
+.v-dialog > .v-card.dialog-flex {
+  display: flex;
+  flex-direction: column;
+  height: min(860px, calc(100vh - 56px));
+  max-height: none;
+  overflow: hidden;
+}
+.v-dialog > .v-card.dialog-flex > .v-card__title,
+.v-dialog > .v-card.dialog-flex > .v-card-title {
+  flex: none;
+}
+.v-dialog > .v-card.dialog-flex > .v-card__text,
+.v-dialog > .v-card.dialog-flex > .v-card-text {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.v-dialog > .v-card.dialog-flex > .v-card__actions,
+.v-dialog > .v-card.dialog-flex > .v-card-actions {
+  flex: none;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 12px;
+}
+
 .v-dialog > .v-card.dialog-sm { max-width: 420px; }
 .v-dialog > .v-card.dialog-md { max-width: 560px; }
 .v-dialog > .v-card.dialog-lg { max-width: 720px; }

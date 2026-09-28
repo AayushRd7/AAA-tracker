@@ -18,8 +18,8 @@
             </v-col>
         </v-row>
 
-        <v-dialog v-model="dialog">
-            <v-card class="dialog-lg">
+        <v-dialog v-model="dialog" persistent>
+            <v-card class="dialog-lg dialog-flex">
                 <v-card-title>
                     <span class="text-h6">{{ isEdit ? 'Edit source' : 'Add source' }}</span>
                 </v-card-title>

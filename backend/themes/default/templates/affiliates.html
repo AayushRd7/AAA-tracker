@@ -18,7 +18,7 @@
             </v-col>
         </v-row>
 
-        <v-dialog v-model="dialog">
+        <v-dialog v-model="dialog" persistent>
             <v-card class="dialog-md">
                 <v-card-title>
                     <span class="text-h6">{{ isEdit ? 'Edit affiliate network' : 'Add affiliate network' }}</span>
@@ -60,7 +60,7 @@
         </v-dialog>
 
         <v-dialog v-model="catalogOpen" scrollable>
-            <v-card class="dialog-lg">
+            <v-card class="dialog-lg dialog-flex">
                 <v-card-title class="d-flex align-center">
                     <span class="text-h6">Offer Sources Catalog</span>
                     <v-spacer></v-spacer>

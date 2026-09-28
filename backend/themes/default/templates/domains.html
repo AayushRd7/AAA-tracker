@@ -26,8 +26,8 @@
         </v-alert>
 
 
-        <v-dialog v-model="dialog">
-            <v-card class="dialog-md">
+        <v-dialog v-model="dialog" persistent>
+            <v-card class="dialog-md dialog-flex">
                 <v-card-title>
                     <span class="text-h6">{{ isEdit ? 'Edit domain' : 'Add domain' }}</span>
                 </v-card-title>
