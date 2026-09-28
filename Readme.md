@@ -77,6 +77,10 @@ Key features:
 
 ### Install
 
+Requirements: Docker Engine with **either** the Compose v2 plugin (`docker compose`) **or** the standalone
+`docker-compose` binary. `make install` detects which one you have and uses it — no need to install the
+legacy binary on modern Docker.
+
 Don't forget to open ports 443 and 80 for nginx.
 
 ```bash
@@ -84,6 +88,28 @@ git clone https://github.com/AayushRd7/AAA-tracker.git
 cd AAA-tracker
 make install
 ```
+
+### Troubleshooting
+
+**`make: docker-compose: No such file or directory`** — you have the modern Compose plugin and no legacy
+binary (or the reverse). Current Docker installs ship only `docker compose`. Fix it with either:
+
+```bash
+# Recommended — the Compose plugin (Debian/Ubuntu)
+sudo apt-get update && sudo apt-get install -y docker-compose-plugin
+
+# or RHEL/Fedora
+sudo dnf install -y docker-compose-plugin
+
+# or the standalone v2 binary (any distro)
+sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+  -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose
+```
+
+Then `make install` again. Check what you have with `make check` (it prints which compose command is used).
+
+**Containers fail to start / port already in use** — `docker compose down` (or `make stop`), then
+`make install`. Ports 80 and 443 must be free.
 
 ### Restart
 

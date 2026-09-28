@@ -30,6 +30,23 @@ jobs:
                   yaml.safe_load(fh)
               print(f'ok: {f}')
           EOF
+      - name: Compose portability guard
+        run: |
+          # Recipes must invoke $(COMPOSE), never a hardcoded binary, so the
+          # Makefile works with both `docker compose` and `docker-compose`.
+          if grep -nE '^[[:space:]]+docker-compose[[:space:]]' Makefile; then
+            echo "Makefile invokes docker-compose directly — use \$(COMPOSE)"
+            exit 1
+          fi
+          grep -q '\$(COMPOSE)' Makefile || { echo "Makefile never uses \$(COMPOSE)"; exit 1; }
+          echo "ok: Makefile is compose-flavour agnostic"
+
+      - name: Makefile dry-run (parses, no docker needed)
+        run: make -n install >/dev/null && echo "ok: make install parses"
+
+      - name: Shell syntax (installer)
+        run: bash -n setup.sh && echo "ok: setup.sh syntax"
+
       # Live smoke tests need the full stack running — run them locally or
       # against your dev server:
       #   TEST_BASE_URL=https://localhost TEST_INSECURE=1 TEST_USER=... TEST_PASS=... \

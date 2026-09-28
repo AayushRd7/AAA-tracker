@@ -125,9 +125,42 @@ Audit: four independent read-only passes (tracking plane, backend API, templates
 - [x] **66. Hide-referrer secondary domain (G91)** — optional `tracking.referrer_hiding_domain`: the hop becomes a 302 to that domain's `/__hide_referrer?u=…` route (http/https destinations only, `javascript:` rejected 404); unset keeps the current inline meta-refresh.
 - [x] **67. Scalability/ops (wave 15 items shipped)** — conversions click-date window capped at 50k visitor ids with loud degradation logging; deterministic pagination (click_id tiebreak for click-log, dimension tiebreak for breakdowns); ClickHouse timezone pinned to UTC; pause/resume offers from report rows (audited `POST /api/offers/{id}/status`); campaign-tag (any) filter in the click log incl. count + CSV export.
 
+## 🔌 Wave 16 — CAPI integrations: platforms, OAuth sign-in, channel binding
+
+**Planned (owner action pending: register the platform apps — target tomorrow).**
+
+Model: pixels are records in **CAPI Integrations**; a **traffic source (channel)** can *connect* to a platform and then select from that account's assets; the same picker exists at **offer level**. Configure a pixel at channel level **or** offer level — never both (duplicate events; the sender resolves channel first and sends once). Everything is dry-run until an admin flips **Active**.
+
+**Two connection paths per platform:**
+- **Connect (OAuth)** — needs an app you own per platform. Credentials go into **Settings → Integrations** (Client ID / Secret) — secrets are never shared outside your install. The callback URL to whitelist is `https://<your-tracker-domain>/backend/api/integrations/<platform>/callback`.
+- **Paste token (manual)** — works immediately, no app review. Required for platforms with no public OAuth and as the fallback while an app is pending approval.
+
+**Platforms to support** (target 6+):
+
+| Platform | Sign-in (OAuth) | Destination ID | Token | Click-id param | Notes |
+|---|---|---|---|---|---|
+| Meta | Yes | Dataset/Pixel ID | Conversions API access token | `fbclid` → `fbc`, `_fbp` | built (pixel model in progress) |
+| Snapchat | Yes | Pixel ID | Conversions API token | `sc_click_id` | Events Manager → generate token |
+| TikTok | Yes | Pixel Code | Access Token | `ttclid` | Events API 2.0; sandbox available |
+| Pinterest | Yes | Ad Account ID | Conversions API token | `epik` | OAuth `ads:read`; trial access for own account |
+| AppLovin | **No** | Account/app ID + SDK key | S2S/postback API token | their macro (confirm from docs) | manual token only |
+| OpenAI / ChatGPT Ads | **No** (partner-gated) | Ads Manager account | API token | TBD | OpenAI and ChatGPT are the **same** platform |
+| *candidate 7th: Google Ads* | Yes | Conversion action | OAuth + **developer token** | `gclid` | offline conversion import / Enhanced Conversions |
+
+**Per-platform code work once credentials exist:** platform-aware pixel dialog (fields differ per platform), asset discovery after connect (pixels / datasets / ad accounts listed as *connected*), event-name mapping per platform's allowed list, value/currency handling, test-event support ("Send test event" per pixel), token refresh + storage, and click-id capture for each param in the table.
+
+**Steps to finish:**
+- [ ] Settings → Integrations: per-platform app credentials + callback URL display.
+- [ ] OAuth start/callback endpoints per platform + token store with refresh.
+- [ ] Asset fetch (pixels/datasets/ad accounts) and "connected" labelling in the channel/offer picker.
+- [ ] Manual-token path for AppLovin / OpenAI and anything awaiting app review.
+- [ ] Meta/Snapchat/TikTok/Pinterest senders; AppLovin + OpenAI once their docs/tokens are confirmed.
+- [ ] Optional 7th: Google Ads (needs a developer token application).
+
 ## 🔜 Queued — will be completed later
 
 - **Remaining G95 leftovers**: Google Safe Browsing checks (needs an API key) · server-side GeoIP DB (needs a MaxMind license or equivalent) — both implemented as opt-in settings the moment a key/license exists.
 - **Wave 15 — scalability follow-ups** (deferred by design, volume-dependent): legacy flow-schema migration for configs carrying the removed `split` schema, ReplacingMergeTree redesign to replace the per-postback `ALTER UPDATE` mutation, fraud CIDR signals extended to IPv6, lazy rDNS resolution (only when a campaign actually filters on `rdns`).
 - **Follow-ups noted by implementation**: domain-group grants are visibility-level (binding-time enforcement pending — G84); fraud CIDR signals are v4-only (v6 visitors simply never match); true IPv6-through-nginx path untested locally.
+- **Installer portability**: `make install` now works with either the modern `docker compose` plugin or the legacy `docker-compose` binary (auto-detected, with an actionable preflight error and `make check`); `setup.sh` installs the plugin (or the standalone binary as fallback) and detects the distro; CI guards against re-hardcoding the binary and dry-runs the Makefile.
 - **Still blocked on user input**: cost auto-sync (5) and CAPI/conversion upload to Meta/Google — need ad-platform API tokens; certbot auto-renewal verification (20).
