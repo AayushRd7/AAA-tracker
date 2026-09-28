@@ -41,6 +41,10 @@
             <optimizer-component></optimizer-component>
         </div>
 
+        <div v-show="$root.activeSection === 'conversion-tracking'">
+            <conversion-tracking-component></conversion-tracking-component>
+        </div>
+
         <div v-show="$root.activeSection === 'settings'">
             <settings-component></settings-component>
         </div>

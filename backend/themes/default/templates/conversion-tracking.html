@@ -1,0 +1,571 @@
+{% raw %}
+<script type="text/x-template" id="conversion-tracking-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4">
+            <div>
+                <div class="page-title">Conversion tracking</div>
+                <div class="page-subtitle">Postback URLs, tokens and conversion types in one place</div>
+            </div>
+            <div class="d-flex align-center">
+                <v-btn
+                        color="primary"
+                        elevation="0"
+                        :loading="saving"
+                        @click="saveAll"
+                >
+                    <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save
+                </v-btn>
+            </div>
+        </div>
+
+        <v-row dense>
+            <!-- ===== 1. Postback domain ===== -->
+            <v-col cols="12">
+                <v-card class="pa-4">
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-earth</v-icon>
+                        Postback domain
+                    </v-card-title>
+                    <v-card-text>
+                        <div class="caption grey--text mb-3">
+                            The selected domain is what the URL templates below use; using a different
+                            custom domain directly in your flow is fine — the tracker accepts postbacks on
+                            any domain it serves.
+                        </div>
+                        <v-row dense>
+                            <v-col cols="12" md="6">
+                                <v-select
+                                        label="Domain"
+                                        :items="domainChoices"
+                                        v-model="domainChoice"
+                                        outlined
+                                        dense
+                                        hide-details
+                                        class="ct-select"
+                                ></v-select>
+                            </v-col>
+                            <v-col cols="12" md="6">
+                                <v-text-field
+                                        label="Custom domain (optional)"
+                                        v-model="customDomain"
+                                        placeholder="track.example.com"
+                                        outlined
+                                        dense
+                                        hide-details
+                                        hint="Overrides the picker when set"
+                                        persistent-hint
+                                ></v-text-field>
+                            </v-col>
+                        </v-row>
+                        <div class="d-flex align-center code-row mt-3">
+                            <code class="code-inline">{{ effectiveDomain }}</code>
+                            <v-btn icon small color="primary" @click="copyText(effectiveDomain)">
+                                <v-icon small>mdi-content-copy</v-icon>
+                            </v-btn>
+                        </div>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+
+            <!-- ===== 2. Tracking builder ===== -->
+            <v-col cols="12">
+                <v-card class="pa-4">
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-link-variant</v-icon>
+                        Tracking builder
+                    </v-card-title>
+                    <v-card-text>
+                        <v-row dense>
+                            <v-col cols="12" md="4">
+                                <v-select
+                                        label="Integration type"
+                                        :items="integrationTypes"
+                                        v-model="integrationType"
+                                        item-text="text"
+                                        item-value="value"
+                                        outlined
+                                        dense
+                                        hide-details
+                                        class="ct-select"
+                                ></v-select>
+                            </v-col>
+                            <v-col cols="12" md="4">
+                                <v-select
+                                        label="Conversion type"
+                                        :items="statusList"
+                                        v-model="conversionType"
+                                        outlined
+                                        dense
+                                        hide-details
+                                        class="ct-select"
+                                ></v-select>
+                            </v-col>
+                            <v-col cols="12" md="4">
+                                <v-text-field
+                                        label="Tracking domain (override)"
+                                        v-model="builderDomain"
+                                        :placeholder="effectiveDomain"
+                                        outlined
+                                        dense
+                                        hide-details
+                                        class="ct-select"
+                                ></v-text-field>
+                            </v-col>
+                        </v-row>
+                        <div class="caption grey--text mt-3 mb-1">{{ integrationNote }}</div>
+
+                        <v-divider class="my-4"></v-divider>
+
+                        <!-- Query-style postback URL -->
+                        <div class="ct-block-title">
+                            <v-icon small color="primary" class="mr-1">mdi-cloud-upload-outline</v-icon>
+                            Query-style postback URL
+                        </div>
+                        <div class="caption grey--text mb-2">
+                            Replace <code>{clickid}</code>, <code>{payout}</code> and <code>{tid}</code>
+                            with the network's own macros (its click-id, payout and transaction-id
+                            placeholders); <code>{status}</code> is fixed to the conversion type above.
+                        </div>
+                        <div class="d-flex align-center code-row">
+                            <code class="code-inline">{{ queryPostbackUrl }}</code>
+                            <v-btn icon small color="primary" @click="copyText(queryPostbackUrl)">
+                                <v-icon small>mdi-content-copy</v-icon>
+                            </v-btn>
+                        </div>
+
+                        <!-- Path-style postback URL -->
+                        <div class="ct-block-title mt-4">
+                            <v-icon small color="primary" class="mr-1">mdi-cloud-upload-outline</v-icon>
+                            Path-style postback URL <span class="caption grey--text">(kept for compatibility)</span>
+                        </div>
+                        <div class="d-flex align-center code-row">
+                            <code class="code-inline">{{ pathPostbackUrl }}</code>
+                            <v-btn icon small color="primary" @click="copyText(pathPostbackUrl)">
+                                <v-icon small>mdi-content-copy</v-icon>
+                            </v-btn>
+                        </div>
+
+                        <!-- Conversion pixel -->
+                        <div class="ct-block-title mt-4">
+                            <v-icon small color="primary" class="mr-1">mdi-image-filter-center-focus</v-icon>
+                            Conversion pixel
+                        </div>
+                        <v-row dense class="align-center">
+                            <v-col cols="12" md="5">
+                                <v-text-field
+                                        label="Campaign alias"
+                                        v-model="pixelAlias"
+                                        placeholder="your-campaign-alias"
+                                        outlined
+                                        dense
+                                        hide-details
+                                        class="ct-select"
+                                ></v-text-field>
+                            </v-col>
+                            <v-col cols="12" md="7">
+                                <div class="d-flex align-center code-row">
+                                    <code class="code-inline">{{ pixelUrl }}</code>
+                                    <v-btn icon small color="primary" @click="copyText(pixelUrl)">
+                                        <v-icon small>mdi-content-copy</v-icon>
+                                    </v-btn>
+                                </div>
+                            </v-col>
+                        </v-row>
+                        <div class="caption grey--text mt-1">
+                            The click id comes from the <code>?click_id=</code> parameter or the
+                            <code>aaa_cid</code> first-party cookie set on the landing page.
+                        </div>
+
+                        <!-- JS tracking snippet -->
+                        <div class="ct-block-title mt-4">
+                            <v-icon small color="primary" class="mr-1">mdi-language-javascript</v-icon>
+                            JS tracking snippet
+                        </div>
+                        <div class="caption grey--text mb-2">
+                            The script reads the campaign alias from <code>?c=</code> and exposes
+                            <code>aaaTrack.fire(status, payout, extra)</code>; it sets the first-party
+                            click-id cookie automatically.
+                        </div>
+                        <div class="d-flex align-start code-row code-row--multiline">
+                            <pre class="code-block">{{ jsSnippet }}</pre>
+                            <v-btn icon small color="primary" @click="copyText(jsSnippet)">
+                                <v-icon small>mdi-content-copy</v-icon>
+                            </v-btn>
+                        </div>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+
+            <!-- ===== Token legend ===== -->
+            <v-col cols="12">
+                <v-card class="pa-4">
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-variable</v-icon>
+                        Token legend
+                    </v-card-title>
+                    <v-card-text>
+                        <v-simple-table dense class="ct-token-table">
+                            <thead>
+                                <tr>
+                                    <th>Token</th>
+                                    <th>Meaning</th>
+                                    <th>Example</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="t in tokenRows" :key="t.token">
+                                    <td><code>{{ t.token }}</code></td>
+                                    <td>{{ t.meaning }}</td>
+                                    <td><code>{{ t.example }}</code></td>
+                                </tr>
+                            </tbody>
+                        </v-simple-table>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+
+            <!-- ===== 3. Conversion types ===== -->
+            <v-col cols="12">
+                <v-card class="pa-4">
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-tag-multiple-outline</v-icon>
+                        Conversion types
+                    </v-card-title>
+                    <v-card-text>
+                        <div class="caption grey--text mb-3">
+                            Mode controls whether an incoming conversion creates a new conversion or is
+                            recorded as a repeat of an existing one; role marks a type as primary or
+                            secondary. A conversion type not recognised by the tracker is recorded under a
+                            default status.
+                        </div>
+                        <v-simple-table dense class="ct-status-table">
+                            <thead>
+                                <tr>
+                                    <th>Status</th>
+                                    <th>Mode</th>
+                                    <th>Role</th>
+                                    <th>Colour</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="s in builtinStatuses" :key="'b-' + s">
+                                    <td>
+                                        <span class="status-chip status-chip--neutral mr-2">{{ s }}</span>
+                                        <span class="caption grey--text">built-in</span>
+                                    </td>
+                                    <td class="caption grey--text">new</td>
+                                    <td class="caption grey--text">primary</td>
+                                    <td class="caption grey--text">default</td>
+                                    <td></td>
+                                </tr>
+                                <tr v-for="(cs, i) in customStatuses" :key="'c-' + i">
+                                    <td>
+                                        <v-text-field
+                                                v-model="cs.name"
+                                                label="Status name"
+                                                outlined
+                                                dense
+                                                hide-details
+                                                class="ct-select"
+                                        ></v-text-field>
+                                        <div class="caption grey--text mt-1">{{ slugifyStatus(cs.name) || '…' }}</div>
+                                    </td>
+                                    <td>
+                                        <v-select
+                                                :items="modeOptions"
+                                                v-model="cs.mode"
+                                                outlined
+                                                dense
+                                                hide-details
+                                                class="ct-select"
+                                        ></v-select>
+                                    </td>
+                                    <td>
+                                        <v-select
+                                                :items="roleOptions"
+                                                v-model="cs.role"
+                                                outlined
+                                                dense
+                                                hide-details
+                                                class="ct-select"
+                                        ></v-select>
+                                    </td>
+                                    <td>
+                                        <div class="d-flex align-center">
+                                            <input type="color" v-model="cs.color" class="ct-color-input"
+                                                   :title="cs.color || '#90a4ae'" aria-label="Status colour">
+                                            <code class="ml-2 caption">{{ cs.color || '#90a4ae' }}</code>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <v-btn icon small @click="removeCustomStatus(i)">
+                                            <v-icon small color="red">mdi-close</v-icon>
+                                        </v-btn>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </v-simple-table>
+                        <div class="mt-2">
+                            <v-btn small text color="primary" @click="addCustomStatus">
+                                <v-icon small class="mr-1">mdi-plus</v-icon>Add conversion type
+                            </v-btn>
+                        </div>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+        </v-row>
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('conversion-tracking-component', {
+        template: '#conversion-tracking-template',
+        data() {
+            return {
+                loading: false,
+                saving: false,
+                settings: {postback_domain: '', domain: '', custom_statuses: []},
+                domains: [],
+                domainChoice: '',
+                customDomain: '',
+                builderDomain: '',
+                pixelAlias: '',
+                integrationType: 'affiliate_network',
+                conversionType: 'sale',
+                builtinStatuses: ['lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'],
+                integrationTypes: [
+                    {text: 'Affiliate network', value: 'affiliate_network'},
+                    {text: 'Custom website', value: 'custom_website'},
+                    {text: 'CRM', value: 'crm'},
+                ],
+                integrationNotes: {
+                    affiliate_network: 'Affiliate network: paste the query-style URL into the network\'s postback field and swap {clickid}, {payout} and {tid} for that network\'s own click-id, payout and transaction-id macros.',
+                    custom_website: 'Custom website: call the query-style URL from your server when the conversion happens, replacing {clickid} and {payout} with your own values (or use the pixel/JS snippet on the page).',
+                    crm: 'CRM: push the query-style URL from your CRM webhook, replacing {clickid} with the stored click id and {payout} with the deal value; {tid} is optional.',
+                },
+                modeOptions: [
+                    {text: 'Create new conversion: new', value: 'new'},
+                    {text: 'Create new conversion: repeated', value: 'repeated'},
+                ],
+                roleOptions: [
+                    {text: 'Primary', value: 'primary'},
+                    {text: 'Secondary', value: 'secondary'},
+                ],
+                tokenRows: [
+                    {token: '{clickid} / {click_id}', meaning: 'The visitor\'s unique click id (incoming postback)', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'},
+                    {token: '{status}', meaning: 'Conversion type/status to record (incoming and outgoing)', example: 'sale'},
+                    {token: '{payout}', meaning: 'Conversion payout (incoming and outgoing)', example: '49.90'},
+                    {token: '{tid} / {transaction_id}', meaning: 'The network\'s transaction id — used for de-duplication and clickless attribution', example: 'TXN-98765'},
+                    {token: '{sub_id_1} … {sub_id_10}', meaning: 'Up to ten free-form sub ids carried with the conversion', example: 'sub_id_1=fb-42'},
+                    {token: '{_md5}', meaning: 'Outgoing only — md5 hex of the click id, for networks that expect a hashed id', example: 'e0a1f4c2b7d8…'},
+                    {token: '{unixconversiontime}', meaning: 'Outgoing only — conversion time as Unix seconds', example: '1738000000'},
+                    {token: '{status2}', meaning: 'Outgoing only — secondary status when the conversion carries one, empty otherwise', example: 'upsale'},
+                    {token: '{event_1} … {event_30}', meaning: 'Outgoing only — custom conversion event parameters stored on the conversion', example: 'event_1=checkout'},
+                    {token: 'payout=auto', meaning: 'Outgoing only — literal in a postback URL, replaced by the payout actually being fired', example: 'payout=49.90'},
+                ],
+            };
+        },
+        computed: {
+            trackerDomain() {
+                return (this.settings.postback_domain || this.settings.domain
+                    || (window.location && window.location.host) || '').trim();
+            },
+            domainChoices() {
+                const set = new Set();
+                (this.domains || []).forEach(d => { if (d.domain) set.add(d.domain); });
+                if (this.settings.domain) set.add(this.settings.domain);
+                if (this.trackerDomain) set.add(this.trackerDomain);
+                return Array.from(set);
+            },
+            effectiveDomain() {
+                return (this.customDomain || this.domainChoice || this.trackerDomain || '').trim();
+            },
+            builderHost() {
+                return (this.builderDomain || this.effectiveDomain || '').trim();
+            },
+            statusList() {
+                const customs = (this.customStatuses || [])
+                    .map(s => this.slugifyStatus(s.name)).filter(Boolean);
+                return Array.from(new Set([...this.builtinStatuses, ...customs]));
+            },
+            customStatuses() {
+                return (this.settings && Array.isArray(this.settings.custom_statuses))
+                    ? this.settings.custom_statuses : [];
+            },
+            integrationNote() {
+                const note = this.integrationNotes[this.integrationType];
+                return note || '';
+            },
+            queryPostbackUrl() {
+                return 'https://' + this.builderHost
+                    + '/pb?clickid={clickid}&payout={payout}&status='
+                    + encodeURIComponent(this.conversionType) + '&tid={tid}';
+            },
+            pathPostbackUrl() {
+                return 'https://' + this.builderHost + '/pb/{click_id}/'
+                    + encodeURIComponent(this.conversionType) + '/{payout}';
+            },
+            pixelAliasValue() {
+                return (this.pixelAlias || '').trim() || 'your-campaign-alias';
+            },
+            pixelUrl() {
+                return 'https://' + this.builderHost + '/p/' + this.pixelAliasValue
+                    + '?status=' + encodeURIComponent(this.conversionType) + '&payout=PAYOUT';
+            },
+            jsSnippet() {
+                const status = this.conversionType || 'sale';
+                return '<script src="https://' + this.builderHost + '/t.js?c='
+                    + this.pixelAliasValue + '" async><\/script>\n'
+                    + '<script>\n'
+                    + '  // Fire a conversion for this visitor (click id read from the aaa_cid cookie)\n'
+                    + '  aaaTrack.fire(' + JSON.stringify(status) + ', 49.90);\n'
+                    + '  // Optional: append the click id to an offer / click-out URL\n'
+                    + '  // aaaTrack.clickThrough(\'https://offer.example/checkout\');\n'
+                    + '<\/script>';
+            },
+        },
+        mounted() {
+            this.load();
+            this.$root.$on('load-conversion-tracking', this.load);
+        },
+        beforeDestroy() {
+            this.$root.$off('load-conversion-tracking', this.load);
+        },
+        methods: {
+            load() {
+                this.loading = true;
+                fetch('/backend/api/settings/', {credentials: 'include'})
+                    .then(r => r.json())
+                    .then(data => {
+                        const s = (data && data.settings) || {};
+                        this.settings = Object.assign({}, this.settings, s);
+                        if (!Array.isArray(this.settings.custom_statuses)) {
+                            this.settings.custom_statuses = [];
+                        }
+                        this.settings.custom_statuses = this.settings.custom_statuses
+                            .filter(cs => cs && typeof cs === 'object')
+                            .map(cs => ({
+                                name: cs.name || '',
+                                color: cs.color || '#90a4ae',
+                                mode: cs.mode || 'new',
+                                role: cs.role || 'primary',
+                            }));
+                        this.domainChoice = this.trackerDomain;
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {type: 'error',
+                            text: 'Could not load settings: ' + sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => { this.loading = false; });
+                fetch('/backend/api/domains/', {credentials: 'include'})
+                    .then(r => r.json())
+                    .then(data => { this.domains = Array.isArray(data) ? data : []; })
+                    .catch(() => { this.domains = []; });
+            },
+            saveAll() {
+                this.saving = true;
+                const settings = Object.assign({}, this.settings, {
+                    postback_domain: this.effectiveDomain,
+                    custom_statuses: this.customStatuses
+                        .filter(cs => this.slugifyStatus(cs.name))
+                        .map(cs => ({
+                            name: cs.name,
+                            color: cs.color || '#90a4ae',
+                            mode: cs.mode || 'new',
+                            role: cs.role || 'primary',
+                        })),
+                });
+                fetch('/backend/api/settings/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({settings: settings}),
+                })
+                    .then(r => {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
+                    .then(() => {
+                        this.settings.postback_domain = settings.postback_domain;
+                        this.$root.$emit('show-message', {type: 'success', text: 'Conversion tracking saved'});
+                    })
+                    .catch(err => {
+                        this.$root.$emit('show-message', {type: 'error',
+                            text: 'Save failed: ' + sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => { this.saving = false; });
+            },
+            addCustomStatus() {
+                if (!Array.isArray(this.settings.custom_statuses)) {
+                    this.$set(this.settings, 'custom_statuses', []);
+                }
+                this.settings.custom_statuses.push({
+                    name: '', color: '#90a4ae', mode: 'new', role: 'primary',
+                });
+            },
+            removeCustomStatus(i) {
+                this.settings.custom_statuses.splice(i, 1);
+            },
+            slugifyStatus(name) {
+                return String(name || '').trim().toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+            },
+            copyText(text) {
+                const value = String(text == null ? '' : text);
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(value).then(() => {
+                        this.$root.$emit('show-message', {type: 'success', text: 'Copied'});
+                    }).catch(() => {
+                        this.$root.$emit('show-message', {type: 'error', text: 'Copy failed'});
+                    });
+                } else {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Clipboard unavailable'});
+                }
+            },
+        },
+    });
+</script>
+
+<style>
+    .ct-select {
+        max-width: 420px;
+    }
+    .ct-block-title {
+        font-weight: 600;
+        font-size: var(--fs-14, 14px);
+        margin-bottom: 4px;
+    }
+    .ct-token-table code,
+    .ct-status-table code {
+        word-break: break-all;
+    }
+    .ct-status-table td,
+    .ct-status-table th {
+        vertical-align: middle !important;
+    }
+    .ct-color-input {
+        width: 40px;
+        height: 32px;
+        padding: 0;
+        border: 1px solid rgba(128, 128, 128, 0.4);
+        border-radius: 4px;
+        background: transparent;
+        cursor: pointer;
+    }
+    .code-row--multiline {
+        align-items: flex-start;
+    }
+    .code-row--multiline .code-block {
+        flex: 1;
+        margin: 0;
+        padding: 10px 12px;
+        border-radius: 4px;
+        background: rgba(127, 127, 127, 0.12);
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 12px;
+        line-height: 1.5;
+    }
+</style>
+{% endraw %}

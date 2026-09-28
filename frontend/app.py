@@ -1432,6 +1432,25 @@ def valid_conversion_statuses() -> set:
     return set(ALL_STATUSES) | {c for c in customs if c}
 
 
+def conversion_status_mode(status: str) -> str:
+    """Per-status Mode for conversion recording (settings.custom_statuses).
+
+    'new' — when a postback arrives for a click whose current conversion row
+    already carries this same status, an ADDITIONAL conversion row is written
+    instead of updating in place. 'repeated' (the default, and always the
+    behavior for built-in statuses and entries without the field) keeps
+    today's accumulate-in-place upsert. Names are matched normalized, so the
+    Settings spelling (casing/spaces) does not matter; `role` is not used here.
+    """
+    if status in ALL_STATUSES:
+        return "repeated"
+    for entry in load_custom_statuses():
+        if normalize_status(entry.get("name")) == status:
+            mode = str(entry.get("mode") or "").strip().lower()
+            return "new" if mode == "new" else "repeated"
+    return "repeated"
+
+
 def match_bot_rule(request: Request, rules: list, visitor_key: str):
     """Return the first matching rule, or None."""
     client_ip = resolve_client_ip(request)
@@ -2016,6 +2035,11 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
     (click_id 'none'), attributing via transaction/external id or, when
     sub_id_1..5 params uniquely match one real click in the last 7 days,
     to that click instead.
+
+    Mode (settings.custom_statuses): a custom status with mode='new' whose
+    matched row already carries that same status writes an ADDITIONAL row
+    instead of accumulating; 'repeated' (the default, and built-ins) keeps the
+    upsert above.
     """
     pg = request.app.state.pg
     now = datetime.utcnow()
@@ -2034,11 +2058,15 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
     # event is appended (events || jsonb) and money accumulated server-side
     # only when the guard passes, so two concurrent identical postbacks can
     # never both add payout. Duplicate postbacks only advance the counter.
+    def transaction_id_value() -> str:
+        """Dedupe/attribution transaction id: extra field first, then query."""
+        return str(extra_fields.get("transaction_id") or extra_fields.get("external_id")
+                   or request.query_params.get("transaction_id")
+                   or request.query_params.get("external_id") or "").strip()
+
     async def apply_to_row(conn, row) -> bool:
         """Accumulate the conversion onto an existing row. Returns is_duplicate."""
-        ext_id = (extra_fields.get("transaction_id") or extra_fields.get("external_id")
-                  or request.query_params.get("transaction_id")
-                  or request.query_params.get("external_id"))
+        ext_id = transaction_id_value()
 
         set_parts = [
             "UPDATE conversions_data SET",
@@ -2102,6 +2130,41 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
         await conn.execute(
             f"INSERT INTO conversions_data ({', '.join(cols)}) VALUES ({', '.join(vals)})",
             *args)
+
+    async def insert_new_conversion(conn, target_click_id: str) -> bool:
+        """Mode 'new': write an ADDITIONAL conversion row instead of updating.
+
+        Returns is_duplicate=True only when this conversion's transaction id
+        already belongs to an existing row (a genuine retry of the same
+        transaction) — that guard stays global. The 60s identical-refire guard
+        is deliberately NOT applied: under mode 'new' each fire is its own
+        conversion, so a distinct transaction id is never silently dropped.
+        """
+        ext_id = transaction_id_value()
+        if ext_id:
+            existing = await conn.fetchrow(
+                "SELECT id FROM conversions_data WHERE transaction_id = $1 OR external_id = $1 "
+                "LIMIT 1", ext_id)
+            if existing:
+                await conn.execute(
+                    "UPDATE conversions_data SET postback_count = COALESCE(postback_count, 0) + 1, "
+                    "last_postback_at = NOW() WHERE id = $1", existing["id"])
+                return True
+        await insert_row(conn, target_click_id)
+        return False
+
+    async def write_conversion(conn, row) -> bool:
+        """Pick the write path for one conversion. Returns is_duplicate.
+
+        Same row match as before — a custom status configured Mode='new' whose
+        matched row already carries that same status inserts an extra row;
+        everything else (built-ins, Mode='repeated', status upgrades) UPSERTs
+        onto the matched row exactly as today.
+        """
+        if (conversion_status_mode(status) == "new"
+                and normalize_status(str(row["status"] or "")) == status):
+            return await insert_new_conversion(conn, row["click_id"])
+        return await apply_to_row(conn, row)
 
     def schedule_ch_sync(cid: str):
         """Mirror the fresh conversion onto the CH click row (best-effort).
@@ -2232,14 +2295,12 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
     async with pg.acquire() as conn:
         if clickless:
             row = None
-            ext_id = (extra_fields.get("transaction_id") or extra_fields.get("external_id")
-                      or request.query_params.get("transaction_id")
-                      or request.query_params.get("external_id"))
+            ext_id = transaction_id_value()
             if ext_id:
                 # A repeated transaction/external id updates the same row
                 row = await conn.fetchrow(
                     "SELECT * FROM conversions_data WHERE transaction_id = $1 "
-                    "OR external_id = $1 ORDER BY received_at DESC LIMIT 1", str(ext_id))
+                    "OR external_id = $1 ORDER BY received_at DESC LIMIT 1", ext_id)
             if row is None:
                 # Attribution fallback: sub_id_1..5 uniquely matching one real
                 # click in the last 7 days attaches to that click
@@ -2256,7 +2317,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                         row = candidates[0]
             if row is not None:
                 row = await conn.fetchrow(JOINED_CLICK_QUERY, row["click_id"]) or row
-                is_duplicate = await apply_to_row(conn, row)
+                is_duplicate = await write_conversion(conn, row)
                 if not is_duplicate:
                     background_tasks.add_task(
                         notify_telegram_conversion_async, row["click_id"], status, payout_value, dict(row))
@@ -2281,7 +2342,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             return {"status": "ok", "click_id": click_id,
                     "updated_status": status, "duplicate": False}
 
-        is_duplicate = await apply_to_row(conn, row)
+        is_duplicate = await write_conversion(conn, row)
 
         # Telegram conversion notification (respects settings toggle/statuses);
         # skipped for duplicate postbacks so chat stays spam-free
@@ -2294,6 +2355,40 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
 
     return {"status": "ok", "click_id": click_id, "updated_status": status,
             "duplicate": is_duplicate}
+
+
+# Query-style postbacks (/pb?…) accept the parameter names affiliate networks
+# natively expose with their own macros. Matching is case-insensitive and the
+# first non-empty alias in each list wins. The path form
+# /pb/{click_id}/{status}/{payout} is untouched.
+POSTBACK_CLICK_ID_ALIASES = ("click_id", "clickid", "click", "subid", "sub_id", "cid")
+POSTBACK_STATUS_ALIASES = ("status", "type", "event", "conversion_type")
+POSTBACK_PAYOUT_ALIASES = ("payout", "sum", "amount", "revenue", "price")
+POSTBACK_TRANSACTION_ALIASES = ("tid", "transaction_id", "external_id", "txn", "transactionid")
+
+
+def _first_postback_param(params: dict, aliases) -> str:
+    """First non-empty value among alias names, matched case-insensitively."""
+    lowered = {str(k).strip().lower(): v for k, v in (params or {}).items()}
+    for alias in aliases:
+        value = lowered.get(alias)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _canonicalize_postback_params(params: dict) -> dict:
+    """Map transaction aliases (tid/txn/transactionid) onto transaction_id.
+
+    transaction_id/external_id are passthrough fields consumed by the dedupe
+    guard and the clickless matcher, so a network's shorter macro names must
+    land on the canonical key for both inbound forms. Existing keys win.
+    """
+    if not params.get("transaction_id") and not params.get("external_id"):
+        tid = _first_postback_param(params, POSTBACK_TRANSACTION_ALIASES)
+        if tid:
+            params["transaction_id"] = tid
+    return params
 
 
 async def _postback_request_params(request: Request) -> dict:
@@ -2360,7 +2455,7 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
         log_track(f"🚫 Postback denied for {click_id}: {deny_reason}")
         raise HTTPException(status_code=403, detail=deny_reason)
 
-    params = await _postback_request_params(request)
+    params = _canonicalize_postback_params(await _postback_request_params(request))
 
     # G85: global postback-processing rules run BEFORE the row is written and
     # before fanout; the first matching rule wins and `reject` is terminal.
@@ -2391,6 +2486,33 @@ async def postback_receive(click_id: str, status: str, payout: str, request: Req
                                      write=not is_head)
     if is_head:
         # HEAD mirrors GET's status but has no body and writes nothing.
+        return Response(status_code=200)
+    if result.get("rejected"):
+        return JSONResponse(status_code=200,
+                            content={"status": "rejected", "reason": result["reason"],
+                                     "click_id": result["click_id"]})
+    return JSONResponse(content=result)
+
+
+@app.get("/pb")
+@app.post("/pb")
+@app.head("/pb")
+async def postback_receive_query(request: Request, background_tasks: BackgroundTasks):
+    """Query-style S2S form: /pb?clickid=…&status=…&payout=… (no path segments).
+
+    Accepts the parameter aliases networks fill with their own macros
+    (see POSTBACK_*_ALIASES) from the query string or a POST form/JSON body,
+    and reuses the exact path-form core. Missing status defaults to 'lead',
+    missing payout to 0, and a missing click id takes the clickless path.
+    """
+    params = await _postback_request_params(request)
+    click_id = _first_postback_param(params, POSTBACK_CLICK_ID_ALIASES)
+    status = _first_postback_param(params, POSTBACK_STATUS_ALIASES) or "lead"
+    payout = _first_postback_param(params, POSTBACK_PAYOUT_ALIASES) or "0"
+    is_head = request.method == "HEAD"
+    result = await _process_postback(click_id, status, payout, request, background_tasks,
+                                     write=not is_head)
+    if is_head:
         return Response(status_code=200)
     if result.get("rejected"):
         return JSONResponse(status_code=200,

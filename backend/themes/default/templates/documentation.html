@@ -381,17 +381,41 @@
 
                             <h3 class="doc-h3">S2S postback</h3>
                             <p>
-                                Networks fire conversions into
-                                <code>GET /pb/{click_id}/{status}/{payout}</code>. Built-in statuses:
+                                Networks fire conversions into one endpoint in two equivalent forms — the
+                                path form and the query form (no path segments, easiest to fill with a
+                                network's own macros):
+                            </p>
+                            <pre class="doc-code">GET /pb/{click_id}/{status}/{payout}
+GET /pb?clickid={click_id}&amp;status={status}&amp;payout={payout}</pre>
+                            <p>
+                                Parameter names in the query form are matched <b>case-insensitively</b> and the
+                                first non-empty alias wins:
+                            </p>
+                            <table class="doc-table">
+                                <thead><tr><th>Field</th><th>Accepted names</th></tr></thead>
+                                <tbody>
+                                <tr><td>Click id</td><td><code>click_id</code>, <code>clickid</code>, <code>click</code>, <code>subid</code>, <code>sub_id</code>, <code>cid</code></td></tr>
+                                <tr><td>Status</td><td><code>status</code>, <code>type</code>, <code>event</code>, <code>conversion_type</code></td></tr>
+                                <tr><td>Payout</td><td><code>payout</code>, <code>sum</code>, <code>amount</code>, <code>revenue</code>, <code>price</code></td></tr>
+                                <tr><td>Transaction id</td><td><code>tid</code>, <code>transaction_id</code>, <code>external_id</code>, <code>txn</code>, <code>transactionid</code></td></tr>
+                                </tbody>
+                            </table>
+                            <p>
+                                The query form accepts <code>GET</code> and <code>POST</code> (form-encoded or JSON
+                                body); passthrough fields (<code>sub_id_1..10</code>, <code>key</code> and custom
+                                parameters) may ride in the query string or the body in either form. Missing
+                                <code>status</code> defaults to <code>lead</code>, missing <code>payout</code> to
+                                <code>0</code>, and a missing click id takes the clickless path. Built-in statuses:
                                 <code>lead</code>, <code>sale</code>, <code>upsale</code>, <code>rejected</code>,
                                 <code>hold</code>, <code>trash</code> — plus any custom statuses you define in
-                                Settings. Unknown statuses return 400. A secret key and/or IP allowlist can be
-                                required (Settings → Postback security); violations get 403.
+                                Settings. Unknown statuses return 400, as does a non-numeric payout. A secret key
+                                and/or IP allowlist can be required (Settings → Postback security); violations get 403.
                             </p>
                             <p>Behavior of <code>record_conversion</code>:</p>
                             <ul class="doc-list">
                                 <li><b>Upsert</b> — status follows the <i>latest</i> postback (lead → sale upgrades); payout and revenue <b>accumulate</b> (LTV) on repeat conversions for the same click.</li>
-                                <li><b>Dedupe</b> — a repeated <code>transaction_id</code> (or <code>external_id</code>), or an identical anonymous (status, payout) re-fire inside a <b>60-second</b> window, only advances <code>postback_count</code> — money and history stay untouched. The guard is an atomic UPDATE, so concurrent duplicates can't double-count.</li>
+                                <li><b>Mode</b> — a custom status can be configured with Mode <b>new</b>: when a postback arrives for a click whose row already carries that same status, an <b>extra conversion row</b> is written instead of accumulating onto it. <b>repeated</b> (the default for every built-in and for custom statuses without the field) keeps the upsert above.</li>
+                                <li><b>Dedupe</b> — a repeated <code>transaction_id</code> (or <code>external_id</code>), or an identical anonymous (status, payout) re-fire inside a <b>60-second</b> window, only advances <code>postback_count</code> — money and history stay untouched. The guard is an atomic UPDATE, so concurrent duplicates can't double-count. A Mode <b>new</b> conversion carrying a <i>distinct</i> transaction id is never swallowed by this guard.</li>
                                 <li><b>History</b> — every accepted postback is appended to the row's <code>events</code> JSONB log with timestamp and source (<code>postback</code> / <code>pixel</code> / <code>import</code>).</li>
                                 <li><b>Fan-out</b> — Telegram notification, campaign-cycle postback and the traffic source's S2S postback fire per accepted conversion.</li>
                                 <li><b>Clickless</b> — a click id of <code>none</code>/<code>0</code> records an unattributed row; with <code>transaction_id</code>/<code>external_id</code> or <code>sub_id_1..5</code> values that uniquely match one real click in the last <b>7 days</b>, the conversion is attributed to that click instead.</li>
@@ -850,7 +874,8 @@
                                 <tbody>
                                 <tr><td>GET/POST</td><td><code>/{alias}</code></td><td>Campaign URL — main tracking hit</td><td>none</td></tr>
                                 <tr><td>GET</td><td><code>/c/{alias}/{offer_id}</code></td><td>Click-out to an offer</td><td>none</td></tr>
-                                <tr><td>GET</td><td><code>/pb/{click_id}/{status}/{payout}</code></td><td>S2S conversion postback</td><td>optional key / IP list</td></tr>
+                                <tr><td>GET</td><td><code>/pb/{click_id}/{status}/{payout}</code></td><td>S2S conversion postback (path form)</td><td>optional key / IP list</td></tr>
+                                <tr><td>GET/POST</td><td><code>/pb?clickid=…&amp;status=…&amp;payout=…</code></td><td>S2S conversion postback (query form)</td><td>optional key / IP list</td></tr>
                                 <tr><td>GET</td><td><code>/p/{alias}</code></td><td>Conversion pixel (GIF / <code>fmt=json</code>)</td><td>none</td></tr>
                                 <tr><td>GET</td><td><code>/i/{alias}</code></td><td>Impression pixel</td><td>none</td></tr>
                                 <tr><td>GET/POST</td><td><code>/t/collect</code></td><td>Direct-tracking visit collection</td><td>none</td></tr>
@@ -885,8 +910,11 @@
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
        "params":{"name":"campaigns.metrics","arguments":{"period":"7d"}}}'</pre>
                             <h3 class="doc-h3">Examples</h3>
-                            <p>S2S postback from a network:</p>
+                            <p>S2S postback from a network (path form):</p>
                             <pre class="doc-code">curl "https://your-domain.com/pb/9f2c1a7e/sale/25.50?transaction_id=T123"</pre>
+                            <p>S2S postback, query form with a network's own macros (here <code>{clickid}</code>,
+                                <code>{sum}</code> and <code>{txn}</code>):</p>
+                            <pre class="doc-code">curl "https://your-domain.com/pb?clickid={clickid}&amp;status=sale&amp;sum={sum}&amp;tid={txn}"</pre>
                             <p>Server-to-server click decision:</p>
                             <pre class="doc-code">curl -X POST "https://your-domain.com/click-api/my-campaign" \
   -H "Content-Type: application/json" \

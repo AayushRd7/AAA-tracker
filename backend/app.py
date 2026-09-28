@@ -218,7 +218,7 @@ ALLOWED_PAGES = {"auth", "dashboard", "editor"}
 # serves the shell pre-focused on that section (deep-linkable, back-button friendly).
 NAV_SECTIONS = {"dashboard", "campaigns", "landings", "affiliates", "offers",
                 "sources", "reports", "domains", "settings", "users", "documentation",
-                "fraud", "optimizer"}
+                "fraud", "optimizer", "conversion-tracking"}
 
 
 from typing import Optional

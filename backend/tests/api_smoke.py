@@ -6272,6 +6272,167 @@ print("ESCAPED-OK")
     check("cookie: https session cookie is Secure",
           r.status_code == 200 and "secure" in sc_https.lower(), f"{r.status_code} {sc_https[:120]}")
 
+    # ===== Query-style postbacks (/pb?…) + per-status Mode =====
+    qp_pid = os.getpid()
+    qp_tag = f"smoke-qp-{qp_pid}"
+
+    def qp_cell(click, cols="status || '|' || payout || '|' || COALESCE(transaction_id, '')"):
+        return pg_query(f"SELECT {cols} FROM conversions_data WHERE click_id = '{click}'")
+
+    def qp_count(click):
+        return pg_query(f"SELECT count(*) FROM conversions_data WHERE click_id = '{click}'")
+
+    print("== Query-style postbacks ==")
+    qp1 = f"{qp_tag}-q1"
+    r = requests.get(f"{BASE}/pb", params={"clickid": qp1, "status": "sale", "payout": "1.5"},
+                     verify=not INSECURE)
+    check("qp: query-style /pb GET accepted",
+          r.status_code == 200 and r.json().get("click_id") == qp1, r.text[:150])
+    check("qp: query-style stores status and payout", qp_cell(qp1) == "sale|1.5|", qp_cell(qp1))
+
+    for qp_alias in ("click_id", "clickid", "click", "subid", "sub_id", "cid"):
+        qp_cl = f"{qp_tag}-ck-{qp_alias}"
+        r = requests.get(f"{BASE}/pb", params={qp_alias: qp_cl, "status": "lead", "payout": "1"},
+                         verify=not INSECURE)
+        check(f"qp: click-id alias '{qp_alias}' maps",
+              r.status_code == 200 and r.json().get("click_id") == qp_cl and qp_cell(qp_cl) == "lead|1|",
+              r.text[:120])
+
+    for qp_alias in ("status", "type", "event", "conversion_type"):
+        qp_cl = f"{qp_tag}-st-{qp_alias}"
+        r = requests.get(f"{BASE}/pb", params={"clickid": qp_cl, qp_alias: "sale", "payout": "2"},
+                         verify=not INSECURE)
+        check(f"qp: status alias '{qp_alias}' maps",
+              r.status_code == 200 and qp_cell(qp_cl) == "sale|2|", r.text[:120])
+
+    for qp_alias in ("payout", "sum", "amount", "revenue", "price"):
+        qp_cl = f"{qp_tag}-po-{qp_alias}"
+        r = requests.get(f"{BASE}/pb", params={"clickid": qp_cl, "status": "lead", qp_alias: "3.5"},
+                         verify=not INSECURE)
+        check(f"qp: payout alias '{qp_alias}' maps",
+              r.status_code == 200 and qp_cell(qp_cl) == "lead|3.5|", r.text[:120])
+
+    for qp_alias in ("tid", "transaction_id", "external_id", "txn", "transactionid"):
+        qp_cl = f"{qp_tag}-tx-{qp_alias}"
+        qp_tid = f"{qp_tag}-tid-{qp_alias}"
+        r = requests.get(f"{BASE}/pb",
+                         params={"clickid": qp_cl, "status": "lead", "payout": "1", qp_alias: qp_tid},
+                         verify=not INSECURE)
+        # external_id keeps its own column; the shorter aliases land on transaction_id
+        check(f"qp: transaction alias '{qp_alias}' stored for dedupe",
+              r.status_code == 200
+              and qp_cell(qp_cl, "status || '|' || payout || '|' || "
+                                 "COALESCE(transaction_id, external_id)") == f"lead|1|{qp_tid}",
+              r.text[:120])
+
+    qp_pf = f"{qp_tag}-postform"
+    r = requests.post(f"{BASE}/pb",
+                      data={"clickid": qp_pf, "conversion_type": "sale", "sum": "4.5",
+                            "sub_id_1": f"pf-{qp_pid}"}, verify=not INSECURE)
+    check("qp: POST form aliases accepted",
+          r.status_code == 200 and r.json().get("click_id") == qp_pf, r.text[:150])
+    check("qp: POST form stores status/payout and the sub_id passthrough",
+          qp_cell(qp_pf) == "sale|4.5|"
+          and pg_query(f"SELECT sub_id_1 FROM conversions_data WHERE click_id='{qp_pf}'") == f"pf-{qp_pid}",
+          qp_cell(qp_pf))
+
+    qp_pj = f"{qp_tag}-postjson"
+    r = requests.post(f"{BASE}/pb",
+                      json={"cid": qp_pj, "event": "lead", "revenue": "5.5",
+                            "txn": f"{qp_tag}-tjson"}, verify=not INSECURE)
+    check("qp: POST JSON aliases accepted",
+          r.status_code == 200 and r.json().get("click_id") == qp_pj, r.text[:150])
+    check("qp: POST JSON stores status/payout/transaction",
+          qp_cell(qp_pj) == f"lead|5.5|{qp_tag}-tjson", qp_cell(qp_pj))
+
+    qp_ms = f"{qp_tag}-missstatus"
+    r = requests.get(f"{BASE}/pb", params={"clickid": qp_ms, "payout": "2"}, verify=not INSECURE)
+    check("qp: missing status defaults to lead",
+          r.status_code == 200 and qp_cell(qp_ms) == "lead|2|", r.text[:120])
+    qp_mp = f"{qp_tag}-misspayout"
+    r = requests.get(f"{BASE}/pb", params={"clickid": qp_mp, "status": "sale"}, verify=not INSECURE)
+    check("qp: missing payout defaults to 0",
+          r.status_code == 200 and qp_cell(qp_mp) == "sale|0|", r.text[:120])
+
+    qp_none_tid = f"{qp_tag}-nonetid"
+    r = requests.get(f"{BASE}/pb", params={"status": "sale", "payout": "6",
+                                           "transaction_id": qp_none_tid}, verify=not INSECURE)
+    check("qp: missing click id takes the clickless path",
+          r.status_code == 200 and r.json().get("clickless") is True
+          and r.json().get("click_id") == "none", r.text[:150])
+
+    r = requests.get(f"{BASE}/pb", params={"clickid": f"{qp_tag}-bad", "status": "not_a_status",
+                                           "payout": "1"}, verify=not INSECURE)
+    check("qp: invalid status still 400", r.status_code == 400, str(r.status_code))
+    r = requests.get(f"{BASE}/pb", params={"clickid": f"{qp_tag}-bad2", "status": "sale",
+                                           "payout": "not_a_number"}, verify=not INSECURE)
+    check("qp: invalid payout still 400", r.status_code == 400, str(r.status_code))
+
+    qp_path = f"{qp_tag}-path"
+    r = requests.get(f"{BASE}/pb/{qp_path}/sale/1.25", verify=not INSECURE)
+    check("qp: path-style /pb still works",
+          r.status_code == 200 and r.json().get("duplicate") is False, r.text[:150])
+    r = requests.get(f"{BASE}/pb/{qp_path}/sale/1.25", verify=not INSECURE)
+    check("qp: path-style identical refire still dedupes",
+          r.status_code == 200 and r.json().get("duplicate") is True, r.text[:150])
+
+    # -- per-status Mode: 'new' inserts an extra row, 'repeated' accumulates --
+    print("== Postback Mode (new vs repeated) ==")
+    qp_saved = (s.get(f"{api}/settings/").json().get("settings") or {}).get("custom_statuses") or []
+    qp_new_name = f"qp new {qp_pid}"
+    qp_rep_name = f"qp rep {qp_pid}"
+    r = s.post(f"{api}/settings/", json={"settings": {"custom_statuses": list(qp_saved) + [
+        {"name": qp_new_name, "mode": "new"},
+        {"name": qp_rep_name, "mode": "repeated"}]}})
+    check("qp: mode custom statuses saved", r.status_code == 200, r.text[:120])
+    settle_settings_cache()
+    qp_new_status = qp_new_name.replace(" ", "_")
+    qp_rep_status = qp_rep_name.replace(" ", "_")
+
+    qp_new_click = f"{qp_tag}-new"
+    requests.get(f"{BASE}/pb/{qp_new_click}/{qp_new_status}/2",
+                 params={"transaction_id": f"{qp_tag}-n1"}, verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb/{qp_new_click}/{qp_new_status}/3",
+                     params={"transaction_id": f"{qp_tag}-n2"}, verify=not INSECURE)
+    check("qp: mode=new writes a second conversion row",
+          r.status_code == 200 and r.json().get("duplicate") is False and qp_count(qp_new_click) == "2",
+          f"{r.text[:100]} rows={qp_count(qp_new_click)}")
+    qp_payouts = pg_query(f"SELECT string_agg(payout::text, ',' ORDER BY received_at) "
+                          f"FROM conversions_data WHERE click_id='{qp_new_click}'")
+    check("qp: mode=new keeps both payouts on separate rows", qp_payouts == "2,3", qp_payouts)
+
+    r = requests.get(f"{BASE}/pb/{qp_new_click}/{qp_new_status}/3",
+                     params={"transaction_id": f"{qp_tag}-n2"}, verify=not INSECURE)
+    check("qp: mode=new still dedupes a repeated transaction id",
+          r.status_code == 200 and r.json().get("duplicate") is True and qp_count(qp_new_click) == "2",
+          f"{r.text[:100]} rows={qp_count(qp_new_click)}")
+
+    r = requests.get(f"{BASE}/pb/{qp_new_click}/{qp_new_status}/3",
+                     params={"transaction_id": f"{qp_tag}-n3"}, verify=not INSECURE)
+    check("qp: mode=new fresh transaction id not swallowed by the 60s dedupe",
+          r.status_code == 200 and r.json().get("duplicate") is False and qp_count(qp_new_click) == "3",
+          f"{r.text[:100]} rows={qp_count(qp_new_click)}")
+
+    qp_rep_click = f"{qp_tag}-rep"
+    requests.get(f"{BASE}/pb/{qp_rep_click}/{qp_rep_status}/2",
+                 params={"transaction_id": f"{qp_tag}-r1"}, verify=not INSECURE)
+    r = requests.get(f"{BASE}/pb/{qp_rep_click}/{qp_rep_status}/3",
+                     params={"transaction_id": f"{qp_tag}-r2"}, verify=not INSECURE)
+    check("qp: mode=repeated updates in place (one row, accumulated)",
+          r.status_code == 200 and qp_count(qp_rep_click) == "1"
+          and qp_cell(qp_rep_click, "payout::text") == "5"
+          and qp_cell(qp_rep_click, "postback_count::text") == "2",
+          f"{r.text[:100]} rows={qp_count(qp_rep_click)} payout={qp_cell(qp_rep_click, 'payout::text')}")
+
+    r = s.post(f"{api}/settings/", json={"settings": {"custom_statuses": qp_saved}})
+    check("qp: custom statuses restored", r.status_code == 200, r.text[:120])
+    pg_exec(f"DELETE FROM conversions_data WHERE click_id LIKE '{qp_tag}%' "
+            f"OR transaction_id LIKE '{qp_tag}%'")
+    check("qp: verification rows cleaned",
+          pg_query(f"SELECT count(*) FROM conversions_data WHERE click_id LIKE '{qp_tag}%'") == "0"
+          and pg_query(f"SELECT count(*) FROM conversions_data WHERE transaction_id LIKE '{qp_tag}%'") == "0",
+          pg_query(f"SELECT count(*) FROM conversions_data WHERE click_id LIKE '{qp_tag}%'"))
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")
