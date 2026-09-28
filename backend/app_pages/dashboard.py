@@ -73,9 +73,25 @@ CONVERSION_BASIS_DIMENSIONS = {
 }
 
 
-def get_conversion_aggregates(db: Session, filters: dict, dimension: str) -> dict:
+def _require_iso_dates(date_from, date_to):
+    """Reject non-ISO dates with 400 before they reach ClickHouse / Postgres
+    (an unvalidated value used to surface as a raw 500)."""
+    for label, value in (("date_from", date_from), ("date_to", date_to)):
+        if value:
+            try:
+                date_cls.fromisoformat(str(value))
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid {label}: expected an ISO date (YYYY-MM-DD)")
+
+
+def get_conversion_aggregates(db: Session, filters: dict, dimension: str,
+                              campaign_scope: Optional[List[int]] = None) -> dict:
     """Group Postgres conversions_data by `dimension` for the date window.
 
+    campaign_scope mirrors the campaigns:'own' click scope: None = no filter
+    (admin/unscoped), a possibly-empty list = only those campaign ids.
     Returns {value_str: {leads, conversions, rejected, revenue, profit}}.
     """
     from app_pages.reports import Conversion
@@ -93,6 +109,10 @@ def get_conversion_aggregates(db: Session, filters: dict, dimension: str) -> dic
         func.sum(func.coalesce(Conversion.revenue, 0)),
         func.sum(func.coalesce(Conversion.profit, 0)),
     )
+    if campaign_scope is not None:
+        if not campaign_scope:
+            return {}
+        query = query.filter(Conversion.campaign_id.in_(campaign_scope))
     date_from = filters.get("date_from")
     date_to = filters.get("date_to")
     if date_from:
@@ -115,14 +135,22 @@ def get_conversion_aggregates(db: Session, filters: dict, dimension: str) -> dic
 @router.post("/visits")
 async def get_visits(
         request: Request,
-        filters: Filters
+        filters: Filters,
+        db: Session = Depends(get_db)
 ):
     try:
+        _require_iso_dates(filters.date_from, filters.date_to)
+        f = filters.dict()
+        if not _apply_click_scope(f, _click_scope_campaign_ids(request, db)):
+            return []
         ch = request.state.ch
-        rows = get_recent_visits(ch, filters)
+        rows = get_recent_visits(ch, f)
         return rows
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print("dashboard visits error:", repr(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/live-clicks")
@@ -150,7 +178,8 @@ async def live_clicks(request: Request, after: Optional[str] = None, limit: int 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print("dashboard live-clicks error:", repr(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 def _click_scope_campaign_ids(request: Request, db: Session) -> Optional[List[int]]:
@@ -215,41 +244,59 @@ def _totals_from_series(series):
     }
 
 
+class MetricsRequest(Filters):
+    """Typed body for POST /dashboard/metrics (previously parsed from the raw
+    request, so non-JSON/array bodies came back as a 500)."""
+    compare: bool = False
+
+
 @router.post("/metrics")
-async def get_metrics(request: Request):
-    ch = request.state.ch
-    body = await request.json()
-    filter_fields = set(Filters.__fields__)
-    filters = Filters(**{k: v for k, v in body.items() if k in filter_fields})
-    compare = bool(body.get("compare"))
+async def get_metrics(request: Request, body: MetricsRequest,
+                      db: Session = Depends(get_db)):
+    _require_iso_dates(body.date_from, body.date_to)
+    try:
+        f = body.dict(exclude={"compare"})
+        scope = _click_scope_campaign_ids(request, db)
+        if not _apply_click_scope(f, scope):
+            # campaigns:'own' with no owned campaigns — all-zero series over
+            # the same window (an empty campaigns list would mean 'no filter')
+            return {"metrics": _totals_from_series([]), "chart": _series_payload([])}
+        filters = Filters(**f)
+        ch = request.state.ch
 
-    series = get_metrics_series(ch, filters)
+        compare = body.compare
+        series = get_metrics_series(ch, filters)
 
-    payload = {
-        "metrics": _totals_from_series(series),
-        "chart": _series_payload(series),
-    }
-
-    # G50: period comparison — same-length window immediately before the selected range
-    if compare and filters.date_from and filters.date_to:
-        start = date_cls.fromisoformat(filters.date_from)
-        end = date_cls.fromisoformat(filters.date_to)
-        length = (end - start).days + 1
-        prev_end = start - timedelta(days=1)
-        prev_start = prev_end - timedelta(days=length - 1)
-        prev_filters = filters.copy(update={
-            "date_from": prev_start.isoformat(),
-            "date_to": prev_end.isoformat(),
-        })
-        prev_series = get_metrics_series(ch, prev_filters)
-        payload["previous"] = {
-            "from": prev_start.isoformat(),
-            "to": prev_end.isoformat(),
-            "metrics": _totals_from_series(prev_series),
-            "chart": _series_payload(prev_series),
+        payload = {
+            "metrics": _totals_from_series(series),
+            "chart": _series_payload(series),
         }
 
-    return payload
+        # G50: period comparison — same-length window immediately before the selected range
+        if compare and filters.date_from and filters.date_to:
+            start = date_cls.fromisoformat(filters.date_from)
+            end = date_cls.fromisoformat(filters.date_to)
+            length = (end - start).days + 1
+            prev_end = start - timedelta(days=1)
+            prev_start = prev_end - timedelta(days=length - 1)
+            prev_filters = filters.copy(update={
+                "date_from": prev_start.isoformat(),
+                "date_to": prev_end.isoformat(),
+            })
+            prev_series = get_metrics_series(ch, prev_filters)
+            payload["previous"] = {
+                "from": prev_start.isoformat(),
+                "to": prev_end.isoformat(),
+                "metrics": _totals_from_series(prev_series),
+                "chart": _series_payload(prev_series),
+            }
+
+        return payload
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("dashboard metrics error:", repr(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/dimensions")
@@ -272,7 +319,19 @@ async def get_breakdown(request: Request, body: ReportRequest, db: Session = Dep
         if date_basis not in ("click_date", "conversion_date"):
             raise ValueError(f"Unknown date_basis: {date_basis}")
 
+        _require_iso_dates(body.filters.date_from, body.filters.date_to)
         filters = body.filters.dict()
+        scope = _click_scope_campaign_ids(request, db)
+        if not _apply_click_scope(filters, scope):
+            # campaigns:'own' with no owned campaigns — empty breakdown
+            return {
+                "dimension": dimensions[0],
+                "dimensions": dimensions,
+                "date_basis": date_basis,
+                "fallback_note": fallback_note,
+                "rows": [],
+                "totals": sum_rows([]),
+            }
         if date_basis == "conversion_date":
             unsupported = [d for d in dimensions if d not in CONVERSION_BASIS_DIMENSIONS]
             if unsupported:
@@ -294,7 +353,9 @@ async def get_breakdown(request: Request, body: ReportRequest, db: Session = Dep
         if date_basis == "conversion_date":
             per_level_dim = {lvl: dim for lvl, dim in enumerate(dimensions, 1) if dim in CONVERSION_BASIS_DIMENSIONS}
             for lvl, dim in per_level_dim.items():
-                pg_agg = get_conversion_aggregates(db, filters, dim)
+                pg_agg = get_conversion_aggregates(
+                    db, filters, dim,
+                    campaign_scope=None if scope is None else filters.get("campaigns"))
                 seen = set()
                 for row in rows:
                     if row["level"] != lvl:
@@ -339,10 +400,13 @@ async def get_breakdown(request: Request, body: ReportRequest, db: Session = Dep
             "rows": rows,
             "totals": totals,
         }
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print("dashboard breakdown error:", repr(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/click-log")
@@ -368,7 +432,8 @@ async def get_click_log_view(request: Request, filters: ClickLogFilters,
         rows = get_click_log(ch, f, limit=min(max(int(filters.limit or 500), 1), 5000))
         return rows
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print("dashboard click-log error:", repr(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 CLICK_LOG_EXPORT_FIELDS = ["received_at", "ip", "country", "device_type", "os", "browser",
@@ -400,7 +465,8 @@ async def export_click_log(request: Request, filters: ClickLogFilters,
         else:
             rows = get_click_log(ch, f, limit=CLICK_LOG_EXPORT_MAX)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print("dashboard click-log export error:", repr(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     buf = _io.StringIO()
     writer = _csv.writer(buf, lineterminator="\n")
     writer.writerow(CLICK_LOG_EXPORT_FIELDS)
@@ -489,4 +555,5 @@ async def public_shared_report(token: str, request: Request, db: Session = Depen
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print("public shared report error:", repr(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

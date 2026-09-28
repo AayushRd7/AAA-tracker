@@ -1571,16 +1571,9 @@ def main():
               and bool(r.json().get("totp_token")), r.text[:200])
         ttok = r.json().get("totp_token")
 
-        codes = [requests.post(f"{api}/login/totp",
-                               json={"totp_token": ttok, "code": "000000"},
-                               verify=not INSECURE).status_code for _ in range(3)]
-        check("2FA: wrong codes -> 401 x3", codes == [401, 401, 401], str(codes))
-        r = requests.post(f"{api}/login/totp",
-                          json={"totp_token": ttok, "code": pyotp.TOTP(sec_secret).now()},
-                          verify=not INSECURE)
-        check("2FA: token burned after 3 fails -> 429",
-              r.status_code == 429 and "Too many TOTP attempts" in r.text, r.text[:150])
-
+        # Note: the failure limiter spans token refreshes (security audit fix),
+        # so the burn-out checks run at the END of this section — a fresh token
+        # must not reset the budget.
         r = requests.post(f"{api}/login", json={"username": sec_user, "password": "smokepass1"},
                           verify=not INSECURE)
         ttok = r.json().get("totp_token")
@@ -1605,6 +1598,30 @@ def main():
                           json={"totp_token": r.json().get("totp_token"), "code": backup},
                           verify=not INSECURE)
         check("2FA: backup code is single-use", r.status_code == 401, r.text[:150])
+
+        # Failure limiter spans token refreshes (security audit fix): after 3
+        # wrong codes, a freshly minted token with the CORRECT code stays refused.
+        r = requests.post(f"{api}/login", json={"username": sec_user, "password": "smokepass1"},
+                          verify=not INSECURE)
+        ttok = r.json().get("totp_token")
+        codes = [requests.post(f"{api}/login/totp",
+                               json={"totp_token": ttok, "code": "000000"},
+                               verify=not INSECURE).status_code for _ in range(3)]
+        check("2FA: repeated wrong codes refused (401 then lockout)",
+              codes[0] == 401 and codes[1] == 401 and codes[2] in (401, 429), str(codes))
+        r = requests.post(f"{api}/login/totp",
+                          json={"totp_token": ttok, "code": pyotp.TOTP(sec_secret).now()},
+                          verify=not INSECURE)
+        check("2FA: token burned after 3 fails -> 429",
+              r.status_code == 429 and "Too many TOTP attempts" in r.text, r.text[:150])
+        r = requests.post(f"{api}/login", json={"username": sec_user, "password": "smokepass1"},
+                          verify=not INSECURE)
+        r = requests.post(f"{api}/login/totp",
+                          json={"totp_token": r.json().get("totp_token"),
+                                "code": pyotp.TOTP(sec_secret).now()},
+                          verify=not INSECURE)
+        check("2FA: fresh token does not reset the failure budget -> 429",
+              r.status_code == 429 and "Too many TOTP attempts" in r.text, r.text[:150])
 
         # admin reset
         r = s.post(f"{api}/users/{sec_uid}/totp/reset")
@@ -3785,12 +3802,16 @@ print("ESCAPED-OK")
     check("cp: offers CSV has UTF-8 BOM",
           r.status_code == 200 and r.content.startswith(b"\xef\xbb\xbf"), str(r.status_code))
 
-    # 12. Landing link whitespace stripped on create
-    r = requests.post(f"{BASE}/landing", verify=not INSECURE, data={
+    # 12. Landing link whitespace stripped on create (admin session required —
+    # the landing router is admin-gated per the security audit)
+    r = requests.get(f"{BASE}/landings", verify=not INSECURE)
+    check("cp: unauthenticated /landings -> 401 (admin-gated)",
+          r.status_code == 401, f"{r.status_code} {r.text[:80]}")
+    r = s.post(f"{BASE}/landing", verify=not INSECURE, data={
         "name": f"Smoke CP Landing {cp_pid}", "site_folder": f"smoke_cp_l_{cp_pid}",
         "type": 0, "link": f"  https://example.com/smoke-cp-landing-{cp_pid}  "})
     check("cp: landing created", r.status_code in (200, 201), f"{r.status_code} {r.text[:100]}")
-    r = requests.get(f"{BASE}/landings", verify=not INSECURE)
+    r = s.get(f"{BASE}/landings", verify=not INSECURE)
     landing_rows = r.json() if r.status_code == 200 else []
     cp_landing = next((x for x in landing_rows
                        if x.get("folder") == f"smoke_cp_l_{cp_pid}"), None)
@@ -3798,7 +3819,7 @@ print("ESCAPED-OK")
           cp_landing is not None and cp_landing.get("link") == f"https://example.com/smoke-cp-landing-{cp_pid}",
           str((cp_landing or {}).get("link")))
     if cp_landing:
-        requests.delete(f"{BASE}/landing/{cp_landing.get('id')}", verify=not INSECURE)
+        s.delete(f"{BASE}/landing/{cp_landing.get('id')}", verify=not INSECURE)
 
     print("== Changelog parity cleanup ==")
     if poison_cid:
@@ -4460,6 +4481,545 @@ print("ESCAPED-OK")
         if _c:
             r = s.delete(f"{api}/campaigns/{_c}")
             check("ops-scope: campaign cleaned up", r.status_code == 200, r.text[:150])
+
+    print("== Security audit fixes (tracking plane) ==")
+    fx_pid = os.getpid()
+    fx_anon = requests.Session()
+    fx_anon.verify = not INSECURE
+
+    # --- P1: landings management requires an admin session ---
+    r = fx_anon.get(f"{BASE}/landings")
+    check("sec: GET /landings unauthenticated -> 401", r.status_code == 401, str(r.status_code))
+    r = s.get(f"{BASE}/landings")
+    check("sec: GET /landings with admin session -> 200", r.status_code == 200, str(r.status_code))
+    r = fx_anon.post(f"{BASE}/landing/grab",
+                     data={"url": "https://example.com/", "folder": f"smoke_sec_{fx_pid}"})
+    check("sec: POST /landing/grab unauthenticated -> 401", r.status_code == 401, str(r.status_code))
+    r = fx_anon.delete(f"{BASE}/landing/99999999")
+    check("sec: DELETE /landing/{id} unauthenticated -> 401 (no rmtree)", r.status_code == 401,
+          str(r.status_code))
+    r = fx_anon.get(f"{BASE}/landings_editor/1/file", params={"filename": "index.html"})
+    check("sec: editor file read unauthenticated -> 401", r.status_code == 401, str(r.status_code))
+
+    # --- fixtures: offer + campaigns for the click-out / config checks ---
+    r = s.post(f"{api}/offers/", json={"name": f"Smoke Sec Offer {fx_pid}",
+                                       "url": "https://example.com/smoke-sec-offer?cid={click_id}"})
+    check("sec: offer created", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    fx_offer_id = r.json().get("id")
+
+    fx_alias = f"smoke-sec-{fx_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke Sec {fx_pid}", "alias": fx_alias,
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "redirect",
+                              "redirect_url": "https://example.com/smoke-sec",
+                              "filters": []}],
+                   "postbacks": [], "fallback_url": "", "hide_referrer": False}})
+    check("sec: campaign created", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    fx_cid = r.json().get("id")
+
+    # --- P1: NULL / garbage campaign config must 404, never 500 ---
+    fx_null_alias = f"smoke-sec-null-{fx_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": fx_null_alias, "alias": fx_null_alias, "type": "campaign",
+        "status": "active", "redirect_mode": "position",
+        "config": {"flows": [], "postbacks": []}})
+    fx_null_id = r.json().get("id")
+    pg_exec(f"UPDATE campaigns SET config = NULL WHERE id = {fx_null_id}")
+    r = fx_anon.get(f"{BASE}/{fx_null_alias}", allow_redirects=False)
+    check("sec: NULL config campaign 404s (no 500)", r.status_code == 404, str(r.status_code))
+
+    # --- P1: non-dict JSON bodies must not 500 the tracking plane ---
+    r = fx_anon.post(f"{BASE}/t/collect", json=[1, 2, 3])
+    check("sec: /t/collect JSON array body -> <500", r.status_code < 500, str(r.status_code))
+    r = fx_anon.post(f"{BASE}/t/collect", json=42)
+    check("sec: /t/collect JSON scalar body -> <500", r.status_code < 500, str(r.status_code))
+    r = fx_anon.post(f"{BASE}/{fx_alias}", json=[{"junk": "x"}])
+    check("sec: POST /{alias} JSON array body -> <500", r.status_code < 500, str(r.status_code))
+
+    # --- P1: superscript-digit campaign ref -> 404 (not 500) ---
+    r = fx_anon.get(f"{BASE}/p/²")
+    check("sec: /p/² (isdigit trap) -> 404", r.status_code == 404, str(r.status_code))
+
+    # --- P1: direct-flow conversion reaches ClickHouse with click_id + status ---
+    fx_ch_click = f"smoke-sec-ch-{fx_pid}"
+    r = fx_anon.post(f"{BASE}/t/collect", json={"c": fx_alias, "click_id": fx_ch_click,
+                                                "url": "https://landing.example/sec"})
+    check("sec: /t/collect accepted with explicit click_id",
+          r.status_code == 200 and r.json().get("click_id") == fx_ch_click, r.text[:120])
+    r = fx_anon.get(f"{BASE}/pb/{fx_ch_click}/sale/3.5")
+    check("sec: /pb conversion for direct click accepted",
+          r.status_code == 200 and r.json().get("status") == "ok", r.text[:120])
+    fx_ch_row = ""
+    for _ in range(15):
+        fx_ch_row = ch_query(
+            f"SELECT click_id, status FROM clicks_data WHERE click_id = '{fx_ch_click}' "
+            f"ORDER BY received_at DESC LIMIT 1")
+        if fx_ch_row and "sale" in fx_ch_row:
+            break
+        _time.sleep(1)
+    check("sec: CH row carries the direct click_id",
+          bool(fx_ch_row) and not fx_ch_row.startswith("ERROR")
+          and fx_ch_row.split("\t")[0] == fx_ch_click, fx_ch_row[:150])
+    check("sec: CH row synced to the conversion status", "sale" in fx_ch_row, fx_ch_row[:150])
+
+    # --- P2: NaN / Infinity payouts rejected 400 ---
+    r = fx_anon.get(f"{BASE}/pb/smoke-sec-nan-{fx_pid}/sale/nan")
+    check("sec: /pb NaN payout -> 400", r.status_code == 400, str(r.status_code))
+    r = fx_anon.get(f"{BASE}/pb/smoke-sec-inf-{fx_pid}/sale/Infinity")
+    check("sec: /pb Infinity payout -> 400", r.status_code == 400, str(r.status_code))
+    r = fx_anon.get(f"{BASE}/p/{fx_alias}",
+                    params={"click_id": f"smoke-sec-pnan-{fx_pid}", "payout": "nan", "fmt": "json"})
+    check("sec: /p NaN payout -> 400", r.status_code == 400, str(r.status_code))
+
+    # --- P2: over-long click_id / sub_id values accepted and truncated ---
+    fx_long = "L" * 300
+    r = fx_anon.get(f"{BASE}/pb/{fx_long}/sale/1", params={"sub_id_1": "S" * 200})
+    check("sec: over-long click_id/sub_id postback accepted (no 500)",
+          r.status_code == 200, f"{r.status_code} {r.text[:120]}")
+    fx_long_rec = poll_first({"click_id": fx_long[:100]})
+    check("sec: over-long click_id truncated to 100 chars", fx_long_rec is not None, str(fx_long_rec))
+
+    # --- P2: non-ASCII postback key -> 403 (TypeError/500 before the fix) ---
+    r = s.get(f"{api}/settings/")
+    fx_settings_all = r.json() if r.status_code == 200 else {}
+    fx_cfg = dict(fx_settings_all.get("settings") or {})
+    fx_saved_sec = dict(fx_cfg.get("postback_security") or {})
+    fx_cfg["postback_security"] = dict(fx_saved_sec, secret_key="smoke-sec-key")
+    r = s.post(f"{api}/settings/", json={"settings": fx_cfg})
+    check("sec: postback secret saved", r.status_code == 200, r.text[:120])
+    settle_settings_cache()
+    r = fx_anon.get(f"{BASE}/pb/smoke-sec-key1-{fx_pid}/sale/1", params={"key": "é"})
+    check("sec: non-ASCII postback key -> 403 (not 500)", r.status_code == 403, str(r.status_code))
+    r = fx_anon.get(f"{BASE}/pb/smoke-sec-key2-{fx_pid}/sale/1", params={"key": "smoke-sec-key"})
+    check("sec: correct postback key accepted", r.status_code == 200, f"{r.status_code} {r.text[:120]}")
+    fx_cfg["postback_security"] = fx_saved_sec
+    r = s.post(f"{api}/settings/", json={"settings": fx_cfg})
+    check("sec: postback secret restored", r.status_code == 200, r.text[:120])
+    settle_settings_cache()
+
+    # --- P1: explicit ?click_id= beats a stale aaa_cid cookie on click-out ---
+    fx_stale = requests.Session()
+    fx_stale.verify = not INSECURE
+    fx_stale.cookies.set("aaa_cid", f"smoke-sec-stale-{fx_pid}")
+    r = fx_stale.get(f"{BASE}/c/{fx_alias}/{fx_offer_id}",
+                     params={"click_id": f"smoke-sec-explicit-{fx_pid}"}, allow_redirects=False)
+    check("sec: click-out honors explicit ?click_id over stale cookie",
+          r.status_code in (301, 302, 307, 308)
+          and f"click_id=smoke-sec-explicit-{fx_pid}" in (r.headers.get("location") or ""),
+          f"{r.status_code} {(r.headers.get('location') or '')[:150]}")
+
+    # --- P1: opted-out visitor click-out redirects but stores nothing ---
+    fx_opt = requests.Session()
+    fx_opt.verify = not INSECURE
+    fx_opt.get(f"{BASE}/optout")
+    fx_opt_click = f"smoke-sec-opt-{fx_pid}"
+    fx_ch_before = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {fx_cid}")
+    r = fx_opt.get(f"{BASE}/c/{fx_alias}/{fx_offer_id}", params={"click_id": fx_opt_click},
+                   allow_redirects=False)
+    check("sec: opted-out click-out still redirects (302)",
+          r.status_code in (301, 302, 307, 308), str(r.status_code))
+    fx_ch_after = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {fx_cid}")
+    check("sec: opted-out click-out wrote no CH row", fx_ch_after == fx_ch_before,
+          f"{fx_ch_before} -> {fx_ch_after}")
+    fx_opt_rec = poll_first({"click_id": fx_opt_click})
+    check("sec: opted-out click-out wrote no conversion", fx_opt_rec is None, str(fx_opt_rec))
+
+    # --- P1: paused campaign refuses click-outs ---
+    pg_exec(f"UPDATE campaigns SET status = 'paused' WHERE id = {fx_cid}")
+    r = fx_anon.get(f"{BASE}/c/{fx_alias}/{fx_offer_id}", allow_redirects=False)
+    check("sec: paused campaign click-out -> 404", r.status_code == 404, str(r.status_code))
+    pg_exec(f"UPDATE campaigns SET status = 'active' WHERE id = {fx_cid}")
+
+    # --- P2: stickiness-bound visitor whose offer gets paused falls back ---
+    fx_sticky_alias = f"smoke-sec-sticky-{fx_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke Sec Sticky {fx_pid}", "alias": fx_sticky_alias,
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "config": {"stickiness": True,
+                   "flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "direct", "offer": fx_offer_id, "filters": []}],
+                   "postbacks": [],
+                   "fallback_url": "https://example.com/smoke-sec-fb",
+                   "hide_referrer": False}})
+    check("sec: sticky campaign created", r.status_code == 200 and "id" in r.json(), r.text[:150])
+    fx_sticky_id = r.json().get("id")
+    fx_sticky = requests.Session()
+    fx_sticky.verify = not INSECURE
+    r = fx_sticky.get(f"{BASE}/{fx_sticky_alias}", allow_redirects=False)
+    check("sec: sticky campaign serves the offer", r.status_code in (301, 302, 307, 308)
+          and "smoke-sec-offer" in (r.headers.get("location") or ""),
+          f"{r.status_code} {(r.headers.get('location') or '')[:150]}")
+    check("sec: stickiness cookie issued", bool(fx_sticky.cookies.get("aaa_bind")),
+          str(fx_sticky.cookies))
+    pg_exec(f"UPDATE offers SET status = 'paused' WHERE id = {fx_offer_id}")
+    r = fx_sticky.get(f"{BASE}/{fx_sticky_alias}", allow_redirects=False)
+    check("sec: bound flow with paused offer falls back (serves fallback, not paused offer)",
+          "smoke-sec-fb" in (r.headers.get("location") or ""),
+          f"{r.status_code} {(r.headers.get('location') or '')[:150]}")
+    pg_exec(f"UPDATE offers SET status = 'active' WHERE id = {fx_offer_id}")
+
+    # --- self-cleaning ---
+    for fx_del_click in (fx_ch_click, fx_long[:100], f"smoke-sec-key1-{fx_pid}",
+                         f"smoke-sec-key2-{fx_pid}", f"smoke-sec-pnan-{fx_pid}"):
+        r = s.get(f"{api}/reports/", params={"click_id": fx_del_click})
+        for fx_rec in (r.json() if r.status_code == 200 and isinstance(r.json(), list) else []):
+            if fx_rec.get("click_id") == fx_del_click:
+                s.delete(f"{api}/reports/{fx_rec['id']}")
+    ch_query(f"ALTER TABLE clicks_data DELETE WHERE click_id LIKE 'smoke-sec-%-{fx_pid}' "
+             f"OR visitor_id LIKE 'smoke-sec-%-{fx_pid}'")
+    for fx_del_id in (fx_sticky_id, fx_null_id, fx_cid):
+        if fx_del_id:
+            r = s.delete(f"{api}/campaigns/{fx_del_id}")
+            check("sec: campaign cleaned up", r.status_code == 200, r.text[:120])
+    if fx_offer_id:
+        r = s.delete(f"{api}/offers/{fx_offer_id}")
+        check("sec: offer cleaned up", r.status_code == 200, r.text[:120])
+
+    print("== Ops hardening: scoping, validators, admin guards ==")
+    hd_pid = os.getpid()
+    hd_today = datetime.utcnow().strftime("%Y-%m-%d")
+
+    # ----- P1-7: PATCH must not wipe fields the caller didn't send -----
+    r = s.post(f"{api}/offers/", json={
+        "name": f"Smoke Patch Offer {hd_pid}", "url": f"https://example.com/patch-{hd_pid}",
+        "tags": [f"smoke-{hd_pid}"], "tokens": {"cid": "{click_id}"}})
+    check("hd-patch: offer created", r.status_code == 200 and bool(r.json().get("id")), r.text[:200])
+    patch_offer_id = r.json().get("id")
+    if patch_offer_id:
+        r = s.patch(f"{api}/offers/{patch_offer_id}",
+                    json={"name": f"Smoke Patch Offer 2 {hd_pid}",
+                          "url": f"https://example.com/patch-{hd_pid}"})
+        check("hd-patch: partial PATCH accepted", r.status_code == 200, r.text[:200])
+        r = s.get(f"{api}/offers/")
+        got = next((o for o in r.json() if o["id"] == patch_offer_id), {}) if r.status_code == 200 else {}
+        check("hd-patch: PATCH keeps tags/tokens",
+              got.get("tags") == [f"smoke-{hd_pid}"] and got.get("tokens") == {"cid": "{click_id}"},
+              f"tags={got.get('tags')} tokens={got.get('tokens')}")
+    r = s.post(f"{api}/affiliate-networks/", json={
+        "name": f"Smoke Patch Net {hd_pid}", "s2s_postback": f"https://pb.example/{hd_pid}"})
+    patch_net_id = r.json().get("id")
+    check("hd-patch: network created", r.status_code == 200 and bool(patch_net_id), r.text[:200])
+    if patch_net_id:
+        r = s.patch(f"{api}/affiliate-networks/{patch_net_id}", json={"name": f"Smoke Patch Net 2 {hd_pid}"})
+        check("hd-patch: network partial PATCH accepted", r.status_code == 200, r.text[:200])
+        r = s.get(f"{api}/affiliate-networks/")
+        got = next((n for n in r.json() if n["id"] == patch_net_id), {}) if r.status_code == 200 else {}
+        check("hd-patch: network PATCH keeps s2s_postback",
+              got.get("s2s_postback") == f"https://pb.example/{hd_pid}", str(got)[:150])
+
+    # ----- P2-12: 'archived' is not a creatable status (PG enum has no such value) -----
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke HD Archived {hd_pid}", "alias": f"smoke-hd-arch-{hd_pid}", "status": "archived"})
+    check("hd-arch: 'archived' status rejected (422)", r.status_code == 422, str(r.status_code))
+
+    # ----- P2-13: duplicate-name source PATCH -> 400 -----
+    r = s.post(f"{api}/sources/", json={"name": f"Smoke Src A {hd_pid}"})
+    src_a = r.json().get("id")
+    r = s.post(f"{api}/sources/", json={"name": f"Smoke Src B {hd_pid}"})
+    src_b = r.json().get("id")
+    check("hd-source: sources created", r.status_code == 200 and bool(src_a) and bool(src_b), r.text[:200])
+    if src_a and src_b:
+        r = s.patch(f"{api}/sources/{src_b}", json={"name": f"Smoke Src A {hd_pid}"})
+        check("hd-source: duplicate-name PATCH -> 400", r.status_code == 400, str(r.status_code))
+
+    # ----- P1-1: campaigns:'own' scope on dashboard metrics/visits/breakdown -----
+    hd_funnel_cfg = {"enabled": True,
+                     "steps": [{"name": "Step 1", "landing": None, "offers": [],
+                                "schema": "landing_offer"}]}
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke HD Own {hd_pid}", "alias": f"smoke-hd-own-{hd_pid}",
+        "type": "campaign", "status": "active", "redirect_mode": "weight",
+        "config": {"flows": [], "postbacks": [], "hide_referrer": False,
+                   "funnel": hd_funnel_cfg}})
+    hd_own_cid = r.json().get("id")
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"Smoke HD Other {hd_pid}", "alias": f"smoke-hd-other-{hd_pid}",
+        "type": "campaign", "status": "active", "redirect_mode": "weight",
+        "config": {"flows": [], "postbacks": [], "hide_referrer": False,
+                   "funnel": hd_funnel_cfg}})
+    hd_other_cid = r.json().get("id")
+    check("hd-scope: two campaigns created", bool(hd_own_cid) and bool(hd_other_cid), r.text[:200])
+    for _c, _tag in ((hd_own_cid, "own"), (hd_other_cid, "other")):
+        requests.post(f"{BASE}/t/collect",
+                      json={"c": str(_c), "url": f"https://hd-{_tag}-{hd_pid}.example/lp"},
+                      verify=not INSECURE)
+    pg_exec("INSERT INTO conversions_data (received_at, click_id, campaign_id, status, revenue, profit) VALUES "
+            f"(now(), 'smoke-hd-conv-own-{hd_pid}', {hd_own_cid}, 'sale', 1, 1), "
+            f"(now(), 'smoke-hd-conv-other-{hd_pid}', {hd_other_cid}, 'sale', 1, 1)")
+    hd_user = f"smoke-hd-{hd_pid}"
+    r = s.post(f"{api}/users/", json={
+        "username": hd_user, "password": "smokepass1",
+        "permissions": {"sections": {"campaigns": True, "dashboard": True, "reports": True},
+                        "write": True, "campaigns": "own"}})
+    hd_uid = r.json().get("id")
+    hs = requests.Session()
+    hs.verify = not INSECURE
+    if hd_uid:
+        r = hs.post(f"{api}/login", json={"username": hd_user, "password": "smokepass1"})
+        check("hd-scope: limited user login", r.status_code == 200, r.text[:150])
+        pg_exec(f"UPDATE campaigns SET owner_id = {hd_uid} WHERE id = {hd_own_cid}")
+        hd_ids = set()
+        for _ in range(20):
+            r = hs.post(f"{api}/dashboard/breakdown", json={"dimensions": ["campaign_id"], "limit": 500})
+            hd_ids = {row.get("value") for row in (r.json().get("rows") or [])} if r.status_code == 200 else set()
+            if str(hd_own_cid) in hd_ids:
+                break
+            _time.sleep(0.5)
+        check("hd-scope: breakdown shows only own campaigns",
+              r.status_code == 200 and hd_ids and hd_ids <= {str(hd_own_cid)} and str(hd_own_cid) in hd_ids,
+              f"status={r.status_code} ids={sorted(hd_ids)[:8]}")
+        r = hs.post(f"{api}/dashboard/metrics", json={})
+        check("hd-scope: scoped metrics 200 with own visits",
+              r.status_code == 200 and ((r.json().get("metrics") or {}).get("visits") or 0) > 0, r.text[:200])
+        r = hs.post(f"{api}/dashboard/visits", json={"limit": 100})
+        vis_rows = r.json() if r.status_code == 200 else []
+        check("hd-scope: visits show own and not other",
+              r.status_code == 200
+              and any(f"hd-own-{hd_pid}" in (row.get("url") or "") for row in vis_rows)
+              and not any(f"hd-other-{hd_pid}" in (row.get("url") or "") for row in vis_rows),
+              f"status={r.status_code} n={len(vis_rows)}")
+        # conversion_date aggregates carry the same scope
+        r = hs.post(f"{api}/dashboard/breakdown",
+                    json={"dimensions": ["campaign_id"], "date_basis": "conversion_date"})
+        conv_vals = {row.get("value") for row in (r.json().get("rows") or [])} if r.status_code == 200 else set()
+        check("hd-scope: conversion_date breakdown hides other campaigns",
+              r.status_code == 200 and str(hd_other_cid) not in conv_vals
+              and str(hd_own_cid) in conv_vals, f"vals={sorted(conv_vals)[:8]}")
+        r = s.post(f"{api}/dashboard/breakdown",
+                   json={"dimensions": ["campaign_id"], "date_basis": "conversion_date", "limit": 2000})
+        admin_vals = {row.get("value") for row in (r.json().get("rows") or [])} if r.status_code == 200 else set()
+        check("hd-scope: admin conversion breakdown sees both campaigns",
+              r.status_code == 200 and str(hd_own_cid) in admin_vals and str(hd_other_cid) in admin_vals,
+              f"vals={sorted(admin_vals)[:8]}")
+        # P1-5: funnel + global search respect the same scope
+        r = hs.get(f"{api}/reports/funnel/{hd_own_cid}")
+        check("hd-funnel: own campaign funnel readable", r.status_code == 200, r.text[:150])
+        r = hs.get(f"{api}/reports/funnel/{hd_other_cid}")
+        check("hd-funnel: other campaign funnel -> 404", r.status_code == 404, str(r.status_code))
+        r = s.get(f"{api}/reports/funnel/{hd_other_cid}")
+        check("hd-funnel: admin still reads funnel", r.status_code == 200, r.text[:150])
+        r = hs.get(f"{api}/search", params={"q": "smoke-hd-conv"})
+        hd_conv_names = [x.get("name") for x in (r.json().get("groups") or {}).get("conversions", [])]
+        check("hd-search: scoped search hides other campaign conversions",
+              r.status_code == 200 and hd_conv_names
+              and all(f"conv-other-{hd_pid}" not in n for n in hd_conv_names)
+              and any(f"conv-own-{hd_pid}" in n for n in hd_conv_names), str(hd_conv_names)[:150])
+    # campaigns:'own' with NO owned campaigns -> empty results, never 'no filter'
+    hd_user2 = f"smoke-hd-none-{hd_pid}"
+    r = s.post(f"{api}/users/", json={
+        "username": hd_user2, "password": "smokepass1",
+        "permissions": {"sections": {"dashboard": True, "reports": True},
+                        "write": True, "campaigns": "own"}})
+    hd_uid2 = r.json().get("id")
+    if hd_uid2:
+        s2 = requests.Session()
+        s2.verify = not INSECURE
+        s2.post(f"{api}/login", json={"username": hd_user2, "password": "smokepass1"})
+        r = s2.post(f"{api}/dashboard/breakdown", json={"dimensions": ["campaign_id"]})
+        check("hd-scope: empty scope -> empty breakdown",
+              r.status_code == 200 and r.json().get("rows") == [], r.text[:150])
+        r = s2.post(f"{api}/dashboard/metrics", json={})
+        check("hd-scope: empty scope -> all-zero metrics",
+              r.status_code == 200 and ((r.json().get("metrics") or {}).get("visits") or 0) == 0, r.text[:150])
+        r = s2.post(f"{api}/dashboard/visits", json={"limit": 50})
+        check("hd-scope: empty scope -> empty visits", r.status_code == 200 and r.json() == [], r.text[:150])
+        r = s.delete(f"{api}/users/{hd_uid2}")
+        check("hd-scope: empty-scope user cleaned up", r.status_code == 200, r.text[:150])
+
+    # ----- P1-2/P1-3: bad bodies and bad dates -> 4xx, never 500 -----
+    r = s.post(f"{api}/dashboard/metrics", data="not-json", headers={"Content-Type": "application/json"})
+    check("hd-validate: non-JSON metrics body -> 422", r.status_code == 422, str(r.status_code))
+    r = s.post(f"{api}/dashboard/metrics", json=[1, 2])
+    check("hd-validate: array metrics body -> 422", r.status_code == 422, str(r.status_code))
+    r = s.post(f"{api}/dashboard/metrics", json={"date_from": "nonsense", "date_to": "2026-01-01"})
+    check("hd-validate: bad metrics dates -> 400", r.status_code == 400, str(r.status_code))
+    r = s.post(f"{api}/dashboard/breakdown", json={
+        "dimensions": ["campaign_id"], "filters": {"date_from": "nonsense", "date_to": "2026-01-01"}})
+    check("hd-validate: bad breakdown dates -> 400", r.status_code == 400, str(r.status_code))
+    r = s.get(f"{api}/reports/", params={"date_from": "nonsense", "date_to": "2026-01-01"})
+    check("hd-validate: bad conversion dates -> 400", r.status_code == 400, str(r.status_code))
+
+    # ----- P1-4: LIKE wildcards stay literal -----
+    r = s.get(f"{api}/reports/", params={"search": f"smoke-hd-conv_other-{hd_pid}"})
+    hd_like_hits = [c for c in (r.json() if r.status_code == 200 else [])
+                    if f"smoke-hd-conv-{hd_pid}" in (c.get("click_id") or "")]
+    check("hd-like: underscore is literal in conversion search",
+          r.status_code == 200 and not hd_like_hits, str([c.get("click_id") for c in hd_like_hits])[:150])
+    r = s.get(f"{api}/reports/", params={"search": f"smoke-hd-conv-own-{hd_pid}"})
+    check("hd-like: literal conversion search still matches",
+          r.status_code == 200
+          and any(c.get("click_id") == f"smoke-hd-conv-own-{hd_pid}" for c in r.json()), r.text[:200])
+    r = s.get(f"{api}/search", params={"q": f"smoke-hd-conv_other-{hd_pid}"})
+    grp = (r.json().get("groups") or {}).get("conversions", [])
+    check("hd-like: underscore is literal in global search", r.status_code == 200 and not grp, str(grp)[:120])
+    r = s.get(f"{api}/search", params={"q": f"smoke-hd-conv-own-{hd_pid}"})
+    grp = (r.json().get("groups") or {}).get("conversions", [])
+    check("hd-like: global search still matches literally", r.status_code == 200 and bool(grp), str(grp)[:120])
+
+    # ----- P1-9: tracker_admin / last-active-admin guards -----
+    r = s.get(f"{api}/users/")
+    hd_ta = next((u for u in (r.json() or []) if (u.get("username") or "").lower() == "tracker_admin"), None)
+    if hd_ta:
+        r = s.patch(f"{api}/users/{hd_ta['id']}", json={"username": hd_ta["username"], "active": False})
+        check("hd-admin: cannot deactivate tracker_admin", r.status_code == 400, r.text[:120])
+        r = s.patch(f"{api}/users/{hd_ta['id']}", json={"username": hd_ta["username"], "is_admin": False})
+        check("hd-admin: cannot demote tracker_admin", r.status_code == 400, r.text[:120])
+        r = s.delete(f"{api}/users/{hd_ta['id']}")
+        check("hd-admin: cannot delete tracker_admin", r.status_code == 400, r.text[:120])
+    hd_admin2 = f"smoke-hd-admin2-{hd_pid}"
+    r = s.post(f"{api}/users/", json={"username": hd_admin2, "password": "smokepass1",
+                                      "is_admin": True, "active": True})
+    hd_admin2_id = r.json().get("id")
+    check("hd-admin: second admin created", r.status_code == 200 and bool(hd_admin2_id), r.text[:150])
+    if hd_admin2_id:
+        r = s.patch(f"{api}/users/{hd_admin2_id}", json={"username": hd_admin2, "active": False})
+        check("hd-admin: non-last admin can be deactivated", r.status_code == 200, r.text[:150])
+        r = s.patch(f"{api}/users/{hd_admin2_id}", json={"username": hd_admin2, "active": True})
+        check("hd-admin: admin reactivated", r.status_code == 200, r.text[:150])
+        r = s.delete(f"{api}/users/{hd_admin2_id}")
+        check("hd-admin: second admin cleaned up", r.status_code == 200, r.text[:150])
+
+    # ----- P1-10: settings import must keep saved-report share tokens -----
+    r = s.post(f"{api}/settings/saved-reports", json={
+        "name": f"smoke-hd-share-{hd_pid}", "config": {"dimensions": ["campaign_id"]}})
+    hd_rid = (r.json().get("report") or {}).get("id")
+    check("hd-share: saved report created", r.status_code == 200 and bool(hd_rid), r.text[:200])
+    hd_token = None
+    if hd_rid:
+        r = s.post(f"{api}/settings/saved-reports/{hd_rid}/share")
+        hd_token = (r.json().get("share") or {}).get("token")
+        check("hd-share: token minted", bool(hd_token), r.text[:150])
+        r = s.get(f"{api}/settings/export")
+        hd_export = (r.json().get("data") or {}) if r.status_code == 200 else {}
+        r = s.post(f"{api}/settings/import", json={"data": {"saved_reports": hd_export.get("saved_reports")}})
+        check("hd-share: backup with saved_reports re-imported", r.status_code == 200, r.text[:200])
+        r = s.get(f"{api}/settings/saved-reports")
+        rep = next((x for x in r.json().get("reports", []) if x.get("id") == hd_rid), {})
+        check("hd-share: token survives import",
+              (rep.get("share") or {}).get("token") == hd_token, str(rep.get("share"))[:120])
+        r = requests.post(f"{api}/dashboard/public/report/{hd_token}", verify=not INSECURE)
+        check("hd-share: public link still serves after import", r.status_code == 200, r.text[:150])
+
+    # ----- P1-6: MCP write gate + argument validation -----
+    r = s.post(f"{api}/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": {"name": "campaigns.set_status", "arguments": [1, 2]}})
+    err = (r.json() or {}).get("error") or {}
+    check("hd-mcp: non-dict arguments -> -32602",
+          r.status_code == 200 and err.get("code") == -32602, r.text[:200])
+    r = s.post(f"{api}/mcp", json={"jsonrpc": "2.0", "id": 3, "method": "ping"})
+    check("hd-mcp: ping works for admin", r.status_code == 200, r.text[:120])
+    if hd_uid:
+        r = hs.post(f"{api}/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                        "params": {"name": "campaigns.set_status",
+                                                   "arguments": {"campaign_id": hd_own_cid or 0,
+                                                                 "status": "paused"}}})
+        check("hd-mcp: mutating tool blocked without settings write", r.status_code == 403, str(r.status_code))
+
+    # ----- P2-11: costs target must exist + mutation is audited -----
+    r = s.post(f"{api}/costs/update", json={
+        "campaign_id": 99999999, "period": {"from": hd_today, "to": hd_today}, "cost": 0})
+    check("hd-costs: unknown campaign -> 404", r.status_code == 404, str(r.status_code))
+    if hd_own_cid:
+        r = s.post(f"{api}/costs/update", json={
+            "campaign_id": hd_own_cid, "period": {"from": hd_today, "to": hd_today}, "cost": 0})
+        check("hd-costs: real update ok", r.status_code == 200 and "updated_rows" in r.json(), r.text[:150])
+        hd_cnt = pg_query("SELECT count(*) FROM audit_log WHERE action='cost_update'")
+        check("hd-costs: cost update audited", (hd_cnt or "0").isdigit() and int(hd_cnt) > 0, hd_cnt[:40])
+
+    # ----- P2-14: destructive/money ops are audited -----
+    r = s.post(f"{api}/settings/", json={"settings": {"currency": (s.get(f"{api}/settings/").json().get("settings") or {}).get("currency")}})
+    check("hd-audit: settings save accepted", r.status_code == 200, r.text[:150])
+    hd_cnt = pg_query("SELECT count(*) FROM audit_log WHERE action='save' AND entity='settings'")
+    check("hd-audit: settings save audited", (hd_cnt or "0").isdigit() and int(hd_cnt) > 0, hd_cnt[:40])
+    r = s.post(f"{api}/reports/import", json={"lines": f"smoke-hd-imp-{hd_pid},0,tid-hd-{hd_pid},sale"})
+    check("hd-audit: conversion import accepted", r.status_code == 200, r.text[:150])
+    hd_cnt = pg_query("SELECT count(*) FROM audit_log WHERE action='import' AND entity='conversions'")
+    check("hd-audit: conversion import audited", (hd_cnt or "0").isdigit() and int(hd_cnt) > 0, hd_cnt[:40])
+    hd_imp_id = (pg_query(f"SELECT id FROM conversions_data WHERE external_id='tid-hd-{hd_pid}' "
+                          "ORDER BY id DESC LIMIT 1").splitlines() or [""])[0].strip()
+    if hd_imp_id:
+        r = s.delete(f"{api}/reports/{hd_imp_id}")
+        check("hd-audit: imported conversion cleaned up", r.status_code == 200, r.text[:150])
+
+    # ----- P2-15: optimizer PUT keeps run history -----
+    if hd_other_cid:
+        pg_exec("UPDATE campaigns SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{optimizer}', "
+                "'{\"enabled\": true, \"last_runs\": [{\"at\": \"2026-01-01T00:00:00\", \"reason\": \"optimized\"}]}'::jsonb) "
+                f"WHERE id = {hd_other_cid}")
+        r = s.put(f"{api}/optimizer/{hd_other_cid}", json={"metric": "cr"})
+        check("hd-opt: PUT accepted", r.status_code == 200, r.text[:200])
+        hd_runs = pg_query(f"SELECT config->'optimizer'->'last_runs' FROM campaigns WHERE id = {hd_other_cid}")
+        check("hd-opt: last_runs survives PUT", "2026-01-01T00:00:00" in (hd_runs or ""), hd_runs[:120])
+        r = s.get(f"{api}/optimizer/{hd_other_cid}")
+        check("hd-opt: GET exposes updated optimizer block",
+              r.status_code == 200 and (r.json().get("optimizer") or {}).get("metric") == "cr", r.text[:200])
+
+    # ----- P1-8: a refreshed TOTP token does not reset the failure budget -----
+    if pyotp is not None:
+        hd_totp_user = f"smoke-hd-totp-{hd_pid}"
+        r = s.post(f"{api}/users/", json={"username": hd_totp_user, "password": "smokepass1", "active": True})
+        hd_totp_uid = r.json().get("id")
+        ts = requests.Session()
+        ts.verify = not INSECURE
+        ts.post(f"{api}/login", json={"username": hd_totp_user, "password": "smokepass1"})
+        r = ts.post(f"{api}/users/me/totp/setup")
+        hd_totp_secret = r.json().get("secret")
+        r = ts.post(f"{api}/users/me/totp/enable", json={"code": pyotp.TOTP(hd_totp_secret).now()})
+        check("hd-totp: 2FA enabled", r.status_code == 200, r.text[:150])
+        r = requests.post(f"{api}/login", json={"username": hd_totp_user, "password": "smokepass1"},
+                          verify=not INSECURE)
+        hd_t1 = r.json().get("totp_token")
+        hd_codes = [requests.post(f"{api}/login/totp", json={"totp_token": hd_t1, "code": "000000"},
+                                  verify=not INSECURE).status_code for _ in range(3)]
+        check("hd-totp: 3 wrong codes -> 401x3", hd_codes == [401, 401, 401], str(hd_codes))
+        r = requests.post(f"{api}/login", json={"username": hd_totp_user, "password": "smokepass1"},
+                          verify=not INSECURE)
+        hd_t2 = r.json().get("totp_token")
+        r = requests.post(f"{api}/login/totp",
+                          json={"totp_token": hd_t2, "code": pyotp.TOTP(hd_totp_secret).now()},
+                          verify=not INSECURE)
+        check("hd-totp: fresh token does not reset the failure budget", r.status_code == 429, r.text[:150])
+        if hd_totp_uid:
+            r = s.delete(f"{api}/users/{hd_totp_uid}")
+            check("hd-totp: user cleaned up", r.status_code == 200, r.text[:150])
+
+    # ----- P2-17: audit rows carry the real client IP, not the nginx proxy IP -----
+    try:
+        hd_ng_ip = subprocess.run(
+            ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+             "tracker_nginx"], capture_output=True, text=True, timeout=30).stdout.strip()
+    except Exception:
+        hd_ng_ip = ""
+    requests.post(f"{api}/login", json={"username": USER, "password": PASS}, verify=not INSECURE)
+    hd_ip_row = pg_query("SELECT ip FROM audit_log WHERE action='login_success' ORDER BY id DESC LIMIT 1")
+    check("hd-ip: login audit IP is not the nginx proxy IP",
+          bool(hd_ip_row) and bool(hd_ng_ip) and hd_ip_row != hd_ng_ip,
+          f"audit={hd_ip_row} nginx={hd_ng_ip}")
+
+    # ----- hardening block cleanup -----
+    if patch_offer_id:
+        r = s.delete(f"{api}/offers/{patch_offer_id}")
+        check("hd-cleanup: patch offer deleted", r.status_code == 200, r.text[:120])
+    if patch_net_id:
+        r = s.delete(f"{api}/affiliate-networks/{patch_net_id}")
+        check("hd-cleanup: patch network deleted", r.status_code == 200, r.text[:120])
+    for _sid in (src_a, src_b):
+        if _sid:
+            r = s.delete(f"{api}/sources/{_sid}")
+            check("hd-cleanup: source deleted", r.status_code == 200, r.text[:120])
+    if hd_rid:
+        r = s.delete(f"{api}/settings/saved-reports/{hd_rid}")
+        check("hd-cleanup: saved report deleted", r.status_code == 200, r.text[:120])
+    pg_exec(f"DELETE FROM conversions_data WHERE click_id LIKE 'smoke-hd-conv-{hd_pid}-%'")
+    if hd_uid:
+        r = s.delete(f"{api}/users/{hd_uid}")
+        check("hd-cleanup: limited user deleted", r.status_code == 200, r.text[:150])
+    for _c in (hd_own_cid, hd_other_cid):
+        if _c:
+            r = s.delete(f"{api}/campaigns/{_c}")
+            check("hd-cleanup: campaign deleted", r.status_code == 200, r.text[:150])
 
     print("== Cleanup ==")
     if conv_id:

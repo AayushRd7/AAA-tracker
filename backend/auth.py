@@ -453,8 +453,6 @@ def _verify_totp_code(db: Session, user, code: str) -> bool:
 async def login_totp(request: Request, response: Response, data: TotpLoginRequest, db: Session = Depends(get_db)):
     from audit_logger import audit_event
     client_ip = request.client.host if request.client else "unknown"
-    if _totp_limited(data.totp_token):
-        raise HTTPException(status_code=429, detail="Too many TOTP attempts — request a new code.")
 
     try:
         payload = jwt.decode(data.totp_token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -462,6 +460,15 @@ async def login_totp(request: Request, response: Response, data: TotpLoginReques
         raise HTTPException(status_code=401, detail="Invalid or expired TOTP token")
     if payload.get("type") != "totp" or not payload.get("sub"):
         raise HTTPException(status_code=401, detail="Invalid TOTP token")
+
+    # Brute-force limiter keyed on username + client IP — NOT on the token.
+    # A token is attacker-refreshable (a valid password mints a fresh one and
+    # each token had its own 3-try budget before); this key survives every
+    # token refresh for the full lockout window, so the 6-digit code keeps a
+    # hard 3-try budget per user/IP. The per-token jti stays one-shot below.
+    limit_key = f"{payload['sub']}:{client_ip}"
+    if _totp_limited(limit_key):
+        raise HTTPException(status_code=429, detail="Too many TOTP attempts — request a new code.")
 
     user = get_user(db, payload["sub"])
     if not user or not user.active or not user.totp_enabled or not user.totp_secret:
@@ -471,17 +478,17 @@ async def login_totp(request: Request, response: Response, data: TotpLoginReques
     # rejected even if the attacker has a valid TOTP code.
     ensure_totp_token_table()
     if not _spend_totp_jti(db, payload.get("jti")):
-        _record_totp_failure(data.totp_token)
+        _record_totp_failure(limit_key)
         audit_event(user.username, "totp_replay", "user", user.username, ip=client_ip)
         raise HTTPException(status_code=401, detail="TOTP token already used")
 
     if not _verify_totp_code(db, user, data.code):
-        _record_totp_failure(data.totp_token)
+        _record_totp_failure(limit_key)
         audit_event(user.username, "totp_failed", "user", user.username, ip=client_ip)
         raise HTTPException(status_code=401, detail="Invalid code")
 
     token = create_session(user.username)
-    _totp_failures.pop(data.totp_token, None)
+    _totp_failures.pop(limit_key, None)
     audit_event(user.username, "login_success", "user", user.username, {"totp": True}, client_ip)
 
     response.set_cookie(key="session_token", value=token, httponly=True,

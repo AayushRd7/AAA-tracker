@@ -67,6 +67,14 @@ def _audit(username, action, entity="user", entity_id="", detail=None, request=N
                 _client_ip(request) if request is not None else "")
 
 
+def _other_active_admins(db: Session, user_obj: UserORM) -> int:
+    """Active admins other than user_obj."""
+    return db.query(UserORM).filter(
+        UserORM.is_admin == True,  # noqa: E712
+        UserORM.active == True,    # noqa: E712
+        UserORM.id != user_obj.id).count()
+
+
 # ====== My own profile / 2FA status ======
 
 @router.get("/me")
@@ -248,6 +256,24 @@ def update_user(user_id: int, user: UserCreateUpdate, request: Request, db: Sess
     if not user_obj:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Lockout guards: the built-in tracker_admin stays active+admin, and the
+    # last active admin can never be demoted or deactivated.
+    if user_obj.username.lower() == "tracker_admin":
+        if user.active is not None and not user.active:
+            raise HTTPException(status_code=400,
+                                detail="The built-in admin account cannot be deactivated")
+        if user.is_admin is not None and not user.is_admin:
+            raise HTTPException(status_code=400,
+                                detail="The built-in admin account cannot be demoted")
+    if user.active is not None and user_obj.active and not user.active \
+            and user_obj.is_admin and _other_active_admins(db, user_obj) == 0:
+        raise HTTPException(status_code=400,
+                            detail="Cannot deactivate the last active admin")
+    if user.is_admin is not None and user_obj.is_admin and not user.is_admin \
+            and user_obj.active and _other_active_admins(db, user_obj) == 0:
+        raise HTTPException(status_code=400,
+                            detail="Cannot demote the last active admin")
+
     changes = {}
     if user.email is not None:
         user_obj.email = user.email
@@ -284,6 +310,13 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
     user_obj = db.query(UserORM).filter(UserORM.id == user_id).first()
     if not user_obj:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if user_obj.username.lower() == "tracker_admin":
+        raise HTTPException(status_code=400,
+                            detail="The built-in admin account cannot be deleted")
+    if user_obj.is_admin and user_obj.active and _other_active_admins(db, user_obj) == 0:
+        raise HTTPException(status_code=400,
+                            detail="Cannot delete the last active admin")
 
     db.delete(user_obj)
     db.commit()

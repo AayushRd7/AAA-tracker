@@ -17,7 +17,10 @@ services:
       "app:app",
       "--host", "0.0.0.0",
       "--port", "8501",
-      "--workers", "2"
+      "--workers", "2",
+      # honor X-Forwarded-For from the nginx proxy so rate-limit keys and
+      # audit rows carry the real client IP
+      "--proxy-headers", "--forwarded-allow-ips", "*"
     ]
 
   clickhouse:

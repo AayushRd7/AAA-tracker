@@ -267,8 +267,8 @@
                             </div>
                         </template>
                         <template v-slot:item.s2s_postback_statuses="{ item }">
-                            {{ Object.keys(item.s2s_postback_statuses).filter(k =>
-                            item.s2s_postback_statuses[k]).join(', ') }}
+                            {{ Object.keys(item.s2s_postback_statuses || {}).filter(k =>
+                            (item.s2s_postback_statuses || {})[k]).join(', ') }}
                         </template>
                         <template v-slot:item.created_at="{ item }">
                             {{ $formatDate(item.created_at) }}

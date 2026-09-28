@@ -16,8 +16,12 @@ import math
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from db import get_db
+from models.campaigns import CampaignORM
 
 router = APIRouter()
 
@@ -33,7 +37,7 @@ class CostUpdateIn(BaseModel):
 
 
 @router.post("/update")
-def update_costs(data: CostUpdateIn, request: Request):
+def update_costs(data: CostUpdateIn, request: Request, db: Session = Depends(get_db)):
     """Apply a retroactive per-click cost to matching clicks_data rows.
 
     Admin-only (router is mounted behind the settings section gate).
@@ -62,6 +66,10 @@ def update_costs(data: CostUpdateIn, request: Request):
 
     if data.campaign_id is not None and int(data.campaign_id) <= 0:
         raise HTTPException(status_code=400, detail="campaign_id must be a positive integer")
+    if data.campaign_id is not None \
+            and not db.query(CampaignORM).filter_by(id=int(data.campaign_id)).first():
+        # previously a typo'd id "succeeded" with updated_rows 0
+        raise HTTPException(status_code=404, detail="Campaign not found")
 
     where = "toDate(received_at) BETWEEN toDate(%(df)s) AND toDate(%(dt)s)"
     params = {"df": d_from.isoformat(), "dt": d_to.isoformat()}
@@ -76,6 +84,15 @@ def update_costs(data: CostUpdateIn, request: Request):
         f"ALTER TABLE clicks_data UPDATE cost = %(cost)s WHERE {where}",
         parameters={**params, "cost": float(cost)},
         settings={"mutations_sync": 1})
+
+    from audit_logger import audit_event
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "cost_update", "campaigns",
+                str(data.campaign_id) if data.campaign_id is not None else "all",
+                {"from": d_from.isoformat(), "to": d_to.isoformat(),
+                 "cost": float(cost), "updated_rows": matched},
+                request.client.host if request.client else "")
 
     return {
         "updated_rows": matched,

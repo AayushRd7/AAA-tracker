@@ -20,7 +20,7 @@ class CampaignIn(BaseModel):
     name: str
     alias: str
     type: Literal['campaign', 'tracking_only'] = 'campaign'
-    status: Literal['active', 'paused', 'archived'] = 'active'
+    status: Literal['active', 'paused'] = 'active'
     redirect_mode: Literal['position', 'weight'] = 'position'
     traffic_source_id: Optional[int] = None
     domain_id: Optional[int] = None
@@ -459,7 +459,8 @@ def import_campaigns(data: CampaignImportIn, request: Request, db: Session = Dep
                                 "detail": f"created campaign {campaign.id}"})
             except Exception as e:
                 db.rollback()
-                results.append({"line": line_no, "ok": False, "detail": f"create failed: {e}"})
+                print(f"campaign import: create failed on line {line_no}:", repr(e))
+                results.append({"line": line_no, "ok": False, "detail": "create failed"})
 
     audit_event(caller or "api_token", "update", "campaigns", "import",
                 {"created": created, "lines": len(results)}, _client_ip(request))

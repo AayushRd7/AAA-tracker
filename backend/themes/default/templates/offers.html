@@ -312,7 +312,7 @@
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
                     >
                         <template v-slot:item.countries="{ item }">
-                            {{ item.countries.map(c => c.code).join(', ') }}
+                            {{ (item.countries || []).map(c => c.code).join(', ') }}
                         </template>
 
                         <template v-slot:item.tags="{ item }">
@@ -542,11 +542,6 @@
                 ,
             }
         ,
-        mounted() {
-            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
-            this.loadOffers();
-            this.$root.$on('load-offers', this.loadOffers);
-        },
         mounted() {
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadOffers();

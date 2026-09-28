@@ -512,9 +512,9 @@
                         text: `Deleted ${data.updated ?? this.selected.length} networks.${skipped}`
                     });
                     this.selected = [];
-                    this.loadNetworks();
+                    this.loadAffiliateNetworks();
                 } catch (e) {
-                    this.$root.$emit('show-message', {type: 'error', text: e.message});
+                    this.$root.$emit('show-message', {type: 'error', text: sanitizeToastMessage(e.message)});
                 } finally {
                     this.bulkLoading = false;
                 }

@@ -320,6 +320,8 @@ def _dispatch_tool(name: str, arguments: dict, request: Request,
     tool = TOOLS_BY_NAME.get(name)
     if tool is None:
         raise _RpcMethodError(-32602, f"Unknown tool '{name}'")
+    if not isinstance(arguments, dict):
+        raise _RpcMethodError(-32602, "Invalid params: 'arguments' must be an object")
     try:
         args = tool["args"](**(arguments or {}))
     except ValidationError as e:
@@ -375,8 +377,11 @@ async def mcp_endpoint(request: Request, db: Session = Depends(get_db)):
             return _rpc_error(rpc_id, -32602, "Invalid params: tools/call "
                                               "requires {name, arguments}")
         try:
-            result = _dispatch_tool(params["name"], params.get("arguments") or {},
-                                    request, db)
+            arguments = params.get("arguments") or {}
+            if not isinstance(arguments, dict):
+                return _rpc_error(rpc_id, -32602,
+                                  "Invalid params: 'arguments' must be an object")
+            result = _dispatch_tool(params["name"], arguments, request, db)
         except _RpcMethodError as e:
             return _rpc_error(rpc_id, e.code, e.message)
         return _rpc_result(rpc_id, result)

@@ -15,6 +15,7 @@ from datetime import datetime
 import asyncpg
 from types import SimpleNamespace
 import json
+import math
 from fastapi.middleware.cors import CORSMiddleware
 from user_agents import parse as parse_ua
 import re
@@ -256,12 +257,12 @@ async def shutdown():
 
 
 VALID_PARAMS = [
-    'ad_campaign_id', 'browser', 'campaign_id', 'city', 'connection_type', 'currency',
+    'ad_campaign_id', 'browser', 'campaign_id', 'city', 'click_id', 'connection_type', 'currency',
     'cost', 'country', 'utm_creative', 'utm_campaign', 'utm_medium', 'utm_source', 'device_type', 'external_id', 'ip',
     'impression', 'is_bot', 'is_using_proxy', 'isp', 'keyword', 'landing_id', 'language', 'offer_id',
-    'os', 'profit', 'referrer', 'region', 'revenue', 'status', 'sub_id_1', 'sub_id_2', 'sub_id_3',
+    'os', 'os_version', 'profit', 'referrer', 'region', 'revenue', 'status', 'sub_id_1', 'sub_id_2', 'sub_id_3',
     'sub_id_4', 'sub_id_5', 'sub_id_6', 'sub_id_7', 'sub_id_8', 'sub_id_9', 'sub_id_10',
-    'traffic_source_name', 'url', 'visitor_id'
+    'traffic_source_name', 'url', 'user_agent', 'visitor_id'
 ]
 
 from landings import router as landings_router
@@ -342,6 +343,11 @@ async def enrich_meta(request: Request, params_id_mapping: list = None) -> dict:
             else:
                 post_data = {}
         except Exception:
+            post_data = {}
+        # A JSON scalar/array body ([1,2], 42, "x") is not mergeable — normalize
+        # to {} at cache time so {**post_data} merges and `key in query` checks
+        # downstream can never raise TypeError on the cached body.
+        if not isinstance(post_data, dict):
             post_data = {}
         request.state._parsed_body = post_data
 
@@ -469,9 +475,10 @@ async def save_click_to_clickhouse(meta: dict, campaign_alias: str):
     """Insert the click-out row (click=true) into ClickHouse.
 
     Dedicated path — track_event would re-enrich the request and mislabel the
-    row. No cost (cost belongs to the visit row) and no is_bot/status/revenue/
-    profit (server-owned fields, never request-derived). A CH failure must
-    never break the visitor's redirect.
+    row. No cost (cost belongs to the visit row) and no status/revenue/profit
+    (server-owned fields, never request-derived). is_bot/fraud_score come from
+    the tracking gate (server-side), not the request. A CH failure must never
+    break the visitor's redirect.
     """
     try:
         row = {
@@ -483,12 +490,33 @@ async def save_click_to_clickhouse(meta: dict, campaign_alias: str):
             "visitor_id": str(meta.get("visitor_id") or ""),
             "flow_index": int(meta.get("flow_index") or 0),
         }
-        _CLICK_ROW_EXCLUDED = ("cost", "is_bot", "status", "revenue", "profit")
+        _CLICK_ROW_EXCLUDED = ("cost", "is_bot", "fraud_score", "status", "revenue", "profit")
         for k, v in meta.items():
             if k in VALID_PARAMS and k not in _CLICK_ROW_EXCLUDED and v is not None:
                 row[k] = v
+        # Gate result — is_bot from the bot rules/shield mark, fraud_score from
+        # the same heuristic track_event applies.
+        row["is_bot"] = bool(meta.get("is_bot"))
+        try:
+            row["fraud_score"] = min(int(meta.get("fraud_score") or 0), 100)
+        except (TypeError, ValueError):
+            row["fraud_score"] = 0
         if row.get("landing_id") is not None:
             row["landing_id"] = str(row["landing_id"])
+        # G79 privacy: same IP masking as track_event (IPv4 → last octet zeroed,
+        # IPv6 → last 16 bits zeroed) — the click-out row must not leak what the
+        # visit row masked.
+        if load_privacy_settings().get("anonymize_ip"):
+            ip_val = row.get("ip")
+            if ip_val:
+                try:
+                    addr = ipaddress.ip_address(str(ip_val))
+                    if addr.version == 4:
+                        row["ip"] = ".".join(str(addr).split(".")[:3] + ["0"])
+                    else:
+                        row["ip"] = str(ipaddress.IPv6Address((int(addr) >> 16) << 16))
+                except ValueError:
+                    pass
         # Full client address (v4 or v6) for the ip_full String column —
         # captured BEFORE the IPv4 coercion below, which erases v6 visitors.
         ip_full_val = row.get("ip")
@@ -551,6 +579,19 @@ async def campaign_click(
         log_track(f"🚫 Click-out refused for non-active offer {offer['id']}")
         return Response("Offer unavailable", status_code=404)
 
+    # Paused/archived campaigns must not accept click-outs either.
+    if campaign["status"] != "active":
+        log_track(f"🚫 Click-out refused for non-active campaign '{campaign_alias}'")
+        return Response("Campaign not found", status_code=404)
+
+    # Bot rules + shield + blacklists + honeypot + GDPR opt-out — the same
+    # shared gate every campaign-serving route applies. Blocked → untracked
+    # 404/blank; opted-out → the redirect still happens but nothing is stored.
+    blocked = await apply_tracking_gate(request, f"{campaign_alias}/{offer_id}", campaign)
+    if blocked is not None:
+        return blocked
+    optout = getattr(request.state, "optout", False)
+
     # G4: daily conversion cap on the click-out route — transparently serve the
     # overflow offer when the primary is capped, otherwise refuse.
     cap_state_cache: dict = {}
@@ -581,7 +622,11 @@ async def campaign_click(
             meta_data["landing_id"] = int(landing_id)
         except ValueError:
             pass
-    meta_data["click_id"] = meta_data.get("click_id") or generate_click_id()
+    # Explicit ?click_id= from the landing click-out wins over the (possibly
+    # stale) aaa_cid cookie — the cookie otherwise overrides it during the
+    # meta merge and conversions misattribute. Mirrors /p's precedence.
+    meta_data["click_id"] = (request.query_params.get("click_id")
+                             or meta_data.get("click_id") or generate_click_id())
 
     # G55: link the conversion to the visitor cookie set on the campaign hit —
     # the conversions log joins click-date windows through this key.
@@ -589,6 +634,20 @@ async def campaign_click(
         vid = request.cookies.get(VISITOR_COOKIE)
         if vid:
             meta_data["visitor_id"] = vid
+
+    # Bot-mark / honeypot flag from the gate + the same fraud heuristic
+    # track_event applies — the click-out row stops looking like human traffic.
+    if getattr(request.state, "bot_marked", None) or getattr(request.state, "honeypot_flagged", False):
+        meta_data["is_bot"] = True
+    gate_score, _crawler, _reasons = compute_fraud_score(
+        visitor_key=visitor_key_for(request),
+        ip=str(meta_data.get("ip") or ""),
+        ua=str(meta_data.get("user_agent") or ""),
+        isp=str(meta_data.get("isp") or ""),
+        is_bot=bool(meta_data.get("is_bot")) or bool(getattr(request.state, "bot_marked", None)))
+    if getattr(request.state, "honeypot_flagged", False):
+        gate_score = 100
+    meta_data["fraud_score"] = min(int(gate_score), 100)
 
     # Per-flow delivery action — the flow is recovered from the signed
     # stickiness cookie's fi; a missing/invalid cookie falls back to the
@@ -635,8 +694,10 @@ async def campaign_click(
         action_flow = None
         funnel_cfg = None
 
-    # 5. Save the click asynchronously
-    background_tasks.add_task(save_click_to_db, meta_data)
+    # 5. Save the click asynchronously — opted-out visitors (G79) get the
+    # redirect but no Postgres/ClickHouse rows and no tracking cookies.
+    if not optout:
+        background_tasks.add_task(save_click_to_db, meta_data)
 
     # 6. Build the final URL
     offer_url = offer["url"]
@@ -655,7 +716,8 @@ async def campaign_click(
 
     # 7. ClickHouse click row (click=true) — awaited inline so the row is
     # observable the moment the redirect returns; failures never block it.
-    await save_click_to_clickhouse(meta_data, campaign_alias)
+    if not optout:
+        await save_click_to_clickhouse(meta_data, campaign_alias)
 
     response = await flow_action_response(
         offer_url, action_flow, lambda u: RedirectResponse(u))
@@ -665,18 +727,19 @@ async def campaign_click(
     # visit serves the next step. Click-out at the last step keeps st at last.
     # Only a previously-bound visitor advances; a bare click-out (no cookie)
     # just redirects without touching funnel state.
-    if funnel_cfg is not None and click_bound is not None:
+    if funnel_cfg is not None and click_bound is not None and not optout:
         steps = funnel_cfg.get("steps") or []
         if steps:
             cur = meta_data.get("funnel_step") or 0
             next_step = min(cur + 1, len(steps) - 1)
-            response.set_cookie(
-                BIND_COOKIE,
-                make_bind_cookie(campaign["id"], 0, offer["id"],
-                                 meta_data.get("landing_id"),
-                                 campaign_routing_hash(click_cfg, click_dmode),
-                                 step=next_step),
-                max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
+            bind_cookie = make_bind_cookie(campaign["id"], 0, offer["id"],
+                                           meta_data.get("landing_id"),
+                                           campaign_routing_hash(click_cfg, click_dmode),
+                                           step=next_step)
+            if bind_cookie:
+                response.set_cookie(
+                    BIND_COOKIE, bind_cookie,
+                    max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
 
     return response
 
@@ -702,13 +765,20 @@ async def save_click_to_db(meta: dict):
 
     insert_data["status"] = 'lead'
 
+    # (column, placeholder, value) built together so the numbering always
+    # matches the value list — filtering "now()" out of values separately
+    # desynced $N indices and silently dropped the click row.
     columns = ", ".join(insert_data.keys())
-    values_placeholders = ", ".join(
-        ["NOW()" if v == "now()" else f"${i + 1}" for i, v in enumerate(insert_data.values())]
-    )
-    values = [v for v in insert_data.values() if v != "now()"]
+    placeholders = []
+    values = []
+    for v in insert_data.values():
+        if v == "now()":
+            placeholders.append("NOW()")
+        else:
+            placeholders.append(f"${len(values) + 1}")
+            values.append(v)
 
-    query = f"INSERT INTO conversions_data ({columns}) VALUES ({values_placeholders})"
+    query = f"INSERT INTO conversions_data ({columns}) VALUES ({', '.join(placeholders)})"
 
     async with pg.acquire() as conn:
         await conn.execute(query, *values)
@@ -885,6 +955,11 @@ async def _collect_payload(request: Request) -> dict:
                 post_data = {}
         except Exception:
             post_data = {}
+        # A JSON scalar/array body ([1,2], 42, "x") is not mergeable — normalize
+        # to {} at cache time so {**post_data} merges and `key in query` checks
+        # downstream can never raise TypeError on the cached body.
+        if not isinstance(post_data, dict):
+            post_data = {}
         request.state._parsed_body = post_data
     return post_data if isinstance(post_data, dict) else {}
 
@@ -897,9 +972,14 @@ async def find_campaign_for_tracking(c_ref: str):
     """
     pg = app.state.pg
     async with pg.acquire() as conn:
-        if str(c_ref).isdigit():
-            row = await conn.fetchrow(
-                "SELECT * FROM campaigns WHERE id = $1 AND status = 'active'", int(c_ref))
+        # isdecimal, not isdigit: "²".isdigit() is True but int("²") raises —
+        # a crafted campaign ref must 404, not 500.
+        if str(c_ref).isdecimal():
+            try:
+                row = await conn.fetchrow(
+                    "SELECT * FROM campaigns WHERE id = $1 AND status = 'active'", int(c_ref))
+            except (TypeError, ValueError):
+                row = None
             if row:
                 return row
         return await conn.fetchrow(
@@ -1052,10 +1132,17 @@ def load_telegram_config() -> dict:
 # visible within the TTL window.
 _SETTINGS_CACHE_TTL = 30.0
 _settings_cache: dict = {}
+# Sentinel: the settings-row read itself failed (DB down/error) — distinct from
+# "the block is genuinely absent", which is a configured state.
+_SETTINGS_READ_FAILED = object()
 
 
 def _read_settings_block(key: str):
-    """Fresh (sync, own connection) read of one block from the settings row."""
+    """Fresh (sync, own connection) read of one block from the settings row.
+
+    Returns _SETTINGS_READ_FAILED when the read itself errors, so callers can
+    fail closed instead of treating the outage as 'no security configured'.
+    """
     try:
         conn = pg_connect()
         cur = conn.cursor()
@@ -1064,13 +1151,18 @@ def _read_settings_block(key: str):
         conn.close()
         if row and row[0]:
             return json.loads(row[0]).get(key)
+        return None
     except Exception as e:
         log_track(f"Settings '{key}' load error: {e}")
-    return None
+        return _SETTINGS_READ_FAILED
 
 
 def _settings_block(key: str, default=None):
-    """Cached read of a settings-row block (30s TTL)."""
+    """Cached read of a settings-row block (30s TTL).
+
+    A failed read is served as the default for this request only and never
+    cached — the next hit retries, so a recovered DB is picked up immediately.
+    """
     if default is None:
         default = {}
     now = time.monotonic()
@@ -1078,6 +1170,8 @@ def _settings_block(key: str, default=None):
     if hit is not None and now - hit[0] < _SETTINGS_CACHE_TTL:
         return hit[1]
     value = _read_settings_block(key)
+    if value is _SETTINGS_READ_FAILED:
+        return default
     if not isinstance(value, type(default)):
         value = default
     _settings_cache[key] = (now, value)
@@ -1085,12 +1179,30 @@ def _settings_block(key: str, default=None):
 
 
 def load_postback_security() -> dict:
-    """Read the postback_security block from the settings row (30s TTL cache)."""
-    return _settings_block("postback_security")
+    """Read the postback_security block (30s TTL cache), failing CLOSED.
+
+    A DB read failure returns a sentinel dict that check_postback_access denies
+    on, and nothing is cached — a transient outage must never disable postback
+    security for the following 30s. A genuinely empty/missing block keeps the
+    configured-open behavior.
+    """
+    now = time.monotonic()
+    hit = _settings_cache.get("postback_security")
+    if hit is not None and now - hit[0] < _SETTINGS_CACHE_TTL:
+        return hit[1]
+    value = _read_settings_block("postback_security")
+    if value is _SETTINGS_READ_FAILED:
+        return {"read_failed": True}
+    if not isinstance(value, dict):
+        value = {}
+    _settings_cache["postback_security"] = (now, value)
+    return value
 
 
 def check_postback_access(request: Request, sec: dict) -> tuple[bool, str]:
     """Enforce the optional secret key and IP allowlist on inbound postbacks."""
+    if sec.get("read_failed"):
+        return False, "Postback security state unavailable — denying (fail closed)"
     client_ip = resolve_client_ip(request)
 
     # IP allowlist: comma-separated IPs or CIDR ranges (e.g. 52.1.2.3, 52.0.0.0/8)
@@ -1126,7 +1238,9 @@ def check_postback_access(request: Request, sec: dict) -> tuple[bool, str]:
                     or request.query_params.get("secret")
                     or request.headers.get("x-postback-key")
                     or "")
-        if not secrets.compare_digest(str(provided), str(secret)):
+        # bytes, not str: compare_digest rejects non-ASCII str input with a
+        # TypeError (500) — a crafted ?key=… must just fail the check.
+        if not secrets.compare_digest(str(provided).encode(), str(secret).encode()):
             return False, "Invalid or missing postback key"
 
     return True, ""
@@ -1745,6 +1859,11 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
     pg = request.app.state.pg
     now = datetime.utcnow()
     extra_fields = dict(extra_fields or {})
+    # Column limits at the edge: click_id VARCHAR(100), sub_id_i VARCHAR(50) —
+    # an over-long value would 500 the asyncpg insert/update.
+    click_id = str(click_id or "").strip()[:100]
+    extra_fields = {k: (str(v)[:50] if k.startswith("sub_id_") and v is not None else v)
+                    for k, v in extra_fields.items()}
     event = {"status": status, "payout": payout_value,
              "received_at": now.isoformat(), "source": source}
     clickless = str(click_id or "").strip().lower() in ("", "none", "0")
@@ -1946,7 +2065,10 @@ async def postback_receive(click_id: str, status: str, payout: str, request: Req
 
     try:
         payout_value = float(str(payout).strip().replace(",", "."))
-    except ValueError:
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid payout format")
+    # NaN/Infinity parse fine but poison every downstream sum/aggregate.
+    if not math.isfinite(payout_value):
         raise HTTPException(status_code=400, detail="Invalid payout format")
 
     # Postback protection (optional secret key + IP allowlist, from Settings)
@@ -2003,7 +2125,10 @@ async def conversion_pixel(campaign_alias: str, request: Request, background_tas
 
     try:
         payout_value = float(str(request.query_params.get("payout") or 0).strip().replace(",", "."))
-    except ValueError:
+    except (TypeError, ValueError):
+        return respond(status_code=400, detail="Invalid payout format")
+    # NaN/Infinity parse fine but poison every downstream sum/aggregate.
+    if not math.isfinite(payout_value):
         return respond(status_code=400, detail="Invalid payout format")
 
     result = await record_conversion(click_id or "none", status, payout_value, request,
@@ -2371,7 +2496,10 @@ def _load_or_create_bind_secret() -> bytes:
             return row[0].encode()
     except Exception as e:
         log_track(f"Bind secret load error: {e}")
-    return b"aaa-bind-secret"
+    # Fail closed: no constant fallback secret — a known secret would make
+    # every stickiness cookie forgeable. Callers skip binding entirely until
+    # the settings row is readable.
+    return None
 
 
 def _bind_secret() -> bytes:
@@ -2381,6 +2509,8 @@ def _bind_secret() -> bytes:
     cached = getattr(app.state, "_bind_secret", None)
     if cached is None:
         cached = _load_or_create_bind_secret()
+        # A None result (settings read failed) is NOT cached — the next hit
+        # retries instead of staying fail-closed forever.
         app.state._bind_secret = cached
     return cached
 
@@ -2415,6 +2545,12 @@ def campaign_routing_hash(config: dict, distribution_mode: str) -> str:
 
 def make_bind_cookie(campaign_id: int, flow_index: int, offer, landing, routing_hash: str,
                      step: int = None) -> str:
+    # Fail closed: with no usable secret (settings read failed) no binding is
+    # issued — never a cookie signed with a constant.
+    secret = _bind_secret()
+    if not secret:
+        log_track("⚠ Bind secret unavailable — binding cookie skipped")
+        return ""
     payload = {"cid": int(campaign_id), "fi": int(flow_index), "offer": offer, "landing": landing,
                "exp": int(datetime.utcnow().timestamp()) + BIND_TTL_SECONDS, "h": routing_hash}
     # G10 funnel campaigns: "st" is the visitor's current step index. Absent on
@@ -2422,18 +2558,23 @@ def make_bind_cookie(campaign_id: int, flow_index: int, offer, landing, routing_
     if step is not None:
         payload["st"] = int(step)
     raw = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
-    sig = hmac.new(_bind_secret(), raw.encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(secret, raw.encode(), hashlib.sha256).hexdigest()
     return f"{raw}.{sig}"
 
 
 def parse_bind_cookie(request: Request, campaign_id: int, routing_hash: str):
     """Return the validated binding payload, or None (bad sig/expired/other campaign/stale config)."""
+    # Fail closed: no usable secret → never accept a binding signed with one.
+    secret = _bind_secret()
+    if not secret:
+        return None
     raw_cookie = request.cookies.get(BIND_COOKIE)
     if not raw_cookie or "." not in raw_cookie:
         return None
     raw, sig = raw_cookie.rsplit(".", 1)
-    expected = hmac.new(_bind_secret(), raw.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(sig, expected):
+    expected = hmac.new(secret, raw.encode(), hashlib.sha256).hexdigest()
+    # bytes, not str: a non-ASCII cookie value would raise TypeError (500).
+    if not hmac.compare_digest(sig.encode(), expected.encode()):
         return None
     try:
         payload = json.loads(_b64url_decode(raw))
@@ -2520,6 +2661,19 @@ def get_params_id_mapping_from_campaign(campaign: dict) -> list:
         return config.get("paramsIdMapping", [])
     except json.JSONDecodeError:
         return []
+
+
+def parse_campaign_config(campaign) -> dict:
+    """Safe parse of campaign['config'] — NULL or garbage JSON behaves as {}.
+
+    A visitor must never see a 500 because an operator saved a broken/empty
+    config; the empty config falls through to the normal fallback/404 handling.
+    """
+    try:
+        cfg = json.loads(campaign["config"] or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return cfg if isinstance(cfg, dict) else {}
 
 
 def meta_refresh_redirect(url: str) -> Response:
@@ -2753,11 +2907,12 @@ async def execute_funnel(campaign, request: Request, config: dict, meta_data: di
     if not getattr(request.state, "optout", False):
         offer_id = served["offer"] if served["offer"] is not None else flow.get("offer")
         landing_id = served["landing"] if served["landing"] is not None else landing
-        response.set_cookie(
-            BIND_COOKIE,
-            make_bind_cookie(campaign["id"], 0, offer_id, landing_id, routing_hash,
-                             step=step_index),
-            max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
+        bind_cookie = make_bind_cookie(campaign["id"], 0, offer_id, landing_id, routing_hash,
+                                       step=step_index)
+        if bind_cookie:
+            response.set_cookie(
+                BIND_COOKIE, bind_cookie,
+                max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
 
     if track and not getattr(request.state, "optout", False):
         await track_event(campaign, request)
@@ -2768,7 +2923,7 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
                                 track: bool = True) -> Response:
     log_track(f"🔁 New campaign execution call for '{campaign}'")
 
-    config = json.loads(campaign["config"])
+    config = parse_campaign_config(campaign)
     flows = config.get("flows", [])
 
     pg = app.state.pg
@@ -2824,7 +2979,19 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
     if bound is not None:
         chosen = sorted_flows[bound["fi"]]
         chosen_index = bound["fi"]
-    else:
+        # A bound visitor whose flow's offer is paused/archived loses the
+        # binding and falls through to fresh selection — the same offer-state
+        # gate the eligibility loop below applies.
+        bound_offer = chosen.get("offer")
+        if bound_offer:
+            bound_offer_cache: dict = {}
+            o_status, o_archived = await offer_state(pg, bound_offer_cache, bound_offer)
+            if o_status != "active" or o_archived:
+                log_track(f"🚫 Bound flow offer {bound_offer} inactive — re-selecting for campaign {campaign['id']}")
+                bound = None
+                chosen = None
+                chosen_index = -1
+    if chosen is None:
         # Collect eligible flows: enabled + schedule open + caps open + filters passed
         eligible = []
         cap_state_cache: dict = {}
@@ -2931,10 +3098,11 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
         if stickiness and not getattr(request.state, "optout", False):
             offer_id = served["offer"] if served["offer"] is not None else flow.get("offer")
             landing_id = served["landing"] if served["landing"] is not None else flow.get("landing")
-            response.set_cookie(
-                BIND_COOKIE,
-                make_bind_cookie(campaign["id"], chosen_index, offer_id, landing_id, routing_hash),
-                max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
+            bind_cookie = make_bind_cookie(campaign["id"], chosen_index, offer_id, landing_id, routing_hash)
+            if bind_cookie:
+                response.set_cookie(
+                    BIND_COOKIE, bind_cookie,
+                    max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
 
     # Track THIS campaign's own execution (flow index was recorded above under
     # this campaign's id). Inner redirect_campaign levels track themselves when
@@ -3166,8 +3334,12 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
             query = await request.json()
         except:
             query = {}
+    # Non-dict bodies (JSON scalars/arrays) can't be keyed — normalize so the
+    # `if key in query` membership test below never raises TypeError.
+    if not isinstance(query, dict):
+        query = {}
 
-    config = json.loads(campaign["config"])
+    config = parse_campaign_config(campaign)
 
     # Extract the mapping from config.paramsIdMapping
     mapping = {}
@@ -3321,6 +3493,25 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
         log_track(f"❌ ClickHouse insert failed for campaign '{campaign_alias}': {str(e)}")
 
 
+def fill_postback_template(url: str, mapping: dict) -> str:
+    """Replace {key} placeholders in an admin-configured postback URL.
+
+    Regex substitution, not str.format_map: unknown keys, format specs
+    ({click_id:>10}), attribute/index accesses and stray braces all stay
+    literal, and malformed template text can never raise (a raised exception
+    here would kill the whole background-tasks queue for the conversion).
+    """
+    def _sub(match):
+        token = match.group(1)
+        # Only a bare {key} with a clean identifier name substitutes; anything
+        # else — format specs ({click_id:>10}), attribute/index access, unknown
+        # keys — stays literal so admin-authored text is never reinterpreted.
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token) and token in mapping:
+            return str(mapping[token])
+        return match.group(0)
+    return re.sub(r"\{([^{}]*)\}", _sub, url)
+
+
 async def send_postback(url: str, data: dict, post: bool = False):
     VALID_PARAMS = [
         'payout', 'status', 'click_id', 'browser', 'campaign_id', 'city', 'connection_type', 'currency',
@@ -3331,21 +3522,22 @@ async def send_postback(url: str, data: dict, post: bool = False):
         'traffic_source_name', 'url', 'visitor_id'
     ]
 
-    # 🔒 Filtered parameters
-    safe_data = {k: str(v) for k, v in data.items() if k in VALID_PARAMS}
+    # 🔒 Filtered parameters — None values dropped (str(None) serializes as
+    # "None" in postback URLs/queries; the s2s path already excluded them).
+    safe_data = {k: str(v) for k, v in data.items() if k in VALID_PARAMS and v is not None}
 
-    class SafeDict(dict):
-        def __missing__(self, key):
-            return "{" + key + "}"
-
-    filled_url = url.format_map(SafeDict({k: str(v) for k, v in data.items()}))
-
-    # Redact: only the origin+path goes into the debug log, never the query
-    # string (it carries click ids, tokens and payouts).
-    redacted = filled_url.split("?")[0]
-    log_track(f"<UNK> Sending Postback: {redacted}")
-
+    # Templating lives inside try/except: a malformed admin-configured URL must
+    # be logged and skipped, never abort the BackgroundTasks queue (Telegram →
+    # campaign/source postbacks → ClickHouse sync for this conversion).
     try:
+        filled_url = fill_postback_template(
+            url, {k: str(v) for k, v in data.items() if v is not None})
+
+        # Redact: only the origin+path goes into the debug log, never the query
+        # string (it carries click ids, tokens and payouts).
+        redacted = filled_url.split("?")[0]
+        log_track(f"<UNK> Sending Postback: {redacted}")
+
         async with httpx.AsyncClient(timeout=10) as client:
             if post:
                 response = await client.post(filled_url, json=safe_data)
@@ -3453,7 +3645,7 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
     apply_tracking_gate on the redirect path) and its "allow" watch mode is
     applied by track_event — no shield logic lives here.
     """
-    config = json.loads(campaign["config"])
+    config = parse_campaign_config(campaign)
     flows = config.get("flows", [])
     pg = app.state.pg
 
@@ -3528,10 +3720,22 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
     if bound is not None:
         chosen = sorted_flows[bound["fi"]]
         chosen_index = bound["fi"]
-    else:
+        # A bound visitor whose flow's offer is paused/archived loses the
+        # binding and falls through to fresh selection (mirror of
+        # do_campaign_execution — KEEP IN SYNC).
+        bound_offer = chosen.get("offer")
+        if bound_offer:
+            bound_offer_cache: dict = {}
+            o_status, o_archived = await offer_state(pg, bound_offer_cache, bound_offer)
+            if o_status != "active" or o_archived:
+                bound = None
+                chosen = None
+                chosen_index = -1
+    if chosen is None:
         eligible = []
         cap_state_cache: dict = {}
         conv_count_cache: dict = {}
+        offer_state_cache: dict = {}
         for idx, flow in enumerate(sorted_flows):
             if not flow or not flow.get("enabled"):
                 continue
@@ -3549,6 +3753,11 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
             offer_override = None
             flow_offer = flow.get("offer")
             if flow_offer:
+                # Paused/archived offers receive no traffic — skip the flow
+                # (mirror of the fresh-selection loop in do_campaign_execution).
+                o_status, o_archived = await offer_state(pg, offer_state_cache, flow_offer)
+                if o_status != "active" or o_archived:
+                    continue
                 daily_cap, overflow = await offer_cap_state(pg, cap_state_cache, flow_offer)
                 if daily_cap and await offer_conversions_today(pg, conv_count_cache, flow_offer) >= int(daily_cap):
                     if overflow:
@@ -3878,7 +4087,7 @@ async def simulate_traffic(campaign_alias: str, request: Request) -> Response:
     profile = body.get("profile")
     profile = profile if isinstance(profile, dict) else {}
 
-    config = json.loads(campaign["config"])
+    config = parse_campaign_config(campaign)
     flows = config.get("flows", [])
     distribution_mode = (campaign.get("redirect_mode") if hasattr(campaign, "get") else campaign["redirect_mode"]) or "position"
     sorted_flows = sorted(

@@ -30,6 +30,12 @@ def _snippet(text_value: str, term: str, width: int = 64) -> str:
     return ("…" if start > 0 else "") + s[start:start + width] + ("…" if start + width < len(s) else "")
 
 
+def _escape_like(term: str) -> str:
+    """Escape SQL LIKE wildcards so user text matches literally (Postgres's
+    default escape character is the backslash)."""
+    return str(term).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @router.get("")
 @router.get("/")
 def global_search(request: Request, q: str = "", db: Session = Depends(get_db)):
@@ -56,7 +62,7 @@ def global_search(request: Request, q: str = "", db: Session = Depends(get_db)):
         from auth import ADMIN_ONLY_SECTIONS
         return is_admin or perms.get(section, section not in ADMIN_ONLY_SECTIONS)
 
-    like = f"%{term}%"
+    like = f"%{_escape_like(term)}%"
     out = {}
     uid_row = db.execute(text("SELECT id FROM users WHERE username = :u"),
                          {"u": caller}).fetchone() if caller else None
@@ -117,13 +123,21 @@ def global_search(request: Request, q: str = "", db: Session = Depends(get_db)):
             out["affiliates"] = [{"id": r[0], "name": r[1], "snippet": r[1]} for r in rows]
 
     if allowed("reports"):
-        rows = db.execute(text("""
+        conv_sql = """
             SELECT id, click_id, external_id, transaction_id, status
             FROM conversions_data
-            WHERE click_id ILIKE :like OR external_id ILIKE :like
-               OR transaction_id ILIKE :like
-            ORDER BY id DESC LIMIT :lim"""),
-            {"like": like, "lim": CONVERSION_LIMIT}).fetchall()
+            WHERE (click_id ILIKE :like OR external_id ILIKE :like
+               OR transaction_id ILIKE :like)"""
+        conv_params = {"like": like, "lim": CONVERSION_LIMIT}
+        # campaigns:'own' parity with the conversions list: a scoped caller
+        # only searches conversions of campaigns they own (unattributable
+        # rows stay hidden).
+        if own_campaigns and my_id:
+            conv_sql += (" AND campaign_id IN (SELECT id FROM campaigns "
+                         "WHERE owner_id = :my_id)")
+            conv_params["my_id"] = my_id
+        conv_sql += " ORDER BY id DESC LIMIT :lim"
+        rows = db.execute(text(conv_sql), conv_params).fetchall()
         if rows:
             out["conversions"] = [{"id": r[0],
                                    "name": r[1] if r[1] and r[1] != "none" else "(unattributed)",

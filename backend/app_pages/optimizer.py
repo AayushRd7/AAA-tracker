@@ -429,7 +429,13 @@ def put_optimizer(campaign_id: int, payload: dict, request: Request,
         "SELECT config FROM campaigns WHERE id = :i FOR UPDATE"),
         {"i": int(campaign_id)}).fetchone()
     config = row[0] or {}
-    block = _settings(config.get("optimizer"))
+    # Start from the live optimizer block (defaults for the known settings,
+    # keeping run history and any extra keys like last_runs) and overlay the
+    # validated updates — a plain rebuild used to wipe last_runs.
+    existing = config.get("optimizer")
+    block = _settings(existing)
+    if isinstance(existing, dict):
+        block.update({k: v for k, v in existing.items() if k not in DEFAULTS})
     block.update(updates)
     db.execute(text(
         "UPDATE campaigns SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{optimizer}', CAST(:o AS JSONB)), "

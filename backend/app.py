@@ -255,10 +255,11 @@ from app_pages.insights import router as insights_router
 app.include_router(insights_router, prefix="/api/insights", tags=["Insights"],
                    dependencies=[Depends(require_section_write("settings"))])
 # G76: MCP / AI-agent access — JSON-RPC 2.0 endpoint, Bearer API token or
-# admin session; same admin plane as monitoring/rules/fraud.
+# admin session; same admin plane as monitoring/rules/fraud. Mounted behind
+# the WRITE gate: campaigns.set_status mutates campaign state.
 from app_pages.mcp import router as mcp_router
 app.include_router(mcp_router, prefix="/api/mcp", tags=["MCP"],
-                   dependencies=[Depends(require_section("settings"))])
+                   dependencies=[Depends(require_section_write("settings"))])
 # G75: global search — any authenticated user; results filtered by permissions.
 app.include_router(search_router, prefix="/api/search", tags=["Search"],
                    dependencies=[Depends(require_section("dashboard"))])

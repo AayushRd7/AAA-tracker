@@ -21,20 +21,28 @@ async def clear_tracking_data(
     request: Request,
     db: Session = Depends(get_db)
 ):
+    from audit_logger import audit_event
+    from auth import get_caller
 
     try:
         ch = request.state.ch
         ch.command("TRUNCATE TABLE clicks_data")
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"ClickHouse error: {str(e)}"})
+        print("clear-tracking-data: ClickHouse error:", repr(e))
+        return JSONResponse(status_code=500, content={"error": "ClickHouse error clearing clicks_data"})
 
     try:
         db.execute(text("TRUNCATE TABLE conversions_data RESTART IDENTITY CASCADE"))
         db.commit()
     except Exception as e:
         db.rollback()
-        return JSONResponse(status_code=500, content={"error": f"PostgreSQL error: {str(e)}"})
+        print("clear-tracking-data: PostgreSQL error:", repr(e))
+        return JSONResponse(status_code=500, content={"error": "PostgreSQL error clearing conversions_data"})
 
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "clear_tracking_data", "settings", "",
+                {"clicks": "truncated", "conversions": "truncated"},
+                request.client.host if request.client else "")
     return {"status": "ok", "message": "Tracking data cleared from ClickHouse and PostgreSQL"}
 
 
@@ -111,7 +119,9 @@ def get_settings(db: Session = Depends(get_db)):
     return out
 
 @router.post("/")
-def save_settings(payload: dict, db: Session = Depends(get_db)):
+def save_settings(payload: dict, request: Request, db: Session = Depends(get_db)):
+    from audit_logger import audit_event
+    from auth import get_caller
     # Merge top-level keys server-side under a row lock: two rapid saves of
     # different keys must not clobber each other (read-modify-write race).
     for key, val in payload.items():
@@ -136,6 +146,10 @@ def save_settings(payload: dict, db: Session = Depends(get_db)):
         else:
             db.add(SettingsORM(name=key, value=val_str))
     db.commit()
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "save", "settings", ", ".join(payload.keys())[:64],
+                {"keys": list(payload.keys())},
+                request.client.host if request.client else "")
     return {"status": "ok"}
 
 
@@ -411,12 +425,60 @@ def _sanitize_for_export(value):
 def _restore_secrets(imported, current):
     """Deep-merge an imported section over the live one: a null leaf in the
     import means "redacted on export" — keep the live value so restoring a
-    backup never wipes credentials."""
+    backup never wipes credentials.
+
+    List sections (saved_reports, report_email_schedules, annotations, …) are
+    matched item-by-item on a stable key (id / report_id / name) so nulled
+    secrets inside a list item (e.g. a saved report's share token) restore
+    from the matching live item; items with no live counterpart get their
+    null secret keys stripped instead of storing null."""
     if isinstance(imported, dict) and isinstance(current, dict):
         return {k: _restore_secrets(v, current.get(k)) for k, v in imported.items()}
+    if isinstance(imported, list) and isinstance(current, list):
+        live_by_key = {}
+        for live in current:
+            k, v = _list_item_key(live)
+            if k is not None:
+                live_by_key[v] = live
+        out = []
+        for item in imported:
+            k, v = _list_item_key(item)
+            live = live_by_key.get(v) if k is not None else None
+            if isinstance(item, dict) and isinstance(live, dict):
+                out.append(_restore_secrets(item, live))
+            else:
+                out.append(_strip_secret_nulls(item))
+        return out
     if imported is None:
         return current
     return imported
+
+
+_LIST_ITEM_KEYS = ("id", "report_id", "name")
+
+
+def _list_item_key(item):
+    """(key_name, value) for the first stable identity key the item carries."""
+    if isinstance(item, dict):
+        for k in _LIST_ITEM_KEYS:
+            if k in item:
+                return k, item[k]
+    return None, None
+
+
+def _strip_secret_nulls(value):
+    """Remove redacted (null) secret-looking keys so they are skipped rather
+    than stored as null when there is no live value to restore from."""
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if v is None and isinstance(k, str) and SECRET_KEY_RE.search(k):
+                continue
+            out[k] = _strip_secret_nulls(v)
+        return out
+    if isinstance(value, list):
+        return [_strip_secret_nulls(v) for v in value]
+    return value
 
 
 @router.get("/export")

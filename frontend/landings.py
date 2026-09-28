@@ -24,7 +24,19 @@ class FileSaveRequest(BaseModel):
     content: str
 
 
-router = APIRouter()
+async def require_admin_dep(request: Request):
+    """Admin gate for every landings-management route.
+
+    These endpoints live on the public tracking host (nginx proxies /), so an
+    unauthenticated visitor must never reach them — DELETE rmtree's landing
+    folders and the editor reads/writes arbitrary files. require_admin lives in
+    app.py, which imports this module — import it lazily at request time.
+    """
+    from app import require_admin
+    await require_admin(request)
+
+
+router = APIRouter(dependencies=[Depends(require_admin_dep)])
 
 LANDINGS_DIR = "/app/landings"  # path inside the src container
 os.makedirs(LANDINGS_DIR, exist_ok=True)

@@ -28,7 +28,7 @@
                 <v-btn
                         color="primary"
                         elevation="0"
-                        @click="saveSettings"
+                        @click="saveSettings(false)"
                 >
                     <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save settings
                 </v-btn>
@@ -1152,7 +1152,7 @@
                     if (res.ok && data.status === "ok") {
                         this.$root.$emit("show-message", {type: "success", text: data.message || "Test message sent"});
                     } else {
-                        this.$root.$emit("show-message", {type: "error", text: data.detail || "Test failed"});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(data.detail || "Test failed")});
                     }
                 } catch (e) {
                     /* error toast already shown by saveSettings or above */
@@ -1173,7 +1173,7 @@
                     if (res.ok && data.status === "ok") {
                         this.$root.$emit("show-message", {type: "success", text: data.message || "Test report sent"});
                     } else {
-                        this.$root.$emit("show-message", {type: "error", text: data.detail || "Test report failed"});
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(data.detail || "Test report failed")});
                     }
                 } catch (e) {
                     /* error toast already shown by saveSettings or above */

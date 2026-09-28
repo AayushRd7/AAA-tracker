@@ -68,6 +68,23 @@ class Conversion(Base):
 VALID_STATUSES = {"lead", "sale", "upsale", "rejected", "hold", "trash"}
 
 
+def _escape_like(term: str) -> str:
+    """Escape SQL LIKE wildcards so user text matches literally (Postgres's
+    default escape character is the backslash)."""
+    return str(term).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _parse_iso_dt(value, label: str) -> datetime:
+    """Validate an ISO date/datetime query param — a bad value used to 500 in
+    fromisoformat downstream."""
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {label}: expected an ISO date (YYYY-MM-DD)")
+
+
 def _conversions_scope(request: Request, db: Session, query):
     """G63/D1c parity with campaigns:'own' — a scoped caller only sees
     conversions whose campaign they own; unattributable rows (NULL campaign_id)
@@ -193,6 +210,11 @@ def _build_conversions_query(request: Request, db: Session):
     date_basis = params.get("date_basis") or "click_date"
     date_from = params.get("date_from")
     date_to = params.get("date_to")
+    if date_from and date_to:
+        # validate once up front — these flow into ClickHouse toDate() and
+        # Postgres fromisoformat() below
+        _parse_iso_dt(date_from, "date_from")
+        _parse_iso_dt(date_to, "date_to")
 
     visitor_ids_in_window = None
     if date_from and date_to and date_basis == "click_date":
@@ -221,7 +243,7 @@ def _build_conversions_query(request: Request, db: Session):
             continue
         elif key == "search":
             # free-text search across the identifier columns
-            term = f"%{value}%"
+            term = f"%{_escape_like(value)}%"
             query = query.filter(
                 (Conversion.click_id.ilike(term)) |
                 (Conversion.external_id.ilike(term)) |
@@ -232,21 +254,22 @@ def _build_conversions_query(request: Request, db: Session):
             # substring match against the bound offer's URL — conversion rows
             # carry no URL column themselves
             from models.offers import OfferORM
-            term = f"%{value}%"
+            term = f"%{_escape_like(value)}%"
             query = query.join(OfferORM, Conversion.offer_id == OfferORM.id) \
                          .filter(OfferORM.url.ilike(term))
 
     if date_from and date_to:
         if date_basis == "conversion_date":
-            query = query.filter(Conversion.received_at >= datetime.fromisoformat(date_from))
-            query = query.filter(Conversion.received_at < datetime.fromisoformat(date_to) + timedelta(days=1))
+            query = query.filter(Conversion.received_at >= _parse_iso_dt(date_from, "date_from"))
+            query = query.filter(
+                Conversion.received_at < _parse_iso_dt(date_to, "date_to") + timedelta(days=1))
         elif visitor_ids_in_window is not None:
             # Linked conversions: window by their CLICK date (visitor cookie).
             # Legacy rows written before visitor attribution have no link —
             # fall back to their own conversion date for the window so the log
             # doesn't silently empty out on reload.
-            window_start = datetime.fromisoformat(date_from)
-            window_end = datetime.fromisoformat(date_to) + timedelta(days=1)
+            window_start = _parse_iso_dt(date_from, "date_from")
+            window_end = _parse_iso_dt(date_to, "date_to") + timedelta(days=1)
             query = query.filter(or_(
                 Conversion.visitor_id.in_(visitor_ids_in_window or ["__none__"]),
                 and_(Conversion.visitor_id.is_(None),
@@ -264,10 +287,20 @@ def get_funnel_report(campaign_id: int, request: Request, db: Session = Depends(
     funnel campaigns); conversion-side aggregates from conversions_data
     (funnel_step = the step at click-out time). Non-funnel campaigns 404."""
     row = db.execute(
-        text("SELECT id, name, config FROM campaigns WHERE id = :cid"),
+        text("SELECT id, name, config, owner_id FROM campaigns WHERE id = :cid"),
         {"cid": campaign_id}).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="Campaign not found")
+
+    # campaigns:'own' parity with the list/export: a scoped caller only reads
+    # funnels of campaigns they own (404, since it's invisible to them).
+    from auth import get_caller
+    username, is_admin = get_caller(request)
+    if not is_admin and username:
+        user = db.query(UserORM).filter(UserORM.username == username).first()
+        if user and (user.permissions or {}).get("campaigns") == "own" \
+                and row["owner_id"] != user.id:
+            raise HTTPException(status_code=404, detail="Campaign not found")
 
     raw_config = row["config"]
     if isinstance(raw_config, dict):
@@ -363,11 +396,14 @@ def _append_event(conv: Conversion, status: str, payout: float, source: str) -> 
 
 
 @router.post("/import")
-def import_conversions(data: ConversionImport, db: Session = Depends(get_db)):
+def import_conversions(data: ConversionImport, request: Request,
+                       db: Session = Depends(get_db)):
     """Manual conversion import (G25): one conversion per CSV line
     'click_id,payout,transaction_id,status'. Existing rows accumulate per the
     LTV semantics; unknown click ids create unattributed rows (click_id 'none').
     Returns a per-line result list — never fails the whole batch."""
+    from audit_logger import audit_event
+    from auth import get_caller
     statuses = all_valid_statuses(db)
     results = []
     rows = [r for r in csv.reader(io.StringIO(data.lines or ""))
@@ -421,6 +457,10 @@ def import_conversions(data: ConversionImport, db: Session = Depends(get_db)):
 
     db.commit()
     imported = sum(1 for r in results if r["ok"])
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "import", "conversions", "bulk",
+                {"imported": imported, "failed": len(results) - imported},
+                request.client.host if request.client else "")
     return {"results": results, "imported": imported, "failed": len(results) - imported}
 
 

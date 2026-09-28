@@ -84,7 +84,9 @@ def update_offer(offer_id: int, offer: OfferIn, request: Request, db: Session = 
         raise HTTPException(status_code=404, detail="Offer not found")
 
     changed = []
-    for key, value in offer.dict().items():
+    # Only touch fields the caller actually sent — omitted fields (e.g. tags or
+    # tokens edited from elsewhere) keep their current value.
+    for key, value in offer.dict(exclude_unset=True).items():
         if getattr(db_offer, key, None) != value:
             changed.append(key)
         setattr(db_offer, key, value)

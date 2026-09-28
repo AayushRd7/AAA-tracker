@@ -1557,16 +1557,16 @@
                             {{ (metricsMap[item.id] || {}).cpc != null ? formatMoney(metricsMap[item.id].cpc) : '—' }}
                         </template>
                         <template v-slot:item.cost="{ item }">
-                            <span :class="signClass(-(metricsMap[item.id]?.cost || 0))">{{ formatMoney((metricsMap[item.id] || {}).cost) }}</span>
+                            <span :class="signClass(-((metricsMap[item.id] || {}).cost || 0))">{{ formatMoney((metricsMap[item.id] || {}).cost) }}</span>
                         </template>
                         <template v-slot:item.revenue="{ item }">
-                            <span :class="signClass(metricsMap[item.id]?.revenue || 0)">{{ formatMoney((metricsMap[item.id] || {}).revenue) }}</span>
+                            <span :class="signClass((metricsMap[item.id] || {}).revenue || 0)">{{ formatMoney((metricsMap[item.id] || {}).revenue) }}</span>
                         </template>
                         <template v-slot:item.profit="{ item }">
-                            <span class="font-weight-bold" :class="signClass(metricsMap[item.id]?.profit || 0)">{{ formatMoney((metricsMap[item.id] || {}).profit) }}</span>
+                            <span class="font-weight-bold" :class="signClass((metricsMap[item.id] || {}).profit || 0)">{{ formatMoney((metricsMap[item.id] || {}).profit) }}</span>
                         </template>
                         <template v-slot:item.roi="{ item }">
-                            <span class="font-weight-bold" :class="signClass(metricsMap[item.id]?.roi || 0)">{{ formatPct((metricsMap[item.id] || {}).roi) }}</span>
+                            <span class="font-weight-bold" :class="signClass((metricsMap[item.id] || {}).roi || 0)">{{ formatPct((metricsMap[item.id] || {}).roi) }}</span>
                         </template>
                         <template v-slot:item.tags="{ item }">
                             <v-chip v-for="t in (item.tags || []).slice(0, 3)" :key="t"
@@ -2788,7 +2788,7 @@
                         type: 'regular',
                         position: nextPosition,
                         weight: 100,
-                        schema: 'split',
+                        schema: 'landing_offer',
                         enabled: true,
                         collect_clicks: true,
                         landing: null,

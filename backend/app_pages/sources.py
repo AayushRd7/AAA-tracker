@@ -1552,7 +1552,11 @@ def update_source(source_id: int, payload: SourceIn, request: Request, db: Sessi
             changed.append(key)
         setattr(source, key, value)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Source with this name already exists.")
     db.refresh(source)
     from auth import get_caller
     caller, _ = get_caller(request)

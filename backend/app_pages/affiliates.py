@@ -281,7 +281,9 @@ def update_network(network_id: int, data: AffiliateNetworkIn, request: Request, 
         raise HTTPException(status_code=404, detail="Affiliate network not found")
 
     changed = []
-    for key, value in data.dict().items():
+    # Only touch fields the caller actually sent — omitted fields keep their
+    # current value.
+    for key, value in data.dict(exclude_unset=True).items():
         if getattr(net, key, None) != value:
             changed.append(key)
         setattr(net, key, value)

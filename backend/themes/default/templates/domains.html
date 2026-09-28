@@ -614,14 +614,23 @@
                 return campaign ? campaign.name : '-';
             },
             async checkDomains() {
-                this.$root.$emit('show-overlay', 'Checking domains statuses... Can take up to 20 seconds per domain...');
-                await fetch("/backend/api/domains/check-domains");
-                await this.loadDomains();
-                this.$root.$emit('hide-overlay');
-                this.$root.$emit('show-message', {
-                    type: 'success',
-                    text: 'Domains statuses checked successfully!'
-                });
+                try {
+                    this.$root.$emit('show-overlay', 'Checking domains statuses... Can take up to 20 seconds per domain...');
+                    await fetch("/backend/api/domains/check-domains");
+                    await this.loadDomains();
+                    this.$root.$emit('hide-overlay');
+                    this.$root.$emit('show-message', {
+                        type: 'success',
+                        text: 'Domains statuses checked successfully!'
+                    });
+                } catch (error) {
+                    console.error('Error checking domains statuses:', error);
+                    this.$root.$emit('hide-overlay');
+                    this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: sanitizeToastMessage(error.message)
+                    });
+                }
             },
             async loadCampaigns() {
                 try {
