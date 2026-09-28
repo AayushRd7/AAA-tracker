@@ -1087,7 +1087,11 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 .v-dialog > .v-card.dialog-flex {
   display: flex;
   flex-direction: column;
+  /* 100vh is the LARGEST viewport on mobile: with the browser's address bar visible the
+     card would be taller than the screen, so the action bar slid in and out while
+     scrolling. dvh tracks the actually-visible height (vh kept as the fallback). */
   height: min(860px, calc(100vh - 56px));
+  height: min(860px, calc(100dvh - 56px));
   max-height: none;
   overflow: hidden;
 }
@@ -1105,6 +1109,11 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 .v-dialog > .v-card.dialog-flex > .v-card__actions,
 .v-dialog > .v-card.dialog-flex > .v-card-actions {
   flex: none;
+  /* Belt and braces: even if the card itself ever scrolls, the bar stays on screen. */
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--card-bg);
   border-top: 1px solid var(--border-soft);
   padding-top: 12px;
 }
@@ -1121,7 +1130,11 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
    drop the wrapper's. */
 .v-dialog__content > .v-dialog { box-shadow: none !important; }
 /* Tall dialogs scroll inside the card instead of overflowing the viewport. */
-.v-dialog > .v-card { max-height: calc(100vh - 48px); overflow-y: auto; }
+.v-dialog > .v-card {
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+}
 .v-dialog--fullscreen > .v-card { border-radius: 0 !important; }
 
 /* ---------- Layout utilities ---------- */
@@ -1267,6 +1280,7 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
    rule for this card only, which also removes the corner shadow artifact. */
 .v-dialog > .v-card.campaign-editor {
   height: min(860px, calc(100vh - 56px));
+  height: min(860px, calc(100dvh - 56px));
   max-height: none;
   overflow: hidden;
   display: flex;
