@@ -48,6 +48,7 @@ jobs:
         run: |
           bash -n setup.sh && echo "ok: setup.sh syntax"
           bash -n scripts/doctor.sh && echo "ok: scripts/doctor.sh syntax"
+          bash -n scripts/wait-for-backend.sh && echo "ok: scripts/wait-for-backend.sh syntax"
 
       - name: First-run config guard
         run: |

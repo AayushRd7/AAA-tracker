@@ -101,9 +101,14 @@ install-db:
 	docker exec tracker_backend python3 /app/install/install.py
 	@printf '  $(C)$(B)▸$(R) databases ready\n'
 	@# The services boot before the tables exist, so their startup migrations could not
-	@# run — restart them now that the schema is in place.
-	@$(COMPOSE) restart backend frontend >/dev/null 2>&1 || true
-	@printf '  $(C)$(B)▸$(R) services restarted (runtime migrations applied)\n'
+	@# run — restart them now that the schema is in place, then prove they came back.
+	@printf '  $(C)$(B)▸$(R) restarting services to apply runtime migrations\n'
+	@$(COMPOSE) restart backend frontend >/dev/null 2>&1 || printf '  $(Y)$(B)!$(R) restart command failed\n'
+	@if scripts/wait-for-backend.sh; then \
+		printf '  $(C)$(B)▸$(R) backend is up (auth gate answering)\n'; \
+	else \
+		printf '  $(Y)$(B)!$(R) backend did not answer after the restart — run: make doctor\n'; \
+	fi
 
 # DESTRUCTIVE: drop every table and recreate the schema (all tracking data is lost).
 install-db-fresh:
