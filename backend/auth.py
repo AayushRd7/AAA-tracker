@@ -375,6 +375,19 @@ def get_caller(request: Request, authorization: Optional[str] = None):
         db.close()
 
 
+def request_is_https(request: Request) -> bool:
+    """True when the client reached us over HTTPS (directly or via nginx).
+
+    The session cookie must NOT be marked Secure on a plain-HTTP install: browsers
+    silently drop Secure cookies over http, so the login would appear to succeed
+    while every following request stays unauthenticated.
+    """
+    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if proto:
+        return proto == "https"
+    return request.url.scheme == "https"
+
+
 # ====== POST /login ======
 # In-process rate limiter: max 5 failed attempts per IP+username per rolling 60s
 LOGIN_MAX_FAILED = 5
@@ -439,9 +452,9 @@ async def login(request: Request, response: Response, login_data: LoginRequest, 
     _login_failures.pop(limit_key, None)
     audit_event(user.username, "login_success", "user", user.username, ip=client_ip)
 
-    # Store the token in cookies (Secure: the app is always behind https nginx)
+    # Secure only when the request actually arrived over https, so http installs work.
     response.set_cookie(key="session_token", value=token, httponly=True,
-                        samesite="lax", secure=True)
+                        samesite="lax", secure=request_is_https(request))
 
     return {"message": "Login successful"}
 
@@ -556,7 +569,7 @@ async def login_totp(request: Request, response: Response, data: TotpLoginReques
     audit_event(user.username, "login_success", "user", user.username, {"totp": True}, client_ip)
 
     response.set_cookie(key="session_token", value=token, httponly=True,
-                        samesite="lax", secure=True)
+                        samesite="lax", secure=request_is_https(request))
     return {"message": "Login successful"}
 
 

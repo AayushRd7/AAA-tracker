@@ -171,6 +171,10 @@ Opening the bare host (`http://your-server-ip/`) redirects to the dashboard, so 
 need to remember the `/backend` path. First login is `tracker_admin` / `admin` — change it
 immediately after signing in.
 
+Both HTTP and HTTPS installs work: the session cookie is marked `Secure` only when the
+request actually arrived over HTTPS (nginx forwards `X-Forwarded-Proto`), so browsers don't
+silently drop the session on a plain-HTTP install.
+
 ---
 
 ## 🏗️ Project Structure

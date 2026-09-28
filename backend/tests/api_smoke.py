@@ -6257,6 +6257,21 @@ print("ESCAPED-OK")
     except Exception:
         pass
 
+    # ----- session cookie must not be Secure over plain HTTP (login would silently fail) -----
+    http_base = "http://" + BASE.split("://", 1)[-1].split("/")[0]
+    r = requests.post(f"{http_base}/backend/api/login",
+                      json={"username": USER, "password": PASS}, verify=not INSECURE)
+    sc_http = r.headers.get("set-cookie") or ""
+    check("cookie: http login issues a session cookie",
+          r.status_code == 200 and "session_token=" in sc_http, f"{r.status_code} {sc_http[:100]}")
+    check("cookie: http session cookie is not Secure",
+          "secure" not in sc_http.lower(), sc_http[:120])
+    r = requests.post(f"{BASE}/backend/api/login",
+                      json={"username": USER, "password": PASS}, verify=not INSECURE)
+    sc_https = r.headers.get("set-cookie") or ""
+    check("cookie: https session cookie is Secure",
+          r.status_code == 200 and "secure" in sc_https.lower(), f"{r.status_code} {sc_https[:120]}")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")
