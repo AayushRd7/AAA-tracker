@@ -38,7 +38,8 @@ import threading
 from datetime import datetime, date, timedelta
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -638,4 +639,392 @@ def status(db: Session = Depends(get_db)):
         "matched": (_last_result or {}).get("matched"),
         "unmatched": (_last_result or {}).get("unmatched"),
         "loop_last_run": _loop_last_run.isoformat() if _loop_last_run else None,
+        "last_control": _last_control_snapshot(),
     }
+
+
+
+# ---------------------------------------------------------------------------
+# Ad-platform control surface (pause / resume a campaign and its ad sets)
+# ---------------------------------------------------------------------------
+#
+# Reuses the Graph host/version/token/retry/masking helpers from the cost sync
+# above — there is deliberately no second Graph client. WRITES (the status
+# POSTs) are dry-run by default (``meta_ads.dry_run``): they log the exact
+# method/URL/body they *would* send and return the intended change without
+# issuing an HTTP write. READS (listing a campaign's ad sets) still run in
+# dry-run so the UI can show what a bulk action would change.
+#
+# Graph calls used (nothing else):
+#   GET  {base}/{ver}/{campaign_id}/adsets?fields=id,name,status&limit=100
+#   POST {base}/{ver}/{campaign_id}  body status=ACTIVE|PAUSED
+#   POST {base}/{ver}/{adset_id}     body status=ACTIVE|PAUSED
+
+_last_control = None
+
+
+class StatusIn(BaseModel):
+    status: str
+    include_adsets: bool = False   # the preferred bulk form (campaign + its ad sets)
+
+
+def _status_url(cfg: dict, object_id: str) -> str:
+    base = (cfg.get("graph_base_url") or DEFAULT_GRAPH_BASE).rstrip("/")
+    return f"{base}/{cfg['api_version']}/{object_id}"
+
+
+def build_adsets_request(cfg: dict, platform_id: str) -> dict:
+    """The exact ad-set listing query (fields=id,name,status, limit=100)."""
+    return {
+        "method": "GET",
+        "url": f"{_status_url(cfg, platform_id)}/adsets",
+        "params": {"fields": "id,name,status", "limit": "100",
+                   "access_token": cfg.get("access_token") or ""},
+    }
+
+
+def build_status_request(cfg: dict, object_id: str, status: str) -> dict:
+    """The exact status POST for a campaign or an ad set."""
+    return {
+        "method": "POST",
+        "url": _status_url(cfg, object_id),
+        "body": {"status": status, "access_token": cfg.get("access_token") or ""},
+    }
+
+
+def _masked_call(req: dict) -> dict:
+    """Same-shaped request with the token redacted — safe to log / return."""
+    out = {"method": req.get("method", "GET"), "url": req["url"]}
+    for key in ("params", "body"):
+        if key in req:
+            out[key] = {k: ("\u2022" * 8 if k == "access_token" else v)
+                        for k, v in req[key].items()}
+    return out
+
+
+def _post_with_retries(client: httpx.Client, url: str, data: dict):
+    """POST with bounded retries + backoff on network errors / 5xx / 429.
+
+    Returns (response_or_None, attempts, error_str). Never raises.
+    """
+    import time as _t
+    delay = 0.25
+    last_err = ""
+    for attempt in range(1, MAX_HTTP_ATTEMPTS + 1):
+        try:
+            resp = client.post(url, data=data)
+            if resp.status_code >= 500 or resp.status_code == 429:
+                last_err = f"HTTP {resp.status_code}"
+                if attempt < MAX_HTTP_ATTEMPTS:
+                    _t.sleep(delay)
+                    delay *= 2
+                    continue
+                return None, attempt, last_err
+            return resp, attempt, ""
+        except Exception as e:  # network / timeout
+            last_err = repr(e)[:200]
+            if attempt < MAX_HTTP_ATTEMPTS:
+                _t.sleep(delay)
+                delay *= 2
+                continue
+            return None, attempt, last_err
+    return None, MAX_HTTP_ATTEMPTS, last_err
+
+
+def _parse_adset_row(raw: dict) -> dict:
+    status = str(raw.get("status") or "").strip().upper()
+    return {
+        "id": str(raw.get("id") or "").strip(),
+        "name": str(raw.get("name") or "").strip(),
+        "status": status,
+        "paused": status == "PAUSED",
+    }
+
+
+def _extract_campaign_status(data: dict):
+    """The parent campaign's status *when it is returned* by the ads edge.
+
+    Meta's /adsets edge does not normally include the parent status, so this is
+    best-effort: it only reports a status the response actually carries rather
+    than issuing an extra Graph call outside the agreed call set.
+    """
+    for key in ("status", "campaign_status", "parent_status"):
+        value = str(data.get(key) or "").strip().upper()
+        if value in ("ACTIVE", "PAUSED"):
+            return value
+    return None
+
+
+def fetch_adsets(cfg: dict, platform_id: str):
+    """List a platform campaign's ad sets, following paging.next verbatim.
+
+    Returns (adsets, campaign_status_or_None, attempts, error). Never raises.
+    """
+    req = build_adsets_request(cfg, platform_id)
+    rows = []
+    attempts = 0
+    campaign_status = None
+    timeout = httpx.Timeout(HTTP_TIMEOUT_SECONDS)
+    with httpx.Client(timeout=timeout) as client:
+        resp, attempts, err = _get_with_retries(client, req["url"], req["params"])
+        if resp is None:
+            return [], None, attempts, err
+        if resp.status_code != 200:
+            return [], None, attempts, f"HTTP {resp.status_code}: {resp.text[:200]}"
+        data = _safe_json(resp)
+        campaign_status = _extract_campaign_status(data)
+        pages = 0
+        while pages < MAX_PAGING_PAGES:
+            pages += 1
+            for row in (data.get("data") or []):
+                if isinstance(row, dict):
+                    rows.append(_parse_adset_row(row))
+            nxt = ((data.get("paging") or {}).get("next") or "").strip()
+            if not nxt:
+                break
+            nresp, nattempts, nerr = _get_with_retries(client, nxt, None)
+            attempts += nattempts
+            if nresp is None or nresp.status_code != 200:
+                return rows, campaign_status, attempts, \
+                    nerr or f"HTTP {nresp.status_code if nresp else '?'}"
+            data = _safe_json(nresp)
+        return rows, campaign_status, attempts, ""
+
+
+def set_object_status(cfg: dict, object_id: str, status: str, dry_run: bool) -> dict:
+    """Pause/resume one Graph object (campaign or ad set). Never raises."""
+    req = build_status_request(cfg, object_id, status)
+    print(f"meta-ads control: POST {req['url']} "
+          f"body={_masked_call(req)['body']}"
+          f"{' (dry-run, not sent)' if dry_run else ''}")
+    if dry_run:
+        return {"dry_run": True, "ok": True, "object_id": object_id,
+                "status": status, "would_send": _masked_call(req), "attempts": 0}
+    timeout = httpx.Timeout(HTTP_TIMEOUT_SECONDS)
+    with httpx.Client(timeout=timeout) as client:
+        resp, attempts, err = _post_with_retries(client, req["url"], req["body"])
+    if resp is None:
+        return {"dry_run": False, "ok": False, "object_id": object_id,
+                "status": status, "error": err, "attempts": attempts}
+    if resp.status_code != 200:
+        return {"dry_run": False, "ok": False, "object_id": object_id,
+                "status": status, "error": f"HTTP {resp.status_code}: {resp.text[:200]}",
+                "attempts": attempts}
+    return {"dry_run": False, "ok": True, "object_id": object_id, "status": status,
+            "attempts": attempts, "response": _safe_json(resp)}
+
+
+def resolve_platform_campaign_id(db: Session, campaign_id):
+    """Map a path value to a platform campaign id.
+
+    Returns ``(platform_id, tracker_campaign_id, error, http_status)``.
+
+    A numeric value is treated as a tracker campaign id: it must carry
+    ``ad_platform_campaign_id`` or the call is rejected with a clear 400 (never
+    a guessed campaign). A non-numeric value is treated as a platform campaign
+    id and must resolve through the same fallbacks the cost sync uses
+    (``match_insight`` over the ``_build_index`` name / tracking strategies).
+    """
+    raw = str(campaign_id or "").strip()
+    if not raw:
+        return None, None, "campaign_id is required", 400
+
+    if raw.isdigit():
+        row = db.execute(text(
+            "SELECT id, name, ad_platform_campaign_id FROM campaigns WHERE id = :id"),
+            {"id": int(raw)}).fetchone()
+        if row is not None:
+            cid, name, pid = row
+            if pid and str(pid).strip():
+                return str(pid).strip(), int(cid), None, None
+            return None, int(cid), (
+                f"Campaign '{name or cid}' has no ad-platform campaign id mapping. "
+                "Set the Meta campaign ID in the campaign editor first."), 400
+
+    index = _build_index(db)
+    matched_cid, _strategy = match_insight(index, raw, raw,
+                                           load_settings().get("match_preference", "auto"))
+    if matched_cid is not None:
+        return raw, int(matched_cid), None, None
+    if raw.isdigit():
+        return None, None, "Campaign not found.", 404
+    return None, None, (
+        f"No tracker campaign is mapped to platform campaign '{raw}'."), 404
+
+
+def _normalise_status(value) -> str:
+    status = str(value or "").strip().upper()
+    if status not in ("ACTIVE", "PAUSED"):
+        raise HTTPException(status_code=400, detail="status must be ACTIVE or PAUSED")
+    return status
+
+
+def run_campaign_control(cfg: dict, platform_id: str, status: str,
+                         include_adsets: bool = False, dry_run=None) -> dict:
+    """Pause/resume a platform campaign (optionally with its ad sets).
+
+    Never raises. In dry-run every write is simulated (no HTTP POST at all);
+    the ad-set listing read still runs so the UI can show what would change.
+    A failed campaign write aborts the group before any ad set is touched; a
+    failed ad-set write stops the rest — the result reports exactly what was
+    applied so nothing is silently half-applied.
+    """
+    is_dry = cfg["dry_run"] if dry_run is None else bool(dry_run)
+    result = {"dry_run": is_dry, "platform_campaign_id": platform_id,
+              "status": status, "include_adsets": bool(include_adsets),
+              "ok": True, "partial": False, "error": None,
+              "campaign": None, "adsets": [], "requests": [], "attempts": 0}
+
+    targets = []
+    if include_adsets:
+        adsets, campaign_status, attempts, error = fetch_adsets(cfg, platform_id)
+        result["requests"].append(_masked_call(build_adsets_request(cfg, platform_id)))
+        result["attempts"] += attempts
+        result["campaign_status"] = campaign_status
+        result["adsets_seen"] = len(adsets)
+        if error:
+            result["ok"] = False
+            result["error"] = f"Could not list ad sets: {error}"
+            return result
+        targets = [a for a in adsets if a["status"] != status]
+
+    campaign_req = build_status_request(cfg, platform_id, status)
+    result["requests"].append(_masked_call(campaign_req))
+    campaign_res = set_object_status(cfg, platform_id, status, is_dry)
+    result["campaign"] = campaign_res
+    result["attempts"] += campaign_res.get("attempts", 0)
+    if not campaign_res.get("ok"):
+        result["ok"] = False
+        result["error"] = campaign_res.get("error")
+        if include_adsets:
+            result["adsets"] = [
+                {"id": a["id"], "name": a["name"], "previous_status": a["status"],
+                 "skipped": True, "reason": "campaign write failed"}
+                for a in targets]
+        return result
+
+    for adset in targets:
+        adset_req = build_status_request(cfg, adset["id"], status)
+        result["requests"].append(_masked_call(adset_req))
+        adset_res = set_object_status(cfg, adset["id"], status, is_dry)
+        result["attempts"] += adset_res.get("attempts", 0)
+        result["adsets"].append({"id": adset["id"], "name": adset["name"],
+                                 "previous_status": adset["status"],
+                                 "result": adset_res})
+        if not adset_res.get("ok"):
+            result["ok"] = False
+            result["partial"] = True
+            result["error"] = f"Ad set {adset['id']}: {adset_res.get('error')}"
+            break
+    return result
+
+
+def _last_control_snapshot() -> dict:
+    if not _last_control:
+        return {}
+    return dict(_last_control)
+
+
+def _record_control(action: str, platform_id, status: str, result: dict,
+                    tracker_campaign_id=None) -> None:
+    global _last_control
+    _last_control = {
+        "at": datetime.utcnow().isoformat(),
+        "action": action,
+        "platform_campaign_id": platform_id,
+        "tracker_campaign_id": tracker_campaign_id,
+        "status": status,
+        "dry_run": result.get("dry_run"),
+        "ok": result.get("ok"),
+        "partial": result.get("partial"),
+        "error": result.get("error"),
+    }
+
+
+def _require_control_credentials() -> dict:
+    cfg = load_settings()
+    if not cfg.get("access_token"):
+        raise HTTPException(status_code=400, detail=(
+            "Meta Ads is not configured — add an access token in Settings "
+            "before controlling campaigns."))
+    return cfg
+
+
+@router.get("/campaigns/{campaign_id}/adsets")
+async def list_campaign_adsets(campaign_id: str, request: Request,
+                               db: Session = Depends(get_db)):
+    """List the platform campaign's ad sets + whether each is paused.
+
+    A read: it runs even in dry-run so the UI can show the intended change.
+    Returns a clear error when the tracker campaign has no platform mapping.
+    """
+    cfg = _require_control_credentials()
+    platform_id, tracker_cid, error, code = resolve_platform_campaign_id(db, campaign_id)
+    if error:
+        raise HTTPException(status_code=code, detail=error)
+    adsets, campaign_status, attempts, fetch_error = await asyncio.to_thread(
+        fetch_adsets, cfg, platform_id)
+    return {
+        "dry_run": cfg["dry_run"],
+        "campaign_id": str(campaign_id),
+        "tracker_campaign_id": tracker_cid,
+        "platform_campaign_id": platform_id,
+        "campaign_status": campaign_status,
+        "adsets": adsets,
+        "attempts": attempts,
+        "error": fetch_error or None,
+        "request": _masked_call(build_adsets_request(cfg, platform_id)),
+    }
+
+
+@router.post("/campaigns/{campaign_id}/status")
+async def set_campaign_status(campaign_id: str, data: StatusIn, request: Request,
+                              db: Session = Depends(get_db)):
+    """Pause/resume the platform campaign.
+
+    Body ``{"status": "ACTIVE"|"PAUSED", "include_adsets": false}``. With
+    ``include_adsets: true`` this is the bulk form — the campaign and every ad
+    set that is not already at the target status are changed together (the
+    real-world "pause the campaign" action).
+    """
+    from audit_logger import audit_event
+    from auth import get_caller
+    status = _normalise_status(data.status)
+    cfg = _require_control_credentials()
+    platform_id, tracker_cid, error, code = resolve_platform_campaign_id(db, campaign_id)
+    if error:
+        raise HTTPException(status_code=code, detail=error)
+    result = await asyncio.to_thread(run_campaign_control, cfg, platform_id, status,
+                                     data.include_adsets)
+    result["campaign_id"] = str(campaign_id)
+    result["tracker_campaign_id"] = tracker_cid
+    _record_control("set_campaign_status", platform_id, status, result, tracker_cid)
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "meta_ads_campaign_status", "campaigns",
+                str(tracker_cid or campaign_id),
+                {"status": status, "include_adsets": data.include_adsets,
+                 "dry_run": result.get("dry_run"), "ok": result.get("ok"),
+                 "platform_campaign_id": platform_id},
+                request.client.host if request.client else "")
+    return result
+
+
+@router.post("/adsets/{adset_id}/status")
+async def set_adset_status(adset_id: str, data: StatusIn, request: Request,
+                           db: Session = Depends(get_db)):
+    """Pause/resume one platform ad set."""
+    from audit_logger import audit_event
+    from auth import get_caller
+    status = _normalise_status(data.status)
+    cfg = _require_control_credentials()
+    result = await asyncio.to_thread(set_object_status, cfg, str(adset_id), status,
+                                     cfg["dry_run"])
+    result["adset_id"] = str(adset_id)
+    _record_control("set_adset_status", str(adset_id), status, result)
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "meta_ads_adset_status", "campaigns",
+                str(adset_id),
+                {"status": status, "dry_run": result.get("dry_run"),
+                 "ok": result.get("ok")},
+                request.client.host if request.client else "")
+    return result

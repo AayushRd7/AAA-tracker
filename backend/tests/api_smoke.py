@@ -7141,8 +7141,8 @@ print("ESCAPED-OK")
             from urllib.parse import urlparse, parse_qs
             parsed = urlparse(self.path)
             params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-            meta_captured.append({"path": self.path, "path_only": parsed.path,
-                                  "params": params})
+            meta_captured.append({"method": "GET", "path": self.path,
+                                  "path_only": parsed.path, "params": params})
 
             def _send(code, obj):
                 body = json.dumps(obj).encode()
@@ -7160,6 +7160,19 @@ print("ESCAPED-OK")
             if "fail429" in self.path:
                 _send(429, {"error": "rate limited"})
                 return
+            if parsed.path.endswith("/adsets"):
+                # Ad-platform control: a campaign's ad sets. The parent status is
+                # included so the endpoint can surface it when it is returned.
+                _send(200, {
+                    "campaign_status": "ACTIVE",
+                    "data": [
+                        {"id": f"as1-{meta_pid}", "name": f"Ad set one {meta_pid}",
+                         "status": "ACTIVE"},
+                        {"id": f"as2-{meta_pid}", "name": f"Ad set two {meta_pid}",
+                         "status": "PAUSED"},
+                    ],
+                })
+                return
             if "page2" in self.path:
                 # second page: name-matched, tracking-matched, zero-click and unmatched rows
                 _send(200, {"data": [
@@ -7173,6 +7186,30 @@ print("ESCAPED-OK")
                 "data": [_meta_row(f"mvid-{meta_pid}", f"MV ID {meta_pid}", 10, 100, 2)],
                 "paging": {"next": f"{meta_base}/page2-{meta_pid}"},
             })
+
+        def do_POST(self):
+            # Ad-platform control writes: campaign / ad-set status POSTs. The
+            # body is form-encoded (status + access_token), as Meta expects.
+            from urllib.parse import urlparse, parse_qs
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length).decode() if length else ""
+            body = {k: v[0] for k, v in parse_qs(raw).items()}
+            parsed = urlparse(self.path)
+            meta_captured.append({"method": "POST", "path": self.path,
+                                  "path_only": parsed.path, "body": body})
+
+            def _send(code, obj):
+                out = json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(out)
+
+            if "fail500" in self.path:
+                _send(500, {"error": "server error"})
+                return
+            _send(200, {"id": parsed.path.rsplit("/", 1)[-1],
+                        "status": body.get("status", "")})
 
         def log_message(self, *args):
             pass
@@ -7456,6 +7493,207 @@ print("ESCAPED-OK")
             meta_srv.server_close()
         except Exception:
             pass
+
+    # ===== Meta ad-platform controls: pause/resume campaign + ad sets =====
+    # Reuses the _MetaGraph receiver above (extended with do_POST + /adsets).
+    # The cost-sync block shut its server down and restored settings, so this
+    # block binds a fresh instance on its own port and re-configures meta_ads.
+    meta_captured.clear()
+    ctl_port = 23000 + (meta_pid % 1000)
+    ctl_base = f"http://host.docker.internal:{ctl_port}"
+    _meta_socketserver.TCPServer.allow_reuse_address = True
+    ctl_srv = None
+    for _attempt in range(8):
+        try:
+            ctl_srv = _meta_socketserver.TCPServer(("0.0.0.0", ctl_port), _MetaGraph)
+            ctl_base = f"http://host.docker.internal:{ctl_port}"
+            break
+        except OSError:
+            ctl_port += 1
+    if ctl_srv is not None:
+        ctl_srv.daemon_threads = True
+        _meta_threading.Thread(target=ctl_srv.serve_forever, daemon=True).start()
+
+    def ctl_set(**over):
+        cfg = {"enabled": True, "ad_account_ids": [meta_acct], "access_token": meta_token,
+               "api_version": "v21.0", "dry_run": True, "cadence": "hourly",
+               "backfill_days": 7, "graph_base_url": ctl_base, "match_preference": "auto"}
+        cfg.update(over)
+        return s.post(f"{api}/settings/", json={"settings": {"meta_ads": cfg}})
+
+    ctl_cid = ctl_unmapped_cid = ctl_fail_cid = None
+    ctl_texts = []
+    try:
+        r = meta_mk(f"MV Control {meta_pid}", f"smoke-meta-ctl-{meta_pid}",
+                    f"mvctl-{meta_pid}")
+        ctl_cid = (r.json() or {}).get("id")
+        r = meta_mk(f"MV Unmapped {meta_pid}", f"smoke-meta-unmapped-{meta_pid}")
+        ctl_unmapped_cid = (r.json() or {}).get("id")
+        r = meta_mk(f"MV Fail {meta_pid}", f"smoke-meta-fail-{meta_pid}",
+                    f"fail500camp-{meta_pid}")
+        ctl_fail_cid = (r.json() or {}).get("id")
+        check("meta-controls: control test campaigns created",
+              all([ctl_cid, ctl_unmapped_cid, ctl_fail_cid]),
+              f"{ctl_cid},{ctl_unmapped_cid},{ctl_fail_cid}")
+
+        # -- listing ad sets (a read: runs in dry-run too) --
+        ctl_set(dry_run=True)
+        meta_captured.clear()
+        r = s.get(f"{api}/meta-ads/campaigns/{ctl_cid}/adsets")
+        ctl_texts.append(r.text)
+        jl = r.json() if r.status_code == 200 else {}
+        ads = {a.get("id"): a for a in (jl.get("adsets") or [])}
+        check("meta-controls: ad-set listing returns the platform ad sets",
+              r.status_code == 200 and len(ads) == 2
+              and ads.get(f"as1-{meta_pid}", {}).get("status") == "ACTIVE"
+              and ads.get(f"as2-{meta_pid}", {}).get("paused") is True, r.text[:220])
+        check("meta-controls: listing surfaces the parent campaign status when returned",
+              jl.get("campaign_status") == "ACTIVE", str(jl.get("campaign_status")))
+        getcap = next((c for c in meta_captured
+                       if c.get("method") == "GET" and c.get("path_only", "").endswith("/adsets")),
+                      None)
+        check("meta-controls: ad-set listing request shape",
+              bool(getcap) and getcap["path_only"] == f"/v21.0/mvctl-{meta_pid}/adsets"
+              and getcap["params"].get("fields") == "id,name,status"
+              and getcap["params"].get("limit") == "100"
+              and getcap["params"].get("access_token") == meta_token, str(getcap)[:220])
+        check("meta-controls: dry-run listing performs no write",
+              not [c for c in meta_captured if c.get("method") == "POST"],
+              str([c.get("method") for c in meta_captured]))
+
+        # -- dry-run pause: intended change echoed, zero HTTP writes --
+        meta_captured.clear()
+        r = s.post(f"{api}/meta-ads/campaigns/{ctl_cid}/status",
+                   json={"status": "PAUSED"})
+        ctl_texts.append(r.text)
+        jd = r.json() if r.status_code == 200 else {}
+        check("meta-controls: dry-run pause returns dry_run + intended change",
+              r.status_code == 200 and jd.get("dry_run") is True and jd.get("ok") is True
+              and (jd.get("campaign") or {}).get("status") == "PAUSED"
+              and ((jd.get("campaign") or {}).get("would_send") or {})
+                  .get("body", {}).get("status") == "PAUSED", r.text[:250])
+        check("meta-controls: dry-run pause performs no HTTP write at all",
+              not [c for c in meta_captured if c.get("method") == "POST"],
+              str([c.get("method") for c in meta_captured]))
+
+        # -- live pause + resume of the campaign --
+        ctl_set(dry_run=False)
+        meta_captured.clear()
+        r = s.post(f"{api}/meta-ads/campaigns/{ctl_cid}/status",
+                   json={"status": "PAUSED"})
+        ctl_texts.append(r.text)
+        jlive = r.json() if r.status_code == 200 else {}
+        check("meta-controls: live campaign pause returns a non-dry result",
+              r.status_code == 200 and jlive.get("dry_run") is False
+              and jlive.get("ok") is True, r.text[:220])
+        pc = next((c for c in meta_captured
+                   if c.get("method") == "POST"
+                   and c.get("path_only") == f"/v21.0/mvctl-{meta_pid}"), None)
+        check("meta-controls: campaign pause sends the correct method/URL/body",
+              bool(pc) and pc["body"].get("status") == "PAUSED"
+              and pc["body"].get("access_token") == meta_token, str(pc)[:200])
+
+        meta_captured.clear()
+        r = s.post(f"{api}/meta-ads/campaigns/{ctl_cid}/status",
+                   json={"status": "ACTIVE"})
+        ctl_texts.append(r.text)
+        pc2 = next((c for c in meta_captured
+                    if c.get("method") == "POST"
+                    and c.get("path_only") == f"/v21.0/mvctl-{meta_pid}"), None)
+        check("meta-controls: campaign resume sends status=ACTIVE",
+              bool(pc2) and pc2["body"].get("status") == "ACTIVE", str(pc2)[:200])
+
+        # -- one ad set --
+        meta_captured.clear()
+        r = s.post(f"{api}/meta-ads/adsets/as1-{meta_pid}/status",
+                   json={"status": "PAUSED"})
+        ctl_texts.append(r.text)
+        ac = next((c for c in meta_captured
+                   if c.get("method") == "POST"
+                   and c.get("path_only") == f"/v21.0/as1-{meta_pid}"), None)
+        check("meta-controls: ad-set pause sends the correct method/URL/body",
+              r.status_code == 200 and (r.json() or {}).get("ok") is True
+              and bool(ac) and ac["body"].get("status") == "PAUSED", str(ac)[:200])
+
+        # -- bulk: campaign + its active ad sets in one request --
+        meta_captured.clear()
+        r = s.post(f"{api}/meta-ads/campaigns/{ctl_cid}/status",
+                   json={"status": "PAUSED", "include_adsets": True})
+        ctl_texts.append(r.text)
+        jb = r.json() if r.status_code == 200 else {}
+        posts = [c for c in meta_captured if c.get("method") == "POST"]
+        check("meta-controls: bulk pause posts the campaign and its active ad set",
+              r.status_code == 200 and jb.get("ok") is True
+              and any(c["path_only"] == f"/v21.0/mvctl-{meta_pid}" for c in posts)
+              and any(c["path_only"] == f"/v21.0/as1-{meta_pid}" for c in posts),
+              str([c["path_only"] for c in posts])[:220])
+        check("meta-controls: bulk pause skips the already-paused ad set",
+              not any(c["path_only"] == f"/v21.0/as2-{meta_pid}" for c in posts),
+              str([c["path_only"] for c in posts])[:200])
+
+        # -- a Graph 5xx on a write is retried and surfaced, never raised --
+        meta_captured.clear()
+        r = s.post(f"{api}/meta-ads/campaigns/{ctl_fail_cid}/status",
+                   json={"status": "PAUSED"})
+        ctl_texts.append(r.text)
+        jf = r.json() if r.status_code == 200 else {}
+        check("meta-controls: Graph 5xx on a write returns a clean error result",
+              r.status_code == 200 and jf.get("ok") is False and jf.get("error"),
+              r.text[:220])
+        check("meta-controls: Graph 5xx on a write is retried (bounded)",
+              len([c for c in meta_captured if c.get("method") == "POST"]) >= 3,
+              str(len([c for c in meta_captured if c.get("method") == "POST"])))
+
+        # -- no platform mapping -> clear rejection, never a guessed campaign --
+        r = s.post(f"{api}/meta-ads/campaigns/{ctl_unmapped_cid}/status",
+                   json={"status": "PAUSED"})
+        ctl_texts.append(r.text)
+        ju = r.json() if r.status_code else {}
+        check("meta-controls: campaign with no platform mapping is rejected clearly",
+              r.status_code == 400 and "platform" in (ju.get("detail") or "").lower(),
+              f"{r.status_code} {r.text[:200]}")
+        r = s.get(f"{api}/meta-ads/campaigns/{ctl_unmapped_cid}/adsets")
+        ctl_texts.append(r.text)
+        check("meta-controls: unmapped campaign ad-set listing rejected too",
+              r.status_code == 400
+              and "platform" in ((r.json() or {}).get("detail") or "").lower(),
+              f"{r.status_code} {r.text[:160]}")
+
+        # -- token never leaks into a control response --
+        check("meta-controls: token never appears in a control response",
+              all(meta_token not in t for t in ctl_texts),
+              str([t[:60] for t in ctl_texts if meta_token in t]))
+
+        # -- the status endpoint reflects the last control action --
+        st = s.get(f"{api}/meta-ads/status").json()
+        lc = st.get("last_control") or {}
+        check("meta-controls: status endpoint reflects the last control action",
+              bool(lc.get("action")) and "dry_run" in lc
+              and lc.get("platform_campaign_id") is not None, str(lc)[:220])
+
+        # -- served pages carry the new controls + markers --
+        rc = s.get(f"{BASE}/backend/campaigns")
+        check("meta-controls: campaign editor serves the Ad platform controls",
+              rc.status_code == 200 and "meta-ad-platform-section" in rc.text
+              and "controlPlatformCampaign" in rc.text
+              and "meta-ad-control-dryrun" in rc.text, f"{rc.status_code}")
+        check("meta-controls: campaign list row serves the pause/resume action",
+              rc.status_code == 200 and "rowPlatformToggle" in rc.text
+              and "platformStatusOf" in rc.text, f"{rc.status_code}")
+    finally:
+        if meta_saved is None:
+            s.post(f"{api}/settings/", json={"settings": {"meta_ads": None}})
+        else:
+            s.post(f"{api}/settings/", json={"settings": {"meta_ads": meta_saved}})
+        for _cc in (ctl_cid, ctl_unmapped_cid, ctl_fail_cid):
+            if _cc:
+                s.delete(f"{api}/campaigns/{_cc}")
+        if ctl_srv is not None:
+            try:
+                ctl_srv.shutdown()
+                ctl_srv.server_close()
+            except Exception:
+                pass
 
     print("== Cleanup ==")
     if conv_id:

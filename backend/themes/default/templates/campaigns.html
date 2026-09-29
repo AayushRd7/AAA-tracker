@@ -100,6 +100,7 @@
                         <v-tab><v-icon small>mdi-shield-outline</v-icon>Shield</v-tab>
                         <v-tab><v-icon small>mdi-stairs</v-icon>Funnel</v-tab>
                         <v-tab><v-icon small>mdi-note-outline</v-icon>Notes</v-tab>
+                        <v-tab><v-icon small>mdi-bullhorn-outline</v-icon>Ad platform</v-tab>
                     </v-tabs>
 
                     <v-tabs-items v-model="tab" class="campaign-editor-panes">
@@ -853,6 +854,76 @@
                                                 <v-textarea v-model="form.notes" label="Internal notes" outlined dense
                                                             rows="5"
                                                             auto-grow></v-textarea>
+                                        </div>
+                                    </v-tab-item>
+
+                                    <!-- AD PLATFORM (Meta campaign + ad-set controls) -->
+                                    <v-tab-item>
+                                        <div class="campaign-editor-pane" id="meta-ad-platform-section">
+                                            <div class="d-flex align-center mb-2">
+                                                <h4 class="text-subtitle-1 mb-0">Ad platform</h4>
+                                                <v-chip x-small class="ml-2" dark
+                                                        :color="platformCampaignStatus === 'PAUSED' ? 'orange darken-2' : (platformCampaignStatus === 'ACTIVE' ? 'green darken-1' : 'grey')">
+                                                    {{ platformCampaignStatus || 'unknown' }}
+                                                </v-chip>
+                                            </div>
+                                            <div class="caption grey--text mb-2">
+                                                Pause or resume the Meta campaign behind this tracker campaign.
+                                                Ad sets load on demand, not when the editor opens.
+                                            </div>
+                                            <v-alert v-if="metaAdsDryRun" dense type="warning" text
+                                                     class="mb-2" id="meta-ad-control-dryrun">
+                                                dry-run: this will log, not send — no live Meta change.
+                                            </v-alert>
+                                            <v-text-field
+                                                    label="Mapped platform campaign ID"
+                                                    :value="form.ad_platform_campaign_id || ''"
+                                                    readonly outlined dense
+                                                    hint="Set it on the General tab. Required for these controls."
+                                                    persistent-hint
+                                            ></v-text-field>
+                                            <div class="d-flex align-center flex-wrap mb-3">
+                                                <v-btn small outlined color="primary"
+                                                       :disabled="!form.ad_platform_campaign_id || !form.id"
+                                                       :loading="platformAdsetsLoading"
+                                                       @click="loadPlatformAdsets">
+                                                    <v-icon small class="mr-1">mdi-refresh</v-icon>Load ad sets
+                                                </v-btn>
+                                                <v-btn small class="ml-2" color="orange darken-2"
+                                                       :disabled="!form.ad_platform_campaign_id || !form.id"
+                                                       :loading="platformControlBusy"
+                                                       @click="controlPlatformCampaign('PAUSED')">
+                                                    <v-icon small class="mr-1">mdi-pause</v-icon>Pause campaign
+                                                </v-btn>
+                                                <v-btn small class="ml-2" color="green darken-1"
+                                                       :disabled="!form.ad_platform_campaign_id || !form.id"
+                                                       :loading="platformControlBusy"
+                                                       @click="controlPlatformCampaign('ACTIVE')">
+                                                    <v-icon small class="mr-1">mdi-play</v-icon>Resume campaign
+                                                </v-btn>
+                                            </div>
+                                            <div v-if="platformAdsets.length" id="meta-ad-adsets-list">
+                                                <div v-for="ad in platformAdsets" :key="ad.id"
+                                                     class="d-flex align-center py-1">
+                                                    <v-icon small class="mr-2"
+                                                            :color="ad.paused ? 'orange darken-2' : 'green darken-1'">
+                                                        {{ ad.paused ? 'mdi-pause-circle-outline' : 'mdi-play-circle-outline' }}
+                                                    </v-icon>
+                                                    <div class="flex-grow-1">
+                                                        <div>{{ ad.name || ad.id }}</div>
+                                                        <div class="caption grey--text">{{ ad.id }} — {{ ad.status }}</div>
+                                                    </div>
+                                                    <v-btn x-small text
+                                                           :color="ad.paused ? 'green darken-1' : 'orange darken-2'"
+                                                           :loading="!!platformAdsetBusy[ad.id]"
+                                                           @click="controlPlatformAdset(ad)">
+                                                        {{ ad.paused ? 'Resume' : 'Pause' }}
+                                                    </v-btn>
+                                                </div>
+                                            </div>
+                                            <div v-else class="caption grey--text">
+                                                No ad sets loaded — click "Load ad sets".
+                                            </div>
                                         </div>
                                     </v-tab-item>
                     </v-tabs-items>
@@ -1753,6 +1824,16 @@
                             {{ $formatDate(item.updated_at) }}
                         </template>
                         <template v-slot:item.actions="{ item }">
+                            <v-tooltip bottom v-if="item.ad_platform_campaign_id">
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small v-bind="attrs" v-on="on"
+                                           :color="platformStatusOf(item) === 'PAUSED' ? 'green darken-1' : 'orange darken-2'"
+                                           @click="rowPlatformToggle(item)">
+                                        <v-icon small>{{ platformStatusOf(item) === 'PAUSED' ? 'mdi-play' : 'mdi-pause' }}</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>{{ platformStatusOf(item) === 'PAUSED' ? 'Resume on Meta' : 'Pause on Meta' }}<span v-if="metaAdsDryRun"> (dry-run — logs, does not send)</span></span>
+                            </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
                                     <v-btn icon small color="success" v-bind="attrs" v-on="on" @click="openSimulate(item)">
@@ -1975,6 +2056,14 @@
                 offers: [],
                 landings: [],
                 tab: 0,
+                // Meta ad-platform control state (loaded on demand)
+                metaAdsDryRun: false,
+                platformStatusByCampaign: {},
+                platformAdsets: [],
+                platformCampaignStatus: null,
+                platformAdsetsLoading: false,
+                platformControlBusy: false,
+                platformAdsetBusy: {},
                 currencies: ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'AED', 'AFN', 'ALL', 'AMD', 'ANG', 'AOA', 'ARS', 'AWG', 'AZN',
                     'BAM', 'BBD', 'BDT', 'BGN', 'BHD', 'BIF', 'BMD', 'BND', 'BOB', 'BRL',
                     'BSD', 'BTN', 'BWP', 'BYN', 'BZD', 'CDF', 'CHF', 'CLP', 'CNY',
@@ -2518,6 +2607,8 @@
                             this.baseParamsIdMapping = JSON.parse(JSON.stringify(data.subIdMapping));
                             this.form.paramsIdMapping = JSON.parse(JSON.stringify(this.baseParamsIdMapping));
                         }
+                        const metaAds = (data.settings || {}).meta_ads || {};
+                        this.metaAdsDryRun = !!metaAds.dry_run;
                         const rules = data.settings && data.settings.postback_rules;
                         if (Array.isArray(rules)) {
                             this.postbackRules = rules.map(r => Object.assign({
@@ -2533,6 +2624,130 @@
                             }));
                         }
                     });
+            },
+            // ---- Meta ad-platform controls (campaign + ad sets) ----
+            platformStatusOf(item) {
+                return this.platformStatusByCampaign[item.id] ||
+                    (item.status === 'paused' ? 'PAUSED' : 'ACTIVE');
+            },
+            _platformApi(path, method, body) {
+                return fetch('/backend/api/meta-ads' + path, {
+                    method: method || 'GET',
+                    credentials: 'include',
+                    headers: body ? {'Content-Type': 'application/json'} : undefined,
+                    body: body ? JSON.stringify(body) : undefined
+                }).then(async (res) => {
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+                    }
+                    return data;
+                });
+            },
+            _platformResultToast(result, label) {
+                const dry = result && result.dry_run;
+                if (result && result.ok) {
+                    this.$root.$emit('show-message', {
+                        type: dry ? 'warning' : 'success',
+                        text: dry
+                            ? (label + ' — dry-run: logged, not sent to Meta')
+                            : (label + ' applied on Meta')
+                    });
+                } else {
+                    this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: label + ' failed: ' +
+                            sanitizeToastMessage((result && (result.error || result.detail)) || 'unknown error')
+                    });
+                }
+            },
+            loadPlatformAdsets() {
+                if (!this.form.id) { return; }
+                this.platformAdsetsLoading = true;
+                this._platformApi('/campaigns/' + this.form.id + '/adsets')
+                    .then((data) => {
+                        this.platformAdsets = data.adsets || [];
+                        this.platformCampaignStatus = data.campaign_status || this.platformCampaignStatus;
+                        if (data.error) {
+                            this.$root.$emit('show-message', {type: 'error',
+                                text: 'Ad sets: ' + sanitizeToastMessage(String(data.error))});
+                        }
+                    })
+                    .catch((err) => {
+                        this.$root.$emit('show-message', {type: 'error',
+                            text: 'Ad sets failed: ' + sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => { this.platformAdsetsLoading = false; });
+            },
+            async controlPlatformCampaign(status) {
+                if (!this.form.id || !this.form.ad_platform_campaign_id) { return; }
+                const verb = status === 'PAUSED' ? 'Pause' : 'Resume';
+                const dryNote = this.metaAdsDryRun ? ' (dry-run: logs, does not send)' : '';
+                const ok = await this.$refs.confirm.open(
+                    verb + ' Meta campaign',
+                    verb + ' the Meta campaign and its ad sets for "' +
+                        (this.form.name || this.form.id) + '"' + dryNote + '?',
+                    verb);
+                if (!ok) { return; }
+                this.platformControlBusy = true;
+                this._platformApi('/campaigns/' + this.form.id + '/status', 'POST',
+                    {status: status, include_adsets: true})
+                    .then((data) => {
+                        this._platformResultToast(data, verb + ' campaign');
+                        this.platformCampaignStatus = status;
+                        this.platformStatusByCampaign[this.form.id] = status;
+                        return this.loadPlatformAdsets();
+                    })
+                    .catch((err) => {
+                        this.$root.$emit('show-message', {type: 'error',
+                            text: verb + ' failed: ' + sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => { this.platformControlBusy = false; });
+            },
+            async controlPlatformAdset(ad) {
+                const status = ad.paused ? 'ACTIVE' : 'PAUSED';
+                const verb = ad.paused ? 'Resume' : 'Pause';
+                const dryNote = this.metaAdsDryRun ? ' (dry-run: logs, does not send)' : '';
+                const ok = await this.$refs.confirm.open(
+                    verb + ' ad set', verb + ' "' + (ad.name || ad.id) + '" on Meta' +
+                    dryNote + '?', verb);
+                if (!ok) { return; }
+                Vue.set(this.platformAdsetBusy, ad.id, true);
+                this._platformApi('/adsets/' + ad.id + '/status', 'POST', {status: status})
+                    .then((data) => {
+                        this._platformResultToast(data, verb + ' ad set');
+                        return this.loadPlatformAdsets();
+                    })
+                    .catch((err) => {
+                        this.$root.$emit('show-message', {type: 'error',
+                            text: verb + ' ad set failed: ' + sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => { Vue.set(this.platformAdsetBusy, ad.id, false); });
+            },
+            async rowPlatformToggle(item) {
+                const status = this.platformStatusOf(item) === 'PAUSED' ? 'ACTIVE' : 'PAUSED';
+                const verb = status === 'PAUSED' ? 'Pause' : 'Resume';
+                const dryNote = this.metaAdsDryRun ? ' (dry-run: logs, does not send)' : '';
+                const ok = await this.$refs.confirm.open(
+                    verb + ' Meta campaign',
+                    verb + ' the Meta campaign and its ad sets for "' +
+                        (item.name || item.alias) + '"' + dryNote + '?', verb);
+                if (!ok) { return; }
+                try {
+                    const data = await this._platformApi(
+                        '/campaigns/' + item.id + '/status', 'POST',
+                        {status: status, include_adsets: true});
+                    this._platformResultToast(data, verb + ' campaign');
+                    Vue.set(this.platformStatusByCampaign, item.id, status);
+                    if (data.campaign_status) {
+                        Vue.set(this.platformStatusByCampaign, item.id, data.campaign_status);
+                    }
+                    // refresh the row from the server (status + metrics)
+                    this.loadCampaigns();
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: verb + ' failed: ' + sanitizeToastMessage(err.message)});
+                }
             },
             addParameter() {
                 this.form.paramsIdMapping.push({
@@ -3303,6 +3518,9 @@
                         };
                     })()
                 };
+                this.platformAdsets = [];
+                this.platformCampaignStatus = null;
+                this.platformAdsetBusy = {};
 
             },
             loadCampaigns() {
@@ -3843,6 +4061,9 @@
                     funnel: {enabled: false, steps: []},
                     shield: this.defaultShield()
                 };
+                this.platformAdsets = [];
+                this.platformCampaignStatus = null;
+                this.platformAdsetBusy = {};
             },
 
             defaultShield() {
