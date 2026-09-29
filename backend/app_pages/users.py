@@ -18,8 +18,8 @@ import qrcode
 from db import get_db
 from models.user import UserORM
 from auth import (hash_password, get_caller, verify_password, _hash_backup_code,
-                  session_token, list_sessions, revoke_session_prefix,
-                  revoke_other_sessions)
+                  is_platform_operator, session_token, list_sessions,
+                  revoke_session_prefix, revoke_other_sessions)
 
 router = APIRouter()
 
@@ -74,10 +74,13 @@ def _audit(username, action, entity="user", entity_id="", detail=None, request=N
 def _require_platform_admin(request: Request) -> str:
     """Phase 2A: the install-wide user plane (co-located 2FA/password reset,
     global enable/disable) is the platform operator's, not a workspace's.
-    Membership authority lives in /api/members."""
-    caller, is_admin = get_caller(request)
-    if not is_admin:
+    Membership authority lives in /api/members.
+
+    A Bearer API token is workspace-scoped (phase 2B) and is never a platform
+    operator, so it cannot manage the install-global user plane."""
+    if not is_platform_operator(request):
         raise HTTPException(status_code=403, detail="Platform operator only")
+    caller, _ = get_caller(request)
     return caller or "api_token"
 
 

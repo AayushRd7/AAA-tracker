@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, Depends
 from auth import (require_api_auth, require_section, require_section_write,
-                  resolve_session_tenant)
+                  require_tenant_feature, resolve_api_token, resolve_session_tenant)
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -8,7 +8,8 @@ from pathlib import Path
 from fastapi.responses import FileResponse
 from clickHouse import get_clickhouse_client, ensure_report_dimensions_schema
 from starlette.concurrency import run_in_threadpool
-from tenant_context import set_current_tenant, reset_current_tenant, set_tenant_missing
+from tenant_context import (set_api_token_tenant, set_current_tenant, set_tenant_missing,
+                            reset_api_token_tenant, reset_current_tenant)
 from types import SimpleNamespace
 
 app = FastAPI(
@@ -34,6 +35,16 @@ def _session_token_from_scope(scope) -> str:
     return ""
 
 
+def _bearer_from_scope(scope) -> str:
+    """The Bearer API token from an ASGI scope ('' when absent)."""
+    for name, value in scope.get("headers") or []:
+        if name == b"authorization":
+            raw = value.decode("latin-1").strip()
+            if raw.lower().startswith("bearer "):
+                return raw.split(" ", 1)[1].strip()
+    return ""
+
+
 class TenantContextMiddleware:
     """Resolve the request's tenant once, before anything else runs.
 
@@ -45,8 +56,9 @@ class TenantContextMiddleware:
     contextvar set here is guaranteed to be visible to the endpoint — both for
     async endpoints and for sync ones (anyio's threadpool copies the context).
 
-    Resolution is session-based only. A tenant id from a query parameter or
-    header is never accepted, so there is no spoofing surface.
+    Resolution is session-based, plus a Bearer API token (which resolves to the
+    workspace that owns it). A tenant id from a query parameter or header is
+    never accepted, so there is no spoofing surface.
     """
 
     def __init__(self, app):
@@ -55,18 +67,28 @@ class TenantContextMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        tenant_id, has_membership = None, True
+        tenant_id, has_membership, token_tenant = None, True, None
         try:
-            tenant_id, has_membership = await run_in_threadpool(
-                resolve_session_tenant, _session_token_from_scope(scope))
+            bearer = _bearer_from_scope(scope)
+            if bearer:
+                token_tenant = await run_in_threadpool(resolve_api_token, bearer)
+            if token_tenant is not None:
+                # A valid API token wins over any cookie: the request runs in
+                # the workspace the token belongs to, nowhere else.
+                tenant_id, has_membership = token_tenant, True
+            else:
+                tenant_id, has_membership = await run_in_threadpool(
+                    resolve_session_tenant, _session_token_from_scope(scope))
         except Exception:
             pass
         token = set_current_tenant(tenant_id)
+        api_token = set_api_token_tenant(token_tenant)
         set_tenant_missing(not has_membership)
         try:
             await self.app(scope, receive, send)
         finally:
             reset_current_tenant(token)
+            reset_api_token_tenant(api_token)
 
 
 app.add_middleware(TenantContextMiddleware)
@@ -689,16 +711,19 @@ app.include_router(audit_router, prefix="/api/audit", tags=["Audit"],
 
 # G69: flow monitoring — configured from Settings, admin-only section.
 app.include_router(monitor_router, prefix="/api/monitor", tags=["Monitoring"],
-                   dependencies=[Depends(require_section_write("settings"))])
+                   dependencies=[Depends(require_section_write("settings")),
+                                 Depends(require_tenant_feature("monitoring"))])
 # G70: auto rules — same admin plane as monitoring.
 app.include_router(rules_router, prefix="/api/rules", tags=["Auto Rules"],
                    dependencies=[Depends(require_section_write("settings"))])
 # Fraud & cloaking dashboard — same admin plane as monitoring/rules.
 app.include_router(fraud_router, prefix="/api/fraud", tags=["Fraud"],
                    dependencies=[Depends(require_section_write("settings"))])
-# G76: AI auto-optimizer — same admin plane as monitoring/rules/fraud.
+# G76: AI auto-optimizer — same admin plane as monitoring/rules/fraud, plus the
+# workspace's "optimizer" feature flag (a workspace can switch the optimizer off).
 app.include_router(optimizer_router, prefix="/api/optimizer", tags=["Optimizer"],
-                   dependencies=[Depends(require_section_write("settings"))])
+                   dependencies=[Depends(require_section_write("settings")),
+                                 Depends(require_tenant_feature("optimizer"))])
 # G56: anomaly insights — same admin plane as monitoring/rules/fraud.
 from app_pages.insights import router as insights_router
 app.include_router(insights_router, prefix="/api/insights", tags=["Insights"],
@@ -812,6 +837,13 @@ async def serve_page(request: Request, page: Optional[str] = None):
         from auth import get_session_username
         perms = get_user_permissions(get_session_username(request))
     page_file = f"pages/{page}.html"
+    # Workspace feature flags drive a couple of nav entries (Optimizer) so the
+    # shell does not offer a section the workspace has switched off.
+    tenant_features = {}
+    if user_type:
+        from tenant_context import current_tenant
+        from tenant_settings import tenant_features as _tenant_features
+        tenant_features = _tenant_features(current_tenant())
     return templates.TemplateResponse(request, "index.html", {
         "page_to_include": page_file,
         "page": page,
@@ -819,5 +851,6 @@ async def serve_page(request: Request, page: Optional[str] = None):
         "is_authenticated_user_type": user_type,
         "initial_section": section or "dashboard",
         "permissions": perms if user_type else None,
+        "tenant_features": tenant_features,
         "page_component": '<'+page+'-page-component></'+page+'-page-component>',
     })

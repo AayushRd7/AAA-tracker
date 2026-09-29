@@ -8,9 +8,13 @@ threaded through every function signature:
   ``TenantContextMiddleware`` (backend/app.py) is visible everywhere in the
   request.
 * The default is tenant 1 — this install. Anything that runs *outside* a
-  request (the monitor / auto-rules / optimizer / email-report background
-  loops) therefore behaves exactly as it did before multi-tenancy: it sees and
-  writes tenant 1's rows only.
+  request must set the context explicitly: the background loops enumerate the
+  tenants that need work and run each tenant's pass through
+  ``tenant_settings.for_each_tenant`` (which also reads/clears this value).
+
+A request carrying a Bearer API token resolves that token to the tenant that
+owns it (``_api_token_tenant`` below) and runs with *that* tenant as the
+current one — the token can never name another workspace.
 
 ``tenant_scope.py`` consumes this value to scope every ORM statement; see the
 comment there for why raw SQL is NOT covered by that mechanism.
@@ -27,6 +31,26 @@ _current_tenant: contextvars.ContextVar[int] = contextvars.ContextVar(
 # The middleware sets it; auth.require_api_auth turns it into a 403.
 _tenant_missing: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "aaa_tenant_missing", default=False)
+
+# The tenant a Bearer API token in this request resolved to (None when the
+# request carries no valid token). Set by TenantContextMiddleware before the
+# per-tenant context is written, so auth can keep the token inside its own
+# workspace and refuse the platform-only escape hatches.
+_api_token_tenant: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
+    "aaa_api_token_tenant", default=None)
+
+
+def set_api_token_tenant(tenant_id: Optional[int]):
+    return _api_token_tenant.set(int(tenant_id) if tenant_id else None)
+
+
+def reset_api_token_tenant(token) -> None:
+    _api_token_tenant.reset(token)
+
+
+def api_token_tenant() -> Optional[int]:
+    """The workspace a valid Bearer API token acts in, else None."""
+    return _api_token_tenant.get()
 
 
 def set_current_tenant(tenant_id: Optional[int]):

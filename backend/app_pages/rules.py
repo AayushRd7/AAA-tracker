@@ -17,6 +17,7 @@ clears).
 import asyncio
 import json
 from tenant_context import current_tenant
+from tenant_settings import for_each_tenant
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -210,38 +211,48 @@ def perform_action(rule: dict, evaluation: dict) -> dict:
 # Background loop
 # ---------------------------------------------------------------------------
 
-async def auto_rules_loop():
-    """Evaluate every enabled rule every 15 minutes."""
+async def _tenant_rules_pass(tenant_id: int) -> None:
+    """Evaluate one tenant's enabled rules, then run its anomaly insights.
+
+    Runs inside the tenant context set by ``for_each_tenant``, so the rule
+    lookup, the ClickHouse metric query (through ``current_tenant()``), the
+    persisted ``last_run`` and the Telegram/email alerts are all scoped to it.
+    """
     global _loop_last_run
+    db = SessionLocal()
+    try:
+        rules = db.execute(text("SELECT * FROM auto_rules "
+                                "WHERE enabled = true AND tenant_id = :tid"),
+                           {"tid": current_tenant()}).fetchall()
+    finally:
+        db.close()
+    if rules:
+        ch = get_clickhouse_client()
+        try:
+            for r in rules:
+                try:
+                    await run_rule(dict(_rule_public(r)), ch, persist=True)
+                except Exception as e:
+                    print(f"Auto rule {r[0]} (tenant {tenant_id}) error:", e)
+        finally:
+            ch.close()
+    _loop_last_run = datetime.utcnow()
+    # G56 — anomaly insights share this 15-min cadence (no separate loop)
+    try:
+        from app_pages import insights
+        summary = await asyncio.to_thread(insights.run_analysis, "auto_rules_loop")
+        if summary.get("telegram_sent"):
+            print(f"Insights (tenant {tenant_id}): new critical findings alerted")
+    except Exception as e:
+        print(f"Insights run error (tenant {tenant_id}):", e)
+
+
+async def auto_rules_loop():
+    """Evaluate every enabled rule of every active tenant every 15 minutes."""
     await asyncio.sleep(90)  # stagger vs the monitor loop
     while True:
         try:
-            db = SessionLocal()
-            try:
-                rules = db.execute(text("SELECT * FROM auto_rules "
-                                        "WHERE enabled = true AND tenant_id = :tid"),
-                                   {"tid": current_tenant()}).fetchall()
-            finally:
-                db.close()
-            if rules:
-                ch = get_clickhouse_client()
-                try:
-                    for r in rules:
-                        try:
-                            await run_rule(dict(_rule_public(r)), ch, persist=True)
-                        except Exception as e:
-                            print(f"Auto rule {r[0]} error:", e)
-                    _loop_last_run = datetime.utcnow()
-                finally:
-                    ch.close()
-            # G56 — anomaly insights share this 15-min cadence (no separate loop)
-            try:
-                from app_pages import insights
-                summary = await asyncio.to_thread(insights.run_analysis, "auto_rules_loop")
-                if summary.get("telegram_sent"):
-                    print(f"Insights: new critical findings alerted via Telegram")
-            except Exception as e:
-                print("Insights run error:", e)
+            await for_each_tenant(_tenant_rules_pass)
         except Exception as e:
             print("Auto rules loop error:", e)
         await asyncio.sleep(LOOP_INTERVAL_SECONDS)

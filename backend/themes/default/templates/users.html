@@ -22,8 +22,7 @@
                     <v-card-title class="d-flex align-center">
                         <v-icon color="primary" class="mr-2">mdi-account-multiple-outline</v-icon>
                         Workspace members
-                        <span v-if="membersMeta.seats !== null && membersMeta.seats !== undefined"
-                              class="caption grey--text ml-2">({{ membersMeta.member_count }} / {{ membersMeta.seats }} seats)</span>
+                        <span class="caption grey--text ml-2">({{ membersMeta.plan }} plan)</span>
                         <v-spacer></v-spacer>
                         <v-btn color="primary" elevation="0" small
                                :disabled="!canManageMembers" @click="openAddMember">
@@ -35,6 +34,20 @@
                         <div class="caption grey--text mb-2">
                             Members of this workspace. Roles: owner (everything incl. ownership),
                             admin (everything except ownership), editor (content write), viewer (read-only).
+                        </div>
+                        <!-- Read-only workspace plan summary (phase 2B) -->
+                        <div class="caption grey--text mb-3">
+                            <span class="status-chip status-chip--neutral">Plan: {{ membersMeta.plan }}</span>
+                            <span class="ml-2">
+                                Seats used: {{ membersMeta.member_count }}<template
+                                    v-if="membersMeta.seats !== null && membersMeta.seats !== undefined"> / {{ membersMeta.seats }}</template>
+                                <template v-else> (unlimited)</template>
+                            </span>
+                            <span class="ml-2">
+                                Data retention:
+                                <template v-if="membersMeta.retention_days">{{ membersMeta.retention_days }} days</template>
+                                <template v-else>install default</template>
+                            </span>
                         </div>
                         <v-data-table
                                 :headers="memberHeaders"
@@ -425,7 +438,8 @@
                 // Workspace members (phase 2A)
                 members: [],
                 loadingMembers: false,
-                membersMeta: {seats: null, member_count: 0, caller_role: '', can_manage: false},
+                membersMeta: {seats: null, member_count: 0, caller_role: '', can_manage: false,
+                              plan: '', retention_days: null},
                 memberHeaders: [
                     {text: 'Username', value: 'username'},
                     {text: 'Email', value: 'email'},
@@ -519,6 +533,8 @@
                             member_count: data.member_count || 0,
                             caller_role: data.caller_role || '',
                             can_manage: !!data.can_manage,
+                            plan: data.plan || 'free',
+                            retention_days: data.retention_days === undefined ? null : data.retention_days,
                         };
                     })
                     .catch(err => {

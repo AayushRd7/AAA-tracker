@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db, SessionLocal
 from tenant_context import current_tenant
+from tenant_settings import for_each_tenant, tenant_feature
 from clickHouse import get_clickhouse_client
 
 router = APIRouter()
@@ -303,34 +304,43 @@ async def _alert_on_big_shift(result: dict) -> None:
 # Background loop
 # ---------------------------------------------------------------------------
 
-async def optimizer_loop():
-    """Sweep every optimizer-enabled campaign every 15 minutes."""
+async def _tenant_optimizer_pass(tenant_id: int) -> None:
+    """Sweep one tenant's optimizer-enabled campaigns (inside its context)."""
     global _loop_last_run
+    db = SessionLocal()
+    try:
+        if not tenant_feature(db, tenant_id, "optimizer"):
+            print(f"Optimizer: tenant {tenant_id} has the optimizer disabled — skipped")
+            return
+        rows = db.execute(text(
+            "SELECT id, config FROM campaigns "
+            "WHERE status = 'active' AND archived = false "
+            "AND tenant_id = :tid"), {"tid": current_tenant()}).fetchall()
+    finally:
+        db.close()
+    for cid, config in rows:
+        try:
+            block = _settings((config or {}).get("optimizer"))
+            if not block["enabled"]:
+                continue
+            result = await asyncio.to_thread(run_optimization, cid)
+            if result.get("reason") == "position_mode_not_supported":
+                print(f"Optimizer: campaign {cid} uses position mode — skipped")
+            elif result.get("changed"):
+                print(f"Optimizer (tenant {tenant_id}): campaign {cid} reweighted:",
+                      result.get("shifts"))
+                await _alert_on_big_shift(result)
+        except Exception as e:
+            print(f"Optimizer: campaign {cid} (tenant {tenant_id}) error:", e)
+    _loop_last_run = datetime.utcnow()
+
+
+async def optimizer_loop():
+    """Sweep every optimizer-enabled campaign of every active tenant every 15 min."""
     await asyncio.sleep(150)  # stagger vs monitor (60s) and rules (90s)
     while True:
         try:
-            db = SessionLocal()
-            try:
-                rows = db.execute(text(
-                    "SELECT id, config FROM campaigns "
-                    "WHERE status = 'active' AND archived = false "
-                    "AND tenant_id = :tid"), {"tid": current_tenant()}).fetchall()
-            finally:
-                db.close()
-            for cid, config in rows:
-                try:
-                    block = _settings((config or {}).get("optimizer"))
-                    if not block["enabled"]:
-                        continue
-                    result = await asyncio.to_thread(run_optimization, cid)
-                    if result.get("reason") == "position_mode_not_supported":
-                        print(f"Optimizer: campaign {cid} uses position mode — skipped")
-                    elif result.get("changed"):
-                        print(f"Optimizer: campaign {cid} reweighted:", result.get("shifts"))
-                        await _alert_on_big_shift(result)
-                except Exception as e:
-                    print(f"Optimizer: campaign {cid} error:", e)
-            _loop_last_run = datetime.utcnow()
+            await for_each_tenant(_tenant_optimizer_pass)
         except Exception as e:
             print("Optimizer loop error:", e)
         await asyncio.sleep(LOOP_INTERVAL_SECONDS)

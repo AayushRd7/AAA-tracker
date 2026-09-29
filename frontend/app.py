@@ -91,9 +91,16 @@ def new_ch_client():
 
 def acquire_ch():
     """Borrow a pooled client, or mint a fresh one immediately when the pool is
-    exhausted — never block the event loop waiting for a slot."""
+    exhausted — never block the event loop waiting for a slot.
+
+    The pool is absent when this module is imported outside the running server
+    (e.g. a one-off ``prune_old_data()`` run); a fresh client is used then.
+    """
+    pool = getattr(app.state, "ch_pool", None)
+    if pool is None:
+        return new_ch_client()
     try:
-        return app.state.ch_pool.get_nowait()
+        return pool.get_nowait()
     except queue.Empty:
         return new_ch_client()
 
@@ -106,8 +113,15 @@ def release_ch(ch, failed: bool = False):
         except Exception:
             pass
         ch = new_ch_client()
+    pool = getattr(app.state, "ch_pool", None)
+    if pool is None:
+        try:
+            ch.close()
+        except Exception:
+            pass
+        return
     try:
-        app.state.ch_pool.put_nowait(ch)
+        pool.put_nowait(ch)
     except queue.Full:
         # Pool already full (overflow clients) — drop the extra so the pool
         # can never grow unboundedly.
@@ -404,7 +418,7 @@ async def ensure_ch_schema():
 
 
 async def retention_loop():
-    """Prune ClickHouse data older than the configured retention window, daily."""
+    """Prune every tenant's ClickHouse data to its own retention window, daily."""
     while True:
         try:
             await prune_old_data()
@@ -413,43 +427,65 @@ async def retention_loop():
         await asyncio.sleep(24 * 3600)
 
 
-async def prune_old_data():
-    """Delete clicks older than settings.data_retention.days when enabled."""
+async def prune_old_data() -> dict:
+    """Prune every tenant's ClickHouse history to its own retention window.
+
+    The window is ``tenants.retention_days`` when set; a NULL falls back to the
+    install-wide ``settings.data_retention.days`` (read from tenant 1's
+    settings document, as before). A tenant with no window at all (NULL and the
+    install-wide setting disabled) is left untouched. Each tenant is pruned with
+    its own ``tenant_id`` predicate and one mutation, and a tenant's failure is
+    logged without stopping the others. Returns {tenant_id: days} for the
+    tenants that were pruned.
+    """
     conn = pg_connect()
     cur = conn.cursor()
-    # settings rows are per tenant; the tracking plane has no request tenant
-    # context, so it reads tenant 1's (this install's) block. Phase 2 iterates
-    # tenants here instead.
+    cur.execute("SELECT id, retention_days FROM tenants ORDER BY id ASC")
+    tenants = cur.fetchall()
+    # The install-wide fallback still lives in tenant 1's settings document.
     cur.execute("SELECT value FROM settings WHERE name = 'settings' AND tenant_id = 1")
     row = cur.fetchone()
     conn.close()
-    if not row or not row[0]:
-        return
-    cfg = json.loads(row[0]).get("data_retention") or {}
-    if not cfg.get("enabled"):
-        return
-    try:
-        days = int(cfg.get("days") or 0)
-    except (TypeError, ValueError):
-        return
-    if days <= 0:
-        return
-    ch = acquire_ch()
-    try:
-        # Tenant 1 only: this plane reads the retention window from tenant 1's
-        # settings row, so letting the mutation run unfiltered would delete
-        # every other tenant's history. Phase 2 iterates tenants with
-        # per-tenant retention windows.
-        await asyncio.to_thread(
-            ch.command,
-            f"ALTER TABLE clicks_data DELETE WHERE tenant_id = 1 "
-            f"AND received_at < now() - INTERVAL {days} DAY",
-            settings={"mutations_sync": 1})
-    except Exception:
-        release_ch(ch, failed=True)
-        raise
-    release_ch(ch)
-    log_track(f"🧹 Retention: pruned tenant 1's clicks_data older than {days} days")
+
+    install_days = None
+    if row and row[0]:
+        try:
+            cfg = json.loads(row[0]).get("data_retention") or {}
+        except Exception:
+            cfg = {}
+        if cfg.get("enabled"):
+            try:
+                install_days = int(cfg.get("days") or 0)
+            except (TypeError, ValueError):
+                install_days = None
+
+    pruned = {}
+    for tenant_id, retention_days in tenants:
+        if retention_days is not None:
+            try:
+                days = int(retention_days)
+            except (TypeError, ValueError):
+                days = None
+        else:
+            days = install_days
+        if not days or days <= 0:
+            continue
+        ch = acquire_ch()
+        try:
+            await asyncio.to_thread(
+                ch.command,
+                f"ALTER TABLE clicks_data DELETE WHERE tenant_id = {int(tenant_id)} "
+                f"AND received_at < now() - INTERVAL {int(days)} DAY",
+                settings={"mutations_sync": 1})
+        except Exception as e:
+            release_ch(ch, failed=True)
+            log_track(f"🧹 Retention: tenant {tenant_id} prune failed: {e}")
+            continue
+        release_ch(ch)
+        pruned[int(tenant_id)] = int(days)
+        log_track(f"🧹 Retention: pruned tenant {tenant_id}'s clicks_data "
+                  f"older than {int(days)} days")
+    return pruned
 
 
 # 🛑 Shutdown
@@ -1045,7 +1081,8 @@ async def campaign_click(
                 and funnel_cfg.get("steps")):
             funnel_cfg = None
         click_bound = parse_bind_cookie(
-            request, campaign["id"], campaign_routing_hash(click_cfg, click_dmode))
+            request, campaign["id"], campaign_routing_hash(click_cfg, click_dmode),
+            tenant_id=campaign["tenant_id"])
         if funnel_cfg is not None:
             st = click_bound.get("st") if click_bound else None
             if not (isinstance(st, int) and not isinstance(st, bool)
@@ -1121,7 +1158,8 @@ async def campaign_click(
             bind_cookie = make_bind_cookie(campaign["id"], 0, offer["id"],
                                            meta_data.get("landing_id"),
                                            campaign_routing_hash(click_cfg, click_dmode),
-                                           step=next_step)
+                                           step=next_step,
+                                           tenant_id=campaign["tenant_id"])
             if bind_cookie:
                 response.set_cookie(
                     BIND_COOKIE, bind_cookie,
@@ -3339,56 +3377,63 @@ VISITOR_COOKIE = "aaa_vid"
 VISITOR_TTL_SECONDS = 180 * 24 * 3600
 
 
-def _load_or_create_bind_secret() -> bytes:
-    """Stable per-installation bind secret persisted in the settings table.
+def _load_or_create_bind_secret(tenant_id: int) -> bytes:
+    """Stable per-tenant bind secret persisted in that tenant's settings rows.
 
-    Generated once, then reused across restarts and workers (a per-process
-    random secret would invalidate every binding on deploy). Never derived
-    from the DB password.
+    Generated once per workspace, then reused across restarts and workers (a
+    per-process random secret would invalidate every binding on deploy). The
+    secret never leaves its workspace, so one tenant's bind cookies cannot be
+    forged with another's. Never derived from the DB password.
     """
+    tid = int(tenant_id or 1)
     try:
         conn = pg_connect()
         cur = conn.cursor()
         cur.execute("SELECT value FROM settings WHERE name = 'aaa_bind_secret' "
-                    "AND tenant_id = 1")
+                    "AND tenant_id = %s", (tid,))
         row = cur.fetchone()
         if row and row[0]:
             conn.close()
             return row[0].encode()
         value = secrets.token_urlsafe(32)
-        # Tenant 1's bind secret. Phase-1 limitation: the tracking plane keeps a
-        # single process-wide bind secret, so a second tenant's campaigns share
-        # this key (bind cookies are still validated against the campaign id and
-        # routing hash, so this is not a cross-tenant read path).
         cur.execute(
             "INSERT INTO settings (name, value, tenant_id) "
-            "VALUES ('aaa_bind_secret', %s, 1) "
-            "ON CONFLICT (tenant_id, name) DO NOTHING", (value,))
+            "VALUES ('aaa_bind_secret', %s, %s) "
+            "ON CONFLICT (tenant_id, name) DO NOTHING", (value, tid))
         conn.commit()
         cur.execute("SELECT value FROM settings WHERE name = 'aaa_bind_secret' "
-                    "AND tenant_id = 1")
+                    "AND tenant_id = %s", (tid,))
         row = cur.fetchone()
         conn.close()
         if row and row[0]:
             return row[0].encode()
     except Exception as e:
-        log_track(f"Bind secret load error: {e}")
+        log_track(f"Bind secret load error (tenant {tid}): {e}")
     # Fail closed: no constant fallback secret — a known secret would make
     # every stickiness cookie forgeable. Callers skip binding entirely until
     # the settings row is readable.
     return None
 
 
-def _bind_secret() -> bytes:
+def _bind_secret(tenant_id: int) -> bytes:
     env = os.environ.get("AAA_BIND_SECRET")
     if env:
+        # Explicit operator override — one secret for the whole install (used
+        # by operators who need cookie continuity across a rebuild). Unset by
+        # default, in which case every tenant has its own secret.
         return env.encode()
-    cached = getattr(app.state, "_bind_secret", None)
+    tid = int(tenant_id or 1)
+    secrets_cache = getattr(app.state, "_bind_secrets", None)
+    if secrets_cache is None:
+        secrets_cache = {}
+        app.state._bind_secrets = secrets_cache
+    cached = secrets_cache.get(tid)
     if cached is None:
-        cached = _load_or_create_bind_secret()
+        cached = _load_or_create_bind_secret(tid)
         # A None result (settings read failed) is NOT cached — the next hit
         # retries instead of staying fail-closed forever.
-        app.state._bind_secret = cached
+        if cached is not None:
+            secrets_cache[tid] = cached
     return cached
 
 
@@ -3421,10 +3466,12 @@ def campaign_routing_hash(config: dict, distribution_mode: str) -> str:
 
 
 def make_bind_cookie(campaign_id: int, flow_index: int, offer, landing, routing_hash: str,
-                     step: int = None) -> str:
+                     step: int = None, tenant_id: int = None) -> str:
+    # Signed with the OWNING campaign's workspace secret — a binding issued for
+    # one tenant's campaign cannot validate anywhere else.
     # Fail closed: with no usable secret (settings read failed) no binding is
     # issued — never a cookie signed with a constant.
-    secret = _bind_secret()
+    secret = _bind_secret(tenant_id)
     if not secret:
         log_track("⚠ Bind secret unavailable — binding cookie skipped")
         return ""
@@ -3439,10 +3486,12 @@ def make_bind_cookie(campaign_id: int, flow_index: int, offer, landing, routing_
     return f"{raw}.{sig}"
 
 
-def parse_bind_cookie(request: Request, campaign_id: int, routing_hash: str):
+def parse_bind_cookie(request: Request, campaign_id: int, routing_hash: str,
+                      tenant_id: int = None):
     """Return the validated binding payload, or None (bad sig/expired/other campaign/stale config)."""
     # Fail closed: no usable secret → never accept a binding signed with one.
-    secret = _bind_secret()
+    # Validated with the campaign's own workspace secret.
+    secret = _bind_secret(tenant_id)
     if not secret:
         return None
     raw_cookie = request.cookies.get(BIND_COOKIE)
@@ -3868,7 +3917,8 @@ async def execute_funnel(campaign, request: Request, config: dict, meta_data: di
     # Unlike flow stickiness, the binding is ALWAYS issued for funnels — the
     # step cannot advance across visits without it.
     step_index = 0
-    bound = parse_bind_cookie(request, campaign["id"], routing_hash)
+    bound = parse_bind_cookie(request, campaign["id"], routing_hash,
+                              tenant_id=campaign["tenant_id"])
     if bound is not None:
         st = bound.get("st")
         if isinstance(st, int) and not isinstance(st, bool) and st > 0:
@@ -3914,7 +3964,7 @@ async def execute_funnel(campaign, request: Request, config: dict, meta_data: di
         offer_id = served["offer"] if served["offer"] is not None else flow.get("offer")
         landing_id = served["landing"] if served["landing"] is not None else landing
         bind_cookie = make_bind_cookie(campaign["id"], 0, offer_id, landing_id, routing_hash,
-                                       step=step_index)
+                                       step=step_index, tenant_id=campaign["tenant_id"])
         if bind_cookie:
             response.set_cookie(
                 BIND_COOKIE, bind_cookie,
@@ -3983,7 +4033,8 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
     # wins — the bound flow is served directly without re-filtering.
     bound = None
     if stickiness:
-        bound = parse_bind_cookie(request, campaign["id"], routing_hash)
+        bound = parse_bind_cookie(request, campaign["id"], routing_hash,
+                                  tenant_id=campaign["tenant_id"])
         if bound is not None and not _bound_flow_still_valid(bound, sorted_flows):
             bound = None
 
@@ -4133,7 +4184,8 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
         if stickiness and not getattr(request.state, "optout", False):
             offer_id = served["offer"] if served["offer"] is not None else flow.get("offer")
             landing_id = served["landing"] if served["landing"] is not None else flow.get("landing")
-            bind_cookie = make_bind_cookie(campaign["id"], chosen_index, offer_id, landing_id, routing_hash)
+            bind_cookie = make_bind_cookie(campaign["id"], chosen_index, offer_id, landing_id,
+                                           routing_hash, tenant_id=campaign["tenant_id"])
             if bind_cookie:
                 response.set_cookie(
                     BIND_COOKIE, bind_cookie,
@@ -5332,7 +5384,9 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
     funnel_steps_ = funnel_config_steps(config)
     if funnel_steps_ is not None:
         step_index = 0
-        bound_f = parse_bind_cookie(request, campaign["id"], routing_hash) if stickiness else None
+        bound_f = (parse_bind_cookie(request, campaign["id"], routing_hash,
+                                     tenant_id=campaign["tenant_id"])
+                   if stickiness else None)
         if bound_f is not None:
             st = bound_f.get("st")
             if isinstance(st, int) and not isinstance(st, bool) and st > 0:
@@ -5365,7 +5419,8 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
 
     bound = None
     if stickiness:
-        bound = parse_bind_cookie(request, campaign["id"], routing_hash)
+        bound = parse_bind_cookie(request, campaign["id"], routing_hash,
+                                  tenant_id=campaign["tenant_id"])
         if bound is not None and not _bound_flow_still_valid(bound, sorted_flows):
             bound = None
 

@@ -3,9 +3,13 @@
 Minimal Model Context Protocol server: JSON-RPC 2.0 over a single HTTP POST
 endpoint (`POST /api/mcp`), so external AI agents (Claude Desktop, Cursor,
 custom assistants) can read tracker state and perform the safe day-to-day
-operations (pause/activate a campaign) with the existing Settings API token:
+operations (pause/activate a campaign) with the workspace's Settings API token:
 
     Authorization: Bearer <apiToken>
+
+The token is workspace-scoped (multi-tenancy phase 2B): it resolves to the
+tenant whose settings document holds it, and every tool below therefore sees
+(and can only touch) that workspace's data.
 
 Implemented methods: initialize, ping, tools/list, tools/call. JSON-RPC
 notifications (requests without an `id`) are accepted and acknowledged with

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db, SessionLocal
 from tenant_context import current_tenant
+from tenant_settings import for_each_tenant, tenant_feature
 from models.settings import SettingsORM
 
 router = APIRouter()
@@ -277,15 +278,45 @@ async def run_monitor_cycle() -> dict:
         db.close()
 
 
+async def run_monitor_sweep() -> dict:
+    """One check pass over every active tenant that has monitoring enabled.
+
+    Each tenant runs inside ``set_current_tenant`` so the campaign/offer/landing
+    lookups and the ``monitor_state`` writes are scoped to it. A tenant whose
+    ``features.monitoring`` flag is false is skipped; one tenant's failure is
+    logged and the sweep continues. Returns {tenant_id: summary}.
+    """
+    summaries = {}
+
+    async def _work(tenant_id):
+        db = SessionLocal()
+        try:
+            if not tenant_feature(db, tenant_id, "monitoring"):
+                print(f"Monitor: tenant {tenant_id} has monitoring disabled — skipped")
+                return
+        finally:
+            db.close()
+        summaries[tenant_id] = await run_monitor_cycle()
+
+    await for_each_tenant(_work)
+    return summaries
+
+
 async def monitor_loop():
-    """Background scheduler — first pass a minute after boot, then every 15 min."""
+    """Background scheduler — first pass a minute after boot, then every 15 min.
+
+    Sweeps every tenant sequentially: the run time is the sum of the tenants'
+    checks (one concurrent HTTP batch per tenant), and the loop never
+    overlaps itself because it sleeps only after a sweep returns.
+    """
     global _loop_last_run
     await asyncio.sleep(60)
     while True:
         try:
-            summary = await run_monitor_cycle()
+            summaries = await run_monitor_sweep()
+            for tenant_id, summary in summaries.items():
+                print(f"Monitor cycle (tenant {tenant_id}): {summary}")
             _loop_last_run = datetime.utcnow()
-            print(f"Monitor cycle: {summary}")
         except Exception as e:
             print("Monitor loop error:", e)
         await asyncio.sleep(CHECK_INTERVAL_SECONDS)

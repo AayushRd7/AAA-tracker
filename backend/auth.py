@@ -23,7 +23,7 @@ from sqlalchemy.exc import IntegrityError
 
 from models.user import UserORM
 from models.settings import SettingsORM
-from tenant_context import current_tenant
+from tenant_context import current_tenant, api_token_tenant as _api_token_tenant
 
 router = APIRouter()
 
@@ -320,11 +320,14 @@ def revoke_other_sessions(db: Session, username: str, current_token: str) -> int
 
 
 def load_api_token() -> str:
-    """The API token from the settings row (used for Bearer auth by external tools)."""
+    """Tenant 1's API token (the credential the Settings page shows).
+
+    Kept for the install-wide default; a *request* is resolved with
+    ``resolve_api_token``, which finds the workspace that owns the presented
+    token. Tokens live in each tenant's own settings document.
+    """
     try:
         db = SessionLocal()
-        # settings rows are per tenant; the API token belongs to tenant 1 (the
-        # install-wide credential the UI shows on the Settings page).
         row = db.execute(text("SELECT value FROM settings "
                               "WHERE name = 'settings' AND tenant_id = 1")).fetchone()
         db.close()
@@ -333,6 +336,56 @@ def load_api_token() -> str:
     except Exception:
         pass
     return ""
+
+
+def resolve_api_token(provided: str) -> Optional[int]:
+    """The tenant whose settings document holds ``provided`` as its apiToken.
+
+    Returns None for an empty/unknown token. One settings row per tenant, so
+    this scans the (small) tenant set; the lowest matching tenant wins when two
+    workspaces somehow share a token. Called by the request middleware, which
+    then runs the whole request in that tenant — a token is therefore a
+    *workspace-scoped* credential, never install-wide.
+    """
+    provided = (provided or "").strip()
+    if not provided:
+        return None
+    try:
+        db = SessionLocal()
+        try:
+            rows = db.execute(text(
+                "SELECT tenant_id, value FROM settings WHERE name = 'settings' "
+                "ORDER BY tenant_id ASC")).fetchall()
+        finally:
+            db.close()
+    except Exception:
+        return None
+    match = None
+    for tenant_id, value in rows:
+        if not value:
+            continue
+        try:
+            token = (json.loads(value).get("apiToken") or "").strip()
+        except Exception:
+            continue
+        if token and len(token) == len(provided) \
+                and secrets.compare_digest(token, provided):
+            match = int(tenant_id) if match is None else min(match, int(tenant_id))
+    return match
+
+
+def is_platform_operator(request: Request) -> bool:
+    """True only for a session user whose ``users.is_admin`` flag is set.
+
+    A Bearer API token is a workspace-scoped credential (phase 2B): it acts as
+    the owner of the workspace it belongs to and is deliberately NOT a platform
+    operator, so it cannot reach the install-global user plane or target
+    another workspace through the platform-only escape hatches.
+    """
+    if _api_token_tenant() is not None:
+        return False
+    _, is_admin = get_caller(request)
+    return is_admin
 
 
 # Model for passing the login and password
@@ -504,12 +557,14 @@ def caller_role_in_tenant(db: Session, username: str, tenant_id: int) -> Optiona
 
 
 def require_api_auth(request: Request, authorization: Optional[str] = Header(None)):
-    """Dependency for API routers: accepts a session cookie or a Bearer API token."""
+    """Dependency for API routers: accepts a session cookie or a Bearer API token.
+
+    A Bearer token is resolved by the middleware to the tenant that owns it
+    (``tenant_context.api_token_tenant``): the request then runs inside that
+    workspace and the token can never reach another one.
+    """
     if authorization and authorization.lower().startswith("bearer "):
-        provided = authorization.split(" ", 1)[1].strip()
-        api_token = load_api_token()
-        if api_token and len(provided) == len(api_token) \
-                and secrets.compare_digest(provided, api_token):
+        if _api_token_tenant() is not None:
             return "api_token"
         raise HTTPException(status_code=401, detail="Invalid API token")
 
@@ -661,24 +716,34 @@ def require_section_write(section: str):
     return checker
 
 
+def require_tenant_feature(name: str):
+    """Dependency factory: deny when the current workspace switched a feature off.
+
+    ``tenants.features`` is an opt-out map — an absent key means enabled, so
+    every workspace that predates feature flags keeps working. A false flag
+    makes the whole capability (API included) unavailable in that workspace.
+    """
+    async def checker(request: Request, authorization: Optional[str] = Header(None),
+                      db: Session = Depends(get_db)):
+        principal = require_api_auth(request, authorization)
+        from tenant_settings import tenant_feature
+        if not tenant_feature(db, current_tenant(), name):
+            raise HTTPException(
+                status_code=403,
+                detail=f"'{name}' is disabled for this workspace")
+        return principal
+    return checker
+
+
 def get_caller(request: Request, authorization: Optional[str] = None):
-    """(username, is_admin) for the current request — api_token counts as admin."""
-    if authorization and authorization.lower().startswith("bearer "):
-        provided = authorization.split(" ", 1)[1].strip()
-        # cache the settings-row token per request — it was loaded twice before
-        try:
-            api_token = getattr(request.state, "_api_token", None)
-        except Exception:
-            api_token = None
-        if api_token is None:
-            api_token = load_api_token()
-            try:
-                request.state._api_token = api_token
-            except Exception:
-                pass
-        if api_token and len(provided) == len(api_token) \
-                and secrets.compare_digest(provided, api_token):
-            return None, True
+    """(username, is_admin) for the current request.
+
+    A valid Bearer API token counts as an admin *of its own workspace* (it has
+    no username). Platform-only gates must use ``is_platform_operator`` — the
+    token is never a platform operator.
+    """
+    if _api_token_tenant() is not None:
+        return None, True
     username = get_session_username(request)
     if not username:
         return None, False

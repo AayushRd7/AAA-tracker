@@ -221,11 +221,11 @@ and its data is backfilled to it, so nothing changes for the existing deployment
 - [x] workspace member management: list/add/update/remove members, transfer ownership, seat limit, guardrails (no self-escalation, last owner protected)
 - [x] settings rows are already per-tenant (phase 1 composite unique); the audit log, logs area and reports are tenant-scoped
 - [x] plan/quota columns on the tenant (plan, seats, retention_days, features) with the seat limit enforced
-- [ ] seed a tenant's settings document on creation (currency, timezone, defaults)
-- [ ] per-tenant retention enforcement and a prune that iterates tenants (today it is pinned to tenant 1)
-- [ ] per-tenant bind secret (today tenant 1's is used)
-- [ ] background loops must iterate tenants (monitor, auto-rules, optimizer, insights, email reports, Meta cost sync) instead of only tenant 1
-- [ ] scope the install-wide API token to a tenant (it currently bypasses every gate)
+- [x] seed a tenant's settings document on creation (documented defaults + a fresh API token per workspace)
+- [x] per-tenant retention: the prune iterates tenants and applies each one's `retention_days`
+- [x] per-tenant bind secret, persisted in that workspace's settings rows
+- [x] background loops iterate tenants (monitor, auto-rules, optimizer, insights, email reports, Meta cost sync) inside a per-tenant context, honouring `tenants.features` and isolating failures
+- [x] API tokens are workspace-scoped: a request resolves the presented token to its tenant and runs there
 - [ ] per-tenant CAPI/Meta connection setup surfaced in the UI
 
 ### Phase 3 — onboarding, whitelabel, billing, sub-workspaces

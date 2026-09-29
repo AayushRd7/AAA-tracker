@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from auth import (TENANT_ROLES, effective_permissions, get_caller, hash_password,
                   membership_for)
 from db import get_db
-from tenant_context import current_tenant
+from tenant_context import api_token_tenant, current_tenant
 
 router = APIRouter()
 
@@ -64,7 +64,18 @@ def _manager_context(request: Request, db: Session, tenant_id: Optional[int]):
     """(caller, is_admin, target_tenant_id, caller_role_in_target).
 
     ``?tenant_id=`` is a platform-operator-only escape hatch; a workspace
-    admin cannot use it to reach another workspace."""
+    admin cannot use it to reach another workspace. A Bearer API token is
+    workspace-scoped and only ever targets its own tenant."""
+    token_tenant = api_token_tenant()
+    if token_tenant is not None:
+        if tenant_id is not None and int(tenant_id) != int(token_tenant):
+            raise HTTPException(
+                status_code=403,
+                detail="An API token only acts inside its own workspace")
+        # Workspace-owner authority inside its own tenant; never a platform
+        # operator (is_admin=False), so the install-global user plane stays out
+        # of reach and is_platform_admin reports honestly.
+        return None, False, int(token_tenant), "owner"
     caller, is_admin = get_caller(request)
     if tenant_id is not None:
         if not is_admin:
@@ -132,7 +143,19 @@ def list_members(request: Request, tenant_id: Optional[int] = None,
             "last_login": r[9].isoformat() if r[9] else None,
         })
 
-    seats = db.execute(text("SELECT seats FROM tenants WHERE id = :t"), {"t": tid}).scalar()
+    tenant_row = db.execute(text(
+        "SELECT plan, seats, retention_days, features FROM tenants WHERE id = :t"),
+        {"t": tid}).fetchone()
+    plan = tenant_row[0] if tenant_row else None
+    seats = tenant_row[1] if tenant_row else None
+    retention_days = tenant_row[2] if tenant_row else None
+    features = tenant_row[3] if tenant_row else None
+    if isinstance(features, str):
+        import json as _json
+        try:
+            features = _json.loads(features)
+        except Exception:
+            features = None
     return {
         "members": members,
         "tenant_id": tid,
@@ -141,6 +164,9 @@ def list_members(request: Request, tenant_id: Optional[int] = None,
         "can_manage": True,
         "member_count": len(members),
         "seats": int(seats) if seats is not None else None,
+        "plan": plan or "free",
+        "retention_days": int(retention_days) if retention_days is not None else None,
+        "features": features if isinstance(features, dict) else {},
         "is_platform_admin": bool(is_admin),
     }
 

@@ -25,6 +25,7 @@ from email.utils import formataddr
 
 from db import SessionLocal
 from tenant_context import current_tenant
+from tenant_settings import for_each_tenant, tenant_feature
 from sqlalchemy import text
 from models.settings import SettingsORM
 from models.campaigns import CampaignORM
@@ -473,60 +474,74 @@ def _mark_schedule_sent(db, report_id: str, today: str):
         db.commit()
 
 
-async def email_report_loop():
-    """Background scheduler: sends the daily report at the configured UTC hour,
-    plus any due per-report schedules (G53)."""
+async def _tenant_email_pass(tenant_id: int) -> None:
+    """Send one tenant's due daily report plus any due per-report schedules.
+
+    Runs inside the tenant context set by ``for_each_tenant``: the settings row,
+    the saved reports and the recipients read here are that workspace's own.
+    A workspace whose ``features.email_reports`` flag is false sends nothing.
+    """
     from clickHouse import get_clickhouse_client
+    db = SessionLocal()
+    try:
+        if not tenant_feature(db, tenant_id, "email_reports"):
+            print(f"Email reports: tenant {tenant_id} disabled — skipped")
+            return
+        cfg = _load_email_config(db)
+        now = datetime.utcnow()
+        today = now.strftime("%Y-%m-%d")
+
+        # Global daily report for this tenant
+        if cfg.get("enabled"):
+            recipients = [r.strip() for r in (cfg.get("recipients") or "").split(",") if r.strip()]
+            if recipients:
+                hour = int(cfg.get("hour", 9) or 9)
+                if now.hour == hour and cfg.get("last_sent") != today:
+                    ch = get_clickhouse_client()
+                    try:
+                        ok, detail = await asyncio.to_thread(
+                            send_daily_report, ch, cfg, now - timedelta(days=1))
+                    finally:
+                        ch.close()
+                    print(f"Email report (tenant {tenant_id}, {today}): ok={ok} {detail}")
+                    if ok:
+                        cfg["last_sent"] = today
+                        _save_email_config(cfg)
+
+        # G53: per-report schedules — send each due report
+        sched_row = db.query(SettingsORM).filter_by(name="report_email_schedules").first()
+        schedules = []
+        if sched_row and sched_row.value:
+            try:
+                schedules = json.loads(sched_row.value) or []
+            except Exception:
+                schedules = []
+        for schedule in schedules:
+            try:
+                if not schedule_due(schedule, now):
+                    continue
+                ch = get_clickhouse_client()
+                try:
+                    ok, detail = await asyncio.to_thread(
+                        send_scheduled_report, ch, cfg, schedule)
+                finally:
+                    ch.close()
+                print(f"Email scheduled report {schedule.get('report_id')} "
+                      f"(tenant {tenant_id}, {today}): ok={ok} {detail}")
+                if ok:
+                    _mark_schedule_sent(db, schedule.get("report_id"), today)
+            except Exception as e:
+                print(f"Email scheduled report error (tenant {tenant_id}):", e)
+    finally:
+        db.close()
+
+
+async def email_report_loop():
+    """Background scheduler: every active tenant's daily report at its own
+    configured UTC hour, plus its due per-report schedules (G53)."""
     while True:
         try:
             await asyncio.sleep(60)
-            db = SessionLocal()
-            try:
-                cfg = _load_email_config(db)
-                now = datetime.utcnow()
-                today = now.strftime("%Y-%m-%d")
-
-                # Global daily report (unchanged behavior)
-                if cfg.get("enabled"):
-                    recipients = [r.strip() for r in (cfg.get("recipients") or "").split(",") if r.strip()]
-                    if recipients:
-                        hour = int(cfg.get("hour", 9) or 9)
-                        if now.hour == hour and cfg.get("last_sent") != today:
-                            ch = get_clickhouse_client()
-                            try:
-                                ok, detail = await asyncio.to_thread(
-                                    send_daily_report, ch, cfg, now - timedelta(days=1))
-                            finally:
-                                ch.close()
-                            print(f"Email report ({today}): ok={ok} {detail}")
-                            if ok:
-                                cfg["last_sent"] = today
-                                _save_email_config(cfg)
-
-                # G53: per-report schedules — send each due report
-                sched_row = db.query(SettingsORM).filter_by(name="report_email_schedules").first()
-                schedules = []
-                if sched_row and sched_row.value:
-                    try:
-                        schedules = json.loads(sched_row.value) or []
-                    except Exception:
-                        schedules = []
-                for schedule in schedules:
-                    try:
-                        if not schedule_due(schedule, now):
-                            continue
-                        ch = get_clickhouse_client()
-                        try:
-                            ok, detail = await asyncio.to_thread(
-                                send_scheduled_report, ch, cfg, schedule)
-                        finally:
-                            ch.close()
-                        print(f"Email scheduled report {schedule.get('report_id')} ({today}): ok={ok} {detail}")
-                        if ok:
-                            _mark_schedule_sent(db, schedule.get("report_id"), today)
-                    except Exception as e:
-                        print("Email scheduled report error:", e)
-            finally:
-                db.close()
+            await for_each_tenant(_tenant_email_pass)
         except Exception as e:
             print("Email report loop error:", e)

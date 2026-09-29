@@ -8760,6 +8760,9 @@ print("ESCAPED-OK")
     # --- phase 2A self-cleanup ---
     pg_exec("DELETE FROM campaigns WHERE alias LIKE 'smoke-rp-%'")
     pg_exec(f"DELETE FROM campaigns WHERE tenant_id IN ({int(rp_t)}, {int(rp_seats)})")
+    # Phase 2B seeds every new tenant's settings document, so the workspace
+    # rows this section created must be removed with the tenants.
+    pg_exec(f"DELETE FROM settings WHERE tenant_id IN ({int(rp_t)}, {int(rp_seats)})")
     pg_exec("DELETE FROM tenant_memberships WHERE user_id IN "
             f"(SELECT id FROM users WHERE username LIKE 'rp-%-{rp_pid}')")
     pg_exec(f"DELETE FROM auth_sessions WHERE username LIKE 'rp-%-{rp_pid}'")
@@ -8770,6 +8773,266 @@ print("ESCAPED-OK")
                     f"({int(rp_t)}, {int(rp_seats)})") == "0")
     check("phase2: test users cleaned up",
           pg_scalar(f"SELECT count(*) FROM users WHERE username LIKE 'rp-%-{rp_pid}'") == "0")
+
+    # =====================================================================
+    print("== Multi-tenancy phase 2B: seeded settings, retention, bind secret, scoped token ==")
+    # A newly created workspace gets its own settings document (documented
+    # defaults + a fresh API token); the retention prune applies each tenant's
+    # own window; the bind secret is per tenant (one workspace's cookie cannot
+    # be forged with another's); and a Bearer API token acts only inside the
+    # workspace that owns it.
+    p2_pid = os.getpid()
+    import base64 as _b64
+    import hashlib as _hashlib
+    import hmac as _hmac
+    import time as _time
+
+    p2_b_tenant = p2_l_tenant = None
+    p2_a_camp = p2_b_bind = p2_b_mon = None
+    p2_b_user = f"p2b-owner-{p2_pid}"
+    p2_t1_token_before = pg_scalar(
+        "SELECT coalesce(value::jsonb->>'apiToken','') FROM settings "
+        "WHERE name = 'settings' AND tenant_id = 1").strip()
+
+    # Tenant ids are handed out from a sequence the backend's startup migration
+    # setvals back to MAX(id), so a previous run's ids can be re-handed-out; the
+    # frontend process caches each tenant's bind secret by id, and a reused id
+    # would serve that stale cached secret. A time-based id range keeps this
+    # section's bind-secret assertions deterministic across runs.
+    pg_exec(f"SELECT setval('tenants_id_seq', {int(_time.time()) % 1000000000})")
+
+    # ---- 1. a new tenant's settings document is seeded ----
+    r = s.post(f"{api}/tenants/", json={
+        "name": f"P2B Workspace {p2_pid}", "slug": f"p2b-{p2_pid}",
+        "username": p2_b_user, "password": "smokepass1",
+        "email": f"{p2_b_user}@example.com", "role": "owner"})
+    p2_b_tenant = (r.json() or {}).get("tenant_id")
+    check("phase2b: workspace provisioned", r.status_code == 200 and bool(p2_b_tenant),
+          r.text[:200])
+    r = s.post(f"{api}/tenants/", json={"name": f"P2B Long {p2_pid}",
+                                        "slug": f"p2b-long-{p2_pid}"})
+    p2_l_tenant = (r.json() or {}).get("tenant_id")
+    check("phase2b: long-retention workspace provisioned",
+          r.status_code == 200 and bool(p2_l_tenant), r.text[:200])
+
+    p2_seed_currency = pg_scalar(f"SELECT value::jsonb->>'currency' FROM settings "
+                                 f"WHERE name = 'settings' AND tenant_id = {int(p2_b_tenant)}")
+    p2_seed_tz = pg_scalar(f"SELECT value::jsonb->>'timezone' FROM settings "
+                           f"WHERE name = 'settings' AND tenant_id = {int(p2_b_tenant)}")
+    p2_seed_token = pg_scalar(f"SELECT coalesce(value::jsonb->>'apiToken','') FROM settings "
+                              f"WHERE name = 'settings' AND tenant_id = {int(p2_b_tenant)}").strip()
+    check("phase2b: new tenant's settings document is seeded (currency/timezone readable)",
+          p2_seed_currency == "USD" and p2_seed_tz == "UTC",
+          f"currency={p2_seed_currency!r} timezone={p2_seed_tz!r}")
+    check("phase2b: new tenant has its own fresh API token (not the shared default / tenant 1's)",
+          len(p2_seed_token) >= 16 and p2_seed_token != "a1b2c3d4e5f6"
+          and p2_seed_token != p2_t1_token_before, f"token={p2_seed_token[:6]!r}…")
+    check("phase2b: no tenant-1 values leaked into the new tenant's settings",
+          pg_scalar(f"SELECT (value::jsonb ? 'telegram')::text FROM settings "
+                    f"WHERE name = 'settings' AND tenant_id = {int(p2_b_tenant)}") == "false"
+          and pg_scalar(f"SELECT (value::jsonb ? 'data_retention')::text FROM settings "
+                        f"WHERE name = 'settings' AND tenant_id = {int(p2_b_tenant)}") == "false")
+
+    # ---- 2. the retention prune applies each tenant's own window ----
+    p2_ret_b = 771000000 + (p2_pid % 10000) * 10 + 1   # campaign ids own these rows
+    p2_ret_l = p2_ret_b + 1
+    for _tid, _camp in ((p2_b_tenant, p2_ret_b), (p2_l_tenant, p2_ret_l)):
+        ch_exec("INSERT INTO clicks_data (received_at, campaign_id, tenant_id, click_id, click) "
+                f"VALUES (now() - INTERVAL 5 DAY, {_camp}, {int(_tid)}, 'p2-ret-old-{int(_tid)}', true), "
+                f"(now(), {_camp}, {int(_tid)}, 'p2-ret-new-{int(_tid)}', true)")
+    pg_exec(f"UPDATE tenants SET retention_days = 1 WHERE id = {int(p2_b_tenant)}")
+    pg_exec(f"UPDATE tenants SET retention_days = 30 WHERE id = {int(p2_l_tenant)}")
+    # Drive the prune directly instead of waiting for the daily schedule.
+    subprocess.run(["docker", "exec", "tracker_frontend", "python", "-c",
+                    "import asyncio, app; asyncio.run(app.prune_old_data())"],
+                   capture_output=True, text=True, timeout=240)
+
+    def p2_click_count(click_id):
+        _rc, out, _err = ch_exec(f"SELECT count() FROM clicks_data WHERE click_id = '{click_id}'")
+        return out.strip()
+
+    check("phase2b: retention prune drops a short-retention tenant's old row",
+          p2_click_count(f"p2-ret-old-{int(p2_b_tenant)}") == "0",
+          p2_click_count(f"p2-ret-old-{int(p2_b_tenant)}"))
+    check("phase2b: the short-retention tenant's fresh row stays",
+          p2_click_count(f"p2-ret-new-{int(p2_b_tenant)}") == "1",
+          p2_click_count(f"p2-ret-new-{int(p2_b_tenant)}"))
+    check("phase2b: a longer-retention tenant's old row is untouched",
+          p2_click_count(f"p2-ret-old-{int(p2_l_tenant)}") == "1",
+          p2_click_count(f"p2-ret-old-{int(p2_l_tenant)}"))
+    check("phase2b: the longer-retention tenant's fresh row stays",
+          p2_click_count(f"p2-ret-new-{int(p2_l_tenant)}") == "1",
+          p2_click_count(f"p2-ret-new-{int(p2_l_tenant)}"))
+
+    # ---- set up both tenants' campaigns (bind secret + monitor + token) ----
+    sb2 = requests.Session()
+    sb2.verify = not INSECURE
+    r = sb2.post(f"{api}/login", json={"username": p2_b_user, "password": "smokepass1"})
+    check("phase2b: new workspace owner logs in", r.status_code == 200, r.text[:150])
+
+    p2_bind_alias = f"p2b-bind-{p2_pid}"
+    p2_mon_alias = f"p2b-mon-{p2_pid}"
+    p2_a_alias = f"p2b-a-{p2_pid}"
+
+    def p2_config(f0, f1=None):
+        flows = [{"type": "regular", "position": 1, "enabled": True, "schema": "redirect",
+                  "redirect_url": f0, "filters": [], "weight": 50}]
+        if f1:
+            flows.append({"type": "regular", "position": 2, "enabled": True,
+                          "schema": "redirect", "redirect_url": f1, "filters": [], "weight": 50})
+        return {"stickiness": True, "postbacks": [], "fallback_url": f0, "flows": flows}
+
+    r = sb2.post(f"{api}/campaigns/", json={
+        "name": p2_bind_alias, "alias": p2_bind_alias, "type": "campaign",
+        "status": "active", "redirect_mode": "position",
+        "config": p2_config("https://example.com/p2b-f0", "https://example.com/p2b-f1")})
+    p2_b_bind = (r.json() or {}).get("id")
+    check("phase2b: tenant B bind campaign created",
+          r.status_code == 200 and p2_b_bind, r.text[:200])
+
+    r = sb2.post(f"{api}/campaigns/", json={
+        "name": p2_mon_alias, "alias": p2_mon_alias, "type": "campaign",
+        "status": "active", "redirect_mode": "position",
+        "config": p2_config("http://127.0.0.1:8501/api/auth-status")})
+    p2_b_mon = (r.json() or {}).get("id")
+    check("phase2b: tenant B monitor campaign created",
+          r.status_code == 200 and p2_b_mon, r.text[:200])
+
+    r = s.post(f"{api}/campaigns/", json={
+        "name": p2_a_alias, "alias": p2_a_alias, "type": "campaign",
+        "status": "active", "redirect_mode": "position",
+        "config": p2_config("https://example.com/p2b-a0", "https://example.com/p2b-a1")})
+    p2_a_camp = (r.json() or {}).get("id")
+    check("phase2b: tenant 1 campaign created", r.status_code == 200 and p2_a_camp, r.text[:200])
+
+    # ---- 3. the bind secret is per tenant ----
+    # Routing hash computed from the stored config — the same algorithm the
+    # tracking plane uses (weight excluded, sorted keys).
+    _stored = json.loads(pg_scalar(f"SELECT config::text FROM campaigns WHERE id = {int(p2_b_bind)}"))
+    _flows = [{k: v for k, v in f.items() if k != "weight"} for f in _stored.get("flows", [])]
+    p2_rhash = _hashlib.sha256(json.dumps(
+        {"flows": _flows, "redirect_mode": "position"}, sort_keys=True,
+        default=str).encode()).hexdigest()[:16]
+
+    def p2_forge(secret, fi):
+        payload = {"cid": int(p2_b_bind), "fi": fi, "offer": None, "landing": None,
+                   "exp": int(_time.time()) + 3600, "h": p2_rhash}
+        raw = _b64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":")).encode()).rstrip(b"=").decode()
+        sig = _hmac.new(secret.encode(), raw.encode(), _hashlib.sha256).hexdigest()
+        return f"{raw}.{sig}"
+
+    def p2_hit(cookie=None):
+        headers = {"Cookie": f"aaa_bind={cookie}"} if cookie else {}
+        rr = requests.get(f"{BASE}/{p2_bind_alias}", verify=not INSECURE,
+                          allow_redirects=False, headers=headers)
+        return rr.status_code, rr.headers.get("location") or ""
+
+    # The first bind use is what creates the workspace's secret.
+    check("phase2b: a fresh visit serves the position-1 flow",
+          "example.com/p2b-f0" in p2_hit()[1], p2_hit()[1])
+    p2_sec_b = pg_scalar("SELECT value FROM settings WHERE name = 'aaa_bind_secret' "
+                         f"AND tenant_id = {int(p2_b_tenant)}").strip()
+    p2_sec_a = pg_scalar("SELECT value FROM settings WHERE name = 'aaa_bind_secret' "
+                         "AND tenant_id = 1").strip()
+    check("phase2b: both tenants have a bind secret and they differ",
+          bool(p2_sec_b) and bool(p2_sec_a) and p2_sec_b != p2_sec_a,
+          f"B={bool(p2_sec_b)} A={bool(p2_sec_a)} same={p2_sec_b == p2_sec_a}")
+
+    check("phase2b: tenant B's own secret signs a valid binding (flow 2)",
+          "example.com/p2b-f1" in p2_hit(p2_forge(p2_sec_b, 1))[1],
+          p2_hit(p2_forge(p2_sec_b, 1))[1])
+    check("phase2b: a cookie forged with tenant A's secret is rejected in tenant B",
+          "example.com/p2b-f0" in p2_hit(p2_forge(p2_sec_a, 1))[1],
+          p2_hit(p2_forge(p2_sec_a, 1))[1])
+
+    # ---- 4. a loop function run for one tenant sees only that tenant's rows ----
+    p2_mon_cmd = ("import asyncio; from tenant_context import set_current_tenant; "
+                  f"set_current_tenant({int(p2_b_tenant)}); "
+                  "from app_pages.monitor import run_monitor_cycle; "
+                  "print(asyncio.run(run_monitor_cycle()))")
+    subprocess.run(["docker", "exec", "tracker_backend", "python", "-c", p2_mon_cmd],
+                   capture_output=True, text=True, timeout=240)
+    check("phase2b: monitor cycle run for tenant B checked B's campaign",
+          pg_scalar(f"SELECT count(*) FROM monitor_state WHERE tenant_id = {int(p2_b_tenant)} "
+                    f"AND campaign_id = {int(p2_b_mon)}") != "0")
+    check("phase2b: the same run did not touch tenant 1's campaign (no cross-tenant row)",
+          pg_scalar(f"SELECT count(*) FROM monitor_state WHERE tenant_id = {int(p2_b_tenant)} "
+                    f"AND campaign_id = {int(p2_a_camp)}") == "0")
+
+    # ---- 5. the Bearer API token is scoped to one tenant ----
+    p2_t1_token = f"p2b-t1-tok-{p2_pid}"
+    pg_exec("UPDATE settings SET value = (value::jsonb || "
+            f"jsonb_build_object('apiToken', '{p2_t1_token}'))::text "
+            "WHERE name = 'settings' AND tenant_id = 1")
+    p2_h_b = {"Authorization": f"Bearer {p2_seed_token}"}
+    p2_h_a = {"Authorization": f"Bearer {p2_t1_token}"}
+
+    r = requests.get(f"{api}/campaigns/", headers=p2_h_b, verify=not INSECURE)
+    p2_b_ids = {c.get("id") for c in (r.json() if r.status_code == 200 else [])}
+    check("phase2b: tenant B's token reads B's own campaign", int(p2_b_bind) in p2_b_ids,
+          f"{r.status_code} {sorted(p2_b_ids)[:8]}")
+    check("phase2b: tenant B's token cannot see tenant 1's campaign",
+          int(p2_a_camp) not in p2_b_ids)
+
+    r = requests.get(f"{api}/campaigns/", headers=p2_h_a, verify=not INSECURE)
+    p2_a_ids = {c.get("id") for c in (r.json() if r.status_code == 200 else [])}
+    check("phase2b: tenant 1's token keeps working and reads tenant 1's campaign",
+          r.status_code == 200 and int(p2_a_camp) in p2_a_ids,
+          f"{r.status_code} {sorted(p2_a_ids)[:8]}")
+    check("phase2b: tenant 1's token cannot see tenant B's campaign",
+          int(p2_b_bind) not in p2_a_ids)
+
+    r = requests.get(f"{api}/optimizer/{int(p2_b_bind)}", headers=p2_h_b, verify=not INSECURE)
+    check("phase2b: tenant B's token reads B's campaign detail", r.status_code == 200,
+          r.text[:120])
+    r = requests.get(f"{api}/optimizer/{int(p2_b_bind)}", headers=p2_h_a, verify=not INSECURE)
+    check("phase2b: tenant 1's token is refused on tenant B's campaign detail",
+          r.status_code in (403, 404), f"got {r.status_code}")
+    r = requests.get(f"{api}/members/", params={"tenant_id": 1}, headers=p2_h_b,
+                     verify=not INSECURE)
+    check("phase2b: a token cannot target another workspace's members",
+          r.status_code == 403, f"got {r.status_code}")
+    r = requests.get(f"{api}/campaigns/", headers={"Authorization": "Bearer not-a-real-token"},
+                     verify=not INSECURE)
+    check("phase2b: an unknown Bearer token is rejected", r.status_code == 401,
+          str(r.status_code))
+
+    # ---- phase 2B self-cleanup ----
+    p2_camps = [c for c in (p2_ret_b, p2_ret_l, p2_b_bind, p2_b_mon, p2_a_camp) if c]
+    ch_exec("ALTER TABLE clicks_data DELETE WHERE campaign_id IN "
+            f"({', '.join(str(int(c)) for c in p2_camps)})")
+    for table in ("campaigns", "offers", "sources", "affiliate_networks", "domains",
+                  "landings", "capi_pixels", "capi_pixel_bindings",
+                  "capi_channel_settings", "capi_pixel_sent", "meta_capi_sent",
+                  "meta_capi_log", "ad_cost_daily", "integration_connections",
+                  "scripts", "filter_presets", "funnel_templates", "domain_groups",
+                  "auto_rules", "monitor_state", "honeypot_hits", "postback_logs",
+                  "click_forward_logs", "cost_update_logs", "conversions_data",
+                  "audit_log", "settings"):
+        pg_exec(f"DELETE FROM {table} WHERE tenant_id IN "
+                f"({int(p2_b_tenant)}, {int(p2_l_tenant)})")
+    pg_exec(f"DELETE FROM campaigns WHERE id = {int(p2_a_camp)}")
+    pg_exec(f"DELETE FROM monitor_state WHERE campaign_id = {int(p2_a_camp)}")
+    pg_exec(f"DELETE FROM tenant_memberships WHERE tenant_id IN "
+            f"({int(p2_b_tenant)}, {int(p2_l_tenant)})")
+    pg_exec(f"DELETE FROM auth_sessions WHERE username = '{p2_b_user}'")
+    pg_exec(f"DELETE FROM users WHERE username = '{p2_b_user}'")
+    pg_exec(f"DELETE FROM tenants WHERE id IN ({int(p2_b_tenant)}, {int(p2_l_tenant)})")
+    # restore tenant 1's API token exactly as it was
+    if p2_t1_token_before:
+        pg_exec("UPDATE settings SET value = (value::jsonb || "
+                f"jsonb_build_object('apiToken', '{p2_t1_token_before}'))::text "
+                "WHERE name = 'settings' AND tenant_id = 1")
+    else:
+        pg_exec("UPDATE settings SET value = (value::jsonb - 'apiToken')::text "
+                "WHERE name = 'settings' AND tenant_id = 1")
+    check("phase2b: test tenants cleaned up",
+          pg_scalar(f"SELECT count(*) FROM tenants WHERE id IN "
+                    f"({int(p2_b_tenant)}, {int(p2_l_tenant)})") == "0")
+    check("phase2b: tenant 1's API token restored",
+          pg_scalar("SELECT coalesce(value::jsonb->>'apiToken','') FROM settings "
+                    "WHERE name = 'settings' AND tenant_id = 1").strip() == p2_t1_token_before)
 
     print("== Cleanup ==")
     if conv_id:

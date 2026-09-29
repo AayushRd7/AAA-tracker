@@ -679,6 +679,10 @@
                 currentTenantId: null,
                 // G63: effective permission map from the server (null for anonymous)
                 userPerms: {{ (permissions if permissions else {"sections": {}, "write": True}) | tojson }},
+                // Multi-tenancy phase 2B: the workspace's feature flags. An
+                // absent key is enabled; only an explicit false hides a nav
+                // entry (and the API refuses the capability server-side).
+                tenantFeatures: {{ (tenant_features if tenant_features else {}) | tojson }},
                 dashboardShell: {{ 'true' if page == 'dashboard' and is_authenticated_user_type else 'false' }},
                 roleLabel: '{{ is_authenticated_user_type if is_authenticated_user_type else "" }}',
                 // `group` is presentation only — it drives the sidebar's small
@@ -687,7 +691,7 @@
                 navItems: [
                     {key: 'dashboard', title: 'Dashboard', icon: 'mdi-view-dashboard-outline', group: 'Performance'},
                     {key: 'reports', title: 'Reports', icon: 'mdi-chart-line', group: 'Performance'},
-                    {key: 'optimizer', title: 'Optimizer', icon: 'mdi-auto-fix', admin: true, group: 'Performance'},
+                    {key: 'optimizer', title: 'Optimizer', icon: 'mdi-auto-fix', admin: true, group: 'Performance', feature: 'optimizer'},
                     {key: 'campaigns', title: 'Campaigns', icon: 'mdi-sitemap', group: 'Entities'},
                     {key: 'landings', title: 'Landing Pages', icon: 'mdi-lan', group: 'Entities'},
                     {key: 'offers', title: 'Offers', icon: 'mdi-tag-outline', group: 'Entities'},
@@ -712,7 +716,9 @@
             visibleNavItems() {
                 const isAdmin = this.roleLabel === 'admin';
                 return this.navItems.filter(i =>
-                    (!i.admin || isAdmin) && (isAdmin || this.userPerms.sections[i.key] !== false));
+                    (!i.admin || isAdmin)
+                    && (isAdmin || this.userPerms.sections[i.key] !== false)
+                    && !(i.feature && this.tenantFeatures[i.feature] === false));
             },
             // Sidebar grouping: consecutive visible items that share a `group`
             // become one block with a small uppercase header. Items without a

@@ -45,6 +45,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db, SessionLocal
 from tenant_context import current_tenant
+from tenant_settings import for_each_tenant
 from models.settings import SettingsORM
 from clickHouse import get_clickhouse_client
 
@@ -73,13 +74,25 @@ DEFAULTS = {
 }
 
 # Heartbeats / last-run state surfaced on /api/meta-ads/status and the system
-# status page. In-memory only — a restart clears them.
+# status page. In-memory only — a restart clears them. Keyed by tenant: the
+# loop sweeps every workspace, so "the last run" is per tenant.
 _loop_last_run = None
-_last_sync_at = None
-_last_result = None
-_last_error = None
+_last_sync_ats: dict = {}
+_last_results: dict = {}
+_last_errors: dict = {}
 _running = False
 _state_lock = threading.Lock()
+
+
+def _record_run(result=None, error=object(), sync_at=None):
+    """Store this tenant's last sync state (error=object() means 'leave as is')."""
+    tid = current_tenant()
+    if result is not None:
+        _last_results[tid] = result
+    if error is not object():
+        _last_errors[tid] = error
+    if sync_at is not None:
+        _last_sync_ats[tid] = sync_at
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +439,7 @@ def run_sync(trigger: str = "manual", dry_run=None) -> dict:
     request it would send and what it would allocate, and writes NOTHING: no
     Postgres rows and no ClickHouse mutation.
     """
-    global _last_sync_at, _last_result, _last_error, _running
+    global _running
     if not _state_lock.acquire(blocking=False):
         return {"status": "skipped", "reason": "already_running"}
     try:
@@ -434,11 +447,11 @@ def run_sync(trigger: str = "manual", dry_run=None) -> dict:
         cfg = load_settings()
         if not cfg["enabled"]:
             res = {"status": "skipped", "reason": "disabled"}
-            _last_result = res
+            _record_run(result=res)
             return res
         if not _credentials_ready(cfg):
             res = {"status": "skipped", "reason": "missing_credentials"}
-            _last_result = res
+            _record_run(result=res)
             return res
 
         is_dry = cfg["dry_run"] if dry_run is None else bool(dry_run)
@@ -499,9 +512,7 @@ def run_sync(trigger: str = "manual", dry_run=None) -> dict:
             if is_dry:
                 # Report the allocation the run WOULD have done, without touching CH.
                 _describe_allocation(alloc_targets, summary)
-                _last_sync_at = datetime.utcnow()
-                _last_result = summary
-                _last_error = None
+                _record_run(result=summary, error=None, sync_at=datetime.utcnow())
                 return summary
 
             db.commit()
@@ -511,17 +522,14 @@ def run_sync(trigger: str = "manual", dry_run=None) -> dict:
                 _describe_allocation(alloc_targets, summary, execute=True, ch=ch)
             finally:
                 ch.close()
-            _last_sync_at = datetime.utcnow()
-            _last_result = summary
-            _last_error = None
+            _record_run(result=summary, error=None, sync_at=datetime.utcnow())
             return summary
         except Exception as e:
             db.rollback()
-            _last_error = repr(e)[:300]
             print("meta-ads: sync error:", repr(e))
             res = {"status": "error", "dry_run": is_dry, "trigger": trigger,
                    "error": repr(e)[:300]}
-            _last_result = res
+            _record_run(result=res, error=repr(e)[:300])
             return res
         finally:
             db.close()
@@ -582,28 +590,38 @@ def _describe_allocation(targets, summary: dict, execute: bool = False, ch=None)
 # Background loop
 # ---------------------------------------------------------------------------
 
-async def meta_ads_loop():
-    """Scheduled cost sync honouring the configured cadence.
-
-    Skipped entirely (no HTTP, no write) when disabled or when the token /
-    account ids are missing. A run never overlaps: ``run_sync`` takes a
-    non-blocking lock and returns ``already_running`` if one is in flight.
-    """
+async def _tenant_meta_ads_sync(tenant_id: int, intervals: list) -> None:
+    """Run one tenant's cost sync (inside its context, disabled/missing creds skipped)."""
     global _loop_last_run
+    cfg = load_settings()
+    intervals.append(DAILY_SECONDS if cfg["cadence"] == "daily" else HOURLY_SECONDS)
+    if not (cfg["enabled"] and _credentials_ready(cfg)):
+        return
+    result = await asyncio.to_thread(run_sync, "loop")
+    _loop_last_run = datetime.utcnow()
+    print(f"Meta Ads sync (tenant {tenant_id}, {cfg['cadence']}): "
+          f"{result.get('status')} matched={result.get('matched')} "
+          f"unmatched={result.get('unmatched')}")
+
+
+async def meta_ads_loop():
+    """Scheduled cost sync honouring each tenant's configured cadence.
+
+    Sweeps every active tenant sequentially; per tenant it is skipped entirely
+    (no HTTP, no write) when disabled or when the token / account ids are
+    missing. A run never overlaps: ``run_sync`` takes a non-blocking lock and
+    returns ``already_running`` if one is in flight. The next sleep is the
+    shortest cadence any tenant asked for, so a tenant configured daily is not
+    re-synced hourly.
+    """
     await asyncio.sleep(120)  # stagger behind monitor (60) / rules (90) / optimizer (150)
     while True:
+        intervals = []
         try:
-            cfg = load_settings()
-            if cfg["enabled"] and _credentials_ready(cfg):
-                result = await asyncio.to_thread(run_sync, "loop")
-                _loop_last_run = datetime.utcnow()
-                print(f"Meta Ads sync ({cfg['cadence']}): {result.get('status')} "
-                      f"matched={result.get('matched')} unmatched={result.get('unmatched')}")
-            interval = DAILY_SECONDS if cfg["cadence"] == "daily" else HOURLY_SECONDS
+            await for_each_tenant(lambda tid: _tenant_meta_ads_sync(tid, intervals))
         except Exception as e:
             print("Meta Ads loop error:", repr(e))
-            interval = HOURLY_SECONDS
-        await asyncio.sleep(interval)
+        await asyncio.sleep(min(intervals) if intervals else HOURLY_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -628,6 +646,10 @@ async def sync_now(request: Request):
 def status(db: Session = Depends(get_db)):
     """Enabled/dry-run/cadence/api-version + last run state, matched/unmatched."""
     cfg = load_settings()
+    tid = current_tenant()
+    last_result = _last_results.get(tid)
+    last_error = _last_errors.get(tid)
+    last_sync_at = _last_sync_ats.get(tid)
     return {
         "enabled": cfg["enabled"],
         "dry_run": cfg["dry_run"],
@@ -638,11 +660,11 @@ def status(db: Session = Depends(get_db)):
         "backfill_days": cfg["backfill_days"],
         "graph_base_url": cfg["graph_base_url"] or DEFAULT_GRAPH_BASE,
         "running": _running,
-        "last_sync_at": _last_sync_at.isoformat() if _last_sync_at else None,
-        "last_result": _last_result,
-        "last_error": _last_error,
-        "matched": (_last_result or {}).get("matched"),
-        "unmatched": (_last_result or {}).get("unmatched"),
+        "last_sync_at": last_sync_at.isoformat() if last_sync_at else None,
+        "last_result": last_result,
+        "last_error": last_error,
+        "matched": (last_result or {}).get("matched"),
+        "unmatched": (last_result or {}).get("unmatched"),
         "loop_last_run": _loop_last_run.isoformat() if _loop_last_run else None,
         "last_control": _last_control_snapshot(),
     }
