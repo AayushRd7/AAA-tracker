@@ -108,6 +108,15 @@ def docker_exec(container, argv, timeout=60):
         return 1, "", repr(e)
 
 
+def docker_inspect(fmt, container, timeout=30):
+    try:
+        proc = subprocess.run(["docker", "inspect", "-f", fmt, container],
+                              capture_output=True, text=True, timeout=timeout)
+        return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+    except Exception as e:
+        return 1, "", repr(e)
+
+
 def wait_for_backend(deadline_s=180):
     """Poll the auth-gated status endpoint until the backend answers."""
     end = time.time() + deadline_s
@@ -200,7 +209,25 @@ def main():
     check("clickhouse holds the installed tables", code == 0 and "clicks_data" in out,
           out or err)
 
-    # 6. the visitor path works: an alias redirect and a tracked visit that lands
+    # 6. the docker socket proxy the certificate/nginx-reload flow depends on: it
+    #    runs as nobody plus the HOST's docker group, so a wrong group id makes it
+    #    restart forever with "permission denied" while the rest of the stack looks
+    #    healthy. Both the loop and the group id are visible here.
+    code, out, err = docker_inspect("{{.State.Status}} {{.RestartCount}}",
+                                    "tracker_socket_proxy")
+    parts = out.split()
+    check("the docker socket proxy is running, not restart-looping",
+          code == 0 and parts and parts[0] == "running"
+          and int(parts[-1] or 0) <= 2, out or err)
+    code, out, err = docker_exec("tracker_frontend", [
+        "python3", "-c",
+        "import urllib.request;"
+        "print(urllib.request.urlopen('http://docker-socket-proxy:2375/_ping',"
+        "timeout=5).read().decode())"])
+    check("the frontend reaches the docker socket proxy (group id is right)",
+          code == 0 and "OK" in out, (out or "") + (err or ""))
+
+    # 7. the visitor path works: an alias redirect and a tracked visit that lands
     #    in clickhouse (the failure mode a started-container check cannot see)
     if campaign_id:
         status, body, headers = call_no_redirect(f"{BASE}/{alias}")
@@ -225,7 +252,7 @@ def main():
             check("the visit reached clickhouse",
                   code == 0 and out.isdigit() and int(out) >= 1, out or err)
 
-    # 7. drop the fixtures so a re-run starts clean
+    # 8. drop the fixtures so a re-run starts clean
     if campaign_id:
         status, _ = call("DELETE", f"{API}/campaigns/{campaign_id}")
         check("the new campaign can be deleted", status == 200, str(status))

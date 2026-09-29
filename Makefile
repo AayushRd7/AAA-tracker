@@ -91,6 +91,26 @@ env:
 	else \
 		printf '  $(Y)$(B)✗ No .env and no .env.example — cannot configure the stack.$(R)\n'; exit 1; \
 	fi
+	@# The socket-proxy sidecar runs as nobody plus the HOST's docker group, and that
+	@# group id differs per box (a hardcoded one loops with "connect: permission
+	@# denied" elsewhere). Derive it here so every install/update keeps it right.
+	@if [ -f .env ]; then \
+		gid=$$(getent group docker 2>/dev/null | cut -d: -f3); \
+		[ -n "$$gid" ] || gid=$$(stat -c '%g' /var/run/docker.sock 2>/dev/null); \
+		if [ -n "$$gid" ]; then \
+			if grep -q '^DOCKER_GID=' .env; then \
+				old=$$(grep '^DOCKER_GID=' .env | cut -d= -f2); \
+				if [ "$$old" != "$$gid" ]; then \
+					sed -i.bak "s|^DOCKER_GID=.*|DOCKER_GID=$$gid|" .env && rm -f .env.bak; \
+					printf '  $(C)$(B)▸$(R) configuration: docker group id set to %s (was %s)\n' "$$gid" "$$old"; \
+					printf '    recreate the socket proxy to apply it: $(B)$(COMPOSE) up -d docker-socket-proxy$(R)\n'; \
+				fi; \
+			else \
+				printf '\n# host docker group id (socket-proxy sidecar)\nDOCKER_GID=%s\n' "$$gid" >> .env; \
+				printf '  $(C)$(B)▸$(R) configuration: docker group id %s recorded\n' "$$gid"; \
+			fi; \
+		fi; \
+	fi
 
 # A previous attempt (or a deleted checkout) leaves containers holding the fixed
 # names this stack uses, so `compose up` fails with "container name is already in

@@ -9,4 +9,6 @@ ssl/*.crt
 /COMPETITOR-GAP.md
 /INTEGRATIONS-SETUP.md
 /brand/
+# Local compose overrides (e.g. a host-specific docker group id) stay on the box
+/docker-compose.override.yml
 .DS_Store

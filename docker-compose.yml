@@ -3,9 +3,11 @@ services:
     image: wollomatic/socket-proxy:1
     container_name: tracker_socket_proxy
     restart: always
-    # run as nobody + host docker group so the socket is reachable but the
-    # process is not root inside the container
-    user: "65534:991"
+    # Run as nobody + the HOST's docker group so the socket is reachable but the
+    # process is not root inside the container. The group id differs per host, so
+    # it is derived at install time into .env (DOCKER_GID) — a hardcoded id makes
+    # the proxy loop forever with "connect: permission denied" on any other box.
+    user: "65534:${DOCKER_GID:-991}"
     environment:
       # wollomatic/socket-proxy uses SP_* env vars; allowlists are regexes per HTTP method.
       # Minimum for `docker exec <container> nginx -s reload`:
