@@ -153,6 +153,77 @@ def reconcile_columns():
         print("  ▸ schema reconcile: up to date")
 
 
+def split_sql_statements(raw_sql: str) -> list:
+    """Split a SQL file into statements on top-level semicolons.
+
+    A naive ``raw_sql.split(";")`` truncates a statement at any semicolon that really sits
+    inside a comment or a quoted literal. That produced a broken CREATE TABLE (unbalanced
+    parentheses) on a fresh install while it went unnoticed where the table already existed.
+    This walks the text and splits only on a semicolon outside quotes and comments, and drops
+    comments so they never reach the server.
+    """
+    statements, current = [], []
+    quote = None            # active quote character, when inside a literal
+    line_comment = False
+    block_comment = False
+    i = 0
+    while i < len(raw_sql):
+        ch = raw_sql[i]
+        nxt = raw_sql[i + 1] if i + 1 < len(raw_sql) else ""
+
+        if line_comment:
+            if ch == "\n":
+                line_comment = False
+            i += 1
+            continue
+        if block_comment:
+            if ch == "*" and nxt == "/":
+                block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                if nxt == quote:           # doubled quote inside a literal
+                    current.append(nxt)
+                    i += 2
+                    continue
+                quote = None
+            i += 1
+            continue
+
+        if ch == "-" and nxt == "-":
+            line_comment = True
+            current.append("\n")          # keep the line break, drop the comment text
+            i += 2
+            continue
+        if ch == "/" and nxt == "*":
+            block_comment = True
+            i += 2
+            continue
+        if ch in ("'", '"', "`"):
+            quote = ch
+            current.append(ch)
+            i += 1
+            continue
+        if ch == ";":
+            statement = "".join(current).strip()
+            if statement:
+                statements.append(statement)
+            current = []
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+
+    tail = "".join(current).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
 def run_clickhouse_install():
     print("  ▸ clickhouse: connecting")
     client = get_client(
@@ -170,8 +241,7 @@ def run_clickhouse_install():
     with open(sql_file_path, "r", encoding="utf-8") as f:
         raw_sql = f.read()
 
-    statements = [s.strip() for s in raw_sql.split(";") if s.strip()]
-    for statement in statements:
+    for statement in split_sql_statements(raw_sql):
         client.command(statement)
 
     print("  ▸ clickhouse: schema ready")

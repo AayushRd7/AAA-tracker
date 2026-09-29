@@ -87,6 +87,30 @@ jobs:
           print(f"ok: install SQL is idempotent ({inserts} guarded seeds)")
           EOF
 
+      - name: Install SQL statement split guard
+        run: |
+          # A ';' inside a comment used to truncate a statement and break fresh installs
+          # (unbalanced parentheses in CREATE TABLE) while existing installs stayed fine.
+          python3 - <<'EOF'
+          import re, sys
+          src = open("backend/install/install.py").read()
+          ns = {}
+          exec(src[src.index("def split_sql_statements"):src.index("def run_clickhouse_install")], ns)
+          split = ns["split_sql_statements"]
+          bad = []
+          for path in ("backend/install/sql/clickHouse.sql", "backend/install/sql/init.sql"):
+              raw = open(path).read()
+              sts = split(raw)
+              if not sts:
+                  bad.append(f"{path}: no statements parsed")
+              for st in sts:
+                  if st.count("(") != st.count(")"):
+                      bad.append(f"{path}: unbalanced statement: {' '.join(st.split())[:70]}")
+          if bad:
+              print("\n".join(bad)); sys.exit(1)
+          print("ok: install SQL splits into balanced statements")
+          EOF
+
       - name: Container-name cleanup guard
         run: |
           # Leftover containers holding our fixed names must be cleared before up,

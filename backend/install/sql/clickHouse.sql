@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS clicks_data (
     fbc String DEFAULT '',
     fbp String DEFAULT '',
     -- Tenant that owns the click (written from the resolved campaign's
-    -- tenant_id; DEFAULT 1 keeps rows written before multi-tenancy in
+    -- tenant_id (DEFAULT 1 keeps rows written before multi-tenancy in
     -- tenant 1). Not part of ORDER BY: converting an existing MergeTree's
     -- sort key is impossible via ALTER and would make fresh installs
     -- structurally different from upgraded ones.
