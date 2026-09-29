@@ -290,6 +290,94 @@ def revoke_saved_report_share(report_id: str, db: Session = Depends(get_db)):
     return {"status": "ok"}
 
 
+# --- Wave 19A: saved column templates (stored under 'column_templates') ---
+# Shaped {scope: [{name, columns: [...]}]}; one settings row, no new table.
+# The Logs tabs and the report builder use these to switch a table's columns.
+
+def _load_column_templates(db: Session) -> dict:
+    row = db.query(SettingsORM).filter_by(name="column_templates").first()
+    if not row or not row.value:
+        return {}
+    try:
+        data = json.loads(row.value)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for scope, items in data.items():
+        if not isinstance(scope, str) or not isinstance(items, list):
+            continue
+        clean = []
+        for t in items:
+            if not isinstance(t, dict) or not t.get("name"):
+                continue
+            cols = t.get("columns")
+            clean.append({"name": str(t["name"])[:100],
+                          "columns": [str(c)[:80] for c in cols] if isinstance(cols, list) else []})
+        out[scope] = clean
+    return out
+
+
+def _store_column_templates(db: Session, data: dict) -> None:
+    val_str = json.dumps(data)
+    row = db.query(SettingsORM).filter_by(name="column_templates").first()
+    if row:
+        row.value = val_str
+    else:
+        db.add(SettingsORM(name="column_templates", value=val_str))
+    db.commit()
+
+
+@router.get("/column-templates")
+def list_column_templates(scope: str = None, db: Session = Depends(get_db)):
+    data = _load_column_templates(db)
+    if scope:
+        return {"scope": scope, "templates": data.get(scope, [])}
+    return {"templates": data}
+
+
+@router.put("/column-templates")
+def save_column_template(payload: dict, db: Session = Depends(get_db)):
+    scope = str(payload.get("scope") or "").strip()
+    name = str(payload.get("name") or "").strip()
+    if not scope:
+        raise HTTPException(status_code=400, detail="scope is required")
+    if not name:
+        raise HTTPException(status_code=400, detail="Template name is required")
+    raw_cols = payload.get("columns")
+    if not isinstance(raw_cols, list) or not raw_cols:
+        raise HTTPException(status_code=400, detail="columns must be a non-empty list")
+    columns = [str(c) for c in raw_cols if str(c).strip()]
+    data = _load_column_templates(db)
+    items = data.get(scope, [])
+    template = {"name": name, "columns": columns}
+    for i, t in enumerate(items):
+        if t.get("name") == name:
+            items[i] = template
+            break
+    else:
+        items.append(template)
+    data[scope] = items
+    _store_column_templates(db, data)
+    return {"template": template, "templates": items}
+
+
+@router.delete("/column-templates")
+def delete_column_template(scope: str, name: str, db: Session = Depends(get_db)):
+    data = _load_column_templates(db)
+    items = data.get(scope, [])
+    remaining = [t for t in items if t.get("name") != name]
+    if len(remaining) == len(items):
+        raise HTTPException(status_code=404, detail="Column template not found")
+    if remaining:
+        data[scope] = remaining
+    else:
+        data.pop(scope, None)
+    _store_column_templates(db, data)
+    return {"status": "ok"}
+
+
 # --- G57: chart annotations (admin-wide, stored under 'annotations') ---
 
 ANNOTATION_COLORS = ("success", "warning", "danger", "info")

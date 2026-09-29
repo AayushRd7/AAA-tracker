@@ -5,6 +5,7 @@ from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, or_, a
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import or_
 from sqlalchemy import text
+from sqlalchemy import func, case
 from db import get_db
 from models.base import Base
 from models.settings import SettingsORM
@@ -16,7 +17,7 @@ import io
 import json
 import re
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List
 
 router = APIRouter()
 
@@ -62,10 +63,15 @@ class Conversion(Base):
     device_type = Column(String)
     postback_count = Column(Integer)
     last_postback_at = Column(DateTime)
+    approval = Column(String)
+    is_duplicate = Column(Boolean)
     funnel_step = Column(Integer)
     events = Column(JSONB)
 
 VALID_STATUSES = {"lead", "sale", "upsale", "rejected", "hold", "trash"}
+
+# Wave 19B — reconciliation lifecycle for networks that approve conversions.
+VALID_APPROVALS = {"pending", "approved", "declined", "other"}
 
 # Upper bound on the visitor ids pulled from ClickHouse for click_date
 # attribution. Above this the id set is truncated (with a loud log) so a busy
@@ -162,16 +168,25 @@ def get_conversions(request: Request, limit: int = 100, offset: Optional[int] = 
                  .limit(min(max(int(limit or 50), 1), 5000)))
     if offset is not None:
         rows = rows.offset(offset)
-    items = [row.__dict__ for row in rows.all()]
+    items = [_conversion_to_dict(row) for row in rows.all()]
     if total is not None:
         return {"items": items, "total": total, "limit": limit, "offset": offset}
     return items
 
 
+def _conversion_to_dict(conv: "Conversion") -> dict:
+    """Serialize one conversion row, adding ``dedupe_token`` — the
+    transaction/external id the dedupe guard matches on (derived, no column)."""
+    item = dict(conv.__dict__)
+    item.pop("_sa_instance_state", None)
+    item["dedupe_token"] = conv.transaction_id or conv.external_id
+    return item
+
+
 CONVERSION_EXPORT_FIELDS = ["id", "received_at", "click_id", "campaign_id", "offer_id",
-                            "landing_id", "status", "external_id", "transaction_id",
-                            "visitor_id", "country", "payout", "revenue", "profit",
-                            "currency", "postback_count"]
+                            "landing_id", "status", "approval", "external_id",
+                            "transaction_id", "visitor_id", "country", "payout", "revenue",
+                            "profit", "currency", "postback_count"]
 
 
 @router.get("/export")
@@ -200,7 +215,8 @@ def _build_conversions_query(request: Request, db: Session):
     """Full filtered conversions query shared by the list and CSV export."""
     # fields allowed for filtering
     ALLOWED_FILTER_FIELDS = {
-        "campaign_id", "offer_id", "landing_id", "status", "click_id", "external_id",
+        "campaign_id", "offer_id", "landing_id", "status", "approval", "click_id",
+        "external_id",
         "sub_id_1", "sub_id_2", "sub_id_3", "sub_id_4", "sub_id_5",
         "sub_id_6", "sub_id_7", "sub_id_8", "sub_id_9", "sub_id_10",
         "utm_source", "utm_campaign", "utm_creative", "traffic_source_name"
@@ -470,6 +486,9 @@ def import_conversions(data: ConversionImport, request: Request,
         )).first()
         if conv:
             _append_event(conv, status, payout, source="import")
+            # This row was matched by the dedupe lookup and accumulated onto
+            # instead of inserting a new one — the dedupe path.
+            conv.is_duplicate = True
             if tid:
                 conv.transaction_id = tid
             db.add(conv)
@@ -478,6 +497,7 @@ def import_conversions(data: ConversionImport, request: Request,
             conv = Conversion(
                 click_id="none", status=status, payout=payout, revenue=payout, profit=payout,
                 external_id=tid, postback_count=1,
+                approval="pending", is_duplicate=False,
                 received_at=datetime.utcnow(), last_postback_at=datetime.utcnow(),
                 events=[{"status": status, "payout": payout,
                          "received_at": datetime.utcnow().isoformat(), "source": "import"}])
@@ -497,10 +517,15 @@ def import_conversions(data: ConversionImport, request: Request,
 
 class ConversionUpdate(BaseModel):
     status: Optional[str] = None
+    approval: Optional[str] = None
     payout: Optional[float] = None
     revenue: Optional[float] = None
     external_id: Optional[str] = None
     transaction_id: Optional[str] = None
+
+
+def normalize_approval(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
 
 
 @router.patch("/{conversion_id}")
@@ -517,6 +542,13 @@ def update_conversion(conversion_id: int, data: ConversionUpdate,
         if status not in all_valid_statuses(db):
             raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {', '.join(sorted(all_valid_statuses(db)))}")
         conv.status = status
+    if "approval" in updates:
+        approval = normalize_approval(updates["approval"])
+        if approval not in VALID_APPROVALS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid approval. Allowed: {', '.join(sorted(VALID_APPROVALS))}")
+        conv.approval = approval
     # Payout drives revenue (conversions carry no cost → profit = revenue),
     # consistent with record_conversion's accumulate semantics.
     if "payout" in updates and "revenue" not in updates:
@@ -532,6 +564,192 @@ def update_conversion(conversion_id: int, data: ConversionUpdate,
 
     db.commit()
     return {"message": "Conversion updated"}
+
+
+class BulkConversionIds(BaseModel):
+    ids: List[int]
+    approval: Optional[str] = None
+    status: Optional[str] = None
+
+
+def _resolve_conversions(db: Session, ids: List[int]) -> List["Conversion"]:
+    clean = [int(i) for i in (ids or [])]
+    if not clean:
+        return []
+    return db.query(Conversion).filter(Conversion.id.in_(clean)).all()
+
+
+@router.post("/bulk-approval")
+def bulk_set_approval(data: BulkConversionIds, request: Request, db: Session = Depends(get_db)):
+    """Bulk-set the reconciliation approval on the given conversion ids."""
+    from audit_logger import audit_event
+    from auth import get_caller
+    approval = normalize_approval(data.approval)
+    if approval not in VALID_APPROVALS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid approval. Allowed: {', '.join(sorted(VALID_APPROVALS))}")
+    rows = _resolve_conversions(db, data.ids)
+    applied = []
+    for conv in rows:
+        _require_conversion_access(request, db, conv)
+        conv.approval = approval
+        applied.append(conv.id)
+    db.commit()
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "conversions", "bulk",
+                {"action": "approval", "approval": approval, "ids": applied},
+                request.client.host if request.client else "")
+    return {"message": f"Approval set to {approval}", "updated": len(applied), "ids": applied}
+
+
+@router.post("/bulk-status")
+def bulk_set_status(data: BulkConversionIds, request: Request, db: Session = Depends(get_db)):
+    """Bulk-set the conversion status on the given ids (same validation as the
+    single-conversion PATCH: built-ins plus configured custom statuses)."""
+    from audit_logger import audit_event
+    from auth import get_caller
+    status = normalize_status(data.status)
+    valid = all_valid_statuses(db)
+    if status not in valid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Allowed: {', '.join(sorted(valid))}")
+    rows = _resolve_conversions(db, data.ids)
+    applied = []
+    for conv in rows:
+        _require_conversion_access(request, db, conv)
+        conv.status = status
+        applied.append(conv.id)
+    db.commit()
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "conversions", "bulk",
+                {"action": "status", "status": status, "ids": applied},
+                request.client.host if request.client else "")
+    return {"message": f"Status set to {status}", "updated": len(applied), "ids": applied}
+
+
+class ConversionCreate(BaseModel):
+    """Operator-entered offline conversion (manual add — no CSV)."""
+    status: Optional[str] = None
+    approval: Optional[str] = None
+    payout: Optional[float] = None
+    revenue: Optional[float] = None
+    click_id: Optional[str] = None
+    external_id: Optional[str] = None
+    transaction_id: Optional[str] = None
+    sub_ids: Optional[dict] = None
+
+
+@router.post("/conversion")
+def create_conversion(data: ConversionCreate, request: Request, db: Session = Depends(get_db)):
+    """Create (or accumulate onto) a single conversion from the manual-add
+    dialog. Mirrors import_conversions' LTV dedupe semantics but accepts the
+    richer field set (revenue, sub ids) the dialog offers."""
+    from audit_logger import audit_event
+    from auth import get_caller
+    status = normalize_status(data.status) if data.status else "sale"
+    if status not in all_valid_statuses(db):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Allowed: {', '.join(sorted(all_valid_statuses(db)))}")
+    approval = normalize_approval(data.approval) if data.approval else "pending"
+    if approval not in VALID_APPROVALS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid approval. Allowed: {', '.join(sorted(VALID_APPROVALS))}")
+    click_id = str(data.click_id or "").strip()
+    external_id = str(data.external_id or "").strip() or None
+    transaction_id = str(data.transaction_id or "").strip() or None
+    if not (click_id or external_id or transaction_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a click id, external id or transaction id")
+    payout = float(data.payout or 0)
+    revenue = float(data.revenue) if data.revenue is not None else payout
+
+    sub_fields = {}
+    for k, v in (data.sub_ids or {}).items():
+        if re.fullmatch(r"sub_id_\d{1,2}", str(k)) and v not in (None, ""):
+            sub_fields[str(k)] = str(v)[:50]
+
+    conv = None
+    match_conds = []
+    if click_id:
+        match_conds.append(Conversion.click_id == click_id)
+    if external_id:
+        match_conds.append(Conversion.external_id == external_id)
+    if transaction_id:
+        match_conds.append(Conversion.transaction_id == transaction_id)
+    if match_conds:
+        conv = db.query(Conversion).filter(or_(*match_conds)).first()
+
+    now = datetime.utcnow()
+    if conv:
+        _append_event(conv, status, payout, source="manual")
+        conv.is_duplicate = True
+        if transaction_id:
+            conv.transaction_id = transaction_id
+        if external_id:
+            conv.external_id = external_id
+        if data.revenue is not None:
+            conv.revenue = revenue
+            conv.profit = revenue
+        if data.approval:
+            conv.approval = approval
+        for k, v in sub_fields.items():
+            setattr(conv, k, v)
+        created = False
+    else:
+        conv = Conversion(
+            click_id=click_id or "none", status=status, approval=approval,
+            is_duplicate=False,
+            payout=payout, revenue=revenue, profit=revenue,
+            external_id=external_id, transaction_id=transaction_id,
+            postback_count=1, received_at=now, last_postback_at=now,
+            events=[{"status": status, "payout": payout,
+                     "received_at": now.isoformat(), "source": "manual"}],
+            **sub_fields)
+        db.add(conv)
+        db.flush()
+        created = True
+
+    db.commit()
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "create", "conversions", str(conv.id),
+                {"source": "manual", "created": created, "status": status,
+                 "approval": approval},
+                request.client.host if request.client else "")
+    return {"message": "Conversion created" if created else "Conversion updated",
+            "id": conv.id, "created": created}
+
+
+@router.get("/summary")
+def conversions_summary(request: Request, db: Session = Depends(get_db)):
+    """Approval reconciliation totals over the same filters as the list:
+    pending / approved / declined / other plus approval and decline rates
+    (percentage, divide-by-zero safe). Aggregated in Postgres."""
+    query = _build_conversions_query(request, db)
+    approval_col = func.coalesce(Conversion.approval, "pending")
+    total, approved, declined, pending, other = query.with_entities(
+        func.count(Conversion.id),
+        func.sum(case((approval_col == "approved", 1), else_=0)),
+        func.sum(case((approval_col == "declined", 1), else_=0)),
+        func.sum(case((approval_col == "pending", 1), else_=0)),
+        func.sum(case((approval_col == "other", 1), else_=0)),
+    ).one()
+    total = int(total or 0)
+    approved = int(approved or 0)
+    declined = int(declined or 0)
+    return {
+        "total": total,
+        "approved": approved,
+        "declined": declined,
+        "pending": int(pending or 0),
+        "other": int(other or 0),
+        "approval_rate": round(approved / total * 100, 2) if total else 0.0,
+        "decline_rate": round(declined / total * 100, 2) if total else 0.0,
+    }
 
 
 @router.delete("/{conversion_id}")

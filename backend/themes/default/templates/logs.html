@@ -68,9 +68,55 @@
 
         <div class="d-flex align-center justify-space-between mb-2">
             <div class="caption grey--text">{{ total }} record(s)</div>
-            <v-btn text small color="primary" :disabled="!items.length" @click="exportCsv">
-                <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
-            </v-btn>
+            <div class="d-flex align-center">
+                <v-menu offset-y left :close-on-content-click="false">
+                    <template v-slot:activator="{ on, attrs }">
+                        <v-btn text small color="primary" class="mr-2" v-bind="attrs" v-on="on">
+                            <v-icon small class="mr-1">mdi-view-column-outline</v-icon>Columns
+                        </v-btn>
+                    </template>
+                    <v-card class="pa-2 column-menu-card">
+                        <div class="caption grey--text px-2 pt-1">Show columns</div>
+                        <v-checkbox
+                                v-for="h in currentHeadersAll"
+                                :key="activeTab + '-col-' + h.value"
+                                :input-value="isColumnVisible(h.value)"
+                                @change="toggleColumn(h.value)"
+                                :label="h.text"
+                                dense hide-details
+                                class="mt-0 column-menu-check"
+                        ></v-checkbox>
+                        <v-divider class="my-2"></v-divider>
+                        <div class="caption grey--text px-2">Templates</div>
+                        <div class="px-2 mt-1">
+                            <v-btn small text color="primary" @click="saveColumnTemplate">
+                                <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save as template
+                            </v-btn>
+                        </div>
+                        <v-list dense class="py-0">
+                            <v-list-item v-for="t in columnTemplates" :key="t.name" link
+                                         @click="applyColumnTemplate(t)">
+                                <v-list-item-title>{{ t.name }}</v-list-item-title>
+                                <v-list-item-icon>
+                                    <v-icon small @click.stop="deleteColumnTemplate(t)">mdi-delete</v-icon>
+                                </v-list-item-icon>
+                            </v-list-item>
+                            <div v-if="!columnTemplates.length" class="caption grey--text px-2 py-1">
+                                No saved templates
+                            </div>
+                        </v-list>
+                        <v-divider class="my-2"></v-divider>
+                        <div class="px-2">
+                            <v-btn small text color="primary" @click="saveDefaultColumns">
+                                <v-icon small class="mr-1">mdi-pin-outline</v-icon>Use as default
+                            </v-btn>
+                        </div>
+                    </v-card>
+                </v-menu>
+                <v-btn text small color="primary" :disabled="!items.length" @click="exportCsv">
+                    <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
+                </v-btn>
+            </div>
         </div>
 
         <v-card>
@@ -84,6 +130,7 @@
                     :items-per-page="pageSize"
                     :footer-props="{ 'items-per-page-options': [pageSize] }"
                     :loading="loading"
+                    :item-class="logRowClass"
             >
                 <template v-slot:item.result="{ item }">
                     <span class="status-chip" :class="resultChipClass(item.result)">{{ item.result }}</span>
@@ -91,6 +138,13 @@
                 <template v-slot:item.status="{ item }">
                     <span class="status-chip" :class="resultChipClass(item.status)">{{ item.status }}</span>
                 </template>
+                <!-- Wave 19A: workspace number formatting on numeric cells -->
+                <template v-slot:item.payout="{ item }"><span>{{ $fmtNum(item.payout) }}</span></template>
+                <template v-slot:item.revenue="{ item }"><span>{{ $fmtNum(item.revenue) }}</span></template>
+                <template v-slot:item.cost="{ item }"><span>{{ $fmtNum(item.cost) }}</span></template>
+                <template v-slot:item.updated_rows="{ item }"><span>{{ $fmtNum(item.updated_rows) }}</span></template>
+                <template v-slot:item.attempts="{ item }"><span>{{ $fmtNum(item.attempts) }}</span></template>
+                <template v-slot:item.flow_index="{ item }"><span>{{ $fmtNum(item.flow_index) }}</span></template>
                 <template v-slot:no-data>
                     <div class="empty-state">
                         <v-icon>mdi-inbox-outline</v-icon>
@@ -117,6 +171,9 @@
                 dateTo: '',
                 presets: [],
                 selectedPreset: null,
+                // Wave 19A: per-tab visible-column selection and saved templates
+                selectedColumnsByTab: {},
+                columnTemplates: [],
                 tabs: [
                     {key: 'clicks', title: 'Clicks'},
                     {key: 'conversions', title: 'Conversions'},
@@ -238,8 +295,15 @@
             currentFilters() {
                 return this.filterDefs[this.activeTab] || [];
             },
-            currentHeaders() {
+            currentHeadersAll() {
                 return this.headers[this.activeTab] || [];
+            },
+            currentHeaders() {
+                const all = this.currentHeadersAll;
+                const selected = this.columnsForScope(this.presetScope);
+                if (!selected || !selected.length) return all;
+                const keep = selected.filter(k => all.some(h => h.value === k));
+                return keep.length ? all.filter(h => keep.indexOf(h.value) !== -1) : all;
             },
             isClickLog() {
                 return this.activeTab === 'clicks';
@@ -251,6 +315,7 @@
         mounted() {
             this.load();
             this.loadPresets();
+            this.loadColumnTemplates();
             this.$root.$on('load-logs', this.load);
             this.$root.$on('load-logs', this.loadPresets);
         },
@@ -263,7 +328,98 @@
                 this.page = 1;
                 this.selectedPreset = null;
                 this.loadPresets();
+                this.loadColumnTemplates();
                 this.load();
+            },
+            logRowClass(item) {
+                return this.$rowClass(item, this.presetScope);
+            },
+            // Selected keys for a scope: explicit pick, else workspace default,
+            // else undefined meaning "show everything".
+            columnsForScope(scope) {
+                const picked = this.selectedColumnsByTab[scope];
+                if (picked && picked.length) return picked;
+                const defaults = (this.$workspace && this.$workspace.default_columns) || {};
+                const fallback = defaults[scope];
+                return Array.isArray(fallback) && fallback.length ? fallback : null;
+            },
+            isColumnVisible(key) {
+                const selected = this.columnsForScope(this.presetScope);
+                return !selected || selected.indexOf(key) !== -1;
+            },
+            toggleColumn(key) {
+                const all = this.currentHeadersAll.map(h => h.value);
+                const current = this.columnsForScope(this.presetScope) || all.slice();
+                const next = current.indexOf(key) === -1
+                    ? current.concat([key])
+                    : current.filter(k => k !== key);
+                // Keep the header order for a stable table.
+                const ordered = all.filter(k => next.indexOf(k) !== -1);
+                if (!ordered.length) return;
+                this.$set(this.selectedColumnsByTab, this.presetScope, ordered);
+            },
+            saveDefaultColumns() {
+                const ws = Object.assign({}, this.$workspace);
+                ws.default_columns = Object.assign({}, ws.default_columns);
+                ws.default_columns[this.presetScope] =
+                    (this.columnsForScope(this.presetScope) || this.currentHeadersAll.map(h => h.value)).slice();
+                fetch('/backend/api/settings/', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({settings: {workspace: ws}}),
+                })
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(() => {
+                        if (this.$loadWorkspace) this.$loadWorkspace();
+                        this.$root.$emit('show-message', {type: 'success', text: 'Default columns saved'});
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Save failed: ' + sanitizeToastMessage(err.message)}));
+            },
+            loadColumnTemplates() {
+                fetch('/backend/api/settings/column-templates?scope=' + encodeURIComponent(this.presetScope),
+                      {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {templates: []})
+                    .then(data => { this.columnTemplates = data.templates || []; })
+                    .catch(() => { this.columnTemplates = []; });
+            },
+            saveColumnTemplate() {
+                const name = (window.prompt('Template name') || '').trim();
+                if (!name) return;
+                const columns = (this.columnsForScope(this.presetScope)
+                    || this.currentHeadersAll.map(h => h.value)).slice();
+                fetch('/backend/api/settings/column-templates', {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({scope: this.presetScope, name: name, columns: columns}),
+                })
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(data => {
+                        this.columnTemplates = data.templates || [];
+                        this.$root.$emit('show-message', {type: 'success', text: 'Template saved'});
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Template save failed: ' + sanitizeToastMessage(err.message)}));
+            },
+            applyColumnTemplate(template) {
+                if (!template || !Array.isArray(template.columns)) return;
+                this.$set(this.selectedColumnsByTab, this.presetScope, template.columns.slice());
+            },
+            deleteColumnTemplate(template) {
+                if (!template) return;
+                fetch('/backend/api/settings/column-templates?scope='
+                        + encodeURIComponent(this.presetScope)
+                        + '&name=' + encodeURIComponent(template.name),
+                      {method: 'DELETE', credentials: 'include'})
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(() => {
+                        this.columnTemplates = this.columnTemplates.filter(t => t.name !== template.name);
+                        this.$root.$emit('show-message', {type: 'success', text: 'Template deleted'});
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Template delete failed: ' + sanitizeToastMessage(err.message)}));
             },
             loadPresets() {
                 fetch('/backend/api/filter-presets/?scope=' + encodeURIComponent(this.presetScope),
@@ -430,6 +586,16 @@
     }
     .log-filter-sm {
         max-width: 220px;
+    }
+    .column-menu-card {
+        min-width: 280px;
+        max-height: 460px;
+        overflow-y: auto;
+    }
+    .column-menu-check {
+        margin-top: 0;
+        padding-top: 0;
+        height: 32px;
     }
 </style>
 {% endraw %}

@@ -213,6 +213,13 @@ async def startup():
             _mig(conn, "ALTER TABLE offers ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false")
             # D1c — campaign ownership for the campaigns:'own' permission
             _mig(conn, "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS owner_id INTEGER")
+            # Wave 19B — conversion approval lifecycle (reconciliation for
+            # networks that approve conversions) and the dedupe-path flag
+            # exposed as the conversions-log duplicate column.
+            _mig(conn, "ALTER TABLE conversions_data ADD COLUMN IF NOT EXISTS "
+                       "approval VARCHAR(16) NOT NULL DEFAULT 'pending'")
+            _mig(conn, "ALTER TABLE conversions_data ADD COLUMN IF NOT EXISTS "
+                       "is_duplicate BOOLEAN NOT NULL DEFAULT false")
             # G62 — one-shot TOTP token replay protection
             _mig(conn, """
                 CREATE TABLE IF NOT EXISTS totp_token_used (
@@ -476,6 +483,12 @@ app.include_router(scripts_router, prefix="/api/scripts", tags=["Scripts"],
 from app_pages.funnel_templates import router as funnel_templates_router
 app.include_router(funnel_templates_router, prefix="/api/funnel-templates", tags=["Funnel templates"],
                    dependencies=[Depends(require_section_write("campaigns"))])
+# Wave 19A: workspace display settings (number formatting / row colouring /
+# default columns) — read by every data-table page, so gated by the
+# always-readable dashboard section rather than the admin settings section.
+from app_pages.workspace import router as workspace_router
+app.include_router(workspace_router, prefix="/api/workspace", tags=["Workspace"],
+                   dependencies=[Depends(require_section("dashboard"))])
 
 
 # G52: minimal public view for shared reports — shell-less, token in the query

@@ -1647,19 +1647,19 @@
                             <span class="clamp-2 campaign-name">{{ item.name }}</span>
                         </template>
                         <template v-slot:item.clicks="{ item }">
-                            {{ (metricsMap[item.id] || {}).clicks != null ? Number(metricsMap[item.id].clicks).toLocaleString() : '—' }}
+                            {{ (metricsMap[item.id] || {}).clicks != null ? $fmtNum(Number(metricsMap[item.id].clicks)) : '—' }}
                         </template>
                         <template v-slot:item.unique_clicks="{ item }">
-                            {{ (metricsMap[item.id] || {}).unique_clicks != null ? Number(metricsMap[item.id].unique_clicks).toLocaleString() : '—' }}
+                            {{ (metricsMap[item.id] || {}).unique_clicks != null ? $fmtNum(Number(metricsMap[item.id].unique_clicks)) : '—' }}
                         </template>
                         <template v-slot:item.conversions="{ item }">
-                            {{ (metricsMap[item.id] || {}).conversions != null ? Number(metricsMap[item.id].conversions).toLocaleString() : '—' }}
+                            {{ (metricsMap[item.id] || {}).conversions != null ? $fmtNum(Number(metricsMap[item.id].conversions)) : '—' }}
                         </template>
                         <template v-slot:item.leads="{ item }">
-                            {{ (metricsMap[item.id] || {}).leads != null ? Number(metricsMap[item.id].leads).toLocaleString() : '—' }}
+                            {{ (metricsMap[item.id] || {}).leads != null ? $fmtNum(Number(metricsMap[item.id].leads)) : '—' }}
                         </template>
                         <template v-slot:item.cr="{ item }">
-                            {{ (metricsMap[item.id] || {}).cr != null ? metricsMap[item.id].cr + '%' : '—' }}
+                            {{ (metricsMap[item.id] || {}).cr != null ? $fmtNum(metricsMap[item.id].cr) + '%' : '—' }}
                         </template>
                         <template v-slot:item.epc="{ item }">
                             {{ (metricsMap[item.id] || {}).epc != null ? formatMoney(metricsMap[item.id].epc) : '—' }}
@@ -3492,11 +3492,11 @@
                 const t = this.metricsTotals;
                 switch (value) {
                     case 'name': return 'Totals';
-                    case 'clicks': return t.clicks.toLocaleString();
-                    case 'unique_clicks': return t.unique_clicks.toLocaleString();
-                    case 'leads': return t.leads.toLocaleString();
-                    case 'conversions': return t.conversions.toLocaleString();
-                    case 'cr': return t.cr.toFixed(2) + '%';
+                    case 'clicks': return this.$fmtNum(t.clicks);
+                    case 'unique_clicks': return this.$fmtNum(t.unique_clicks);
+                    case 'leads': return this.$fmtNum(t.leads);
+                    case 'conversions': return this.$fmtNum(t.conversions);
+                    case 'cr': return this.$fmtNum(t.cr) + '%';
                     case 'epc': return this.formatMoney(t.epc);
                     case 'cpc': return this.formatMoney(t.cpc);
                     case 'cost': return this.formatMoney(t.cost);
@@ -3532,11 +3532,11 @@
             },
             formatMoney(v) {
                 const n = parseFloat(v) || 0;
-                return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                return '$' + this.$fmtNum(n);
             },
             formatPct(v) {
                 const n = parseFloat(v) || 0;
-                return (n > 0 ? '+' : '') + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%';
+                return (n > 0 ? '+' : '') + this.$fmtNum(n) + '%';
             },
             async deleteCampaign(item) {
                 const ok = await this.$refs.confirm.open(

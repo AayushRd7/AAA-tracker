@@ -90,6 +90,82 @@
     Vue.prototype.faviconB64 = function(domain) {
         return '~' + btoa(String(domain)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     };
+
+    // --- Wave 19A: workspace display settings ---
+    // One reactive object shared by every component (Vue.prototype), seeded
+    // from the settings document's `workspace` block via /api/workspace so all
+    // pages honour the same decimals/divider/row colouring/default columns.
+    Vue.prototype.$workspace = Vue.observable({
+        decimals: 2,
+        divider: 'comma',
+        row_coloring: [],
+        default_columns: {},
+    });
+
+    Vue.prototype.$loadWorkspace = function() {
+        return fetch('/backend/api/workspace/', {credentials: 'include'})
+            .then(r => r.ok ? r.json() : null)
+            .then(d => {
+                if (d && d.workspace && typeof d.workspace === 'object') {
+                    Object.assign(Vue.prototype.$workspace, d.workspace);
+                }
+            })
+            .catch(() => {});
+    };
+
+    // Format a numeric value with the workspace decimals + thousands divider.
+    // Null-safe and leaves non-numbers (IDs, dates, labels) untouched.
+    Vue.prototype.$fmtNum = function(value) {
+        if (value === null || value === undefined || value === '') return value;
+        if (typeof value === 'string' && value.trim() === '') return value;
+        const n = typeof value === 'number' ? value : Number(value);
+        if (!isFinite(n)) return value;
+        const ws = Vue.prototype.$workspace || {};
+        let decimals = parseInt(ws.decimals, 10);
+        if (isNaN(decimals)) decimals = 2;
+        decimals = Math.min(6, Math.max(0, decimals));
+        let out = n.toLocaleString('en-US',
+            {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
+        const divider = ws.divider || 'comma';
+        if (divider === 'space') out = out.replace(/,/g, '\u00a0');
+        else if (divider === 'none') out = out.replace(/,/g, '');
+        return out;
+    };
+
+    // Conditional row colouring: evaluate the workspace `row_coloring` rules
+    // against one row and return a palette class (green/amber/red/blue/grey).
+    // A rule may carry an optional `scope` to target a single table.
+    Vue.prototype.$rowClass = function(row, scope) {
+        if (!row) return '';
+        const rules = (Vue.prototype.$workspace || {}).row_coloring || [];
+        for (let i = 0; i < rules.length; i++) {
+            const rule = rules[i];
+            if (!rule || !rule.column) continue;
+            if (rule.scope && rule.scope !== scope) continue;
+            if (workspaceRuleMatches(row[rule.column], rule.operator, rule.value)) {
+                return 'row-color-' + (rule.color || 'grey');
+            }
+        }
+        return '';
+
+        function workspaceRuleMatches(cell, operator, value) {
+            const c = Number(cell);
+            const v = Number(value);
+            const numeric = cell !== null && cell !== undefined && cell !== ''
+                && isFinite(c) && isFinite(v);
+            if (operator === '==') {
+                return numeric ? c === v : String(cell) === String(value);
+            }
+            if (!numeric) return false;
+            switch (operator) {
+                case '>': return c > v;
+                case '>=': return c >= v;
+                case '<': return c < v;
+                case '<=': return c <= v;
+                default: return false;
+            }
+        }
+    };
 </script>
 <script type="application/javascript">
     Vue.component('toast-list-component', {
@@ -641,6 +717,9 @@
             },
         },
         mounted() {
+            // Display preferences (number formatting / row colouring) apply on
+            // every page, not just the dashboard shell.
+            this.$loadWorkspace();
             if (!this.dashboardShell) return;
             // D1a: an expired/revoked session bounces any API fetch to the login page
             const origFetch = window.fetch;

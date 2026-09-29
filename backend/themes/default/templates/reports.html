@@ -30,6 +30,29 @@
 
         <!-- Report builder controls -->
         <template v-if="reportView === 'builder'">
+        <!-- Wave 19B: built-in report template gallery (frontend-only list) -->
+        <v-card class="pa-4 mb-4 report-gallery-card">
+            <div class="d-flex align-center mb-2">
+                <div class="builder-label mb-0">Report templates</div>
+                <span class="builder-hint ml-2">load a ready-made configuration into the builder</span>
+            </div>
+            <div class="report-gallery">
+                <v-card v-for="t in reportTemplateGallery" :key="t.id"
+                        outlined class="report-template-card" :class="{'report-template-card--active': activeTemplate === t.id}"
+                        @click="applyReportTemplate(t)">
+                    <v-card-text class="pa-3">
+                        <div class="d-flex align-center">
+                            <v-icon small class="mr-2">{{ t.icon }}</v-icon>
+                            <span class="font-weight-medium">{{ t.name }}</span>
+                        </div>
+                        <div class="caption grey--text mt-1">{{ t.hint }}</div>
+                    </v-card-text>
+                </v-card>
+            </div>
+            <div v-if="templateNote" class="basis-note mt-2">
+                <v-icon small class="mr-1">mdi-information-outline</v-icon>{{ templateNote }}
+            </div>
+        </v-card>
         <v-card class="pa-4 mb-4">
             <div class="filter-bar align-center">
                 <v-menu v-model="dateMenu" :close-on-content-click="false" transition="scale-transition" offset-y min-width="auto">
@@ -131,6 +154,51 @@
                         small-chips
                         class="columns-select"
                 ></v-select>
+                <!-- Wave 19A: checkbox column picker + saved column templates -->
+                <v-menu offset-y left :close-on-content-click="false">
+                    <template v-slot:activator="{ on, attrs }">
+                        <v-btn small outlined class="mr-2" v-bind="attrs" v-on="on">
+                            <v-icon small>mdi-view-column-outline</v-icon>
+                        </v-btn>
+                    </template>
+                    <v-card class="pa-2 column-menu-card">
+                        <div class="caption grey--text px-2 pt-1">Show columns</div>
+                        <v-checkbox
+                                v-for="h in reportHeadersBase"
+                                :key="'rcol-' + h.value"
+                                :input-value="selectedColumns.indexOf(h.value) !== -1"
+                                @change="toggleReportColumn(h.value)"
+                                :label="h.text"
+                                dense hide-details
+                                class="mt-0 column-menu-check"
+                        ></v-checkbox>
+                        <v-divider class="my-2"></v-divider>
+                        <div class="caption grey--text px-2">Templates</div>
+                        <div class="px-2 mt-1">
+                            <v-btn small text color="primary" @click="saveColumnTemplate">
+                                <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save as template
+                            </v-btn>
+                        </div>
+                        <v-list dense class="py-0">
+                            <v-list-item v-for="t in columnTemplates" :key="t.name" link
+                                         @click="applyColumnTemplate(t)">
+                                <v-list-item-title>{{ t.name }}</v-list-item-title>
+                                <v-list-item-icon>
+                                    <v-icon small @click.stop="deleteColumnTemplate(t)">mdi-delete</v-icon>
+                                </v-list-item-icon>
+                            </v-list-item>
+                            <div v-if="!columnTemplates.length" class="caption grey--text px-2 py-1">
+                                No saved templates
+                            </div>
+                        </v-list>
+                        <v-divider class="my-2"></v-divider>
+                        <div class="px-2">
+                            <v-btn small text color="primary" @click="saveDefaultColumns">
+                                <v-icon small class="mr-1">mdi-pin-outline</v-icon>Use as default
+                            </v-btn>
+                        </div>
+                    </v-card>
+                </v-menu>
                 <v-select
                         v-model="sortBy"
                         :items="sortOptions"
@@ -260,25 +328,25 @@
                     </div>
                 </template>
                 <template v-slot:item.visits="{ item }">
-                    <span>{{ Number(item.visits || 0).toLocaleString() }}</span>
+                    <span>{{ $fmtNum(Number(item.visits || 0)) }}</span>
                 </template>
                 <template v-slot:item.unique_visits="{ item }">
-                    <span>{{ Number(item.unique_visits || 0).toLocaleString() }}</span>
+                    <span>{{ $fmtNum(Number(item.unique_visits || 0)) }}</span>
                 </template>
                 <template v-slot:item.clicks="{ item }">
-                    <span>{{ Number(item.clicks || 0).toLocaleString() }}</span>
+                    <span>{{ $fmtNum(Number(item.clicks || 0)) }}</span>
                 </template>
                 <template v-slot:item.unique_clicks="{ item }">
-                    <span>{{ Number(item.unique_clicks || 0).toLocaleString() }}</span>
+                    <span>{{ $fmtNum(Number(item.unique_clicks || 0)) }}</span>
                 </template>
                 <template v-slot:item.leads="{ item }">
-                    <span>{{ Number(item.leads || 0).toLocaleString() }}</span>
+                    <span>{{ $fmtNum(Number(item.leads || 0)) }}</span>
                 </template>
                 <template v-slot:item.conversions="{ item }">
-                    <span>{{ Number(item.conversions || 0).toLocaleString() }}</span>
+                    <span>{{ $fmtNum(Number(item.conversions || 0)) }}</span>
                 </template>
                 <template v-slot:item.rejected="{ item }">
-                    <span>{{ Number(item.rejected || 0).toLocaleString() }}</span>
+                    <span>{{ $fmtNum(Number(item.rejected || 0)) }}</span>
                 </template>
                 <template v-slot:item.cost="{ item }">
                     <span>{{ formatMoney(item.cost) }}</span>
@@ -305,7 +373,7 @@
                     <span>{{ formatPct(item.click_through_rate) }}</span>
                 </template>
                 <template v-slot:item.bot_clicks="{ item }">
-                    <span :class="item.bot_clicks ? 'num-neg' : ''">{{ Number(item.bot_clicks || 0).toLocaleString() }}</span>
+                    <span :class="item.bot_clicks ? 'num-neg' : ''">{{ $fmtNum(Number(item.bot_clicks || 0)) }}</span>
                 </template>
                 <template v-slot:item.bot_cost="{ item }">
                     <span :class="signClass(-Math.abs(item.bot_cost || 0))">{{ formatMoney(item.bot_cost) }}</span>
@@ -314,7 +382,7 @@
                     <span>{{ item.fraud_score_avg == null ? '—' : Number(item.fraud_score_avg).toFixed(2) }}</span>
                 </template>
                 <template v-slot:item.human_clicks="{ item }">
-                    <span>{{ Number(item.human_clicks || 0).toLocaleString() }}</span>
+                    <span>{{ $fmtNum(Number(item.human_clicks || 0)) }}</span>
                 </template>
                 <template v-for="cm in customMetrics" v-slot:[customSlot(cm)]="{ item }">
                     <span :key="cm.name + '-' + rowKey(item)">{{ formatCustom(item[cm.name]) }}</span>
@@ -324,7 +392,7 @@
                         <td>Total</td>
                         <td v-for="h in headers.slice(1)" :key="h.value" :class="h.align === 'end' ? 'text-end' : ''">
                             <template v-if="['visits','unique_visits','clicks','unique_clicks','leads','conversions','rejected'].includes(h.value)">
-                                {{ Number(reportTotals[h.value] || 0).toLocaleString() }}
+                                {{ $fmtNum(Number(reportTotals[h.value] || 0)) }}
                             </template>
                             <template v-else-if="['cost','revenue','profit'].includes(h.value)">
                                 <span :class="h.value === 'profit' ? signClass(reportTotals.profit) : ''">{{ formatMoney(reportTotals[h.value]) }}</span>
@@ -338,7 +406,7 @@
                                 {{ formatPct(reportTotals[h.value]) }}
                             </template>
                             <template v-else-if="['bot_clicks','human_clicks'].includes(h.value)">
-                                {{ Number(reportTotals[h.value] || 0).toLocaleString() }}
+                                {{ $fmtNum(Number(reportTotals[h.value] || 0)) }}
                             </template>
                             <template v-else-if="h.value === 'bot_cost'">{{ formatMoney(reportTotals.bot_cost) }}</template>
                             <template v-else-if="h.value === 'fraud_score_avg'">
@@ -599,6 +667,7 @@
                     :items-per-page="logPageSize"
                     :footer-props="{ 'items-per-page-options': [logPageSize] }"
                     :loading="logLoading"
+                    :item-class="clickLogRowClass"
             >
                 <template v-slot:item.received_at="{ item }">
                     <span class="click-time">
@@ -643,6 +712,9 @@
                 <v-btn text small color="primary" class="mr-2" @click="openImport">
                     <v-icon small class="mr-1">mdi-upload</v-icon>Import
                 </v-btn>
+                <v-btn text small color="primary" class="mr-2" @click="openAddConversion">
+                    <v-icon small class="mr-1">mdi-plus</v-icon>Add conversion
+                </v-btn>
                 <v-btn text small color="primary" class="mr-2" :disabled="!conversions || !conversions.length" @click="exportCsv">
                     <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
                 </v-btn>
@@ -652,11 +724,26 @@
             </div>
         </div>
         <v-card class="pa-4 mb-2">
+            <div v-if="convSummary && convSummary.total" class="conv-summary mb-3">
+                <v-chip small label outlined class="mr-1">Total {{ $fmtNum(convSummary.total) }}</v-chip>
+                <v-chip small label class="mr-1 approval-chip approval-chip--approved">Approved {{ $fmtNum(convSummary.approved) }}</v-chip>
+                <v-chip small label class="mr-1 approval-chip approval-chip--declined">Declined {{ $fmtNum(convSummary.declined) }}</v-chip>
+                <v-chip small label class="mr-1 approval-chip approval-chip--pending">Pending {{ $fmtNum(convSummary.pending) }}</v-chip>
+                <v-chip small label class="mr-1">Approval rate {{ formatPct(convSummary.approval_rate) }}</v-chip>
+                <v-chip small label class="mr-1">Decline rate {{ formatPct(convSummary.decline_rate) }}</v-chip>
+            </div>
             <div class="filter-bar align-center">
                 <v-select
                         v-model="convFilters.status"
                         :items="statusOptions"
                         label="Status"
+                        outlined dense hide-details clearable
+                        class="log-filter-status"
+                ></v-select>
+                <v-select
+                        v-model="convFilters.approval"
+                        :items="approvalOptions"
+                        label="Approval"
                         outlined dense hide-details clearable
                         class="log-filter-status"
                 ></v-select>
@@ -685,7 +772,38 @@
         <v-row dense>
             <v-col>
                 <v-card>
+                    <!-- Wave 19B: bulk status / approval on selected conversions -->
+                    <div v-if="convSelected.length" class="d-flex align-center pa-2 pl-4 bulk-bar">
+                        <span class="text-body-2 font-weight-medium mr-4">{{ convSelected.length }} selected</span>
+                        <v-select
+                                v-model="bulkStatusValue"
+                                :items="statusOptions.filter(s => s)"
+                                label="Set status"
+                                outlined dense hide-details
+                                class="bulk-value-select mr-2"
+                        ></v-select>
+                        <v-btn small color="primary" elevation="0" class="mr-2"
+                               :loading="bulkLoading" :disabled="!bulkStatusValue" @click="applyBulkStatus">
+                            Apply status
+                        </v-btn>
+                        <v-select
+                                v-model="bulkApprovalValue"
+                                :items="approvalValues"
+                                label="Set approval"
+                                outlined dense hide-details
+                                class="bulk-value-select mr-2"
+                        ></v-select>
+                        <v-btn small color="secondary" elevation="0" class="mr-2"
+                               :loading="bulkLoading" :disabled="!bulkApprovalValue" @click="applyBulkApproval">
+                            Apply approval
+                        </v-btn>
+                        <v-spacer></v-spacer>
+                        <v-btn small text @click="convSelected = []">Clear selection</v-btn>
+                    </div>
                     <v-data-table v-col-resize:reports-conversions="headers"
+                            v-model="convSelected"
+                            show-select
+                            item-key="id"
                             :headers="headers"
                             :items="conversions"
                             dense
@@ -695,9 +813,22 @@
                             :items-per-page="convPageSize"
                             :footer-props="{ 'items-per-page-options': [convPageSize] }"
                             :loading="convLoading"
+                            :item-class="convRowClass"
                     >
                         <template v-slot:item.status="{ item }">
                             <span v-if="item.status" class="status-chip" :class="statusChipClass(item.status)">{{ item.status }}</span>
+                            <span v-else class="grey--text">—</span>
+                        </template>
+                        <template v-slot:item.approval="{ item }">
+                            <span v-if="item.approval" class="approval-chip" :class="approvalChipClass(item.approval)">{{ item.approval }}</span>
+                            <span v-else class="grey--text">—</span>
+                        </template>
+                        <template v-slot:item.is_duplicate="{ item }">
+                            <span v-if="item.is_duplicate" class="approval-chip approval-chip--other">duplicate</span>
+                            <span v-else class="grey--text">—</span>
+                        </template>
+                        <template v-slot:item.dedupe_token="{ item }">
+                            <code v-if="item.dedupe_token">{{ item.dedupe_token }}</code>
                             <span v-else class="grey--text">—</span>
                         </template>
                         <template v-slot:item.click_id="{ item }">
@@ -769,6 +900,13 @@
                             outlined
                             dense
                     ></v-select>
+                    <v-select
+                            v-model="editItem.approval"
+                            :items="approvalOptions"
+                            label="Approval"
+                            outlined
+                            dense
+                    ></v-select>
                     <v-row dense>
                         <v-col cols="6">
                             <v-text-field label="Payout" v-model="editItem.payout" type="number" step="0.01" outlined dense></v-text-field>
@@ -820,6 +958,64 @@
                 </v-card-actions>
             </v-card>
         </v-dialog>
+
+        <!-- Wave 19B: manual add conversion (single offline conversion, no CSV) -->
+        <v-dialog v-model="addDialog" max-width="640">
+            <v-card>
+                <v-card-title class="text-h6">Add conversion</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-2">
+                        Record a single offline conversion. Provide a click id or a
+                        transaction id; an existing conversion is accumulated (LTV) instead of duplicated.
+                    </div>
+                    <v-row dense>
+                        <v-col cols="6">
+                            <v-select v-model="addForm.status" :items="statusOptions.filter(s => s)"
+                                      label="Status" outlined dense hide-details></v-select>
+                        </v-col>
+                        <v-col cols="6">
+                            <v-select v-model="addForm.approval" :items="approvalValues"
+                                      label="Approval" outlined dense hide-details></v-select>
+                        </v-col>
+                    </v-row>
+                    <v-row dense class="mt-1">
+                        <v-col cols="6">
+                            <v-text-field v-model="addForm.payout" label="Payout" type="number" step="0.01"
+                                          outlined dense hide-details></v-text-field>
+                        </v-col>
+                        <v-col cols="6">
+                            <v-text-field v-model="addForm.revenue" label="Revenue (optional)" type="number" step="0.01"
+                                          outlined dense hide-details></v-text-field>
+                        </v-col>
+                    </v-row>
+                    <v-text-field v-model="addForm.click_id" label="Click ID" outlined dense hide-details
+                                  class="mt-1"></v-text-field>
+                    <v-row dense class="mt-1">
+                        <v-col cols="6">
+                            <v-text-field v-model="addForm.external_id" label="External ID (optional)"
+                                          outlined dense hide-details></v-text-field>
+                        </v-col>
+                        <v-col cols="6">
+                            <v-text-field v-model="addForm.transaction_id" label="Transaction ID (optional)"
+                                          outlined dense hide-details></v-text-field>
+                        </v-col>
+                    </v-row>
+                    <div class="caption grey--text mt-3">Sub IDs (optional)</div>
+                    <v-row dense>
+                        <v-col v-for="n in 5" :key="'add-sub-' + n" cols="4">
+                            <v-text-field v-model="addForm['sub_id_' + n]" :label="'Sub ID ' + n"
+                                          outlined dense hide-details></v-text-field>
+                        </v-col>
+                    </v-row>
+                    <div v-if="addError" class="caption error--text mt-2">{{ addError }}</div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="addDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" :loading="addSaving" @click="submitAddConversion">Add</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
         </template>
 
         <!-- FUNNEL VIEW (G10): per-step visits / click-outs / conversions -->
@@ -859,6 +1055,9 @@
                         hide-default-footer
                         dense
                 >
+                    <template v-slot:item.visits="{ item }">{{ $fmtNum(item.visits) }}</template>
+                    <template v-slot:item.clickouts="{ item }">{{ $fmtNum(item.clickouts) }}</template>
+                    <template v-slot:item.conversions="{ item }">{{ $fmtNum(item.conversions) }}</template>
                     <template v-slot:item.revenue="{ item }">{{ formatMoney(item.revenue) }}</template>
                     <template v-slot:item.profit="{ item }">
                         <span :class="signClass(item.profit)">{{ formatMoney(item.profit) }}</span>
@@ -866,7 +1065,7 @@
                     <template v-slot:item.cr="{ item }">{{ pct(item.cr) }}</template>
                     <template v-slot:item.cumulative_cr="{ item }">{{ pct(item.cumulative_cr) }}</template>
                     <template v-slot:item.drop_off_pct="{ item }">
-                        {{ item.drop_off_pct == null ? '—' : item.drop_off_pct + '%' }}
+                        {{ item.drop_off_pct == null ? '—' : $fmtNum(item.drop_off_pct) + '%' }}
                     </template>
                 </v-data-table>
             </v-card>
@@ -904,6 +1103,7 @@
                 convDateBasis: 'click_date',
                 basisNote: null,
                 selectedColumns: ['visits', 'clicks', 'conversions', 'cost', 'revenue', 'profit', 'cr', 'epc', 'roi'],
+                columnTemplates: [],
                 sortBy: 'visits',
                 sortDir: 'desc',
                 customMetrics: [],
@@ -945,6 +1145,48 @@
                     { label: 'Traffic chain', icon: 'mdi-traffic-light', dims: ['utm_source', 'utm_medium', 'utm_campaign', 'keyword'] },
                     { label: 'Funnel', icon: 'mdi-filter-outline', dims: ['campaign_id', 'offer_id', 'landing_id'] },
                 ],
+                // Wave 19B: built-in report templates (frontend-only list — no
+                // new table). Each loads its config into the builder.
+                activeTemplate: null,
+                templateNote: '',
+                reportTemplateGallery: [
+                    { id: 'campaign', name: 'Campaign performance', icon: 'mdi-bullseye-arrow',
+                      hint: 'Clicks, conversions and ROI per campaign',
+                      dimensions: ['campaign_id'], days: 7, sortBy: 'visits',
+                      columns: ['visits', 'clicks', 'conversions', 'cost', 'revenue', 'profit', 'cr', 'epc', 'roi'] },
+                    { id: 'offer_landing', name: 'Offer / landing split', icon: 'mdi-call-split',
+                      hint: 'Which offer and landing page convert',
+                      dimensions: ['offer_id', 'landing_id'], days: 7, sortBy: 'visits',
+                      columns: ['visits', 'clicks', 'conversions', 'revenue', 'profit', 'cr', 'epc', 'roi'] },
+                    { id: 'geo', name: 'Geo breakdown', icon: 'mdi-earth',
+                      hint: 'Country → region → city drill-down',
+                      dimensions: ['country', 'region', 'city'], days: 7, sortBy: 'visits',
+                      columns: ['visits', 'clicks', 'conversions', 'cost', 'revenue', 'cr', 'roi'] },
+                    { id: 'source_quality', name: 'Traffic-source quality', icon: 'mdi-traffic-light',
+                      hint: 'Conversion quality and reject rate per source',
+                      dimensions: ['traffic_source_name'], days: 7, sortBy: 'visits',
+                      columns: ['visits', 'clicks', 'conversions', 'rejected', 'revenue', 'profit', 'cr', 'roi', 'rejected_rate', 'bot_clicks'] },
+                    { id: 'device_os', name: 'Device & OS', icon: 'mdi-cellphone-link',
+                      hint: 'Device type → OS → OS version',
+                      dimensions: ['device_type', 'os', 'os_version'], days: 7, sortBy: 'visits',
+                      columns: ['visits', 'clicks', 'conversions', 'revenue', 'cr', 'roi'] },
+                    { id: 'hour', name: 'Hour-of-day', icon: 'mdi-clock-outline',
+                      hint: 'Performance by hour to shape dayparting',
+                      dimensions: ['hour'], days: 7, sortBy: 'visits',
+                      columns: ['visits', 'clicks', 'conversions', 'revenue', 'cr', 'roi'] },
+                    { id: 'week', name: 'Week-over-week', icon: 'mdi-calendar-week',
+                      hint: 'ISO week for trend comparison',
+                      dimensions: ['week'], days: 28, sortBy: 'visits',
+                      columns: ['visits', 'clicks', 'conversions', 'revenue', 'profit', 'cr', 'roi'] },
+                    { id: 'subid', name: 'Sub-ID chain', icon: 'mdi-numeric',
+                      hint: 'Sub ID 1 → 5 chain for source drill-down',
+                      dimensions: ['sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5'], days: 7, sortBy: 'visits',
+                      columns: ['visits', 'clicks', 'conversions', 'revenue', 'cr', 'epc'] },
+                    { id: 'ip', name: 'IP report', icon: 'mdi-ip-network',
+                      hint: 'One day, grouped by client IP',
+                      dimensions: ['ip'], days: 0, singleDay: true, sortBy: 'clicks',
+                      columns: ['visits', 'clicks', 'unique_clicks', 'conversions', 'revenue', 'cr'] },
+                ],
                 emailHourOptions: Array.from({length: 24}, (_, h) => ({text: String(h).padStart(2, '0') + ':00', value: h})),
                 reportTotals: {},
                 dimensionItems: [
@@ -976,6 +1218,7 @@
                     { key: 'isp', label: 'ISP' },
                     { key: 'connection_type', label: 'Connection type' },
                     { key: 'domain', label: 'Domain' },
+                    { key: 'ip', label: 'IP (client address)' },
                     { key: 'user_agent', label: 'User Agent' },
                     { key: 'status', label: 'Conversion status' },
                     { key: 'is_bot', label: 'Bot flag' },
@@ -1011,7 +1254,10 @@
                     {text: 'Campaign ID', value: 'campaign_id'},
                     {text: 'Offer ID', value: 'offer_id'},
                     {text: 'Status', value: 'status'},
+                    {text: 'Approval', value: 'approval', sortable: false},
                     {text: 'External ID', value: 'external_id'},
+                    {text: 'Dedupe token', value: 'dedupe_token', sortable: false},
+                    {text: 'Duplicate', value: 'is_duplicate', sortable: false},
                     {text: 'Sub ID 1', value: 'sub_id_1'},
                     {text: 'IP', value: 'ip'},
                     {text: 'Payout', value: 'payout', align: 'end'},
@@ -1027,8 +1273,28 @@
                 convTotal: 0,
                 convFilters: {
                     status: '',
+                    approval: '',
                     search: '',
                     url: '',
+                },
+                convSelected: [],
+                bulkStatusValue: null,
+                bulkApprovalValue: '',
+                bulkLoading: false,
+                convSummary: null,
+                approvalValues: ['pending', 'approved', 'declined', 'other'],
+                addDialog: false,
+                addSaving: false,
+                addError: '',
+                addForm: {
+                    status: 'sale',
+                    approval: 'pending',
+                    payout: '',
+                    revenue: '',
+                    click_id: '',
+                    external_id: '',
+                    transaction_id: '',
+                    sub_id_1: '', sub_id_2: '', sub_id_3: '', sub_id_4: '', sub_id_5: '',
                 },
                 customStatuses: [],
                 importDialog: false,
@@ -1146,10 +1412,13 @@
             },
             convFiltersActive() {
                 const f = this.convFilters;
-                return !!(f.status || f.search || f.url);
+                return !!(f.status || f.approval || f.search || f.url);
             },
             statusOptions() {
                 return ['', 'lead', 'sale', 'upsale', 'rejected', 'hold', 'trash', ...this.customStatuses];
+            },
+            approvalOptions() {
+                return ['', ...this.approvalValues];
             },
             funnelCampaigns() {
                 return (this.campaigns || []).filter(c => c.config && c.config.funnel && c.config.funnel.enabled);
@@ -1163,6 +1432,15 @@
             this.loadCustomStatuses();
             this.loadSavedReports();
             this.loadReportPresets();
+            this.loadColumnTemplates();
+            if (this.$loadWorkspace) {
+                this.$loadWorkspace().then(() => {
+                    const d = (this.$workspace || {}).default_columns || {};
+                    if (Array.isArray(d.reports) && d.reports.length) {
+                        this.selectedColumns = d.reports.slice();
+                    }
+                });
+            }
             if (this.$root.roleLabel === 'admin') this.loadOffers();
             this.$root.$on('load-reports', () => { this.loadCampaigns(); this.loadReports(); this.loadClickLog(); });
         },
@@ -1429,8 +1707,41 @@
                 const known = new Set(this.dimensionItems.map(d => d.key));
                 const dims = (preset.dims || []).filter(d => known.has(d)).slice(0, 5);
                 if (!dims.length) return;
+                this.activeTemplate = null;
+                this.templateNote = '';
                 this.dimensions = dims;
                 this.expanded = {};
+                this.runReport();
+            },
+            // --- Wave 19B: built-in report template gallery ---
+            isSingleDayRange() {
+                return this.dateRange.length === 2 && this.dateRange[0] === this.dateRange[1];
+            },
+            applyReportTemplate(t) {
+                if (!t) return;
+                const known = new Set(this.dimensionItems.map(d => d.key));
+                const dims = (t.dimensions || []).filter(d => known.has(d)).slice(0, 5);
+                if (!dims.length) return;
+                this.activeTemplate = t.id;
+                this.dimensions = dims;
+                if (Array.isArray(t.columns) && t.columns.length) {
+                    this.selectedColumns = t.columns.filter(c => this.reportHeadersBase.some(h => h.value === c));
+                }
+                this.sortBy = t.sortBy || 'visits';
+                this.sortDir = 'desc';
+                const to = new Date();
+                const from = new Date();
+                if (t.singleDay) {
+                    from.setTime(to.getTime());
+                } else {
+                    from.setDate(from.getDate() - (t.days || 6));
+                }
+                this.dateRange = [from.toISOString().split('T')[0], to.toISOString().split('T')[0]];
+                this.activePreset = '';
+                this.expanded = {};
+                this.templateNote = t.singleDay
+                    ? t.name + ' is fixed to a single day (' + this.dateRange[0] + '). Pick another day and run again to move it.'
+                    : '';
                 this.runReport();
             },
             // --- G52: sharing ---
@@ -1577,7 +1888,7 @@
                 this.loadClickLog();
             },
             clearConvFilters() {
-                this.convFilters = {status: '', search: '', url: ''};
+                this.convFilters = {status: '', approval: '', search: '', url: ''};
                 this.convPage = 1;
                 this.loadReports();
             },
@@ -1612,11 +1923,87 @@
             },
             formatMoney(v) {
                 const n = parseFloat(v) || 0;
-                return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                return '$' + this.$fmtNum(n);
             },
             formatPct(v) {
                 const n = parseFloat(v) || 0;
-                return n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%';
+                return this.$fmtNum(n) + '%';
+            },
+            // Wave 19A: shared conditional row colouring on the log/conversion
+            // tables (the breakdown table keeps its perf win/loss tinting).
+            clickLogRowClass(item) {
+                return this.$rowClass(item, 'reports-clicklog');
+            },
+            convRowClass(item) {
+                return this.$rowClass(item, 'reports-conversions');
+            },
+            toggleReportColumn(key) {
+                const all = this.reportHeadersBase.map(h => h.value);
+                const next = this.selectedColumns.indexOf(key) === -1
+                    ? this.selectedColumns.concat([key])
+                    : this.selectedColumns.filter(k => k !== key);
+                if (!next.length) return;
+                const extras = next.filter(k => all.indexOf(k) === -1);
+                this.selectedColumns = all.filter(k => next.indexOf(k) !== -1).concat(extras);
+            },
+            loadColumnTemplates() {
+                fetch('/backend/api/settings/column-templates?scope=reports', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {templates: []})
+                    .then(data => { this.columnTemplates = data.templates || []; })
+                    .catch(() => { this.columnTemplates = []; });
+            },
+            saveColumnTemplate() {
+                const name = (window.prompt('Template name') || '').trim();
+                if (!name) return;
+                fetch('/backend/api/settings/column-templates', {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({scope: 'reports', name: name,
+                                          columns: this.selectedColumns.slice()}),
+                })
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(data => {
+                        this.columnTemplates = data.templates || [];
+                        this.$root.$emit('show-message', {type: 'success', text: 'Template saved'});
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Template save failed: ' + sanitizeToastMessage(err.message)}));
+            },
+            applyColumnTemplate(template) {
+                if (!template || !Array.isArray(template.columns) || !template.columns.length) return;
+                this.selectedColumns = template.columns.slice();
+            },
+            deleteColumnTemplate(template) {
+                if (!template) return;
+                fetch('/backend/api/settings/column-templates?scope=reports&name='
+                        + encodeURIComponent(template.name),
+                      {method: 'DELETE', credentials: 'include'})
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(() => {
+                        this.columnTemplates = this.columnTemplates.filter(t => t.name !== template.name);
+                        this.$root.$emit('show-message', {type: 'success', text: 'Template deleted'});
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Template delete failed: ' + sanitizeToastMessage(err.message)}));
+            },
+            saveDefaultColumns() {
+                const ws = Object.assign({}, this.$workspace);
+                ws.default_columns = Object.assign({}, ws.default_columns);
+                ws.default_columns.reports = this.selectedColumns.slice();
+                fetch('/backend/api/settings/', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({settings: {workspace: ws}}),
+                })
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(() => {
+                        if (this.$loadWorkspace) this.$loadWorkspace();
+                        this.$root.$emit('show-message', {type: 'success', text: 'Default columns saved'});
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Save failed: ' + sanitizeToastMessage(err.message)}));
             },
             formatEpc(v) {
                 const n = parseFloat(v) || 0;
@@ -1722,6 +2109,12 @@
                         type: 'error', text: 'Offer update failed: ' + sanitizeToastMessage(err.message)}));
             },
             runReport() {
+                this.templateNote = '';
+                if (this.dimensions.includes('ip') && !this.isSingleDayRange()) {
+                    this.basisNote =
+                        'IP report works on a single day — set the same start and end date (e.g. today) and run it again.';
+                    return;
+                }
                 this.loading = true;
                 this.expanded = {};
                 const payload = {
@@ -1855,6 +2248,7 @@
                 this.$root.$emit('show-message', {type: 'success', text: 'CSV exported'});
             },
             reloadReports() {
+                this.convSelected = [];
                 this.loadReports();
                 this.$root.$emit("show-message", {type: "success", text: 'Conversions reloaded successfully!'});
             },
@@ -1884,6 +2278,11 @@
                     return palette[idx % palette.length];
                 }
                 return 'status-chip--neutral';
+            },
+            approvalChipClass(approval) {
+                const map = {approved: 'approval-chip--approved', declined: 'approval-chip--declined',
+                    pending: 'approval-chip--pending', other: 'approval-chip--other'};
+                return map[approval] || 'approval-chip--other';
             },
             openImport() {
                 this.importText = '';
@@ -1921,6 +2320,7 @@
             conversionListParams() {
                 const params = new URLSearchParams();
                 if (this.convFilters.status) params.set('status', this.convFilters.status);
+                if (this.convFilters.approval) params.set('approval', this.convFilters.approval);
                 if (this.convFilters.search) params.set('search', this.convFilters.search);
                 if (this.convFilters.url) params.set('url', this.convFilters.url);
                 params.set('date_from', this.dateRange[0]);
@@ -1939,6 +2339,7 @@
             },
             loadReports() {
                 this.convLoading = true;
+                this.loadConversionsSummary();
                 const params = this.conversionListParams();
                 params.set('limit', this.convPageSize);
                 params.set('offset', (this.convPage - 1) * this.convPageSize);
@@ -1960,6 +2361,13 @@
                         this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
             },
+            loadConversionsSummary() {
+                fetch('/backend/api/reports/summary?' + this.conversionListParams().toString(),
+                      {credentials: 'include'})
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => { this.convSummary = data; })
+                    .catch(() => { this.convSummary = null; });
+            },
             async exportCsv() {
                 try {
                     const res = await fetch('/backend/api/reports/export?' + this.conversionListParams().toString(),
@@ -1972,12 +2380,14 @@
             },
             openEdit(item) {
                 this.editItem = Object.assign({}, item);
+                if (!this.editItem.approval) this.editItem.approval = 'pending';
                 this.editDialog = true;
             },
             async saveConversion() {
                 this.editSaving = true;
                 const payload = {
                     status: this.editItem.status,
+                    approval: this.editItem.approval || 'pending',
                     payout: this.editItem.payout === '' || this.editItem.payout == null ? null : parseFloat(this.editItem.payout),
                     revenue: this.editItem.revenue === '' || this.editItem.revenue == null ? null : parseFloat(this.editItem.revenue),
                     external_id: this.editItem.external_id || null,
@@ -2015,6 +2425,109 @@
                     this.loadReports();
                 } catch (err) {
                     this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                }
+            },
+            // --- Wave 19B: bulk status / approval on selected conversions ---
+            selectedConvIds() {
+                return (this.convSelected || []).map(c => c.id);
+            },
+            async applyBulkStatus() {
+                const ids = this.selectedConvIds();
+                if (!ids.length || !this.bulkStatusValue) return;
+                this.bulkLoading = true;
+                try {
+                    const res = await fetch('/backend/api/reports/bulk-status', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify({ids: ids, status: this.bulkStatusValue}),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Bulk update failed');
+                    this.$root.$emit("show-message", {type: "success",
+                        text: 'Status updated on ' + data.updated + ' conversion(s)'});
+                    this.convSelected = [];
+                    this.bulkStatusValue = null;
+                    this.loadReports();
+                } catch (err) {
+                    this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                } finally {
+                    this.bulkLoading = false;
+                }
+            },
+            async applyBulkApproval() {
+                const ids = this.selectedConvIds();
+                if (!ids.length || !this.bulkApprovalValue) return;
+                this.bulkLoading = true;
+                try {
+                    const res = await fetch('/backend/api/reports/bulk-approval', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify({ids: ids, approval: this.bulkApprovalValue}),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Bulk update failed');
+                    this.$root.$emit("show-message", {type: "success",
+                        text: 'Approval updated on ' + data.updated + ' conversion(s)'});
+                    this.convSelected = [];
+                    this.bulkApprovalValue = '';
+                    this.loadReports();
+                } catch (err) {
+                    this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                } finally {
+                    this.bulkLoading = false;
+                }
+            },
+            // --- Wave 19B: manual add conversion ---
+            openAddConversion() {
+                this.addError = '';
+                this.addForm = {
+                    status: 'sale', approval: 'pending', payout: '', revenue: '',
+                    click_id: '', external_id: '', transaction_id: '',
+                    sub_id_1: '', sub_id_2: '', sub_id_3: '', sub_id_4: '', sub_id_5: '',
+                };
+                this.addDialog = true;
+            },
+            async submitAddConversion() {
+                const f = this.addForm;
+                if (!f.click_id && !f.external_id && !f.transaction_id) {
+                    this.addError = 'Provide a click id, external id or transaction id';
+                    return;
+                }
+                this.addSaving = true;
+                this.addError = '';
+                const sub_ids = {};
+                for (let n = 1; n <= 5; n++) {
+                    if (f['sub_id_' + n]) sub_ids['sub_id_' + n] = f['sub_id_' + n];
+                }
+                const payload = {
+                    status: f.status || 'sale',
+                    approval: f.approval || 'pending',
+                    payout: f.payout === '' ? null : parseFloat(f.payout),
+                    revenue: f.revenue === '' ? null : parseFloat(f.revenue),
+                    click_id: f.click_id || null,
+                    external_id: f.external_id || null,
+                    transaction_id: f.transaction_id || null,
+                    sub_ids: sub_ids,
+                };
+                try {
+                    const res = await fetch('/backend/api/reports/conversion', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Add failed');
+                    this.addDialog = false;
+                    this.$root.$emit("show-message", {type: "success",
+                        text: data.created ? 'Conversion added' : 'Conversion updated (existing id)'});
+                    this.loadReports();
+                } catch (err) {
+                    this.addError = sanitizeToastMessage(err.message);
+                } finally {
+                    this.addSaving = false;
                 }
             },
         },
@@ -2195,5 +2708,58 @@
     [data-theme="dark"] .v-data-table tr.perf-loss-1:hover > td,
     [data-theme="dark"] .v-data-table tr.perf-loss-2:hover > td,
     [data-theme="dark"] .v-data-table tr.perf-loss-3:hover > td { background: #452622 !important; }
+    .column-menu-card {
+        min-width: 280px;
+        max-height: 460px;
+        overflow-y: auto;
+    }
+    .column-menu-check {
+        margin-top: 0;
+        padding-top: 0;
+        height: 32px;
+    }
+    /* Wave 19B — report template gallery */
+    .report-gallery {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2, 8px);
+    }
+    .report-template-card {
+        width: 190px;
+        cursor: pointer;
+        transition: box-shadow var(--t-med, 200ms) ease, border-color var(--t-med, 200ms) ease;
+    }
+    .report-template-card:hover {
+        border-color: var(--primary, #2563eb);
+    }
+    .report-template-card--active {
+        border-color: var(--primary, #2563eb);
+        box-shadow: 0 0 0 1px var(--primary, #2563eb);
+    }
+    /* Wave 19B — approval lifecycle chips (mirrors .status-chip) */
+    .approval-chip {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 2px var(--space-2, 8px);
+        font-size: var(--fs-11, 11px);
+        font-weight: 600;
+        line-height: 1.6;
+        white-space: nowrap;
+        background: var(--status-neutral-bg);
+        color: var(--status-neutral-text);
+    }
+    .approval-chip--approved { background: var(--status-success-bg); color: var(--status-success-text); }
+    .approval-chip--declined { background: var(--status-danger-bg); color: var(--status-danger-text); }
+    .approval-chip--pending { background: var(--status-warning-bg); color: var(--status-warning-text); }
+    .approval-chip--other { background: var(--status-neutral-bg); color: var(--status-neutral-text); }
+    .bulk-value-select {
+        max-width: 160px;
+    }
+    .conv-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1, 4px);
+    }
 </style>
 {% endraw %}

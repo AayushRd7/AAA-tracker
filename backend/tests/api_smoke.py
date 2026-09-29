@@ -6854,6 +6854,254 @@ print("ESCAPED-OK")
     check("w18: global fallback restored", r.status_code == 200, r.text[:120])
     settle_settings_cache()
 
+    # ===== Wave 19A: workspace display settings + configurable columns =====
+    print("== Wave 19A: workspace display settings ==")
+    w19 = os.getpid()
+
+    r = s.get(f"{api}/workspace/")
+    check("w19: workspace reader returns the display block",
+          r.status_code == 200 and isinstance(r.json().get("workspace"), dict)
+          and "decimals" in r.json()["workspace"], r.text[:160])
+    w19_saved_ws = ((s.get(f"{api}/settings/").json().get("settings")) or {}).get("workspace")
+
+    w19_decimals = 3 if (w19_saved_ws or {}).get("decimals") != 3 else 4
+    w19_ws = {
+        "decimals": w19_decimals,
+        "divider": "space",
+        "row_coloring": [
+            {"column": "roi", "operator": "<", "value": 0, "color": "red"},
+            {"column": "roi", "operator": ">=", "value": 100, "color": "green"},
+        ],
+        "default_columns": {"logs-clicks": ["received_at", "ip", "status"]},
+    }
+
+    # A sibling key in the shared settings document must survive the save.
+    r = s.post(f"{api}/settings/", json={"settings": {"__smoke_w19_keep": {"n": 1}}})
+    check("w19: sentinel settings key saved", r.status_code == 200, r.text[:120])
+    r = s.post(f"{api}/settings/", json={"settings": {"workspace": w19_ws}})
+    check("w19: workspace block saved via settings API", r.status_code == 200, r.text[:120])
+
+    w19_back = (((s.get(f"{api}/settings/").json().get("settings")) or {}).get("workspace") or {})
+    check("w19: workspace decimals round-trips", w19_back.get("decimals") == w19_decimals,
+          str(w19_back)[:160])
+    check("w19: workspace divider round-trips", w19_back.get("divider") == "space",
+          str(w19_back)[:160])
+    check("w19: workspace row_coloring round-trips",
+          isinstance(w19_back.get("row_coloring"), list) and len(w19_back["row_coloring"]) == 2
+          and w19_back["row_coloring"][0].get("color") == "red",
+          str(w19_back.get("row_coloring"))[:160])
+    check("w19: workspace default_columns round-trips",
+          (w19_back.get("default_columns") or {}).get("logs-clicks")
+          == ["received_at", "ip", "status"], str(w19_back.get("default_columns"))[:160])
+    w19_keep = (((s.get(f"{api}/settings/").json().get("settings")) or {}).get("__smoke_w19_keep") or {})
+    check("w19: saving workspace does not clobber sibling settings keys",
+          w19_keep.get("n") == 1, str(w19_keep)[:120])
+    r = s.get(f"{api}/workspace/")
+    check("w19: workspace reader reflects saved decimals",
+          (r.json().get("workspace") or {}).get("decimals") == w19_decimals, r.text[:160])
+
+    # -- column templates: save/load/delete per scope, isolated between scopes --
+    w19_scope_a = "logs-clicks"
+    w19_scope_b = "reports"
+    w19_tname = f"w19-{w19}"
+    r = s.put(f"{api}/settings/column-templates", json={
+        "scope": w19_scope_a, "name": w19_tname, "columns": ["received_at", "ip"]})
+    check("w19: column template saved (scope A)", r.status_code == 200
+          and r.json().get("template", {}).get("name") == w19_tname, r.text[:160])
+    r = s.put(f"{api}/settings/column-templates", json={
+        "scope": w19_scope_b, "name": w19_tname, "columns": ["visits", "revenue"]})
+    check("w19: column template saved (scope B)", r.status_code == 200, r.text[:160])
+
+    w19_ta = s.get(f"{api}/settings/column-templates",
+                   params={"scope": w19_scope_a}).json().get("templates", [])
+    w19_tb = s.get(f"{api}/settings/column-templates",
+                   params={"scope": w19_scope_b}).json().get("templates", [])
+    w19_a_cols = next((t.get("columns") for t in w19_ta if t.get("name") == w19_tname), None)
+    w19_b_cols = next((t.get("columns") for t in w19_tb if t.get("name") == w19_tname), None)
+    check("w19: column templates load per scope",
+          w19_a_cols == ["received_at", "ip"] and w19_b_cols == ["visits", "revenue"],
+          f"A={w19_a_cols} B={w19_b_cols}")
+    check("w19: column templates isolated between scopes",
+          len([t for t in w19_ta if t.get("name") == w19_tname]) == 1
+          and len([t for t in w19_tb if t.get("name") == w19_tname]) == 1,
+          f"A={w19_ta} B={w19_tb}")
+
+    check("w19: empty template columns rejected",
+          s.put(f"{api}/settings/column-templates",
+                json={"scope": w19_scope_a, "name": "w19-bad", "columns": []}).status_code == 400)
+    check("w19: deleting a missing template 404s",
+          s.delete(f"{api}/settings/column-templates",
+                   params={"scope": w19_scope_a, "name": "w19-missing"}).status_code == 404)
+    check("w19: column template deleted (scope A)",
+          s.delete(f"{api}/settings/column-templates",
+                   params={"scope": w19_scope_a, "name": w19_tname}).status_code == 200)
+    check("w19: column template deleted (scope B)",
+          s.delete(f"{api}/settings/column-templates",
+                   params={"scope": w19_scope_b, "name": w19_tname}).status_code == 200)
+    w19_ta2 = s.get(f"{api}/settings/column-templates",
+                    params={"scope": w19_scope_a}).json().get("templates", [])
+    check("w19: deleted template no longer listed",
+          not any(t.get("name") == w19_tname for t in w19_ta2), str(w19_ta2)[:160])
+
+    # -- the served pages carry the new markers --
+    for w19_pg, w19_marker in (("settings", "settings.workspace.decimals"),
+                               ("logs", "loadColumnTemplates"),
+                               ("reports", "column-templates?scope=reports")):
+        rp = s.get(f"{BASE}/backend/{w19_pg}")
+        check(f"w19: served /backend/{w19_pg} has the workspace marker",
+              rp.status_code == 200 and w19_marker in rp.text,
+              f"{rp.status_code} missing {w19_marker}")
+        check(f"w19: /backend/{w19_pg} has no unreplaced jinja tags",
+              "{%" not in rp.text, "unreplaced jinja tag")
+
+    # cleanup: restore the original workspace and drop the sentinel key
+    _ = s.post(f"{api}/settings/", json={"settings": {"workspace": w19_saved_ws}})
+    _ = s.post(f"{api}/settings/", json={"settings": {"__smoke_w19_keep": None}})
+    w19_ws_final = (((s.get(f"{api}/settings/").json().get("settings")) or {}).get("workspace") or {})
+    check("w19: workspace restored after the run",
+          (w19_saved_ws or {}) == w19_ws_final if isinstance(w19_saved_ws, dict) else True,
+          str(w19_ws_final)[:160])
+
+    # ===== Wave 19B: report templates, IP report, conversion reconciliation =====
+    print("== Wave 19B: IP report + approval lifecycle + conversions log ==")
+    w19b = os.getpid()
+    w19b_conv_ids = []
+
+    # -- approval column exists with the pending default after the startup migration
+    w19b_col = pg_exec_out(
+        "SELECT column_default || '|' || is_nullable FROM information_schema.columns "
+        "WHERE table_name='conversions_data' AND column_name='approval'").strip()
+    check("w19b: approval column exists with pending default after migration",
+          "'pending'::character varying" in w19b_col and w19b_col.endswith("|NO"), w19b_col)
+
+    # -- a normal conversion starts pending and is not a duplicate
+    w19b_norm = f"w19b-normal-{w19b}"
+    w19b_tid_a = f"w19bsum-{w19b}-a"
+    requests.get(f"{BASE}/pb?clickid={w19b_norm}&status=sale&payout=4",
+                 params={"transaction_id": w19b_tid_a}, verify=not INSECURE)
+    w19b_rec_a = poll_first({"click_id": w19b_norm})
+    check("w19b: normal conversion defaults to approval=pending",
+          w19b_rec_a and w19b_rec_a.get("approval") == "pending", str(w19b_rec_a and w19b_rec_a.get("approval")))
+    check("w19b: normal conversion is not a duplicate and exposes its dedupe token",
+          w19b_rec_a and w19b_rec_a.get("is_duplicate") is False
+          and w19b_rec_a.get("dedupe_token") == w19b_tid_a,
+          str(w19b_rec_a and (w19b_rec_a.get("is_duplicate"), w19b_rec_a.get("dedupe_token"))))
+    if w19b_rec_a:
+        w19b_conv_ids.append(w19b_rec_a["id"])
+
+    # -- single-conversion approval set + invalid value rejected
+    if w19b_rec_a:
+        r = s.patch(f"{api}/reports/{w19b_rec_a['id']}", json={"approval": "approved"})
+        check("w19b: single conversion approval set accepted", r.status_code == 200, r.text[:150])
+        r = s.get(f"{api}/reports/", params={"click_id": w19b_norm})
+        got = r.json()[0] if r.status_code == 200 and r.json() else {}
+        check("w19b: approval reflected in the conversion list",
+              got.get("approval") == "approved", str(got.get("approval")))
+        r = s.patch(f"{api}/reports/{w19b_rec_a['id']}", json={"approval": "maybe"})
+        check("w19b: invalid approval on single update -> 400", r.status_code == 400, str(r.status_code))
+
+    # -- invalid approval on the bulk endpoint -> 400
+    r = s.post(f"{api}/reports/bulk-approval", json={"ids": [w19b_rec_a["id"] if w19b_rec_a else 0],
+                                                     "approval": "maybe"})
+    check("w19b: bulk approval rejects an invalid value (400)", r.status_code == 400, str(r.status_code))
+
+    # -- manual add conversion (dedupe path), then bulk approval + bulk status
+    w19b_man = f"w19b-man-{w19b}"
+    w19b_tid_b = f"w19bsum-{w19b}-b"
+    r = s.post(f"{api}/reports/conversion", json={
+        "status": "sale", "approval": "pending", "payout": 3.0,
+        "click_id": w19b_man, "transaction_id": w19b_tid_b,
+        "sub_ids": {"sub_id_1": f"w19b-sub-{w19b}"}})
+    w19b_man_id = (r.json() or {}).get("id")
+    check("w19b: manual add conversion created", r.status_code == 200
+          and (r.json() or {}).get("created") is True and bool(w19b_man_id), r.text[:200])
+    if w19b_man_id:
+        w19b_conv_ids.append(w19b_man_id)
+    check("w19b: manual add without any id -> 400",
+          s.post(f"{api}/reports/conversion", json={"payout": 1}).status_code == 400)
+
+    if w19b_man_id:
+        r = s.post(f"{api}/reports/bulk-approval",
+                   json={"ids": [w19b_man_id], "approval": "declined"})
+        check("w19b: bulk approval accepted", r.status_code == 200
+              and (r.json() or {}).get("updated") == 1, r.text[:180])
+        r = s.get(f"{api}/reports/", params={"click_id": w19b_man})
+        got = r.json()[0] if r.status_code == 200 and r.json() else {}
+        check("w19b: bulk approval reflected in the list", got.get("approval") == "declined",
+              str(got.get("approval")))
+
+        r = s.post(f"{api}/reports/bulk-status",
+                   json={"ids": [w19b_man_id], "status": "rejected"})
+        check("w19b: bulk status change accepted", r.status_code == 200
+              and (r.json() or {}).get("updated") == 1, r.text[:180])
+        r = s.get(f"{api}/reports/", params={"click_id": w19b_man})
+        got = r.json()[0] if r.status_code == 200 and r.json() else {}
+        check("w19b: bulk status reflected in the list", got.get("status") == "rejected",
+              str(got.get("status")))
+    check("w19b: bulk status rejects an unknown status (400)",
+          s.post(f"{api}/reports/bulk-status",
+                 json={"ids": [w19b_man_id or 0], "status": "definitely_not_a_status"}).status_code == 400)
+
+    # -- approval filter
+    r = s.get(f"{api}/reports/", params={"approval": "approved", "click_id": w19b_norm})
+    check("w19b: approval filter returns the approved row",
+          r.status_code == 200 and r.json() and r.json()[0].get("approval") == "approved",
+          r.text[:200])
+
+    # -- the dedupe path marks the row duplicate on a repeated write
+    if w19b_man_id:
+        r = s.post(f"{api}/reports/conversion", json={"click_id": w19b_man, "payout": 1.0})
+        check("w19b: repeat write dedupes onto the existing conversion",
+              r.status_code == 200 and (r.json() or {}).get("created") is False, r.text[:180])
+        r = s.get(f"{api}/reports/", params={"click_id": w19b_man})
+        got = r.json()[0] if r.status_code == 200 and r.json() else {}
+        check("w19b: duplicate conversion flagged and keeps its dedupe token",
+              got.get("is_duplicate") is True and got.get("dedupe_token") == w19b_tid_b,
+              str(got and (got.get("is_duplicate"), got.get("dedupe_token"))))
+
+    # -- approval / decline rates over the two pid-scoped conversions
+    r = s.get(f"{api}/reports/summary", params={"search": f"w19bsum-{w19b}"})
+    summ = r.json() if r.status_code == 200 else {}
+    check("w19b: conversions summary returns approval/decline rates",
+          r.status_code == 200 and summ.get("total", 0) >= 2
+          and summ.get("approval_rate") == round(summ.get("approved", 0) / summ["total"] * 100, 2)
+          and summ.get("decline_rate") == round(summ.get("declined", 0) / summ["total"] * 100, 2),
+          str(summ))
+    check("w19b: summary approval counts match the seeded rows",
+          summ.get("approved", 0) >= 1 and summ.get("declined", 0) >= 1, str(summ))
+
+    # -- CSV export carries the approval column
+    r = s.get(f"{api}/reports/export", params={"click_id": w19b_man})
+    check("w19b: conversions CSV export includes the approval column",
+          r.status_code == 200 and "approval" in r.text.splitlines()[0], r.text[:120])
+
+    # -- IP report: single day returns rows, multi-day is rejected with an explanation
+    requests.get(f"{BASE}/{alias}", verify=not INSECURE, allow_redirects=False)
+    w19b_day = ch_query("SELECT toString(toDate(now()))")
+    r = s.post(f"{api}/dashboard/breakdown", json={
+        "dimensions": ["ip"], "filters": {"date_from": w19b_day, "date_to": w19b_day}})
+    check("w19b: IP report single day returns grouped rows",
+          r.status_code == 200 and isinstance((r.json() or {}).get("rows"), list)
+          and len(r.json()["rows"]) >= 1, f"{r.status_code} {r.text[:160]}")
+    r = s.post(f"{api}/dashboard/breakdown", json={
+        "dimensions": ["ip"], "filters": {"date_from": "2026-01-01", "date_to": "2026-01-05"}})
+    check("w19b: IP report multi-day range rejected with an explanation",
+          r.status_code == 400 and "single day" in (r.json() or {}).get("detail", "").lower(),
+          f"{r.status_code} {r.text[:160]}")
+
+    # -- served page carries the new markers, no unreplaced jinja tags
+    rp = s.get(f"{BASE}/backend/reports")
+    check("w19b: served /backend/reports 200 with gallery + approval markers",
+          rp.status_code == 200 and "reportTemplateGallery" in rp.text
+          and "bulk-approval" in rp.text and "loadConversionsSummary" in rp.text,
+          f"{rp.status_code}")
+    check("w19b: /backend/reports has no unreplaced jinja tags",
+          "{%" not in rp.text, "unreplaced jinja tag")
+
+    # cleanup the conversions this block created
+    for w19b_cid_conv in w19b_conv_ids:
+        s.delete(f"{api}/reports/{w19b_cid_conv}")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

@@ -91,6 +91,29 @@ def _require_iso_dates(date_from, date_to):
                     detail=f"Invalid {label}: expected an ISO date (YYYY-MM-DD)")
 
 
+def _require_single_day_for_ip(dimensions, date_from, date_to):
+    """The IP report groups clicks by client address for one day only. A wider
+    range fans out into a per-(IP, day) list that is neither useful nor cheap,
+    so reject it with an explanatory 400 (the UI surfaces the detail inline)."""
+    if "ip" not in dimensions:
+        return
+    if not date_from or not date_to:
+        raise HTTPException(
+            status_code=400,
+            detail="IP report needs a single day — pick a start and end date on the same day")
+    try:
+        same_day = date_cls.fromisoformat(str(date_from)) == date_cls.fromisoformat(str(date_to))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="IP report needs a single day — pick a start and end date on the same day")
+    if not same_day:
+        raise HTTPException(
+            status_code=400,
+            detail="IP report works on a single day only — set the same start and end date "
+                   "(e.g. today) and run it again")
+
+
 def get_conversion_aggregates(db: Session, filters: dict, dimension: str,
                               campaign_scope: Optional[List[int]] = None) -> dict:
     """Group Postgres conversions_data by `dimension` for the date window.
@@ -349,6 +372,7 @@ async def get_breakdown(request: Request, body: ReportRequest, db: Session = Dep
             raise ValueError(f"Unknown date_basis: {date_basis}")
 
         _require_iso_dates(body.filters.date_from, body.filters.date_to)
+        _require_single_day_for_ip(dimensions, body.filters.date_from, body.filters.date_to)
         filters = body.filters.dict()
         scope = _click_scope_campaign_ids(request, db)
         if not _apply_click_scope(filters, scope):

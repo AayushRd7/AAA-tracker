@@ -144,6 +144,8 @@ async def ensure_schema():
             await conn.execute("""
                 ALTER TABLE conversions_data
                 ADD COLUMN IF NOT EXISTS postback_count INTEGER DEFAULT 0,
+                    -- conversion reconciliation (approval lifecycle + dedupe flag)
+                    ADD COLUMN IF NOT EXISTS is_duplicate BOOLEAN NOT NULL DEFAULT false,
                 ADD COLUMN IF NOT EXISTS last_postback_at TIMESTAMP,
                 ADD COLUMN IF NOT EXISTS flow_index INTEGER,
                 ADD COLUMN IF NOT EXISTS funnel_step INTEGER,
@@ -2285,6 +2287,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
         # money/history untouched (concurrency-safe increment).
         await conn.execute(
             "UPDATE conversions_data SET postback_count = COALESCE(postback_count, 0) + 1, "
+            "is_duplicate = true, "
             "last_postback_at = NOW() WHERE id = $1", row["id"])
         return True
 
@@ -2329,6 +2332,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             if existing:
                 await conn.execute(
                     "UPDATE conversions_data SET postback_count = COALESCE(postback_count, 0) + 1, "
+                    "is_duplicate = true, "
                     "last_postback_at = NOW() WHERE id = $1", existing["id"])
                 return True
         await insert_row(conn, target_click_id)

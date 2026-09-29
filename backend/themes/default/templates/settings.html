@@ -144,6 +144,78 @@
                                     dense
                             ></v-select>
 
+                            <v-divider class="my-4"></v-divider>
+                            <div class="subtitle-2 mb-2">Table display</div>
+
+                            <v-row dense>
+                                <v-col cols="6">
+                                    <v-text-field
+                                            label="Decimals"
+                                            v-model.number="settings.workspace.decimals"
+                                            type="number" min="0" max="6" step="1"
+                                            outlined dense hide-details
+                                            hint="0–6, applied to every numeric table cell"
+                                            persistent-hint
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="6">
+                                    <v-select
+                                            label="Thousands divider"
+                                            :items="dividerOptions"
+                                            v-model="settings.workspace.divider"
+                                            outlined dense hide-details
+                                    ></v-select>
+                                </v-col>
+                            </v-row>
+                            <div class="caption grey--text mt-2 mb-3">
+                                Preview: <strong>{{ workspacePreview }}</strong>
+                                — shown in Logs, Reports and Campaigns metrics.
+                            </div>
+
+                            <div class="subtitle-2 mb-1">Conditional row colouring</div>
+                            <div class="caption grey--text mb-2">
+                                Tint a data row when a numeric column matches a rule
+                                (Logs tables and the Reports click/conversion tables).
+                            </div>
+                            <div v-for="(rule, i) in settings.workspace.row_coloring" :key="i"
+                                 class="d-flex align-center row-color-rule">
+                                <v-combobox
+                                        v-model="rule.column"
+                                        :items="rowColumnSuggestions"
+                                        label="Column"
+                                        outlined dense hide-details
+                                        class="row-rule-col"
+                                ></v-combobox>
+                                <v-select
+                                        v-model="rule.operator"
+                                        :items="rowOperatorOptions"
+                                        label="Op"
+                                        outlined dense hide-details
+                                        class="row-rule-op"
+                                ></v-select>
+                                <v-text-field
+                                        v-model="rule.value"
+                                        label="Value"
+                                        outlined dense hide-details
+                                        class="row-rule-val"
+                                ></v-text-field>
+                                <v-select
+                                        v-model="rule.color"
+                                        :items="rowColorOptions"
+                                        label="Colour"
+                                        outlined dense hide-details
+                                        class="row-rule-color"
+                                ></v-select>
+                                <v-btn icon small @click="settings.workspace.row_coloring.splice(i, 1)">
+                                    <v-icon small color="red">mdi-close</v-icon>
+                                </v-btn>
+                            </div>
+                            <div class="mt-2">
+                                <v-btn small text color="primary" @click="addRowColorRule">
+                                    <v-icon small class="mr-1">mdi-plus</v-icon>Add rule
+                                </v-btn>
+                            </div>
+
                         </v-card-text>
                     </v-card>
                 </v-col>
@@ -1344,7 +1416,33 @@
                         include_customer_match: true,
                         pixel_overrides: {},
                     },
+                    // Wave 19A: table display preferences. `default_columns`
+                    // and `column_templates` are written by the Logs / Reports
+                    // column menus and preserved here so the settings save
+                    // never drops them.
+                    workspace: {
+                        decimals: 2,
+                        divider: 'comma',
+                        row_coloring: [],
+                        default_columns: {},
+                    },
                 },
+                dividerOptions: [
+                    {text: 'Comma — 1,234.50', value: 'comma'},
+                    {text: 'Space — 1 234.50', value: 'space'},
+                    {text: 'None — 1234.50', value: 'none'},
+                ],
+                rowColorOptions: [
+                    {text: 'Green', value: 'green'},
+                    {text: 'Amber', value: 'amber'},
+                    {text: 'Red', value: 'red'},
+                    {text: 'Blue', value: 'blue'},
+                    {text: 'Grey', value: 'grey'},
+                ],
+                rowOperatorOptions: ['>', '>=', '<', '<=', '=='],
+                rowColumnSuggestions: ['clicks', 'conversions', 'leads', 'revenue',
+                    'payout', 'profit', 'roi', 'cr', 'epc', 'cost', 'postback_count',
+                    'attempts', 'http_status', 'updated_rows', 'flow_index', 'is_bot'],
                 metaTesting: false,
                 metaTestResult: '',
                 capiPixels: [],
@@ -1519,9 +1617,28 @@
                     'ad_campaign_id', 'utm_source', 'utm_medium', 'utm_campaign',
                     'utm_creative', '_md5', 'payout', 'status',
                 ];
+              },
+              // Live "what your numbers will look like" hint under the controls.
+              workspacePreview() {
+                const ws = this.settings.workspace || {};
+                let decimals = parseInt(ws.decimals, 10);
+                if (isNaN(decimals)) decimals = 2;
+                decimals = Math.min(6, Math.max(0, decimals));
+                let out = (1234567.891).toLocaleString('en-US',
+                    {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
+                if (ws.divider === 'space') out = out.replace(/,/g, '\u00a0');
+                else if (ws.divider === 'none') out = out.replace(/,/g, '');
+                return out;
               }
         },
         methods: {
+            addRowColorRule() {
+                if (!Array.isArray(this.settings.workspace.row_coloring)) {
+                    this.settings.workspace.row_coloring = [];
+                }
+                this.settings.workspace.row_coloring.push(
+                    {column: 'roi', operator: '<', value: 0, color: 'red'});
+            },
             copyText(text) {
                 navigator.clipboard.writeText(text).then(() => {
                     this.$root.$emit("show-message", {type: "success", text: "Copied to clipboard"});
@@ -1607,6 +1724,17 @@
                             this.settings.meta_capi.send_statuses = mcDefaults.send_statuses.slice();
                         }
                         if (!Array.isArray(this.settings.custom_statuses)) this.settings.custom_statuses = [];
+                        this.settings.workspace = Object.assign(
+                            {}, {decimals: 2, divider: 'comma', row_coloring: [],
+                                 default_columns: {}},
+                            this.settings.workspace || {});
+                        if (!Array.isArray(this.settings.workspace.row_coloring)) {
+                            this.settings.workspace.row_coloring = [];
+                        }
+                        if (!this.settings.workspace.default_columns
+                            || typeof this.settings.workspace.default_columns !== 'object') {
+                            this.settings.workspace.default_columns = {};
+                        }
                         if (data.subIdMapping) this.subIdMapping = data.subIdMapping;
                         this.loadCapiPixels();
                     });
@@ -1626,6 +1754,7 @@
                 })
                     .then((r) => r.json())
                     .then((data) => {
+                        if (this.$loadWorkspace) this.$loadWorkspace();
                         if (!silent) {
                             this.$root.$emit("show-message", {type: "success", text: "Settings saved"});
                         }
@@ -2082,6 +2211,22 @@
     }
     .bot-rule-grow {
         flex: 1;
+    }
+    .row-color-rule {
+        gap: var(--space-2, 8px);
+        margin-bottom: var(--space-2, 8px);
+    }
+    .row-rule-col {
+        max-width: 150px;
+    }
+    .row-rule-op {
+        max-width: 92px;
+    }
+    .row-rule-val {
+        max-width: 110px;
+    }
+    .row-rule-color {
+        max-width: 130px;
     }
     .demo-label {
         min-width: 42px;

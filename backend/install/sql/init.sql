@@ -222,6 +222,8 @@ CREATE TABLE IF NOT EXISTS conversions_data (
     device_type VARCHAR(50),
     postback_count INTEGER DEFAULT 0,          -- how many postbacks this conversion received
     last_postback_at TIMESTAMP,                -- time of the most recent postback
+    approval VARCHAR(16) NOT NULL DEFAULT 'pending', -- network reconciliation: pending|approved|declined|other
+    is_duplicate BOOLEAN NOT NULL DEFAULT false,     -- row absorbed a deduplicated/dedupe-matched write
     fbc TEXT,                                  -- Meta click id (fb.1.<ms>.<fbclid>)
     fbp TEXT                                   -- Meta browser cookie (_fbp)
 );

@@ -366,6 +366,10 @@ REPORT_DIMENSIONS = {
     "connection_type": "connection_type",
     "referrer": "referrer",
     "url": "url",
+    # Client address as displayed elsewhere: the full (possibly IPv6) address
+    # from ip_full, falling back to the legacy IPv4 column. Backs the
+    # single-day IP report; both columns already exist on clicks_data.
+    "ip": "if(empty(ip_full), toString(ip), ip_full)",
     "user_agent": "coalesce(nullIf(user_agent, ''), '(empty)')",
     "status": "status",
     "is_bot": "toString(is_bot)",

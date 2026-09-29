@@ -653,6 +653,20 @@ body::-webkit-scrollbar-thumb:hover {
 .v-data-table tr.perf-loss-2:hover > td,
 .v-data-table tr.perf-loss-3:hover > td { background: #fad9d6 !important; }
 
+/* ---------- Wave 19A: workspace row colouring ----------
+   Palette names map to the status tokens, so the same class reads correctly
+   in light and dark mode (the tokens switch with [data-theme="dark"]). */
+.v-data-table tr.row-color-green > td { background: var(--status-success-bg) !important; }
+.v-data-table tr.row-color-amber > td { background: var(--status-warning-bg) !important; }
+.v-data-table tr.row-color-red > td { background: var(--status-danger-bg) !important; }
+.v-data-table tr.row-color-blue > td { background: var(--status-info-bg) !important; }
+.v-data-table tr.row-color-grey > td { background: var(--status-neutral-bg) !important; }
+.v-data-table tr.row-color-green > td:first-child { box-shadow: inset 3px 0 0 var(--status-success); }
+.v-data-table tr.row-color-amber > td:first-child { box-shadow: inset 3px 0 0 var(--status-warning); }
+.v-data-table tr.row-color-red > td:first-child { box-shadow: inset 3px 0 0 var(--status-danger); }
+.v-data-table tr.row-color-blue > td:first-child { box-shadow: inset 3px 0 0 var(--status-info); }
+.v-data-table tr.row-color-grey > td:first-child { box-shadow: inset 3px 0 0 var(--status-neutral-text); }
+
 /* Positive/negative figures. */
 .num-pos { color: var(--status-success); font-weight: 600; }
 .num-neg { color: var(--status-danger); font-weight: 600; }
