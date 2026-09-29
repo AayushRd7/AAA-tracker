@@ -45,6 +45,10 @@
             <conversion-tracking-component></conversion-tracking-component>
         </div>
 
+        <div v-show="$root.activeSection === 'logs'">
+            <logs-component></logs-component>
+        </div>
+
         <div v-show="$root.activeSection === 'settings'">
             <settings-component></settings-component>
         </div>

@@ -153,6 +153,14 @@
                                 </template>
                                 <span>Edit</span>
                             </v-tooltip>
+                            <v-tooltip bottom>
+                                <template v-slot:activator="{ on, attrs }">
+                                    <v-btn icon small color="teal" v-bind="attrs" v-on="on" @click="openSessions(item)">
+                                        <v-icon small>mdi-devices</v-icon>
+                                    </v-btn>
+                                </template>
+                                <span>Devices</span>
+                            </v-tooltip>
                             <v-tooltip bottom v-if="item.totp_enabled">
                                 <template v-slot:activator="{ on, attrs }">
                                     <v-btn icon small color="orange" v-bind="attrs" v-on="on" @click="resetTotp(item)">
@@ -182,6 +190,96 @@
             </v-col>
         </v-row>
 
+        <v-row dense class="mt-4">
+            <v-col>
+                <v-card>
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-shield-account-outline</v-icon>
+                        Active sessions
+                        <v-spacer></v-spacer>
+                        <v-btn small outlined color="primary" :disabled="!hasOtherSessions"
+                               @click="logoutOtherDevices">
+                            <v-icon small class="mr-1">mdi-logout-variant</v-icon>
+                            Log out all other devices
+                        </v-btn>
+                    </v-card-title>
+                    <v-card-text>
+                        <div class="caption grey--text mb-2">
+                            Devices currently signed in to your account. Revoke any you do not recognise.
+                        </div>
+                        <v-data-table
+                                :headers="sessionHeaders"
+                                :items="mySessions"
+                                dense
+                                :loading="loadingSessions"
+                                :items-per-page="10"
+                                hide-default-footer
+                        >
+                            <template v-slot:item.device="{ item }">
+                                <v-icon small class="mr-1">{{ deviceIcon(item.device) }}</v-icon>{{ item.device }}
+                                <span v-if="item.current" class="status-chip status-chip--success ml-2">This device</span>
+                            </template>
+                            <template v-slot:item.last_seen="{ item }">
+                                {{ item.last_seen ? $formatDate(item.last_seen) : '—' }}
+                            </template>
+                            <template v-slot:item.created_at="{ item }">
+                                {{ $formatDate(item.created_at) }}
+                            </template>
+                            <template v-slot:item.actions="{ item }">
+                                <v-btn v-if="!item.current" icon small color="red" @click="revokeMySession(item)">
+                                    <v-icon small>mdi-delete-outline</v-icon>
+                                </v-btn>
+                                <span v-else class="caption grey--text">Current</span>
+                            </template>
+                            <template v-slot:no-data>
+                                <div class="empty-state">
+                                    <v-icon>mdi-shield-account-outline</v-icon>
+                                    <div class="mt-2">No active sessions</div>
+                                </div>
+                            </template>
+                        </v-data-table>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <v-dialog v-model="sessionsDialog" max-width="760">
+            <v-card>
+                <v-card-title>
+                    <span class="text-h6">Devices — {{ sessionsUser ? sessionsUser.username : '' }}</span>
+                </v-card-title>
+                <v-card-text>
+                    <v-data-table
+                            :headers="adminSessionHeaders"
+                            :items="adminSessions"
+                            dense
+                            :loading="loadingAdminSessions"
+                            hide-default-footer
+                    >
+                        <template v-slot:item.device="{ item }">
+                            <v-icon small class="mr-1">{{ deviceIcon(item.device) }}</v-icon>{{ item.device }}
+                        </template>
+                        <template v-slot:item.last_seen="{ item }">
+                            {{ item.last_seen ? $formatDate(item.last_seen) : '—' }}
+                        </template>
+                        <template v-slot:item.created_at="{ item }">
+                            {{ $formatDate(item.created_at) }}
+                        </template>
+                        <template v-slot:no-data>
+                            <div class="empty-state">
+                                <v-icon>mdi-shield-account-outline</v-icon>
+                                <div class="mt-2">No active sessions</div>
+                            </div>
+                        </template>
+                    </v-data-table>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="sessionsDialog = false">Close</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
         <confirm-dialog-component ref="confirm" />
     </v-container>
 </script>
@@ -205,6 +303,29 @@
                 ],
                 users: [],
                 loadingUsers: false,
+                mySessions: [],
+                loadingSessions: false,
+                sessionsDialog: false,
+                sessionsUser: null,
+                adminSessions: [],
+                loadingAdminSessions: false,
+                sessionHeaders: [
+                    {text: 'Device', value: 'device'},
+                    {text: 'OS', value: 'os'},
+                    {text: 'Browser', value: 'browser'},
+                    {text: 'IP', value: 'ip'},
+                    {text: 'Last seen', value: 'last_seen'},
+                    {text: 'Started', value: 'created_at'},
+                    {text: 'Actions', value: 'actions', sortable: false},
+                ],
+                adminSessionHeaders: [
+                    {text: 'Device', value: 'device'},
+                    {text: 'OS', value: 'os'},
+                    {text: 'Browser', value: 'browser'},
+                    {text: 'IP', value: 'ip'},
+                    {text: 'Last seen', value: 'last_seen'},
+                    {text: 'Started', value: 'created_at'},
+                ],
                 permSections: ['dashboard', 'campaigns', 'landings', 'affiliates', 'offers',
                     'sources', 'reports', 'domains', 'settings', 'users'],
                 form: {
@@ -224,10 +345,14 @@
             dateRangeText() {
                 return this.date_range.join(' ~ ')
             },
+            hasOtherSessions() {
+                return this.mySessions.some(s => !s.current);
+            },
         },
         mounted() {
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadUsers();
+            this.loadMySessions();
             this.$root.$on('load-users', this.loadUsers);
         },
         methods: {
@@ -415,6 +540,101 @@
 
             close() {
                 this.dialog = false;
+            },
+
+            deviceIcon(device) {
+                const d = (device || '').toLowerCase();
+                if (d.includes('iphone') || d.includes('android phone') || d.includes('mobile')) {
+                    return 'mdi-cellphone';
+                }
+                if (d.includes('ipad') || d.includes('tablet')) return 'mdi-tablet';
+                if (d.includes('bot') || d.includes('cli')) return 'mdi-robot';
+                if (d.includes('desktop')) return 'mdi-monitor';
+                return 'mdi-devices';
+            },
+
+            loadMySessions() {
+                this.loadingSessions = true;
+                fetch("/backend/api/users/me/sessions", {credentials: "include"})
+                    .then(res => res.json())
+                    .then(data => {
+                        this.mySessions = data.sessions || [];
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.loadingSessions = false;
+                    });
+            },
+
+            async revokeMySession(item) {
+                const ok = await this.$refs.confirm.open('Revoke session',
+                    `Log out the ${item.device} device at ${item.ip || 'unknown IP'}?`, 'Revoke');
+                if (!ok) return;
+                fetch(`/backend/api/users/me/sessions/${encodeURIComponent(item.id)}`, {
+                    method: "DELETE",
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        if (!res.ok) {
+                            const data = await res.json().catch(() => ({}));
+                            throw new Error(data.detail || 'Revoke failed');
+                        }
+                        this.$root.$emit("show-message", {type: "success", text: "Session revoked"});
+                        this.loadMySessions();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    });
+            },
+
+            async logoutOtherDevices() {
+                const ok = await this.$refs.confirm.open('Log out other devices',
+                    'Log out every other device signed in to your account? This device stays signed in.',
+                    'Log out');
+                if (!ok) return;
+                fetch("/backend/api/users/me/sessions?others=true", {
+                    method: "DELETE",
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        if (!res.ok) {
+                            const data = await res.json().catch(() => ({}));
+                            throw new Error(data.detail || 'Logout failed');
+                        }
+                        const data = await res.json();
+                        this.$root.$emit("show-message", {
+                            type: "success",
+                            text: `Logged out ${data.revoked || 0} other device(s)`
+                        });
+                        this.loadMySessions();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    });
+            },
+
+            openSessions(user) {
+                this.sessionsUser = user;
+                this.sessionsDialog = true;
+                this.loadAdminSessions();
+            },
+
+            loadAdminSessions() {
+                if (!this.sessionsUser) return;
+                this.loadingAdminSessions = true;
+                fetch(`/backend/api/users/${this.sessionsUser.id}/sessions`, {credentials: "include"})
+                    .then(res => res.json())
+                    .then(data => {
+                        this.adminSessions = data.sessions || [];
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.loadingAdminSessions = false;
+                    });
             }
         }
 

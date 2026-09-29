@@ -57,6 +57,93 @@ def _ensure_capi_tables(conn):
             impression_cost_sync BOOLEAN NOT NULL DEFAULT false,
             updated_at TIMESTAMP NOT NULL DEFAULT now()
         )"""))
+
+
+def _ensure_logs_tables(conn):
+    """Idempotent Logs-area schema (audit trails for the Logs section).
+
+    The tracking plane (frontend/app.py) creates the same tables on its own
+    startup so either service can boot first; writes happen there off the
+    request path and cost_update_logs is written by backend/app_pages/costs.py.
+    """
+    from sqlalchemy import text
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS postback_logs (
+            id BIGSERIAL PRIMARY KEY,
+            received_at TIMESTAMP NOT NULL DEFAULT now(),
+            click_id VARCHAR(100),
+            status VARCHAR(50),
+            payout DOUBLE PRECISION,
+            transaction_id VARCHAR(100),
+            source_ip TEXT,
+            url TEXT,
+            result VARCHAR(32) NOT NULL,
+            reason TEXT,
+            raw JSONB NOT NULL DEFAULT '{}'::jsonb
+        )"""))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS postback_logs_received_at_idx "
+                      "ON postback_logs (received_at)"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS click_forward_logs (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            click_id VARCHAR(100),
+            campaign_id INTEGER,
+            flow_index INTEGER,
+            schema VARCHAR(32),
+            offer_id INTEGER,
+            destination_url TEXT,
+            status VARCHAR(32) NOT NULL,
+            reason TEXT,
+            ip TEXT,
+            user_agent TEXT
+        )"""))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS click_forward_logs_created_at_idx "
+                      "ON click_forward_logs (created_at)"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS cost_update_logs (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            username VARCHAR(255),
+            campaign_id INTEGER,
+            date_from DATE,
+            date_to DATE,
+            cost DOUBLE PRECISION,
+            updated_rows INTEGER
+        )"""))
+    # The outbound CAPI delivery trail predates the Logs area; create it if the
+    # tracking plane has not yet, then extend it in place rather than adding a
+    # parallel table.
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS meta_capi_log (
+            id BIGSERIAL PRIMARY KEY,
+            at TIMESTAMP NOT NULL DEFAULT now(),
+            click_id VARCHAR(100),
+            status VARCHAR(50),
+            event_name VARCHAR(100),
+            dataset_id VARCHAR(100),
+            outcome VARCHAR(32),
+            attempt INTEGER DEFAULT 1,
+            response_status INTEGER,
+            detail TEXT,
+            platform VARCHAR(32),
+            pixel_id VARCHAR(100),
+            http_status INTEGER,
+            response_snippet TEXT,
+            attempts INTEGER,
+            created_at TIMESTAMP NOT NULL DEFAULT now()
+        )"""))
+    for ddl in (
+        "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS platform VARCHAR(32)",
+        "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS pixel_id VARCHAR(100)",
+        "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS http_status INTEGER",
+        "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS response_snippet TEXT",
+        "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS attempts INTEGER",
+        "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT now()",
+    ):
+        conn.execute(text(ddl))
+
+
 async def startup():
     # Lightweight schema migration for installs created before a column existed.
     # Idempotent — safe to run on every boot.
@@ -131,6 +218,9 @@ async def startup():
             # per-channel toggles. The tracking plane (frontend/app.py) creates
             # the same tables on its own startup so either service can boot first.
             _ensure_capi_tables(conn)
+            # Logs area audit trails (postback_logs, click_forward_logs,
+            # cost_update_logs) + meta_capi_log extension.
+            _ensure_logs_tables(conn)
             conn.commit()
     except Exception as e:
         print("startup migration:", e)
@@ -218,7 +308,11 @@ ALLOWED_PAGES = {"auth", "dashboard", "editor"}
 # serves the shell pre-focused on that section (deep-linkable, back-button friendly).
 NAV_SECTIONS = {"dashboard", "campaigns", "landings", "affiliates", "offers",
                 "sources", "reports", "domains", "settings", "users", "documentation",
-                "fraud", "optimizer", "conversion-tracking"}
+                "fraud", "optimizer", "conversion-tracking", "logs"}
+# auth.PERMISSION_SECTIONS and auth.ADMIN_ONLY_SECTIONS (see how
+# "conversion-tracking" is registered there). backend/auth.py is owned by
+# another change right now, so until that lands the section gate below treats
+# any NAV section absent from the permission map as admin-only.
 
 
 from typing import Optional
@@ -311,6 +405,11 @@ app.include_router(status_router, prefix="/api/status", tags=["Status"],
 from app_pages.costs import router as costs_router
 app.include_router(costs_router, prefix="/api/costs", tags=["Costs"],
                    dependencies=[Depends(require_section_write("settings"))])
+# Logs area — admin-only audit surface. Gated by the "logs" section write flag
+# (the section entry is pending in auth.py; see the NAV_SECTIONS TODO).
+from app_pages.logs import router as logs_router
+app.include_router(logs_router, prefix="/api/logs", tags=["Logs"],
+                   dependencies=[Depends(require_section_write("logs"))])
 
 
 # G52: minimal public view for shared reports — shell-less, token in the query
@@ -342,7 +441,11 @@ async def serve_page(request: Request, page: Optional[str] = None):
             # G63: deep links to sections the user cannot read fall back to dashboard
             from auth import get_session_username
             perms = get_user_permissions(get_session_username(request))
-            if not perms["sections"].get(page, False):
+            # A NAV section absent from the permission map (the logs section,
+            # pending its auth.PERMISSION_SECTIONS entry) is admin-only.
+            allowed = perms["sections"].get(page, False) or (
+                page not in perms["sections"] and user_type == "admin")
+            if not allowed:
                 page = "dashboard"
             else:
                 section = page

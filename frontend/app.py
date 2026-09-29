@@ -252,6 +252,66 @@ async def ensure_schema():
                     PRIMARY KEY (click_id, status, pixel_id)
                 )
             """)
+            # Logs area audit trails — the tracking plane is the only writer of
+            # postback_logs and click_forward_logs, so it must be able to create
+            # them even when it boots before the backend service.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS postback_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    received_at TIMESTAMP NOT NULL DEFAULT now(),
+                    click_id VARCHAR(100),
+                    status VARCHAR(50),
+                    payout DOUBLE PRECISION,
+                    transaction_id VARCHAR(100),
+                    source_ip TEXT,
+                    url TEXT,
+                    result VARCHAR(32) NOT NULL,
+                    reason TEXT,
+                    raw JSONB NOT NULL DEFAULT '{}'::jsonb
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS postback_logs_received_at_idx "
+                               "ON postback_logs (received_at)")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS click_forward_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    created_at TIMESTAMP NOT NULL DEFAULT now(),
+                    click_id VARCHAR(100),
+                    campaign_id INTEGER,
+                    flow_index INTEGER,
+                    schema VARCHAR(32),
+                    offer_id INTEGER,
+                    destination_url TEXT,
+                    status VARCHAR(32) NOT NULL,
+                    reason TEXT,
+                    ip TEXT,
+                    user_agent TEXT
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS click_forward_logs_created_at_idx "
+                               "ON click_forward_logs (created_at)")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS cost_update_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    created_at TIMESTAMP NOT NULL DEFAULT now(),
+                    username VARCHAR(255),
+                    campaign_id INTEGER,
+                    date_from DATE,
+                    date_to DATE,
+                    cost DOUBLE PRECISION,
+                    updated_rows INTEGER
+                )
+            """)
+            # Extend the CAPI delivery trail for the Logs area.
+            for _ddl in (
+                "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS platform VARCHAR(32)",
+                "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS pixel_id VARCHAR(100)",
+                "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS http_status INTEGER",
+                "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS response_snippet TEXT",
+                "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS attempts INTEGER",
+                "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT now()",
+            ):
+                await conn.execute(_ddl)
     except Exception as e:
         log_track(f"Schema migration error: {e}")
 
@@ -370,6 +430,78 @@ def log_track(message: str):
     TRACK_LOG.append(message)
     if len(TRACK_LOG) > 50:
         TRACK_LOG.pop(0)
+
+
+async def _insert_audit_row(sql: str, *args):
+    """Best-effort insert into a Logs-area table (off the request path).
+
+    A logging failure is itself logged and swallowed — the audit trail must
+    never break the click or the conversion it is recording.
+    """
+    try:
+        async with app.state.pg.acquire() as conn:
+            await conn.execute(sql, *args)
+    except Exception as e:
+        log_track(f"audit log write error: {e}")
+
+
+def schedule_audit_insert(sql: str, *args):
+    """Queue an audit insert as a detached task so it never delays the response.
+
+    Used instead of FastAPI's BackgroundTasks because the failure paths
+    (400/403) raise before a response — a background task attached to the
+    request would never run.
+    """
+    try:
+        asyncio.create_task(_insert_audit_row(sql, *args))
+    except Exception as e:
+        log_track(f"audit log schedule error: {e}")
+
+
+def schedule_postback_log(click_id, status, payout, transaction_id, source_ip,
+                          url, result, reason, raw):
+    """Record one inbound S2S postback outcome (see postback_logs)."""
+    schedule_audit_insert(
+        "INSERT INTO postback_logs (click_id, status, payout, transaction_id, "
+        "source_ip, url, result, reason, raw) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)",
+        str(click_id or "")[:100], str(status or "")[:50], payout,
+        (str(transaction_id)[:100] if transaction_id else None),
+        str(source_ip or "")[:200] or None, str(url or "")[:2000] or None,
+        str(result)[:32], str(reason or "")[:500] or None,
+        json.dumps(raw or {}, default=str)[:20000])
+
+
+def schedule_click_forward_log(click_id, campaign_id, flow_index, schema,
+                               offer_id, destination_url, status, reason, request):
+    """Record one redirect decision (see click_forward_logs)."""
+    schedule_audit_insert(
+        "INSERT INTO click_forward_logs (click_id, campaign_id, flow_index, schema, "
+        "offer_id, destination_url, status, reason, ip, user_agent) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        str(click_id or "")[:100] or None, campaign_id, flow_index,
+        (str(schema)[:32] if schema else None), offer_id,
+        str(destination_url)[:2000] or None if destination_url else None,
+        str(status)[:32], str(reason or "")[:500] or None,
+        resolve_client_ip(request) or None,
+        (request.headers.get("user-agent") or "")[:500] or None)
+
+
+def log_campaign_gate(campaign, request: Request, campaign_alias: str):
+    """Record an unknown/paused campaign hit (before any flow decision).
+
+    Unknown aliases are only logged when the hit carries a click id — the
+    /{campaign_alias} route catches every stray path, and an audit row per
+    random 404 would drown the trail."""
+    click_id = request.query_params.get("click_id")
+    if campaign is None:
+        if not click_id:
+            return
+        schedule_click_forward_log(click_id, None, None, None, None, None,
+                                   "not_found", "campaign_not_found", request)
+    else:
+        schedule_click_forward_log(click_id, campaign["id"], None, None, None, None,
+                                   "paused", f"campaign_status:{campaign['status']}", request)
 
 
 def resolve_client_ip(request: Request) -> str:
@@ -1886,11 +2018,24 @@ async def apply_tracking_gate(request: Request, label: str, campaign=None) -> Re
     mirrors it via the same evaluate_campaign_shield helper — keep the two
     call sites in sync when adding new gate checks.
     """
+    def _gate_campaign_id():
+        try:
+            return campaign["id"] if campaign is not None else None
+        except Exception:
+            return None
+
+    def _log_blocked(reason):
+        """Record a blocking tracking-gate decision (Logs area)."""
+        schedule_click_forward_log(
+            request.query_params.get("click_id"), _gate_campaign_id(),
+            None, None, None, None, "blocked", reason, request)
+
     rule, blocked = await apply_bot_rules(request)
     if rule:
         request.state.bot_marked = rule.get("type")
         if blocked:
             log_track(f"🤖 Blocked visit to '{label}' by rule '{rule.get('type')}'")
+            _log_blocked(f"bot_rule:{rule.get('type')}")
             return render_404_html()
 
     # Source-declared bot status: honored ONLY when the campaign's traffic
@@ -1912,6 +2057,7 @@ async def apply_tracking_gate(request: Request, label: str, campaign=None) -> Re
     bl_action = await apply_blacklists(request, campaign)
     if bl_action == "block":
         log_track(f"🚫 Blacklist-blocked visit to '{label}'")
+        _log_blocked("blacklist")
         return render_404_html()
 
     # G33 honeypot: visitors that hit the /t/hp decoy are bots (fraud_score=100
@@ -1927,9 +2073,11 @@ async def apply_tracking_gate(request: Request, label: str, campaign=None) -> Re
         shield_action = await evaluate_campaign_shield(request, campaign)
         if shield_action == "blank":
             log_track(f"🛡 Shield blanked visit to '{label}'")
+            _log_blocked("shield_blank")
             return render_blank_html()
         if shield_action == "404":
             log_track(f"🛡 Shield 404'd visit to '{label}'")
+            _log_blocked("shield_404")
             return render_404_html()
     if request.cookies.get(OPT_OUT_COOKIE):
         request.state.optout = True
@@ -2376,6 +2524,15 @@ def _first_postback_param(params: dict, aliases) -> str:
     return ""
 
 
+def _to_float_or_none(value):
+    """Parse a postback payout without raising — for the audit log only."""
+    try:
+        parsed = float(str(value).strip().replace(",", "."))
+        return parsed if math.isfinite(parsed) else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _canonicalize_postback_params(params: dict) -> dict:
     """Map transaction aliases (tid/txn/transactionid) onto transaction_id.
 
@@ -2435,16 +2592,39 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
     nothing and schedules no fanout — it only reports the GET status code.
     """
     status = normalize_status(status)
+    # Capture the inbound request once, up front, so the audit trail can record
+    # the exact params even on the 400/403 failure paths (which raise before the
+    # conversion is touched).
+    raw_params = await _postback_request_params(request)
+    source_ip = resolve_client_ip(request)
+    request_url = str(request.url)
+    initial_tid = _first_postback_param(raw_params, POSTBACK_TRANSACTION_ALIASES)
+
+    def log_postback(result: str, reason: str, log_status=None, log_payout=None,
+                     params=None) -> None:
+        """Record this postback outcome; HEAD probes (write=False) are not logged."""
+        if not write:
+            return
+        schedule_postback_log(
+            click_id,
+            log_status if log_status is not None else status,
+            log_payout if log_payout is not None else _to_float_or_none(payout),
+            initial_tid, source_ip, request_url, result, reason,
+            params if params is not None else raw_params)
+
     # Built-ins (lead/sale/upsale/rejected/hold/trash) + configured custom statuses
     if status not in valid_conversion_statuses():
+        log_postback("rejected", "Invalid status")
         raise HTTPException(status_code=400, detail="Invalid status")
 
     try:
         payout_value = float(str(payout).strip().replace(",", "."))
     except (TypeError, ValueError):
+        log_postback("rejected", "Invalid payout format")
         raise HTTPException(status_code=400, detail="Invalid payout format")
     # NaN/Infinity parse fine but poison every downstream sum/aggregate.
     if not math.isfinite(payout_value):
+        log_postback("rejected", "Invalid payout format")
         raise HTTPException(status_code=400, detail="Invalid payout format")
 
     # Postback protection (optional secret key + IP allowlist, from Settings)
@@ -2452,9 +2632,11 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
     allowed, deny_reason = check_postback_access(request, sec)
     if not allowed:
         log_track(f"🚫 Postback denied for {click_id}: {deny_reason}")
+        log_postback("blocked", deny_reason, log_payout=None)
         raise HTTPException(status_code=403, detail=deny_reason)
 
-    params = _canonicalize_postback_params(await _postback_request_params(request))
+    params = _canonicalize_postback_params(raw_params)
+    tx_id = params.get("transaction_id") or params.get("external_id") or initial_tid
 
     # G85: global postback-processing rules run BEFORE the row is written and
     # before fanout; the first matching rule wins and `reject` is terminal.
@@ -2463,6 +2645,8 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
     rule_result = apply_postback_rules(status, payout_value, rule_data, request)
     if rule_result["rejected"]:
         log_track(f"🚫 Postback rejected by rule for {click_id}: {rule_result['reason']}")
+        log_postback("rule_rejected", rule_result["reason"],
+                     log_status=status, log_payout=payout_value, params=params)
         return {"rejected": True, "reason": rule_result["reason"], "click_id": click_id}
     status = rule_result["status"]
     payout_value = rule_result["payout"]
@@ -2471,8 +2655,11 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
         return {"status": "ok", "click_id": click_id, "updated_status": status, "head": True}
 
     extra_fields = {k: v for k, v in params.items() if k in PIXEL_EXTRA_FIELDS}
-    return await record_conversion(click_id, status, payout_value, request, background_tasks,
-                                   extra_fields or None, source="postback", identity=params)
+    result = await record_conversion(click_id, status, payout_value, request, background_tasks,
+                                     extra_fields or None, source="postback", identity=params)
+    log_postback("duplicate" if result.get("duplicate") else "accepted", "",
+                 log_status=status, log_payout=payout_value, params=params)
+    return result
 
 
 @app.get("/pb")
@@ -3549,6 +3736,7 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
                 bound = None
                 chosen = None
                 chosen_index = -1
+    skip_reasons = []
     if chosen is None:
         # Collect eligible flows: enabled + schedule open + caps open + filters passed
         eligible = []
@@ -3557,17 +3745,21 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
         offer_state_cache: dict = {}
         for idx, flow in enumerate(sorted_flows):
             if not flow or not flow.get("enabled"):
+                skip_reasons.append("disabled")
                 continue
             schedule = flow.get("schedule")
             if schedule and not schedule_matches(schedule):
+                skip_reasons.append("schedule")
                 continue
             caps = flow.get("caps")
             if caps:
                 counts = await flow_click_counts(campaign["id"], idx)
                 if counts and cap_exceeded(caps, counts):
+                    skip_reasons.append("cap")
                     continue
             filters = flow.get("filters", [])
             if filters and not await match_flow_filters_async(meta_data, filters, request):
+                skip_reasons.append("filter")
                 continue
             # G4: offer daily conversion cap — count once per offer per request.
             # Over cap → swap to the overflow offer when configured, otherwise
@@ -3579,6 +3771,7 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
                 # (same as capped-without-overflow).
                 offer_status, offer_archived = await offer_state(pg, offer_state_cache, flow_offer)
                 if offer_status != "active" or offer_archived:
+                    skip_reasons.append("offer_paused")
                     continue
                 daily_cap, overflow = await offer_cap_state(pg, cap_state_cache, flow_offer)
                 if daily_cap and await offer_conversions_today(pg, conv_count_cache, flow_offer) >= int(daily_cap):
@@ -3586,9 +3779,11 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
                         o_cap, _ = await offer_cap_state(pg, cap_state_cache, overflow)
                         o_used = await offer_conversions_today(pg, conv_count_cache, overflow) if o_cap else 0
                         if o_cap and o_used >= int(o_cap):
+                            skip_reasons.append("cap")
                             continue
                         offer_override = overflow
                     else:
+                        skip_reasons.append("cap")
                         continue
             eligible.append((idx, flow, offer_override))
 
@@ -3661,6 +3856,32 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
                 response.set_cookie(
                     BIND_COOKIE, bind_cookie,
                     max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
+
+    # Logs area: record the redirect decision so "why did this click go there /
+    # why did it not fire" is answerable after the fact. Only real executions
+    # (track=True — GET/POST, not HEAD probes) are recorded, and the insert runs
+    # off the request path.
+    if track:
+        fwd_click_id = meta_data.get("click_id") or request.query_params.get("click_id")
+        if chosen is None:
+            fwd_reason = ",".join(sorted(set(skip_reasons))) or "no_matching_flow"
+            if fallback_url:
+                if skip_reasons and all(r == "schedule" for r in skip_reasons):
+                    fwd_status = "scheduled_out"
+                elif skip_reasons and all(r == "cap" for r in skip_reasons):
+                    fwd_status = "capped"
+                else:
+                    fwd_status = "fallback"
+                schedule_click_forward_log(fwd_click_id, campaign["id"], None, None, None,
+                                           fallback_url, fwd_status, fwd_reason, request)
+            else:
+                schedule_click_forward_log(fwd_click_id, campaign["id"], None, None, None,
+                                           None, "not_found", fwd_reason, request)
+        else:
+            served_offer = served["offer"] if served["offer"] is not None else flow.get("offer")
+            schedule_click_forward_log(
+                fwd_click_id, campaign["id"], chosen_index, flow.get("schema"),
+                served_offer, response.headers.get("location"), "redirected", "", request)
 
     # Track THIS campaign's own execution (flow index was recorded above under
     # this campaign's id). Inner redirect_campaign levels track themselves when
@@ -4339,12 +4560,15 @@ async def _meta_capi_audit(conv: dict, dataset_id: str, event_name: str,
                 detail = a.get("response") or a.get("error") or ""
                 await conn.execute(
                     "INSERT INTO meta_capi_log (click_id, status, event_name, dataset_id, "
-                    "outcome, attempt, response_status, detail) "
-                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+                    "outcome, attempt, response_status, detail, platform, pixel_id, "
+                    "http_status, response_snippet, attempts) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
                     str(conv.get("click_id") or "")[:100], str(conv.get("status") or "")[:50],
                     str(event_name or "")[:100], str(dataset_id or "")[:100],
                     str(outcome)[:32], int(a.get("attempt") or 1), a.get("status_code"),
-                    str(detail)[:2000])
+                    str(detail)[:2000], "meta", str(dataset_id or "")[:100] or None,
+                    a.get("status_code"), str(detail)[:2000] or None,
+                    int(a.get("attempt") or 1))
     except Exception as e:
         log_track(f"Meta CAPI audit write error: {e}")
 
@@ -5398,6 +5622,7 @@ async def get_with_campaign_alias(campaign_alias: str, request: Request):
     if not campaign or campaign["status"] != "active":
         msg = f"❌ Campaign '{campaign_alias}' not found"
         log_track(msg)
+        log_campaign_gate(campaign, request, campaign_alias)
         raise HTTPException(status_code=404, detail=msg)
 
     # Bot & filter rules + shield + GDPR opt-out (shared gate). Blocked → 404;
@@ -5451,6 +5676,7 @@ async def post_with_campaign_alias(campaign_alias: str, request: Request):
     if not campaign or campaign["status"] != "active":
         msg = f"❌ Campaign '{campaign_alias}' not found"
         log_track(msg)
+        log_campaign_gate(campaign, request, campaign_alias)
         raise HTTPException(status_code=404, detail=msg)
 
     # Bot & filter rules + shield + GDPR opt-out (shared gate)

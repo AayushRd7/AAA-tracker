@@ -1,0 +1,361 @@
+{% raw %}
+<script type="text/x-template" id="logs-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap">
+            <div>
+                <div class="page-title">Logs</div>
+                <div class="page-subtitle">Audit trail for clicks, conversions, postbacks, forwarding decisions and cost updates</div>
+            </div>
+            <div class="d-flex align-center flex-wrap">
+                <v-text-field
+                        v-model="dateFrom"
+                        label="From"
+                        type="date"
+                        outlined dense hide-details clearable
+                        class="log-date-field mr-2"
+                        @change="reload"
+                ></v-text-field>
+                <v-text-field
+                        v-model="dateTo"
+                        label="To"
+                        type="date"
+                        outlined dense hide-details clearable
+                        class="log-date-field mr-2"
+                        @change="reload"
+                ></v-text-field>
+                <v-btn color="primary" elevation="0" :loading="loading" @click="reload">
+                    <v-icon small class="mr-1">mdi-refresh</v-icon>Refresh
+                </v-btn>
+            </div>
+        </div>
+
+        <v-tabs v-model="activeTab" background-color="transparent" grow class="mb-3" @change="onTabChange">
+            <v-tab v-for="t in tabs" :key="t.key" :href="'#' + t.key">{{ t.title }}</v-tab>
+        </v-tabs>
+
+        <v-card class="pa-4 mb-4">
+            <div class="filter-bar align-center">
+                <v-text-field
+                        v-for="f in currentFilters"
+                        :key="activeTab + '-' + f.key"
+                        v-model="filterState[activeTab][f.key]"
+                        :label="f.label"
+                        outlined dense hide-details clearable
+                        class="log-filter-sm"
+                        @keyup.enter="reload"
+                ></v-text-field>
+                <v-btn color="primary" elevation="0" :loading="loading" @click="reload">
+                    <v-icon small class="mr-1">mdi-magnify</v-icon>Search
+                </v-btn>
+            </div>
+        </v-card>
+
+        <div class="d-flex align-center justify-space-between mb-2">
+            <div class="caption grey--text">{{ total }} record(s)</div>
+            <v-btn text small color="primary" :disabled="!items.length" @click="exportCsv">
+                <v-icon small class="mr-1">mdi-download</v-icon>Export CSV
+            </v-btn>
+        </div>
+
+        <v-card>
+            <v-data-table
+                    :headers="currentHeaders"
+                    :items="items"
+                    dense
+                    :server-items-length="total"
+                    :page="page"
+                    @update:page="onPage"
+                    :items-per-page="pageSize"
+                    :footer-props="{ 'items-per-page-options': [pageSize] }"
+                    :loading="loading"
+            >
+                <template v-slot:item.result="{ item }">
+                    <span class="status-chip" :class="resultChipClass(item.result)">{{ item.result }}</span>
+                </template>
+                <template v-slot:item.status="{ item }">
+                    <span class="status-chip" :class="resultChipClass(item.status)">{{ item.status }}</span>
+                </template>
+                <template v-slot:no-data>
+                    <div class="empty-state">
+                        <v-icon>mdi-inbox-outline</v-icon>
+                        <div class="mt-2">No records in this range</div>
+                    </div>
+                </template>
+            </v-data-table>
+        </v-card>
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('logs-component', {
+        template: '#logs-template',
+        data() {
+            return {
+                activeTab: 'clicks',
+                loading: false,
+                items: [],
+                total: 0,
+                page: 1,
+                pageSize: 50,
+                dateFrom: '',
+                dateTo: '',
+                tabs: [
+                    {key: 'clicks', title: 'Clicks'},
+                    {key: 'conversions', title: 'Conversions'},
+                    {key: 'postbacks', title: 'S2S postbacks'},
+                    {key: 'api-postbacks', title: 'API postbacks'},
+                    {key: 'click-forwarding', title: 'Click forwarding'},
+                    {key: 'cost-updates', title: 'Cost updates'},
+                ],
+                filterState: {
+                    clicks: {country: '', device_type: '', os: '', status: '', search: ''},
+                    conversions: {status: '', click_id: '', campaign_id: ''},
+                    postbacks: {click_id: '', status: '', result: '', search: ''},
+                    'api-postbacks': {click_id: '', event_name: '', status: '', outcome: ''},
+                    'click-forwarding': {click_id: '', campaign_id: '', status: '', search: ''},
+                    'cost-updates': {username: '', campaign_id: ''},
+                },
+                filterDefs: {
+                    clicks: [
+                        {key: 'country', label: 'Country'},
+                        {key: 'device_type', label: 'Device'},
+                        {key: 'os', label: 'OS'},
+                        {key: 'status', label: 'Status'},
+                        {key: 'search', label: 'Search (url, ip, visitor id)'},
+                    ],
+                    conversions: [
+                        {key: 'status', label: 'Status'},
+                        {key: 'click_id', label: 'Click id'},
+                        {key: 'campaign_id', label: 'Campaign id'},
+                    ],
+                    postbacks: [
+                        {key: 'click_id', label: 'Click id'},
+                        {key: 'status', label: 'Status'},
+                        {key: 'result', label: 'Result'},
+                        {key: 'search', label: 'Search (url, reason, ip)'},
+                    ],
+                    'api-postbacks': [
+                        {key: 'click_id', label: 'Click id'},
+                        {key: 'event_name', label: 'Event'},
+                        {key: 'status', label: 'Conversion status'},
+                        {key: 'outcome', label: 'Outcome'},
+                    ],
+                    'click-forwarding': [
+                        {key: 'click_id', label: 'Click id'},
+                        {key: 'campaign_id', label: 'Campaign id'},
+                        {key: 'status', label: 'Status'},
+                        {key: 'search', label: 'Search (reason, destination)'},
+                    ],
+                    'cost-updates': [
+                        {key: 'username', label: 'Username'},
+                        {key: 'campaign_id', label: 'Campaign id'},
+                    ],
+                },
+                headers: {
+                    clicks: [
+                        {text: 'Time', value: 'received_at'},
+                        {text: 'Click id', value: 'visitor_id'},
+                        {text: 'IP', value: 'ip'},
+                        {text: 'Country', value: 'country'},
+                        {text: 'Device', value: 'device_type'},
+                        {text: 'Status', value: 'status'},
+                        {text: 'URL', value: 'url'},
+                        {text: 'Bot', value: 'is_bot'},
+                    ],
+                    conversions: [
+                        {text: 'Time', value: 'received_at'},
+                        {text: 'Click id', value: 'click_id'},
+                        {text: 'Status', value: 'status'},
+                        {text: 'Campaign', value: 'campaign_id'},
+                        {text: 'Offer', value: 'offer_id'},
+                        {text: 'Payout', value: 'payout'},
+                        {text: 'Revenue', value: 'revenue'},
+                        {text: 'Transaction', value: 'transaction_id'},
+                    ],
+                    postbacks: [
+                        {text: 'Time', value: 'received_at'},
+                        {text: 'Click id', value: 'click_id'},
+                        {text: 'Status', value: 'status'},
+                        {text: 'Result', value: 'result'},
+                        {text: 'Payout', value: 'payout'},
+                        {text: 'Transaction', value: 'transaction_id'},
+                        {text: 'Source IP', value: 'source_ip'},
+                        {text: 'Reason', value: 'reason'},
+                    ],
+                    'api-postbacks': [
+                        {text: 'Time', value: 'created_at'},
+                        {text: 'Click id', value: 'click_id'},
+                        {text: 'Platform', value: 'platform'},
+                        {text: 'Pixel', value: 'pixel_id'},
+                        {text: 'Event', value: 'event_name'},
+                        {text: 'Status', value: 'status'},
+                        {text: 'HTTP', value: 'http_status'},
+                        {text: 'Outcome', value: 'outcome'},
+                        {text: 'Attempts', value: 'attempts'},
+                    ],
+                    'click-forwarding': [
+                        {text: 'Time', value: 'created_at'},
+                        {text: 'Click id', value: 'click_id'},
+                        {text: 'Campaign', value: 'campaign_id'},
+                        {text: 'Flow', value: 'flow_index'},
+                        {text: 'Schema', value: 'schema'},
+                        {text: 'Offer', value: 'offer_id'},
+                        {text: 'Status', value: 'status'},
+                        {text: 'Destination', value: 'destination_url'},
+                        {text: 'Reason', value: 'reason'},
+                    ],
+                    'cost-updates': [
+                        {text: 'Time', value: 'created_at'},
+                        {text: 'Username', value: 'username'},
+                        {text: 'Campaign', value: 'campaign_id'},
+                        {text: 'From', value: 'date_from'},
+                        {text: 'To', value: 'date_to'},
+                        {text: 'Cost', value: 'cost'},
+                        {text: 'Rows', value: 'updated_rows'},
+                    ],
+                },
+            };
+        },
+        computed: {
+            currentFilters() {
+                return this.filterDefs[this.activeTab] || [];
+            },
+            currentHeaders() {
+                return this.headers[this.activeTab] || [];
+            },
+            isClickLog() {
+                return this.activeTab === 'clicks';
+            },
+        },
+        mounted() {
+            this.load();
+            this.$root.$on('load-logs', this.load);
+        },
+        beforeDestroy() {
+            this.$root.$off('load-logs', this.load);
+        },
+        methods: {
+            onTabChange() {
+                this.page = 1;
+                this.load();
+            },
+            reload() {
+                this.page = 1;
+                this.load();
+            },
+            onPage(p) {
+                if (p === this.page) return;
+                this.page = p;
+                this.load();
+            },
+            baseParams() {
+                const f = Object.assign({}, this.filterState[this.activeTab] || {});
+                Object.keys(f).forEach(k => { if (f[k] === '' || f[k] === null) delete f[k]; });
+                if (this.dateFrom) f.date_from = this.dateFrom;
+                if (this.dateTo) f.date_to = this.dateTo;
+                return f;
+            },
+            load() {
+                this.loading = true;
+                const offset = (this.page - 1) * this.pageSize;
+                let url, options;
+                if (this.isClickLog) {
+                    url = '/backend/api/dashboard/click-log';
+                    options = {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify(Object.assign(this.baseParams(),
+                            {limit: this.pageSize, offset: offset})),
+                    };
+                } else if (this.activeTab === 'conversions') {
+                    url = this.withQuery('/backend/api/reports/',
+                        Object.assign(this.baseParams(), {limit: this.pageSize, offset: offset}));
+                    options = {credentials: 'include'};
+                } else {
+                    url = this.withQuery('/backend/api/logs/' + this.activeTab,
+                        Object.assign(this.baseParams(), {limit: this.pageSize, offset: offset}));
+                    options = {credentials: 'include'};
+                }
+                fetch(url, options)
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        if (Array.isArray(data)) {
+                            this.items = data;
+                            this.total = data.length;
+                        } else {
+                            this.items = data.items || [];
+                            this.total = data.total || 0;
+                        }
+                        this.loading = false;
+                    })
+                    .catch(err => {
+                        this.loading = false;
+                        this.$root.$emit('show-message', {type: 'error', text: 'Logs failed: ' + sanitizeToastMessage(err.message)});
+                    });
+            },
+            withQuery(url, params) {
+                const parts = [];
+                Object.keys(params || {}).forEach(k => {
+                    const v = params[k];
+                    if (v !== '' && v !== null && v !== undefined) {
+                        parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(v));
+                    }
+                });
+                if (!parts.length) return url;
+                return url + (url.indexOf('?') === -1 ? '?' : '&') + parts.join('&');
+            },
+            async exportCsv() {
+                try {
+                    let res;
+                    if (this.isClickLog) {
+                        res = await fetch('/backend/api/dashboard/click-log/export', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            credentials: 'include',
+                            body: JSON.stringify(this.baseParams()),
+                        });
+                    } else if (this.activeTab === 'conversions') {
+                        res = await fetch(this.withQuery('/backend/api/reports/export', this.baseParams()),
+                            {credentials: 'include'});
+                    } else {
+                        res = await fetch(this.withQuery('/backend/api/logs/' + this.activeTab,
+                            Object.assign(this.baseParams(), {format: 'csv'})), {credentials: 'include'});
+                    }
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    this.saveBlob(await res.blob(), this.activeTab + '.csv');
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Logs export failed: ' + sanitizeToastMessage(err.message)});
+                }
+            },
+            saveBlob(blob, filename) {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                this.$root.$emit('show-message', {type: 'success', text: 'CSV exported'});
+            },
+            resultChipClass(value) {
+                const s = String(value || '').toLowerCase();
+                if (['accepted', 'redirected'].indexOf(s) !== -1) return 'status-chip--success';
+                if (['duplicate'].indexOf(s) !== -1) return 'status-chip--warning';
+                if (['rejected', 'rule_rejected', 'blocked', 'not_found'].indexOf(s) !== -1) return 'status-chip--danger';
+                if (['fallback', 'capped', 'scheduled_out', 'paused'].indexOf(s) !== -1) return 'status-chip--neutral';
+                if (['sale', 'upsale'].indexOf(s) !== -1) return 'status-chip--success';
+                if (['lead'].indexOf(s) !== -1) return 'status-chip--info';
+                return 'status-chip--neutral';
+            },
+        },
+    });
+</script>
+
+<style>
+    .log-date-field {
+        max-width: 170px;
+    }
+    .log-filter-sm {
+        max-width: 220px;
+    }
+</style>
+{% endraw %}

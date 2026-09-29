@@ -717,6 +717,28 @@
                             </div>
                             <v-row dense align="center" class="mb-2">
                                 <v-col cols="12" sm="3">
+                                    <v-select
+                                            label="Object type"
+                                            :items="auditEntityOptions"
+                                            v-model="auditFilterEntity"
+                                            outlined
+                                            dense
+                                            hide-details
+                                            clearable
+                                    ></v-select>
+                                </v-col>
+                                <v-col cols="12" sm="3">
+                                    <v-text-field
+                                            label="Title / ID contains"
+                                            v-model="auditFilterQ"
+                                            outlined
+                                            dense
+                                            hide-details
+                                            clearable
+                                            @keyup.enter="loadAudit(1)"
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="12" sm="3">
                                     <v-text-field
                                             label="Filter by user"
                                             v-model="auditFilterUser"
@@ -738,20 +760,36 @@
                                             clearable
                                     ></v-select>
                                 </v-col>
-                                <v-col cols="6" sm="3">
-                                    <v-select
-                                            label="Entity"
-                                            :items="['user', 'campaigns', 'offers', 'sources', 'affiliate_networks', 'domains', 'auto_rules', 'monitoring']"
-                                            v-model="auditFilterEntity"
+                                <v-col cols="6" sm="2">
+                                    <v-text-field
+                                            label="From"
+                                            type="date"
+                                            v-model="auditFilterFrom"
                                             outlined
                                             dense
                                             hide-details
                                             clearable
-                                    ></v-select>
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="6" sm="2">
+                                    <v-text-field
+                                            label="To"
+                                            type="date"
+                                            v-model="auditFilterTo"
+                                            outlined
+                                            dense
+                                            hide-details
+                                            clearable
+                                    ></v-text-field>
                                 </v-col>
                                 <v-col cols="auto">
                                     <v-btn small outlined color="primary" @click="loadAudit(1)">
                                         <v-icon small class="mr-1">mdi-filter-outline</v-icon>Apply
+                                    </v-btn>
+                                </v-col>
+                                <v-col cols="auto">
+                                    <v-btn small outlined color="primary" @click="exportAudit">
+                                        <v-icon small class="mr-1">mdi-download-outline</v-icon>Export CSV
                                     </v-btn>
                                 </v-col>
                             </v-row>
@@ -1333,6 +1371,11 @@
                 auditFilterUser: '',
                 auditFilterAction: '',
                 auditFilterEntity: '',
+                auditFilterQ: '',
+                auditFilterFrom: '',
+                auditFilterTo: '',
+                auditEntityOptions: ['user', 'campaigns', 'offers', 'sources',
+                    'affiliate_networks', 'domains', 'auto_rules', 'monitoring'],
                 auditHeaders: [
                     {text: 'Time', value: 'at'},
                     {text: 'User', value: 'username'},
@@ -1388,6 +1431,7 @@
             this.darkMode = (document.documentElement.dataset.theme === 'dark');
             this.loadSettings();
             this.loadAudit(1);
+            this.loadAuditFacets();
             this.loadMonitorStatus();
             this.loadRules();
             this.$root.$on('load-settings', this.loadSettings);
@@ -1753,14 +1797,23 @@
             generateToken() {
                 this.settings.apiToken = Math.random().toString(36).substring(2, 12);
             },
-            loadAudit(page) {
-                this.auditLoading = true;
-                const params = new URLSearchParams({page: page || 1, page_size: 50});
+            auditQueryParams() {
+                const params = new URLSearchParams();
                 if (this.auditFilterUser) params.set('user', this.auditFilterUser);
                 if (this.auditFilterAction) params.set('action', this.auditFilterAction);
                 if (this.auditFilterEntity) params.set('entity', this.auditFilterEntity);
+                if (this.auditFilterQ) params.set('q', this.auditFilterQ);
+                if (this.auditFilterFrom) params.set('date_from', this.auditFilterFrom);
+                if (this.auditFilterTo) params.set('date_to', this.auditFilterTo);
                 if (this.auditSortBy) params.set('sort_by', this.auditSortBy);
                 params.set('sort_desc', this.auditSortDesc ? 'true' : 'false');
+                return params;
+            },
+            loadAudit(page) {
+                this.auditLoading = true;
+                const params = this.auditQueryParams();
+                params.set('page', page || 1);
+                params.set('page_size', 50);
                 fetch(`/backend/api/audit/?${params.toString()}`, {credentials: 'include'})
                     .then(r => r.json())
                     .then(data => {
@@ -1774,6 +1827,20 @@
                     .finally(() => {
                         this.auditLoading = false;
                     });
+            },
+            loadAuditFacets() {
+                fetch('/backend/api/audit/facets', {credentials: 'include'})
+                    .then(r => r.json())
+                    .then(data => {
+                        if (Array.isArray(data.entities) && data.entities.length) {
+                            this.auditEntityOptions = data.entities;
+                        }
+                    })
+                    .catch(() => {});
+            },
+            exportAudit() {
+                const params = this.auditQueryParams();
+                window.open(`/backend/api/audit/export?${params.toString()}`, '_blank');
             },
             auditChipClass(action) {
                 if (action.includes('fail') || action.includes('delete') || action === 'totp_failed') {

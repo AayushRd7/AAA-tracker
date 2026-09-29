@@ -15,7 +15,9 @@ import qrcode
 
 from db import get_db
 from models.user import UserORM
-from auth import hash_password, get_caller, verify_password, _hash_backup_code
+from auth import (hash_password, get_caller, verify_password, _hash_backup_code,
+                  session_token, list_sessions, revoke_session_prefix,
+                  revoke_other_sessions)
 
 router = APIRouter()
 
@@ -205,6 +207,57 @@ def change_my_password(data: PasswordChange, request: Request, db: Session = Dep
     user_obj.password_hash = hash_password(data.new_password)
     db.commit()
     return {"message": "Password changed"}
+
+
+# ====== Active sessions (account security) ======
+
+@router.get("/me/sessions")
+def my_sessions(request: Request, db: Session = Depends(get_db)):
+    """The caller's own active sessions (devices), newest first."""
+    user_obj = _current_user(request, db)
+    return {"sessions": list_sessions(db, user_obj.username, session_token(request))}
+
+
+@router.delete("/me/sessions")
+def revoke_other_devices(request: Request, others: bool = False,
+                         db: Session = Depends(get_db)):
+    """Log out every session except the current one (others=true)."""
+    user_obj = _current_user(request, db)
+    if not others:
+        raise HTTPException(status_code=400,
+                            detail="Pass others=true to log out other devices")
+    count = revoke_other_sessions(db, user_obj.username, session_token(request))
+    _audit(user_obj.username, "sessions_revoked", "user", user_obj.username,
+           {"scope": "others", "count": count}, request)
+    return {"message": "Logged out other devices", "revoked": count}
+
+
+@router.delete("/me/sessions/{session_id}")
+def revoke_my_session(session_id: str, request: Request, db: Session = Depends(get_db)):
+    """Revoke one of the caller's own sessions by its token prefix."""
+    user_obj = _current_user(request, db)
+    if session_id == session_token(request)[:12]:
+        raise HTTPException(status_code=400,
+                            detail="Use log out to end the current session")
+    count = revoke_session_prefix(db, user_obj.username, session_id)
+    if not count:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _audit(user_obj.username, "session_revoked", "user", user_obj.username,
+           {"session": session_id}, request)
+    return {"message": "Session revoked", "revoked": count}
+
+
+@router.get("/{user_id}/sessions")
+def admin_user_sessions(user_id: int, request: Request, db: Session = Depends(get_db)):
+    """Admin view of another user's active sessions."""
+    caller, is_admin = get_caller(request)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    user_obj = db.query(UserORM).filter(UserORM.id == user_id).first()
+    if not user_obj:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"username": user_obj.username,
+            "sessions": list_sessions(db, user_obj.username, "")}
 
 
 # ====== List all users ======

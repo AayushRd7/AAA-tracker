@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 from db import get_db, engine, SessionLocal
 from audit_logger import audit_event
 
+import json
+
 router = APIRouter()
 audit_router = APIRouter()
 
@@ -97,13 +99,8 @@ def restore(entity: str, row_id: int, request: Request):
     return {"message": "Restored", "entity": entity, "id": row_id}
 
 
-@audit_router.get("/")
-def read_audit(user: str = "", action: str = "", entity: str = "",
-               page: int = 1, page_size: int = 50,
-               sort_by: str = "id", sort_desc: bool = True,
-               db: Session = Depends(get_db)):
-    page = max(1, page)
-    page_size = min(max(1, page_size), 100)
+def _audit_filters(user, action, entity, q, date_from, date_to):
+    """Shared WHERE builder for the audit list and its CSV export."""
     where, params = [], {}
     if user:
         where.append("username = :u")
@@ -114,10 +111,35 @@ def read_audit(user: str = "", action: str = "", entity: str = "",
     if entity:
         where.append("entity = :e")
         params["e"] = entity
+    if q:
+        # substring over the entity id and the free-form detail payload
+        where.append("(entity_id ILIKE :q OR detail::text ILIKE :q)")
+        params["q"] = f"%{q}%"
+    if date_from:
+        where.append("at >= CAST(:df AS date)")
+        params["df"] = date_from
+    if date_to:
+        # inclusive of the whole end day
+        where.append("at < CAST(:dt AS date) + interval '1 day'")
+        params["dt"] = date_to
+    return where, params
+
+
+_AUDIT_ORDER_COLS = ("id", "at", "username", "action", "entity", "entity_id", "ip")
+
+
+@audit_router.get("/")
+def read_audit(user: str = "", action: str = "", entity: str = "",
+               q: str = "", date_from: str = "", date_to: str = "",
+               page: int = 1, page_size: int = 50,
+               sort_by: str = "id", sort_desc: bool = True,
+               db: Session = Depends(get_db)):
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    where, params = _audit_filters(user, action, entity, q, date_from, date_to)
     # Whitelisted columns only — anything else falls back to the default
     # newest-first ordering so header-sort clicks can never inject SQL.
-    order_col = sort_by if sort_by in ("id", "at", "username", "action",
-                                       "entity", "entity_id", "ip") else "id"
+    order_col = sort_by if sort_by in _AUDIT_ORDER_COLS else "id"
     direction = "DESC" if sort_desc else "ASC"
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     total = db.execute(text(f"SELECT count(*) FROM audit_log{clause}"), params).scalar()
@@ -129,3 +151,53 @@ def read_audit(user: str = "", action: str = "", entity: str = "",
             "entries": [{"id": r[0], "at": r[1].isoformat() if r[1] else None,
                          "username": r[2], "action": r[3], "entity": r[4],
                          "entity_id": r[5], "detail": r[6], "ip": r[7]} for r in rows]}
+
+
+@audit_router.get("/facets")
+def audit_facets(db: Session = Depends(get_db)):
+    """Distinct filter values actually present in the log (object types, actions,
+    users) so the UI dropdowns stay in sync with real data."""
+    entities = [r[0] for r in db.execute(text(
+        "SELECT DISTINCT entity FROM audit_log WHERE entity <> '' ORDER BY entity")).fetchall()]
+    actions = [r[0] for r in db.execute(text(
+        "SELECT DISTINCT action FROM audit_log WHERE action <> '' ORDER BY action")).fetchall()]
+    users = [r[0] for r in db.execute(text(
+        "SELECT DISTINCT username FROM audit_log WHERE username <> '' "
+        "ORDER BY username LIMIT 200")).fetchall()]
+    return {"entities": entities, "actions": actions, "users": users}
+
+
+def _csv_safe(value):
+    """Prefix cells that would start a spreadsheet formula (=,+,-,@) with an
+    apostrophe so exported CSVs can't smuggle live formulas into Excel/Sheets."""
+    s = "" if value is None else (value if isinstance(value, str) else str(value))
+    return "'" + s if s[:1] in ("=", "+", "-", "@") else s
+
+
+@audit_router.get("/export")
+def export_audit(user: str = "", action: str = "", entity: str = "",
+                 q: str = "", date_from: str = "", date_to: str = "",
+                 sort_by: str = "id", sort_desc: bool = True,
+                 db: Session = Depends(get_db)):
+    """CSV export of the filtered audit set (UTF-8 BOM, formula-guarded)."""
+    import csv as _csv
+    import io as _io
+    from fastapi.responses import Response
+    where, params = _audit_filters(user, action, entity, q, date_from, date_to)
+    order_col = sort_by if sort_by in _AUDIT_ORDER_COLS else "id"
+    direction = "DESC" if sort_desc else "ASC"
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    rows = db.execute(text(
+        f"SELECT id, at, username, action, entity, entity_id, detail, ip "
+        f"FROM audit_log{clause} ORDER BY {order_col} {direction} LIMIT 10000"),
+        params).fetchall()
+    buf = _io.StringIO()
+    writer = _csv.writer(buf, lineterminator="\n")
+    writer.writerow(["id", "at", "username", "action", "entity", "entity_id",
+                     "ip", "detail"])
+    for r in rows:
+        writer.writerow([_csv_safe(v) for v in (
+            r[0], r[1].isoformat() if r[1] else "", r[2], r[3], r[4], r[5],
+            r[7], json.dumps(r[6]) if r[6] is not None else "")])
+    return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=audit_log.csv"})

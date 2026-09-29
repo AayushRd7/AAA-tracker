@@ -18,6 +18,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db
@@ -34,6 +35,25 @@ class CostUpdateIn(BaseModel):
     campaign_id: Optional[int] = None   # omit = all campaigns
     period: Optional[dict] = None       # {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}
     cost: Optional[float] = None        # per-click cost (see module docstring)
+
+
+def _log_cost_update(db: Session, username: str, campaign_id: Optional[int],
+                     date_from: date, date_to: date, cost: float,
+                     updated_rows: int) -> None:
+    """Append to cost_update_logs (best-effort — a logging failure must never
+    fail the cost mutation itself)."""
+    try:
+        db.execute(text("""
+            INSERT INTO cost_update_logs
+                (username, campaign_id, date_from, date_to, cost, updated_rows)
+            VALUES (:username, :campaign_id, :date_from, :date_to, :cost, :updated_rows)
+        """), {"username": username, "campaign_id": campaign_id,
+               "date_from": date_from, "date_to": date_to,
+               "cost": cost, "updated_rows": updated_rows})
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print("cost_update_logs write error:", repr(e))
 
 
 @router.post("/update")
@@ -93,6 +113,12 @@ def update_costs(data: CostUpdateIn, request: Request, db: Session = Depends(get
                 {"from": d_from.isoformat(), "to": d_to.isoformat(),
                  "cost": float(cost), "updated_rows": matched},
                 request.client.host if request.client else "")
+
+    # Logs area: the retroactive cost update is itself an audit event — record
+    # who changed which campaign's costs over which window and how many rows.
+    _log_cost_update(db, caller or "api_token",
+                     int(data.campaign_id) if data.campaign_id is not None else None,
+                     d_from, d_to, float(cost), matched)
 
     return {
         "updated_rows": matched,

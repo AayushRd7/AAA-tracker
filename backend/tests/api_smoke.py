@@ -6440,6 +6440,270 @@ print("ESCAPED-OK")
           and pg_query(f"SELECT count(*) FROM conversions_data WHERE transaction_id LIKE '{qp_tag}%'") == "0",
           pg_query(f"SELECT count(*) FROM conversions_data WHERE click_id LIKE '{qp_tag}%'"))
 
+    # ===== Active sessions + audit log filters =====
+    print("== Active sessions & audit filters ==")
+    sess_pid = os.getpid()
+    sess_user = f"smoke-sess-{sess_pid}"
+    r = s.post(f"{api}/users/", json={"username": sess_user, "password": "smokepass1",
+                                      "active": True})
+    check("sessions: test user created", r.status_code == 200, r.text[:150])
+    sess_uid = r.json().get("id")
+
+    chrome_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    iphone_ua = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                 "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
+                 "Mobile/15E148 Safari/604.1")
+
+    s1 = requests.Session()
+    s1.verify = not INSECURE
+    r = s1.post(f"{api}/login", json={"username": sess_user, "password": "smokepass1"},
+                headers={"User-Agent": chrome_ua})
+    check("sessions: first login ok", r.status_code == 200, r.text[:150])
+
+    r = s1.get(f"{api}/users/me/sessions")
+    sess_list = r.json().get("sessions", []) if r.status_code == 200 else []
+    current = [x for x in sess_list if x.get("current")]
+    check("sessions: own session listed + marked current",
+          r.status_code == 200 and len(sess_list) == 1 and len(current) == 1, r.text[:250])
+    cur_row = current[0] if current else {}
+    check("sessions: login records ip + user agent",
+          bool(cur_row.get("ip")) and "Chrome/120" in (cur_row.get("user_agent") or ""),
+          json.dumps(cur_row)[:250])
+    check("sessions: UA parsed to device/browser/os",
+          cur_row.get("device") == "Desktop" and cur_row.get("browser") == "Chrome"
+          and cur_row.get("os") == "Windows", json.dumps(cur_row)[:250])
+
+    s2 = requests.Session()
+    s2.verify = not INSECURE
+    r = s2.post(f"{api}/login", json={"username": sess_user, "password": "smokepass1"},
+                headers={"User-Agent": iphone_ua})
+    check("sessions: second login (fresh client) ok", r.status_code == 200, r.text[:150])
+
+    r = s.get(f"{api}/users/{sess_uid}/sessions")
+    admin_sessions = r.json().get("sessions", []) if r.status_code == 200 else []
+    check("sessions: admin sees both devices",
+          r.status_code == 200 and len(admin_sessions) == 2, r.text[:250])
+
+    r = s1.get(f"{api}/users/me/sessions")
+    others = [x for x in r.json().get("sessions", []) if not x.get("current")]
+    check("sessions: second device visible to owner", len(others) == 1, r.text[:200])
+    other_id = others[0]["id"] if others else ""
+    r = s1.delete(f"{api}/users/me/sessions/{other_id}")
+    check("sessions: revoke one other session", r.status_code == 200, r.text[:150])
+    r = s2.get(f"{api}/users/me")
+    check("sessions: revoked cookie rejected (401)", r.status_code == 401, str(r.status_code))
+    r = s1.get(f"{api}/users/me")
+    check("sessions: current session unaffected by revoke", r.status_code == 200, r.text[:120])
+
+    s3 = requests.Session()
+    s3.verify = not INSECURE
+    s3.post(f"{api}/login", json={"username": sess_user, "password": "smokepass1"},
+            headers={"User-Agent": iphone_ua})
+    r = s1.delete(f"{api}/users/me/sessions", params={"others": "true"})
+    check("sessions: log out all other devices",
+          r.status_code == 200 and r.json().get("revoked", 0) >= 1, r.text[:150])
+    r = s3.get(f"{api}/users/me")
+    check("sessions: other cookie rejected after logout-all (401)",
+          r.status_code == 401, str(r.status_code))
+    r = s1.get(f"{api}/users/me")
+    check("sessions: current session survives logout-all", r.status_code == 200, r.text[:120])
+    r = s1.get(f"{api}/users/me/sessions")
+    remaining = r.json().get("sessions", [])
+    check("sessions: only the current session remains",
+          len(remaining) == 1 and remaining[0].get("current") is True, r.text[:200])
+
+    # -- audit log filters + CSV export --
+    r = s.get(f"{api}/audit/", params={"user": sess_user})
+    d = r.json() if r.status_code == 200 else {}
+    check("audit: user filter returns only that user",
+          r.status_code == 200 and d.get("total", 0) >= 1
+          and all(e["username"] == sess_user for e in d.get("entries", [])), r.text[:200])
+    r = s.get(f"{api}/audit/", params={"entity": "user", "user": sess_user, "q": sess_user})
+    d = r.json() if r.status_code == 200 else {}
+    check("audit: entity + substring filters match",
+          r.status_code == 200 and d.get("total", 0) >= 1
+          and all(e["entity"] == "user" for e in d.get("entries", [])), r.text[:200])
+    r = s.get(f"{api}/audit/", params={"date_from": "2099-01-01", "date_to": "2099-01-02"})
+    check("audit: future date range returns nothing",
+          r.status_code == 200 and r.json().get("total") == 0, r.text[:200])
+    r = s.get(f"{api}/audit/", params={"user": sess_user,
+                                       "date_from": "2000-01-01", "date_to": "2100-01-01"})
+    check("audit: wide date range includes rows",
+          r.status_code == 200 and r.json().get("total", 0) >= 1, r.text[:200])
+    r = s.get(f"{api}/audit/export", params={"user": sess_user})
+    body = r.content if r.status_code == 200 else b""
+    check("audit: CSV export has UTF-8 BOM + header",
+          r.status_code == 200 and body.startswith(b"\xef\xbb\xbf")
+          and body.lstrip(b"\xef\xbb\xbf").startswith(b"id,at,username"), repr(body[:60]))
+    check("audit: CSV export is filtered to the requested user",
+          bool(body) and sess_user.encode() in body
+          and b"tracker_admin" not in body, repr(body[:200]))
+
+    # cleanup this section
+    s1.post(f"{api}/logout")
+    if sess_uid:
+        r = s.delete(f"{api}/users/{sess_uid}")
+        check("sessions: test user cleaned up", r.status_code == 200, r.text[:120])
+
+    # ===== Logs area =====
+    print("== Logs area ==")
+    lg_pid = os.getpid()
+    lg_base = f"logs-{lg_pid}"
+    lg_dest = f"https://example.com/lg-dest-{lg_pid}"
+    lg_fb = f"https://example.com/lg-fb-{lg_pid}"
+    lg_campaign = lg_fb_campaign = None
+    lg_saved_pr = (s.get(f"{api}/settings/").json().get("settings") or {}).get("postback_rules")
+
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"{lg_base}-redirect", "alias": f"{lg_base}-redirect",
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "redirect", "redirect_url": lg_dest,
+                              "weight": 100, "filters": []}],
+                   "postbacks": [], "fallback_url": lg_fb, "hide_referrer": False}})
+    check("logs: redirect campaign created", r.status_code == 200 and "id" in r.json(),
+          r.text[:200])
+    lg_campaign = r.json().get("id") if r.status_code == 200 else None
+
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"{lg_base}-nomatch", "alias": f"{lg_base}-nomatch",
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "config": {"flows": [], "postbacks": [], "fallback_url": lg_fb, "hide_referrer": False}})
+    check("logs: no-match campaign created", r.status_code == 200 and "id" in r.json(),
+          r.text[:200])
+    lg_fb_campaign = r.json().get("id") if r.status_code == 200 else None
+
+    def lg_wait(fn, timeout=15):
+        import time as _t
+        deadline = _t.time() + timeout
+        while _t.time() < deadline:
+            if fn():
+                return True
+            _t.sleep(1)
+        return False
+
+    def lg_fwd(campaign_id, status):
+        return s.get(f"{api}/logs/click-forwarding",
+                     params={"campaign_id": campaign_id, "status": status,
+                             "offset": 0, "limit": 10}).json()
+
+    # -- click forwarding: normal redirect records the destination; no-match
+    #    flow ends in a fallback --
+    r = requests.get(f"{BASE}/{lg_base}-redirect", verify=not INSECURE, allow_redirects=False)
+    check("logs: redirect campaign serves a redirect",
+          r.status_code in (301, 302, 307, 308) and lg_dest in (r.headers.get("location") or ""),
+          r.headers.get("location", ""))
+    r = requests.get(f"{BASE}/{lg_base}-nomatch", verify=not INSECURE, allow_redirects=False)
+    check("logs: no-match campaign falls back",
+          r.status_code in (301, 302, 307, 308) and lg_fb in (r.headers.get("location") or ""),
+          r.headers.get("location", ""))
+    lg_fwd_resp = lg_fwd(lg_campaign, "redirected")
+    check("logs: click-forwarding paged shape",
+          isinstance(lg_fwd_resp.get("items"), list) and isinstance(lg_fwd_resp.get("total"), int),
+          str(lg_fwd_resp)[:160])
+    check("logs: successful redirect logged with destination",
+          lg_wait(lambda: any(lg_dest in (it.get("destination_url") or "")
+                              for it in lg_fwd(lg_campaign, "redirected").get("items", []))),
+          str(lg_fwd(lg_campaign, "redirected"))[:200])
+    check("logs: no-match flow logged as fallback",
+          lg_wait(lambda: any(it.get("status") == "fallback"
+                              for it in lg_fwd(lg_fb_campaign, "fallback").get("items", []))),
+          str(lg_fwd(lg_fb_campaign, "fallback"))[:200])
+
+    # -- S2S postbacks: accepted then duplicate --
+    lg_acc = f"{lg_base}-accept"
+    r = requests.get(f"{BASE}/pb", params={"clickid": lg_acc, "status": "sale", "payout": "5"},
+                     verify=not INSECURE)
+    check("logs: accepted postback processed", r.status_code == 200, r.text[:120])
+    r = requests.get(f"{BASE}/pb", params={"clickid": lg_acc, "status": "sale", "payout": "5"},
+                     verify=not INSECURE)
+    check("logs: duplicate postback flagged", r.status_code == 200 and r.json().get("duplicate") is True,
+          r.text[:120])
+
+    def lg_postbacks(click_id, **kw):
+        params = {"click_id": click_id, "offset": 0, "limit": 20}
+        params.update(kw)
+        return s.get(f"{api}/logs/postbacks", params=params).json()
+
+    lg_pb = lg_postbacks(lg_acc)
+    check("logs: postbacks paged shape",
+          isinstance(lg_pb.get("items"), list) and isinstance(lg_pb.get("total"), int),
+          str(lg_pb)[:160])
+    check("logs: accepted postback logged",
+          lg_wait(lambda: any(it.get("result") == "accepted"
+                              for it in lg_postbacks(lg_acc).get("items", []))),
+          str(lg_postbacks(lg_acc))[:200])
+    check("logs: duplicate postback logged",
+          lg_wait(lambda: any(it.get("result") == "duplicate"
+                              for it in lg_postbacks(lg_acc).get("items", []))),
+          str(lg_postbacks(lg_acc))[:200])
+    lg_dup = lg_postbacks(lg_acc, result="duplicate")
+    check("logs: postbacks respects the result filter",
+          lg_dup.get("total") >= 1 and all(it.get("result") == "duplicate" for it in lg_dup["items"]),
+          str(lg_dup)[:160])
+
+    # -- CSV export carries the UTF-8 BOM --
+    rc = s.get(f"{api}/logs/postbacks", params={"click_id": lg_acc, "format": "csv"})
+    check("logs: postbacks CSV has UTF-8 BOM and header",
+          rc.status_code == 200 and rc.content[:3] == b"\xef\xbb\xbf"
+          and b"click_id" in rc.content[:120], repr(rc.content[:60]))
+
+    # -- rule-rejected postback --
+    lg_rej = f"{lg_base}-rule-rej"
+    r = s.post(f"{api}/settings/", json={"settings": {"postback_rules": [{
+        "enabled": True, "name": f"{lg_base} reject",
+        "conditions": [{"field": "click_id", "operator": "starts_with", "value": lg_rej}],
+        "action": {"type": "reject"}}]}})
+    check("logs: reject rule saved", r.status_code == 200, r.text[:120])
+    settle_settings_cache()
+    r = requests.get(f"{BASE}/pb", params={"clickid": lg_rej, "status": "sale", "payout": "3"},
+                     verify=not INSECURE)
+    check("logs: rule-rejected postback returns rejected",
+          r.status_code == 200 and r.json().get("status") == "rejected", r.text[:160])
+    check("logs: rule-rejected postback logged",
+          lg_wait(lambda: any(it.get("result") == "rule_rejected"
+                              for it in lg_postbacks(lg_rej).get("items", []))),
+          str(lg_postbacks(lg_rej))[:200])
+
+    # -- outbound API (CAPI) postbacks reuse meta_capi_log --
+    lg_api = s.get(f"{api}/logs/api-postbacks", params={"offset": 0, "limit": 5}).json()
+    check("logs: api-postbacks paged shape",
+          isinstance(lg_api.get("items"), list) and isinstance(lg_api.get("total"), int),
+          str(lg_api)[:160])
+
+    # -- cost updates write cost_update_logs --
+    if lg_campaign:
+        r = s.post(f"{api}/costs/update", json={
+            "campaign_id": lg_campaign,
+            "period": {"from": "2000-01-01", "to": "2000-01-02"}, "cost": 1})
+        check("logs: cost update applied", r.status_code == 200, r.text[:150])
+        cu = s.get(f"{api}/logs/cost-updates",
+                   params={"campaign_id": lg_campaign, "offset": 0}).json()
+        check("logs: cost-updates paged shape",
+              isinstance(cu.get("items"), list) and isinstance(cu.get("total"), int),
+              str(cu)[:160])
+        check("logs: cost update logged for the campaign",
+              any(it.get("campaign_id") == lg_campaign and it.get("username")
+                  for it in cu.get("items", [])), str(cu)[:200])
+
+    # -- logs cleanup --
+    s.post(f"{api}/settings/", json={"settings": {"postback_rules": lg_saved_pr}})
+    pg_exec(f"DELETE FROM postback_logs WHERE click_id LIKE '{lg_base}%'")
+    pg_exec(f"DELETE FROM conversions_data WHERE click_id LIKE '{lg_base}%'")
+    if lg_campaign:
+        pg_exec(f"DELETE FROM click_forward_logs WHERE campaign_id = {lg_campaign}")
+        pg_exec(f"DELETE FROM cost_update_logs WHERE campaign_id = {lg_campaign}")
+    if lg_fb_campaign:
+        pg_exec(f"DELETE FROM click_forward_logs WHERE campaign_id = {lg_fb_campaign}")
+    if lg_fb_campaign:
+        s.delete(f"{api}/campaigns/{lg_fb_campaign}")
+    if lg_campaign:
+        s.delete(f"{api}/campaigns/{lg_campaign}")
+    check("logs: verification rows cleaned",
+          pg_exec_out(f"SELECT count(*) FROM postback_logs WHERE click_id LIKE '{lg_base}%'").strip() == "0",
+          pg_exec_out(f"SELECT count(*) FROM postback_logs WHERE click_id LIKE '{lg_base}%'"))
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

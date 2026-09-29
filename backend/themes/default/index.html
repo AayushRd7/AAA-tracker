@@ -255,6 +255,7 @@
         {% include "templates/fraud.html" %}
         {% include "templates/optimizer.html" %}
         {% include "templates/conversion-tracking.html" %}
+        {% include "templates/logs.html" %}
     {% endif %}
 {% endif %}
 
@@ -553,6 +554,7 @@
                     {key: 'sources', title: 'Traffic Sources', icon: 'mdi-database-outline'},
                     {key: 'reports', title: 'Reports', icon: 'mdi-chart-line'},
                     {key: 'conversion-tracking', title: 'Conversion tracking', icon: 'mdi-link-variant', admin: true},
+                    {key: 'logs', title: 'Logs', icon: 'mdi-clipboard-text-clock-outline', admin: true},
                     {key: 'domains', title: 'Domains', icon: 'mdi-domain', admin: true},
                     {key: 'fraud', title: 'Fraud', icon: 'mdi-shield-alert-outline', admin: true},
                     {key: 'optimizer', title: 'Optimizer', icon: 'mdi-auto-fix', admin: true},
@@ -584,6 +586,7 @@
                     sources: 'Traffic Sources',
                     reports: 'Reports',
                     'conversion-tracking': 'Conversion tracking',
+                    logs: 'Logs',
                     domains: 'Domains',
                     fraud: 'Fraud & Cloaking',
                     optimizer: 'Auto Optimizer',

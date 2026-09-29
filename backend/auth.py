@@ -160,20 +160,32 @@ def ensure_sessions_table():
             revoked BOOLEAN NOT NULL DEFAULT false
         )
     """))
+    # Session device/visibility columns (added after the original table).
+    # created_at predates this block, so the ALTER is a no-op on fresh installs.
+    db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
+                    "created_at TIMESTAMP DEFAULT now()"))
+    db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
+                    "last_seen TIMESTAMP"))
+    db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
+                    "ip VARCHAR(64) DEFAULT ''"))
+    db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
+                    "user_agent TEXT DEFAULT ''"))
     db.commit()
     db.close()
     _sessions_table_ready = True
 
 
-def create_session(username: str) -> str:
+def create_session(username: str, ip: str = "", user_agent: str = "") -> str:
     ensure_sessions_table()
     token = secrets.token_urlsafe(32)
     db = SessionLocal()
     db.execute(text(
-        "INSERT INTO auth_sessions (token, username, expires_at) "
-        "VALUES (:t, :u, :e)"),
+        "INSERT INTO auth_sessions (token, username, created_at, last_seen, "
+        "expires_at, ip, user_agent) "
+        "VALUES (:t, :u, now(), now(), :e, :ip, :ua)"),
         {"t": token, "u": username,
-         "e": datetime.utcnow() + timedelta(days=SESSION_TTL_DAYS)})
+         "e": datetime.utcnow() + timedelta(days=SESSION_TTL_DAYS),
+         "ip": (ip or "")[:64], "ua": (user_agent or "")[:512]})
     db.commit()
     db.close()
     return token
@@ -185,6 +197,120 @@ def revoke_session(token: str):
     db.execute(text("DELETE FROM auth_sessions WHERE token = :t"), {"t": token})
     db.commit()
     db.close()
+
+
+def session_token(request: Request) -> str:
+    """The raw session cookie for the current request ('' when absent)."""
+    return request.cookies.get("session_token") or ""
+
+
+def user_agent(request: Request) -> str:
+    return (request.headers.get("user-agent") or "")[:512]
+
+
+def parse_user_agent(ua: str) -> dict:
+    """Best-effort {device, browser, os} from a User-Agent string.
+
+    Not a full UA database — just enough to label a session row for a human.
+    """
+    ua = ua or ""
+    low = ua.lower()
+    os_name = ""
+    if "windows nt" in low:
+        os_name = "Windows"
+    elif "iphone" in low or "ipad" in low:
+        os_name = "iOS"
+    elif "android" in low:
+        os_name = "Android"
+    elif "mac os x" in low or "macintosh" in low:
+        os_name = "macOS"
+    elif "cros" in low:
+        os_name = "ChromeOS"
+    elif "linux" in low:
+        os_name = "Linux"
+
+    browser = ""
+    if "edg/" in low or "edge/" in low:
+        browser = "Edge"
+    elif "opr/" in low or "opera" in low:
+        browser = "Opera"
+    elif "chrome/" in low or "chromium/" in low:
+        browser = "Chrome"
+    elif "firefox/" in low:
+        browser = "Firefox"
+    elif "safari/" in low:
+        browser = "Safari"
+    elif "curl/" in low or "python-requests" in low or "wget/" in low:
+        browser = "CLI"
+
+    if not ua:
+        device = "Unknown"
+    elif "bot" in low or "spider" in low or "crawler" in low or "curl/" in low \
+            or "python-requests" in low:
+        device = "Bot/CLI"
+    elif "iphone" in low:
+        device = "iPhone"
+    elif "ipad" in low:
+        device = "iPad"
+    elif "android" in low and "mobile" in low:
+        device = "Android phone"
+    elif "android" in low:
+        device = "Android tablet"
+    elif "mobile" in low:
+        device = "Mobile"
+    elif os_name in ("Windows", "macOS", "Linux", "ChromeOS"):
+        device = "Desktop"
+    else:
+        device = "Unknown"
+    return {"device": device, "browser": browser or "Unknown", "os": os_name or "Unknown"}
+
+
+def _session_public(row, current_token: str = "") -> dict:
+    """One session row shaped for the UI (never includes the full token)."""
+    token = row[0] or ""
+    ua = row[4] or ""
+    return {
+        "id": token[:12],
+        "token_prefix": token[:12],
+        "created_at": row[1].isoformat() if row[1] else None,
+        "last_seen": row[2].isoformat() if row[2] else None,
+        "ip": row[3] or "",
+        "user_agent": ua,
+        "current": bool(current_token and token == current_token),
+        **parse_user_agent(ua),
+    }
+
+
+def list_sessions(db: Session, username: str, current_token: str = "") -> list:
+    """Active (non-revoked, unexpired) sessions for a username, newest first."""
+    rows = db.execute(text(
+        "SELECT token, created_at, last_seen, ip, user_agent FROM auth_sessions "
+        "WHERE username = :u AND revoked = false "
+        "AND (expires_at IS NULL OR expires_at >= now()) "
+        "ORDER BY created_at DESC NULLS LAST"),
+        {"u": username}).fetchall()
+    return [_session_public(r, current_token) for r in rows]
+
+
+def revoke_session_prefix(db: Session, username: str, prefix: str) -> int:
+    """Delete the given user's session whose token starts with `prefix`."""
+    prefix = (prefix or "").strip()
+    if not prefix:
+        return 0
+    res = db.execute(text(
+        "DELETE FROM auth_sessions WHERE username = :u AND token LIKE :p"),
+        {"u": username, "p": prefix + "%"})
+    db.commit()
+    return res.rowcount or 0
+
+
+def revoke_other_sessions(db: Session, username: str, current_token: str) -> int:
+    """Delete every session of `username` except the caller's current one."""
+    res = db.execute(text(
+        "DELETE FROM auth_sessions WHERE username = :u AND token != :t"),
+        {"u": username, "t": current_token or ""})
+    db.commit()
+    return res.rowcount or 0
 
 
 def load_api_token() -> str:
@@ -217,7 +343,8 @@ def is_authenticated(request: Request) -> any:
         ensure_sessions_table()
         db: Session = SessionLocal()
         row = db.execute(text(
-            "SELECT username, expires_at, revoked FROM auth_sessions WHERE token = :t"),
+            "SELECT username, expires_at, revoked, last_seen "
+            "FROM auth_sessions WHERE token = :t"),
             {"t": token}).fetchone()
         if not row or row.revoked:
             db.close()
@@ -225,6 +352,21 @@ def is_authenticated(request: Request) -> any:
         if row.expires_at and row.expires_at < datetime.utcnow():
             db.close()
             return False
+
+        # Refresh last_seen, throttled to at most once per ~60s per session so
+        # the hot auth path stays cheap. Never fatal — a failed touch must not
+        # break the request.
+        try:
+            if row.last_seen is None or \
+                    (datetime.utcnow() - row.last_seen).total_seconds() > 60:
+                db.execute(text("UPDATE auth_sessions SET last_seen = now() "
+                                "WHERE token = :t"), {"t": token})
+                db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
         user = get_user(db, row.username)
         db.close()
@@ -277,9 +419,9 @@ def require_api_auth(request: Request, authorization: Optional[str] = Header(Non
 # sections were already admin-only in the UI; the API now enforces the same.
 PERMISSION_SECTIONS = ["dashboard", "campaigns", "landings", "affiliates", "offers",
                        "sources", "reports", "domains", "settings", "users", "documentation",
-                       "fraud", "optimizer", "conversion-tracking"]
+                       "fraud", "optimizer", "conversion-tracking", "logs"]
 ADMIN_ONLY_SECTIONS = {"users", "settings", "domains", "fraud", "optimizer",
-                       "conversion-tracking"}
+                       "conversion-tracking", "logs"}
 
 
 def resolve_permissions(user) -> dict:
@@ -449,7 +591,7 @@ async def login(request: Request, response: Response, login_data: LoginRequest, 
             SECRET_KEY, algorithm=ALGORITHM)
         return {"requires_totp": True, "totp_token": totp_token}
 
-    token = create_session(user.username)
+    token = create_session(user.username, client_ip, user_agent(request))
     _login_failures.pop(limit_key, None)
     audit_event(user.username, "login_success", "user", user.username, ip=client_ip)
 
@@ -565,7 +707,7 @@ async def login_totp(request: Request, response: Response, data: TotpLoginReques
         audit_event(user.username, "totp_failed", "user", user.username, ip=client_ip)
         raise HTTPException(status_code=401, detail="Invalid code")
 
-    token = create_session(user.username)
+    token = create_session(user.username, client_ip, user_agent(request))
     _totp_failures.pop(limit_key, None)
     audit_event(user.username, "login_success", "user", user.username, {"totp": True}, client_ip)
 
