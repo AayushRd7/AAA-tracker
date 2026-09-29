@@ -124,3 +124,36 @@ jobs:
       # against your dev server:
       #   TEST_BASE_URL=https://localhost TEST_INSECURE=1 TEST_USER=... TEST_PASS=... \
       #   python backend/tests/api_smoke.py
+
+  fresh-install:
+    name: Fresh install end-to-end (empty volumes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        # Three app images plus postgres and clickhouse; the runner images carry a
+        # lot of SDKs we do not need and the default disk is tight.
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android 2>/dev/null || true
+          docker image prune -af >/dev/null 2>&1 || true
+
+      - name: Install the whole stack from empty volumes
+        # The documented path, on purpose: this is exactly what an operator runs
+        # on a new box, so a failure here is the failure they would hit.
+        run: make install
+
+      - name: Doctor
+        run: make doctor
+
+      - name: End-to-end assertions (login, campaign, databases, tracking plane)
+        run: python3 scripts/ci/fresh_install_e2e.py
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down --volumes --remove-orphans || true
