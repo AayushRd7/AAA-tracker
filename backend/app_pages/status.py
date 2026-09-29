@@ -9,6 +9,7 @@ landings volume is visible to this container — its disk usage.
 import os
 import shutil
 import time
+from tenant_context import current_tenant
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import text
@@ -46,7 +47,9 @@ def system_status(request: Request, db: Session = Depends(get_db)):
         ch_ok = True
         row = ch.query(
             "SELECT count() AS n, countIf(click = true) AS clicks "
-            "FROM clicks_data WHERE received_at >= now() - toIntervalHour(24)"
+            "FROM clicks_data WHERE tenant_id = %(tid)s "
+            "AND received_at >= now() - toIntervalHour(24)",
+            parameters={"tid": current_tenant()},
         ).result_rows
         if row:
             clicks_24h = int(row[0][1] or 0)
@@ -56,7 +59,8 @@ def system_status(request: Request, db: Session = Depends(get_db)):
     try:
         conversions_24h = int(db.execute(text(
             "SELECT count(*) FROM conversions_data "
-            "WHERE received_at > now() - interval '24 hours'")).scalar() or 0)
+            "WHERE tenant_id = :tid AND received_at > now() - interval '24 hours'"),
+            {"tid": current_tenant()}).scalar() or 0)
     except Exception:
         conversions_24h = 0
 

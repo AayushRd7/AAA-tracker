@@ -22,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db
+from tenant_context import current_tenant
 from models.campaigns import CampaignORM
 
 router = APIRouter()
@@ -45,11 +46,12 @@ def _log_cost_update(db: Session, username: str, campaign_id: Optional[int],
     try:
         db.execute(text("""
             INSERT INTO cost_update_logs
-                (username, campaign_id, date_from, date_to, cost, updated_rows)
-            VALUES (:username, :campaign_id, :date_from, :date_to, :cost, :updated_rows)
+                (username, campaign_id, date_from, date_to, cost, updated_rows, tenant_id)
+            VALUES (:username, :campaign_id, :date_from, :date_to, :cost, :updated_rows, :tid)
         """), {"username": username, "campaign_id": campaign_id,
                "date_from": date_from, "date_to": date_to,
-               "cost": cost, "updated_rows": updated_rows})
+               "cost": cost, "updated_rows": updated_rows,
+               "tid": current_tenant()})
         db.commit()
     except Exception as e:
         db.rollback()
@@ -91,8 +93,10 @@ def update_costs(data: CostUpdateIn, request: Request, db: Session = Depends(get
         # previously a typo'd id "succeeded" with updated_rows 0
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    where = "toDate(received_at) BETWEEN toDate(%(df)s) AND toDate(%(dt)s)"
-    params = {"df": d_from.isoformat(), "dt": d_to.isoformat()}
+    where = ("tenant_id = %(tenant_id)s AND "
+             "toDate(received_at) BETWEEN toDate(%(df)s) AND toDate(%(dt)s)")
+    params = {"df": d_from.isoformat(), "dt": d_to.isoformat(),
+              "tenant_id": current_tenant()}
     if data.campaign_id is not None:
         where += " AND campaign_id = %(cid)s"
         params["cid"] = int(data.campaign_id)

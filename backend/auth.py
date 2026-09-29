@@ -157,7 +157,8 @@ def ensure_sessions_table():
             username VARCHAR(255) NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT now(),
             expires_at TIMESTAMP NOT NULL,
-            revoked BOOLEAN NOT NULL DEFAULT false
+            revoked BOOLEAN NOT NULL DEFAULT false,
+            current_tenant_id INTEGER
         )
     """))
     # Session device/visibility columns (added after the original table).
@@ -170,6 +171,10 @@ def ensure_sessions_table():
                     "ip VARCHAR(64) DEFAULT ''"))
     db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
                     "user_agent TEXT DEFAULT ''"))
+    # Multi-tenancy phase 1 — the tenant this session is currently working in.
+    # NULL means "never switched": the resolver treats it as tenant 1.
+    db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
+                    "current_tenant_id INTEGER"))
     db.commit()
     db.close()
     _sessions_table_ready = True
@@ -317,7 +322,10 @@ def load_api_token() -> str:
     """The API token from the settings row (used for Bearer auth by external tools)."""
     try:
         db = SessionLocal()
-        row = db.execute(text("SELECT value FROM settings WHERE name = 'settings'")).fetchone()
+        # settings rows are per tenant; the API token belongs to tenant 1 (the
+        # install-wide credential the UI shows on the Settings page).
+        row = db.execute(text("SELECT value FROM settings "
+                              "WHERE name = 'settings' AND tenant_id = 1")).fetchone()
         db.close()
         if row and row[0]:
             return (json.loads(row[0]).get("apiToken") or "").strip()
@@ -398,6 +406,102 @@ def get_session_username(request: Request) -> Optional[str]:
         return None
 
 
+# ====== Multi-tenancy phase 1: current-tenant resolution ======
+# The tenant of a request is the *session's* current tenant, validated against
+# tenant_memberships on every request. No endpoint accepts a tenant id from a
+# query parameter or header (a caller cannot spoof a workspace), and a stale
+# session value (membership revoked) falls back to the user's first membership.
+TENANT_ROLES = ("owner", "admin", "editor", "viewer")
+
+
+def session_tenant_id(token: str) -> Optional[int]:
+    """The raw current_tenant_id stored on the session row (None when unset)."""
+    if not token:
+        return None
+    try:
+        ensure_sessions_table()
+        db = SessionLocal()
+        row = db.execute(text("SELECT current_tenant_id FROM auth_sessions WHERE token = :t"),
+                         {"t": token}).fetchone()
+        db.close()
+        return int(row[0]) if row and row[0] is not None else None
+    except Exception:
+        return None
+
+
+def list_user_memberships(db: Session, username: str) -> list:
+    """[{tenant_id, role, name, slug, status}] — tenant_id ascending. Uses raw SQL
+    because tenant_memberships/tenants are deliberately install-global (no
+    TenantMixin), so the ORM scoping must not apply here."""
+    rows = db.execute(text(
+        "SELECT m.tenant_id, m.role, t.name, t.slug, t.status "
+        "FROM tenant_memberships m JOIN tenants t ON t.id = m.tenant_id "
+        "JOIN users u ON u.id = m.user_id "
+        "WHERE u.username = :u ORDER BY m.tenant_id ASC"),
+        {"u": username}).fetchall()
+    return [{"tenant_id": int(r[0]), "role": r[1] or "viewer",
+             "name": r[2] or f"Tenant {r[0]}", "slug": r[3] or "", "status": r[4] or "active"}
+            for r in rows]
+
+
+def resolve_session_tenant(token: str) -> tuple[Optional[int], bool]:
+    """(tenant_id, has_membership) for a session token.
+
+    * no/expired/revoked session -> (None, True): caller is unauthenticated; the
+      middleware leaves the default tenant 1 in place (every data endpoint
+      requires auth anyway).
+    * authenticated with memberships -> the stored tenant when it is still a
+      membership, else the lowest tenant_id the user belongs to (persisted back
+      onto the session). This is the "membership revoked mid-session" fallback.
+    * authenticated with no memberships -> (None, False): the caller gets 403
+      from require_api_auth.
+    """
+    if not token:
+        return None, True
+    try:
+        ensure_sessions_table()
+        db = SessionLocal()
+        try:
+            row = db.execute(text(
+                "SELECT username, expires_at, revoked, current_tenant_id "
+                "FROM auth_sessions WHERE token = :t"), {"t": token}).fetchone()
+            if not row or row.revoked:
+                return None, True
+            if row.expires_at and row.expires_at < datetime.utcnow():
+                return None, True
+            memberships = list_user_memberships(db, row.username)
+            if not memberships:
+                return None, False
+            member_ids = [m["tenant_id"] for m in memberships]
+            stored = int(row.current_tenant_id) if row.current_tenant_id is not None else None
+            tenant_id = stored if stored in member_ids else member_ids[0]
+            if stored != tenant_id:
+                db.execute(text("UPDATE auth_sessions SET current_tenant_id = :tid "
+                                "WHERE token = :t"), {"tid": tenant_id, "t": token})
+                db.commit()
+            return tenant_id, True
+        finally:
+            db.close()
+    except Exception:
+        # Never let tenant resolution break a request: fall back to tenant 1.
+        return None, True
+
+
+def set_session_tenant(db: Session, token: str, tenant_id: int) -> None:
+    db.execute(text("UPDATE auth_sessions SET current_tenant_id = :tid WHERE token = :t"),
+               {"tid": int(tenant_id), "t": token})
+    db.commit()
+
+
+def caller_role_in_tenant(db: Session, username: str, tenant_id: int) -> Optional[str]:
+    """The caller's role in a tenant, or None when they are not a member."""
+    row = db.execute(text(
+        "SELECT m.role FROM tenant_memberships m JOIN users u ON u.id = m.user_id "
+        "WHERE u.username = :u AND m.tenant_id = :t"),
+        {"u": username, "t": int(tenant_id)}).fetchone()
+    return row[0] if row else None
+
+
 def require_api_auth(request: Request, authorization: Optional[str] = Header(None)):
     """Dependency for API routers: accepts a session cookie or a Bearer API token."""
     if authorization and authorization.lower().startswith("bearer "):
@@ -411,6 +515,12 @@ def require_api_auth(request: Request, authorization: Optional[str] = Header(Non
     user_type = is_authenticated(request)
     if not user_type:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    # Multi-tenancy: an authenticated user with no tenant_memberships row has no
+    # workspace to act in. The middleware resolves this; every data endpoint is
+    # behind this dependency.
+    from tenant_context import tenant_missing
+    if tenant_missing():
+        raise HTTPException(status_code=403, detail="No workspace membership for this account")
     return user_type
 
 

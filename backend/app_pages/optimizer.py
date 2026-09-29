@@ -35,6 +35,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db, SessionLocal
+from tenant_context import current_tenant
 from clickHouse import get_clickhouse_client
 
 router = APIRouter()
@@ -81,11 +82,13 @@ def _click_metrics(ch, campaign_id: int, hours: int) -> dict:
         SELECT flow_index, count() AS clicks, sumOrNull(toFloat64(cost)) AS cost
         FROM clicks_data
         WHERE campaign_id = %(cid)s
+          AND tenant_id = %(tenant_id)s
           AND received_at >= now() - toIntervalHour(%(hours)s)
           AND flow_index > 0
           AND NOT (is_bot = true)
         GROUP BY flow_index""",
-        parameters={"cid": int(campaign_id), "hours": int(hours)}).result_rows
+        parameters={"cid": int(campaign_id), "hours": int(hours),
+                    "tenant_id": current_tenant()}).result_rows
     return {int(r[0]): {"clicks": int(r[1] or 0), "cost": float(r[2] or 0)}
             for r in rows}
 
@@ -95,12 +98,14 @@ def _conversion_metrics(db: Session, campaign_id: int, hours: int) -> dict:
         SELECT flow_index, count(*) AS convs,
                COALESCE(sum(profit), 0) AS profit, COALESCE(sum(revenue), 0) AS revenue
         FROM conversions_data
-        WHERE campaign_id = :cid
+        WHERE tenant_id = :tid
+          AND campaign_id = :cid
           AND received_at >= now() - make_interval(hours => :h)
           AND flow_index IS NOT NULL
           AND status NOT IN ('rejected', 'trash')
         GROUP BY flow_index"""),
-        {"cid": int(campaign_id), "h": int(hours)}).fetchall()
+        {"cid": int(campaign_id), "h": int(hours),
+         "tid": current_tenant()}).fetchall()
     return {int(r[0]): {"convs": int(r[1] or 0), "profit": float(r[2] or 0),
                         "revenue": float(r[3] or 0)} for r in rows}
 
@@ -147,7 +152,8 @@ def run_optimization(campaign_id: int, caller: str = "", ip: str = "") -> dict:
     try:
         row = db.execute(text(
             "SELECT id, name, status, redirect_mode, config FROM campaigns "
-            "WHERE id = :i FOR UPDATE"), {"i": int(campaign_id)}).fetchone()
+            "WHERE id = :i AND tenant_id = :tid FOR UPDATE"),
+            {"i": int(campaign_id), "tid": current_tenant()}).fetchone()
         if not row:
             return {"ok": False, "reason": "campaign_not_found"}
         _, name, status, dmode, config = row
@@ -250,8 +256,8 @@ def run_optimization(campaign_id: int, caller: str = "", ip: str = "") -> dict:
         config["optimizer"] = block
         db.execute(text(
             "UPDATE campaigns SET config = CAST(:c AS JSONB), updated_at = now() "
-            "WHERE id = :i"),
-            {"c": json.dumps(config), "i": int(campaign_id)})
+            "WHERE id = :i AND tenant_id = :tid"),
+            {"c": json.dumps(config), "i": int(campaign_id), "tid": current_tenant()})
         db.commit()
 
         from audit_logger import audit_event
@@ -307,7 +313,8 @@ async def optimizer_loop():
             try:
                 rows = db.execute(text(
                     "SELECT id, config FROM campaigns "
-                    "WHERE status = 'active' AND archived = false")).fetchall()
+                    "WHERE status = 'active' AND archived = false "
+                    "AND tenant_id = :tid"), {"tid": current_tenant()}).fetchall()
             finally:
                 db.close()
             for cid, config in rows:
@@ -336,7 +343,8 @@ async def optimizer_loop():
 def _campaign_row(db: Session, campaign_id: int):
     row = db.execute(text(
         "SELECT id, name, status, redirect_mode, config FROM campaigns "
-        "WHERE id = :i"), {"i": int(campaign_id)}).fetchone()
+        "WHERE id = :i AND tenant_id = :tid"),
+        {"i": int(campaign_id), "tid": current_tenant()}).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Campaign not found")
     return row
@@ -376,7 +384,8 @@ def optimizer_status(request: Request, db: Session = Depends(get_db)):
     ch = request.state.ch
     rows = db.execute(text(
         "SELECT id, name, status, redirect_mode, config FROM campaigns "
-        "WHERE archived = false ORDER BY id ASC")).fetchall()
+        "WHERE archived = false AND tenant_id = :tid ORDER BY id ASC"),
+        {"tid": current_tenant()}).fetchall()
     return {"campaigns": [_campaign_status_payload(ch, db, r) for r in rows],
             "metrics": list(METRICS), "defaults": DEFAULTS,
             "loop_last_run": _loop_last_run.isoformat() if _loop_last_run else None,
@@ -426,8 +435,8 @@ def put_optimizer(campaign_id: int, payload: dict, request: Request,
             raise HTTPException(status_code=422, detail="max_shift_pct must be 10-95")
 
     row = db.execute(text(
-        "SELECT config FROM campaigns WHERE id = :i FOR UPDATE"),
-        {"i": int(campaign_id)}).fetchone()
+        "SELECT config FROM campaigns WHERE id = :i AND tenant_id = :tid FOR UPDATE"),
+        {"i": int(campaign_id), "tid": current_tenant()}).fetchone()
     config = row[0] or {}
     # Start from the live optimizer block (defaults for the known settings,
     # keeping run history and any extra keys like last_runs) and overlay the
@@ -439,8 +448,8 @@ def put_optimizer(campaign_id: int, payload: dict, request: Request,
     block.update(updates)
     db.execute(text(
         "UPDATE campaigns SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{optimizer}', CAST(:o AS JSONB)), "
-        "updated_at = now() WHERE id = :i"),
-        {"o": json.dumps(block), "i": int(campaign_id)})
+        "updated_at = now() WHERE id = :i AND tenant_id = :tid"),
+        {"o": json.dumps(block), "i": int(campaign_id), "tid": current_tenant()})
     db.commit()
 
     caller, _ = get_caller(request)

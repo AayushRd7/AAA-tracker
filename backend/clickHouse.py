@@ -6,6 +6,7 @@ from clickhouse_connect import get_client
 from typing import List, Optional, Any, Tuple, Dict, Union
 
 from schemas import Filters
+from tenant_context import current_tenant
 
 CLICKHOUSE_HOST = os.environ.get("CLICKHOUSE_HOST", "tracker_clickhouse")
 CLICKHOUSE_PORT = int(os.environ.get("CLICKHOUSE_PORT", "8123"))
@@ -25,6 +26,19 @@ def get_clickhouse_client():
     )
 
 
+def _add_tenant_condition(conditions: list, params: dict) -> None:
+    """Append the tenant predicate to a WHERE builder.
+
+    ``clicks_data`` carries ``tenant_id`` (written from the resolved campaign's
+    tenant by the tracking plane). The value comes from the request context set
+    by TenantContextMiddleware; background work (email reports, the optimizer)
+    runs outside a request and therefore reads the contextvar default — tenant
+    1. That is deliberate: a background loop must never touch "all tenants".
+    """
+    params["tenant_id"] = int(current_tenant())
+    conditions.append("tenant_id = %(tenant_id)s")
+
+
 def build_filters(filters: Union[dict, object]) -> Tuple[str, dict]:
     def get(val, default=None):
         if isinstance(filters, dict):
@@ -33,6 +47,9 @@ def build_filters(filters: Union[dict, object]) -> Tuple[str, dict]:
 
     conditions = []
     params = {}
+
+    # Tenant isolation — always applied, whatever the caller passed.
+    _add_tenant_condition(conditions, params)
 
     # Date filter
     date_from = get("date_from")
@@ -98,6 +115,7 @@ def get_live_clicks(client, after: Optional[str] = None, limit: int = 20) -> Lis
     """
     conditions = []
     params = {"limit": limit}
+    _add_tenant_condition(conditions, params)
     if after:
         conditions.append("received_at > %(after)s")
         params["after"] = after
@@ -125,6 +143,8 @@ def _click_log_where(filters: dict) -> Tuple[str, dict]:
     must apply exactly the same filters."""
     conditions = []
     params = {}
+
+    _add_tenant_condition(conditions, params)
 
     date_from = filters.get("date_from")
     date_to = filters.get("date_to")

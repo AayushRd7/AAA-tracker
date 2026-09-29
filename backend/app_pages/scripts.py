@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db
+from tenant_context import current_tenant
 
 router = APIRouter()
 
@@ -28,7 +29,8 @@ def _script_public(r) -> dict:
 
 
 def _get_script(db: Session, script_id: int):
-    r = db.execute(text("SELECT * FROM scripts WHERE id = :i"), {"i": script_id}).fetchone()
+    r = db.execute(text("SELECT * FROM scripts WHERE id = :i AND tenant_id = :tid"),
+                   {"i": script_id, "tid": current_tenant()}).fetchone()
     if not r:
         raise HTTPException(status_code=404, detail="Script not found")
     return r
@@ -36,7 +38,9 @@ def _get_script(db: Session, script_id: int):
 
 @router.get("/")
 def list_scripts(db: Session = Depends(get_db)):
-    rows = db.execute(text("SELECT * FROM scripts ORDER BY id ASC")).fetchall()
+    rows = db.execute(text("SELECT * FROM scripts WHERE tenant_id = :tid "
+                           "ORDER BY id ASC"),
+                      {"tid": current_tenant()}).fetchall()
     return {"scripts": [_script_public(r) for r in rows]}
 
 
@@ -48,9 +52,10 @@ def create_script(payload: ScriptIn, request: Request, db: Session = Depends(get
     if not title:
         raise HTTPException(status_code=400, detail="Script title is required")
     r = db.execute(text("""
-        INSERT INTO scripts (title, code, description)
-        VALUES (:t, :c, :d) RETURNING id"""),
-        {"t": title, "c": payload.code or "", "d": payload.description}).fetchone()
+        INSERT INTO scripts (title, code, description, tenant_id)
+        VALUES (:t, :c, :d, :tid) RETURNING id"""),
+        {"t": title, "c": payload.code or "", "d": payload.description,
+         "tid": current_tenant()}).fetchone()
     db.commit()
     caller, _ = get_caller(request)
     audit_event(caller or "api_token", "create", "scripts", str(r[0]),
@@ -69,9 +74,11 @@ def update_script(script_id: int, payload: dict, request: Request,
     title = str(merged.get("title") or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="Script title is required")
-    db.execute(text("UPDATE scripts SET title = :t, code = :c, description = :d WHERE id = :i"),
+    db.execute(text("UPDATE scripts SET title = :t, code = :c, description = :d "
+                    "WHERE id = :i AND tenant_id = :tid"),
                {"t": title, "c": merged.get("code") or "",
-                "d": merged.get("description"), "i": script_id})
+                "d": merged.get("description"), "i": script_id,
+                "tid": current_tenant()})
     db.commit()
     caller, _ = get_caller(request)
     audit_event(caller or "api_token", "update", "scripts", str(script_id),
@@ -85,7 +92,8 @@ def delete_script(script_id: int, request: Request, db: Session = Depends(get_db
     from audit_logger import audit_event
     from auth import get_caller
     _get_script(db, script_id)
-    db.execute(text("DELETE FROM scripts WHERE id = :i"), {"i": script_id})
+    db.execute(text("DELETE FROM scripts WHERE id = :i AND tenant_id = :tid"),
+               {"i": script_id, "tid": current_tenant()})
     db.commit()
     caller, _ = get_caller(request)
     audit_event(caller or "api_token", "delete", "scripts", str(script_id),

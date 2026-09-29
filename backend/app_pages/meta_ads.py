@@ -44,6 +44,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db, SessionLocal
+from tenant_context import current_tenant
 from models.settings import SettingsORM
 from clickHouse import get_clickhouse_client
 
@@ -288,7 +289,8 @@ def _build_index(db: Session) -> dict:
     """Index every non-archived campaign for the three match strategies."""
     rows = db.execute(text(
         "SELECT id, name, ad_platform_campaign_id, config FROM campaigns "
-        "WHERE archived = false")).fetchall()
+        "WHERE archived = false AND tenant_id = :tid"),
+        {"tid": current_tenant()}).fetchall()
     by_id, by_name, by_name_ci, by_tracking = {}, {}, {}, {}
     for cid, name, platform_id, config in rows:
         if platform_id:
@@ -349,10 +351,10 @@ def _upsert_daily_row(db: Session, account_id: str, row: dict, matched_campaign_
     db.execute(text("""
         INSERT INTO ad_cost_daily
             (platform, ad_account_id, platform_campaign_id, campaign_name, date,
-             spend, impressions, clicks, matched_campaign_id, synced_at)
+             spend, impressions, clicks, matched_campaign_id, synced_at, tenant_id)
         VALUES (:platform, :acct, :pcid, :cname, :day,
-                :spend, :impressions, :clicks, :matched, now())
-        ON CONFLICT (platform, ad_account_id, platform_campaign_id, date)
+                :spend, :impressions, :clicks, :matched, now(), :tid)
+        ON CONFLICT (tenant_id, platform, ad_account_id, platform_campaign_id, date)
         DO UPDATE SET campaign_name = EXCLUDED.campaign_name,
                       spend = EXCLUDED.spend,
                       impressions = EXCLUDED.impressions,
@@ -362,7 +364,7 @@ def _upsert_daily_row(db: Session, account_id: str, row: dict, matched_campaign_
     """), {"platform": PLATFORM, "acct": account_id, "pcid": row["platform_campaign_id"],
            "cname": row["campaign_name"], "day": row["date"], "spend": row["spend"],
            "impressions": row["impressions"], "clicks": row["clicks"],
-           "matched": matched_campaign_id})
+           "matched": matched_campaign_id, "tid": current_tenant()})
 
 
 def _click_counts(ch, campaign_dates: dict) -> dict:
@@ -380,9 +382,11 @@ def _click_counts(ch, campaign_dates: dict) -> dict:
         rows = ch.query(
             "SELECT campaign_id, toString(toDate(received_at)) AS day, "
             "countIf(click = true) AS clicks FROM clicks_data "
-            "WHERE campaign_id IN %(cids)s AND toString(toDate(received_at)) IN %(days)s "
+            "WHERE tenant_id = %(tenant_id)s "
+            "AND campaign_id IN %(cids)s AND toString(toDate(received_at)) IN %(days)s "
             "GROUP BY campaign_id, day",
-            parameters={"cids": cids, "days": tuple(days)}).result_rows
+            parameters={"cids": cids, "days": tuple(days),
+                        "tenant_id": current_tenant()}).result_rows
         for cid, day, clicks in rows:
             out[(int(cid), str(day))] = int(clicks or 0)
     except Exception as e:
@@ -402,9 +406,10 @@ def _allocate(ch, campaign_id: int, day: str, spend: float, clicks: int) -> int:
     per_click = float(spend) / clicks
     ch.command(
         "ALTER TABLE clicks_data UPDATE cost = %(cost)s "
-        "WHERE campaign_id = %(cid)s AND toDate(received_at) = toDate(%(day)s) "
-        "AND click = true",
-        parameters={"cost": per_click, "cid": int(campaign_id), "day": str(day)},
+        "WHERE campaign_id = %(cid)s AND tenant_id = %(tenant_id)s "
+        "AND toDate(received_at) = toDate(%(day)s) AND click = true",
+        parameters={"cost": per_click, "cid": int(campaign_id), "day": str(day),
+                    "tenant_id": current_tenant()},
         settings={"mutations_sync": 1})
     return clicks
 
@@ -831,8 +836,9 @@ def resolve_platform_campaign_id(db: Session, campaign_id):
 
     if raw.isdigit():
         row = db.execute(text(
-            "SELECT id, name, ad_platform_campaign_id FROM campaigns WHERE id = :id"),
-            {"id": int(raw)}).fetchone()
+            "SELECT id, name, ad_platform_campaign_id FROM campaigns "
+            "WHERE id = :id AND tenant_id = :tid"),
+            {"id": int(raw), "tid": current_tenant()}).fetchone()
         if row is not None:
             cid, name, pid = row
             if pid and str(pid).strip():

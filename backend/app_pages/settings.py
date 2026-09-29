@@ -8,6 +8,7 @@ import httpx
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from db import get_db
+from tenant_context import current_tenant
 from models.settings import SettingsORM  # the settings model
 from models.capi_pixels import (
     CapiPixelORM, CapiPixelBindingORM, CapiChannelSettingORM,
@@ -29,13 +30,18 @@ async def clear_tracking_data(
 
     try:
         ch = request.state.ch
-        ch.command("TRUNCATE TABLE clicks_data")
+        # Per tenant, not TRUNCATE: the admin of one workspace must not wipe
+        # another workspace's tracking data.
+        ch.command("ALTER TABLE clicks_data DELETE WHERE tenant_id = %(tid)s",
+                   parameters={"tid": current_tenant()},
+                   settings={"mutations_sync": 1})
     except Exception as e:
         print("clear-tracking-data: ClickHouse error:", repr(e))
         return JSONResponse(status_code=500, content={"error": "ClickHouse error clearing clicks_data"})
 
     try:
-        db.execute(text("TRUNCATE TABLE conversions_data RESTART IDENTITY CASCADE"))
+        db.execute(text("DELETE FROM conversions_data WHERE tenant_id = :tid"),
+                   {"tid": current_tenant()})
         db.commit()
     except Exception as e:
         db.rollback()
@@ -182,8 +188,9 @@ def save_settings(payload: dict, request: Request, db: Session = Depends(get_db)
     for key, val in payload.items():
         val_str = json.dumps(val)
         row = db.execute(
-            text("SELECT id, value FROM settings WHERE name = :n FOR UPDATE"),
-            {"n": key}).fetchone()
+            text("SELECT id, value FROM settings "
+                 "WHERE name = :n AND tenant_id = :tid FOR UPDATE"),
+            {"n": key, "tid": current_tenant()}).fetchone()
         if row:
             try:
                 existing = json.loads(row[1]) if row[1] else {}
@@ -638,7 +645,9 @@ def export_settings(db: Session = Depends(get_db)):
     try:
         conn_rows = db.execute(text(
             "SELECT platform, access_token, token_type, expires_at, scopes, "
-            "account_label FROM integration_connections ORDER BY platform")).fetchall()
+            "account_label FROM integration_connections "
+            "WHERE tenant_id = :tid ORDER BY platform"),
+            {"tid": current_tenant()}).fetchall()
         data["integration_connections"] = [
             {"platform": r[0], "access_token": r[1], "token_type": r[2],
              "expires_at": r[3].isoformat() if r[3] else None,

@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db
+from tenant_context import current_tenant
 
 router = APIRouter()
 
@@ -36,8 +37,9 @@ def _preset_public(r) -> dict:
 
 
 def _get_preset(db: Session, preset_id: int):
-    r = db.execute(text("SELECT * FROM filter_presets WHERE id = :i"),
-                   {"i": preset_id}).fetchone()
+    r = db.execute(text("SELECT * FROM filter_presets "
+                        "WHERE id = :i AND tenant_id = :tid"),
+                   {"i": preset_id, "tid": current_tenant()}).fetchone()
     if not r:
         raise HTTPException(status_code=404, detail="Preset not found")
     return r
@@ -45,10 +47,10 @@ def _get_preset(db: Session, preset_id: int):
 
 @router.get("/")
 def list_presets(scope: Optional[str] = None, db: Session = Depends(get_db)):
-    query = "SELECT * FROM filter_presets"
-    params = {}
+    query = "SELECT * FROM filter_presets WHERE tenant_id = :tid"
+    params = {"tid": current_tenant()}
     if scope:
-        query += " WHERE scope = :s"
+        query += " AND scope = :s"
         params["s"] = scope
     query += " ORDER BY name ASC, id ASC"
     rows = db.execute(text(query), params).fetchall()
@@ -67,10 +69,10 @@ def create_preset(payload: PresetIn, request: Request, db: Session = Depends(get
         raise HTTPException(status_code=400, detail="Preset scope is required")
     caller, _ = get_caller(request)
     r = db.execute(text("""
-        INSERT INTO filter_presets (name, scope, filters, created_by)
-        VALUES (:n, :s, CAST(:f AS JSONB), :b) RETURNING id"""),
+        INSERT INTO filter_presets (name, scope, filters, created_by, tenant_id)
+        VALUES (:n, :s, CAST(:f AS JSONB), :b, :tid) RETURNING id"""),
         {"n": name, "s": scope, "f": json.dumps(payload.filters or {}),
-         "b": caller or "api_token"}).fetchone()
+         "b": caller or "api_token", "tid": current_tenant()}).fetchone()
     db.commit()
     audit_event(caller or "api_token", "create", "filter_presets", str(r[0]),
                 {"name": name, "scope": scope},
@@ -92,8 +94,9 @@ def update_preset(preset_id: int, payload: dict, request: Request,
         raise HTTPException(status_code=400, detail="Preset name and scope are required")
     db.execute(text("""
         UPDATE filter_presets SET name = :n, scope = :s, filters = CAST(:f AS JSONB)
-        WHERE id = :i"""),
-        {"n": name, "s": scope, "f": json.dumps(merged.get("filters") or {}), "i": preset_id})
+        WHERE id = :i AND tenant_id = :tid"""),
+        {"n": name, "s": scope, "f": json.dumps(merged.get("filters") or {}),
+         "i": preset_id, "tid": current_tenant()})
     db.commit()
     caller, _ = get_caller(request)
     audit_event(caller or "api_token", "update", "filter_presets", str(preset_id),
@@ -107,7 +110,8 @@ def delete_preset(preset_id: int, request: Request, db: Session = Depends(get_db
     from audit_logger import audit_event
     from auth import get_caller
     _get_preset(db, preset_id)
-    db.execute(text("DELETE FROM filter_presets WHERE id = :i"), {"i": preset_id})
+    db.execute(text("DELETE FROM filter_presets WHERE id = :i AND tenant_id = :tid"),
+               {"i": preset_id, "tid": current_tenant()})
     db.commit()
     caller, _ = get_caller(request)
     audit_event(caller or "api_token", "delete", "filter_presets", str(preset_id),

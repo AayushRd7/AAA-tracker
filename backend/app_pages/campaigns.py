@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from db import get_db
+from tenant_context import current_tenant
 from models.campaigns import CampaignORM
 from models.user import UserORM
 from typing import List
@@ -99,13 +100,16 @@ def _purge_campaign(db: Session, ch, campaign_id: int) -> None:
     dashboard/report numbers for a campaign that no longer exists."""
     try:
         ch.command(
-            "ALTER TABLE clicks_data DELETE WHERE campaign_id = %(campaign_id)s",
-            {"campaign_id": int(campaign_id)})
+            "ALTER TABLE clicks_data DELETE "
+            "WHERE campaign_id = %(campaign_id)s AND tenant_id = %(tenant_id)s",
+            {"campaign_id": int(campaign_id), "tenant_id": current_tenant()})
     except Exception as e:
         print(f"campaign delete: ClickHouse purge failed for {campaign_id}:", e)
 
-    db.execute(text("DELETE FROM conversions_data WHERE campaign_id = :cid"),
-               {"cid": campaign_id})
+    # Raw SQL: the ORM tenant filter does not apply — predicate by hand.
+    db.execute(text("DELETE FROM conversions_data "
+                    "WHERE campaign_id = :cid AND tenant_id = :tid"),
+               {"cid": campaign_id, "tid": current_tenant()})
 
 
 @router.get("/", response_model=List[CampaignOut])

@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db
+from tenant_context import current_tenant
 
 router = APIRouter()
 
@@ -33,8 +34,9 @@ def _template_public(r) -> dict:
 
 
 def _get_template(db: Session, template_id: int):
-    r = db.execute(text("SELECT * FROM funnel_templates WHERE id = :i"),
-                   {"i": template_id}).fetchone()
+    r = db.execute(text("SELECT * FROM funnel_templates "
+                        "WHERE id = :i AND tenant_id = :tid"),
+                   {"i": template_id, "tid": current_tenant()}).fetchone()
     if not r:
         raise HTTPException(status_code=404, detail="Funnel template not found")
     return r
@@ -42,7 +44,9 @@ def _get_template(db: Session, template_id: int):
 
 @router.get("/")
 def list_templates(db: Session = Depends(get_db)):
-    rows = db.execute(text("SELECT * FROM funnel_templates ORDER BY name ASC, id ASC")).fetchall()
+    rows = db.execute(text("SELECT * FROM funnel_templates WHERE tenant_id = :tid "
+                           "ORDER BY name ASC, id ASC"),
+                      {"tid": current_tenant()}).fetchall()
     return {"templates": [_template_public(r) for r in rows]}
 
 
@@ -57,9 +61,9 @@ def create_template(payload: FunnelTemplateIn, request: Request,
     steps = payload.steps if isinstance(payload.steps, list) else []
     caller, _ = get_caller(request)
     r = db.execute(text("""
-        INSERT INTO funnel_templates (name, steps)
-        VALUES (:n, CAST(:s AS JSONB)) RETURNING id"""),
-        {"n": name, "s": json.dumps(steps)}).fetchone()
+        INSERT INTO funnel_templates (name, steps, tenant_id)
+        VALUES (:n, CAST(:s AS JSONB), :tid) RETURNING id"""),
+        {"n": name, "s": json.dumps(steps), "tid": current_tenant()}).fetchone()
     db.commit()
     audit_event(caller or "api_token", "create", "funnel_templates", str(r[0]),
                 {"name": name, "steps": len(steps)},
@@ -72,7 +76,8 @@ def delete_template(template_id: int, request: Request, db: Session = Depends(ge
     from audit_logger import audit_event
     from auth import get_caller
     _get_template(db, template_id)
-    db.execute(text("DELETE FROM funnel_templates WHERE id = :i"), {"i": template_id})
+    db.execute(text("DELETE FROM funnel_templates WHERE id = :i AND tenant_id = :tid"),
+               {"i": template_id, "tid": current_tenant()})
     db.commit()
     caller, _ = get_caller(request)
     audit_event(caller or "api_token", "delete", "funnel_templates", str(template_id),

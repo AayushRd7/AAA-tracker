@@ -24,6 +24,7 @@ from email.mime.text import MIMEText
 from email.utils import formataddr
 
 from db import SessionLocal
+from tenant_context import current_tenant
 from sqlalchemy import text
 from models.settings import SettingsORM
 from models.campaigns import CampaignORM
@@ -50,13 +51,15 @@ def _save_email_config(cfg):
     db = SessionLocal()
     try:
         row = db.execute(
-            text("SELECT value FROM settings WHERE name = 'settings' FOR UPDATE")
+            text("SELECT value FROM settings WHERE name = 'settings' "
+                 "AND tenant_id = :tid FOR UPDATE"), {"tid": current_tenant()}
         ).fetchone()
         if row and row[0]:
             merged = json.loads(row[0]) or {}
             merged["email_reports"] = cfg
-            db.execute(text("UPDATE settings SET value = :v WHERE name = 'settings'"),
-                       {"v": json.dumps(merged)})
+            db.execute(text("UPDATE settings SET value = :v "
+                            "WHERE name = 'settings' AND tenant_id = :tid"),
+                       {"v": json.dumps(merged), "tid": current_tenant()})
             db.commit()
     finally:
         db.close()
@@ -449,7 +452,8 @@ def send_scheduled_report(ch, email_cfg: dict, schedule: dict) -> tuple:
 
 def _mark_schedule_sent(db, report_id: str, today: str):
     row = db.execute(
-        text("SELECT value FROM settings WHERE name = 'report_email_schedules' FOR UPDATE")
+        text("SELECT value FROM settings WHERE name = 'report_email_schedules' "
+             "AND tenant_id = :tid FOR UPDATE"), {"tid": current_tenant()}
     ).fetchone()
     if not row or not row[0]:
         return
@@ -463,8 +467,9 @@ def _mark_schedule_sent(db, report_id: str, today: str):
             s["last_sent"] = today
             changed = True
     if changed:
-        db.execute(text("UPDATE settings SET value = :v WHERE name = 'report_email_schedules'"),
-                   {"v": json.dumps(schedules)})
+        db.execute(text("UPDATE settings SET value = :v "
+                        "WHERE name = 'report_email_schedules' AND tenant_id = :tid"),
+                   {"v": json.dumps(schedules), "tid": current_tenant()})
         db.commit()
 
 

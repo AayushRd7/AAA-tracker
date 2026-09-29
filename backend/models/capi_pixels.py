@@ -10,10 +10,10 @@ from sqlalchemy import (
     Column, Integer, String, Text, Boolean, ForeignKey, DateTime, func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from models.base import Base
+from models.base import Base, TenantMixin
 
 
-class CapiPixelORM(Base):
+class CapiPixelORM(TenantMixin, Base):
     __tablename__ = "capi_pixels"
 
     id = Column(Integer, primary_key=True)
@@ -33,7 +33,7 @@ class CapiPixelORM(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
-class CapiPixelBindingORM(Base):
+class CapiPixelBindingORM(TenantMixin, Base):
     """Attach a pixel to a traffic channel (scope='channel') or an offer (scope='offer')."""
     __tablename__ = "capi_pixel_bindings"
 
@@ -44,7 +44,7 @@ class CapiPixelBindingORM(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class CapiChannelSettingORM(Base):
+class CapiChannelSettingORM(TenantMixin, Base):
     """Per-traffic-channel integration toggles (active gate + impression cost sync)."""
     __tablename__ = "capi_channel_settings"
 

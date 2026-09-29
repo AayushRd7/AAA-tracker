@@ -448,6 +448,33 @@
                     <div v-else class="pa-3 caption grey--text">Type at least 2 characters to search campaigns, offers, landings, domains, sources, networks and conversions.</div>
                 </v-card>
             </v-menu>
+            <!-- Multi-tenancy: workspace switcher. Only rendered when the user
+                 belongs to more than one tenant — a single-workspace install
+                 shows nothing extra. -->
+            <v-menu offset-y left v-if="tenants.length > 1">
+                <template v-slot:activator="{ on, attrs }">
+                    <v-btn text small v-bind="attrs" v-on="on" class="workspace-switcher ml-2"
+                           aria-label="Switch workspace">
+                        <v-icon small left>mdi-briefcase-outline</v-icon>
+                        <span class="workspace-switcher-name">{{ currentTenantName }}</span>
+                        <v-icon small right>mdi-chevron-down</v-icon>
+                    </v-btn>
+                </template>
+                <v-list dense>
+                    <v-subheader class="workspace-menu-header">Workspaces</v-subheader>
+                    <v-list-item v-for="t in tenants" :key="t.tenant_id" link
+                                 @click="switchTenant(t)"
+                                 :class="{'v-item--active': t.tenant_id === currentTenantId}">
+                        <v-list-item-icon class="mr-2">
+                            <v-icon small>{{ t.tenant_id === currentTenantId ? 'mdi-check-circle' : 'mdi-briefcase-outline' }}</v-icon>
+                        </v-list-item-icon>
+                        <v-list-item-content>
+                            <v-list-item-title>{{ t.name }}</v-list-item-title>
+                            <v-list-item-subtitle class="text-capitalize">{{ t.role }}</v-list-item-subtitle>
+                        </v-list-item-content>
+                    </v-list-item>
+                </v-list>
+            </v-menu>
             <v-menu offset-y left>
                 <template v-slot:activator="{ on, attrs }">
                     <v-btn icon v-bind="attrs" v-on="on" class="ml-2" aria-label="Account menu">
@@ -647,6 +674,9 @@
                 searchMenu: false,
                 searchResults: {groups: {}},
                 searchTimer: null,
+                // Multi-tenancy: the caller's workspaces + the active one.
+                tenants: [],
+                currentTenantId: null,
                 // G63: effective permission map from the server (null for anonymous)
                 userPerms: {{ (permissions if permissions else {"sections": {}, "write": True}) | tojson }},
                 dashboardShell: {{ 'true' if page == 'dashboard' and is_authenticated_user_type else 'false' }},
@@ -675,6 +705,10 @@
             };
         },
         computed: {
+            currentTenantName() {
+                const t = this.tenants.find(x => x.tenant_id === this.currentTenantId);
+                return t ? t.name : 'Workspace';
+            },
             visibleNavItems() {
                 const isAdmin = this.roleLabel === 'admin';
                 return this.navItems.filter(i =>
@@ -742,6 +776,7 @@
             // every page, not just the dashboard shell.
             this.$loadWorkspace();
             if (!this.dashboardShell) return;
+            this.loadTenants();
             // D1a: an expired/revoked session bounces any API fetch to the login page
             const origFetch = window.fetch;
             window.fetch = function (...args) {
@@ -787,6 +822,34 @@
             });
         },
         methods: {
+            // --- multi-tenancy: workspace switcher ---
+            loadTenants() {
+                fetch('/backend/api/tenants/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {tenants: []})
+                    .then(d => {
+                        this.tenants = d.tenants || [];
+                        this.currentTenantId = d.current_tenant_id;
+                    })
+                    .catch(() => {});
+            },
+            switchTenant(t) {
+                if (!t || t.tenant_id === this.currentTenantId) return;
+                fetch('/backend/api/tenants/switch', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({tenant_id: t.tenant_id})
+                }).then(r => r.json().then(d => ({ok: r.ok, d}))).then(({ok, d}) => {
+                    if (!ok) throw new Error(d.detail || 'Switch failed');
+                    this.currentTenantId = d.tenant_id;
+                    // Every list on the page belongs to the old workspace — a
+                    // full reload of the current section is the only way to be
+                    // sure none of it stays on screen.
+                    window.location.reload();
+                }).catch(err => {
+                    this.$root.$emit('show-message', {type: 'error', text: err.message});
+                });
+            },
             canReadSection(item) {
                 if (item.admin && this.roleLabel !== 'admin') return false;
                 return this.roleLabel === 'admin' || this.userPerms.sections[item.key] !== false;

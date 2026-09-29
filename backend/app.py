@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Request, Depends
-from auth import require_section, require_section_write
+from auth import require_section, require_section_write, resolve_session_tenant
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from fastapi.responses import FileResponse
 from clickHouse import get_clickhouse_client, ensure_report_dimensions_schema
+from starlette.concurrency import run_in_threadpool
+from tenant_context import set_current_tenant, reset_current_tenant, set_tenant_missing
 from types import SimpleNamespace
 
 app = FastAPI(
@@ -18,6 +20,55 @@ app = FastAPI(
     root_path="/backend"  # when the server sits behind a proxy at /backend
 )
 app.state = SimpleNamespace()
+
+
+def _session_token_from_scope(scope) -> str:
+    """The session cookie value from an ASGI scope ('' when absent)."""
+    for name, value in scope.get("headers") or []:
+        if name == b"cookie":
+            for part in value.decode("latin-1").split(";"):
+                key, _, val = part.strip().partition("=")
+                if key == "session_token":
+                    return val
+    return ""
+
+
+class TenantContextMiddleware:
+    """Resolve the request's tenant once, before anything else runs.
+
+    The resolved tenant lives in a contextvar (tenant_context.py) that the
+    ORM session hooks, the ClickHouse helpers and the audit writer read.
+
+    Deliberately a plain ASGI middleware rather than Starlette's
+    BaseHTTPMiddleware: the inner app is awaited in the same task, so the
+    contextvar set here is guaranteed to be visible to the endpoint — both for
+    async endpoints and for sync ones (anyio's threadpool copies the context).
+
+    Resolution is session-based only. A tenant id from a query parameter or
+    header is never accepted, so there is no spoofing surface.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        tenant_id, has_membership = None, True
+        try:
+            tenant_id, has_membership = await run_in_threadpool(
+                resolve_session_tenant, _session_token_from_scope(scope))
+        except Exception:
+            pass
+        token = set_current_tenant(tenant_id)
+        set_tenant_missing(not has_membership)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            reset_current_tenant(token)
+
+
+app.add_middleware(TenantContextMiddleware)
 
 
 def _ensure_capi_tables(conn):
@@ -258,6 +309,125 @@ def _mig(conn, sql):
         print("startup migration skipped:", e)
 
 
+# Tenant-owned tables. Kept as one list so the migration loop and any future
+# audit agree on the set; the same array lives in install/sql/init.sql.
+TENANT_TABLES = [
+    "campaigns", "domains", "landings", "affiliate_networks", "offers", "sources",
+    "conversions_data", "audit_log", "capi_pixels", "capi_pixel_bindings",
+    "capi_channel_settings", "capi_pixel_sent", "meta_capi_sent", "meta_capi_log",
+    "ad_cost_daily", "integration_connections", "scripts", "filter_presets",
+    "funnel_templates", "domain_groups", "auto_rules", "monitor_state",
+    "honeypot_hits", "postback_logs", "click_forward_logs", "cost_update_logs",
+    "settings",
+]
+
+# {table: [(legacy global unique constraint, composite columns)]}
+TENANT_UNIQUE_REWRITES = {
+    "campaigns": [("campaigns_name_key", "name"), ("campaigns_alias_key", "alias")],
+    "domains": [("domains_domain_key", "domain")],
+    "settings": [("settings_name_key", "name")],
+    "sources": [("sources_name_key", "name")],
+    "affiliate_networks": [("affiliate_networks_name_key", "name")],
+    "offers": [("offers_name_key", "name")],
+    "landings": [("landings_folder_key", "folder"), ("landings_name_key", "name")],
+    "domain_groups": [("domain_groups_name_key", "name")],
+    "integration_connections": [("integration_connections_platform_key", "platform")],
+    "ad_cost_daily": [("ad_cost_daily_platform_ad_account_id_platform_campaign_id_d_key",
+                       "platform, ad_account_id, platform_campaign_id, date")],
+}
+
+
+def _ensure_tenant_schema(conn):
+    """Idempotent multi-tenancy schema + backfill (phase 1).
+
+    Orders the work so it is safe on a live install and on a fresh one:
+    tenants/tenant_memberships -> tenant_id on every tenant-owned table
+    (add nullable, backfill to 1, then NOT NULL DEFAULT 1) -> composite uniques
+    (drop the global ones, add UNIQUE(tenant_id, <col>)) -> per-tenant indexes
+    -> membership backfill.
+
+    Every ALTER is guarded by to_regclass: the tables that this hook does not
+    create (they belong to the tracking plane's/bootstrap migrations) may or may
+    not exist depending on boot order.
+    """
+    from sqlalchemy import text
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS tenants (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            slug VARCHAR(255) NOT NULL UNIQUE,
+            parent_tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL,
+            status VARCHAR(32) NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            updated_at TIMESTAMP NOT NULL DEFAULT now()
+        )"""))
+    # Tenant #1 is this install.
+    conn.execute(text("INSERT INTO tenants (id, name, slug) VALUES (1, 'Default', 'default') "
+                      "ON CONFLICT DO NOTHING"))
+    conn.execute(text("SELECT setval(pg_get_serial_sequence('tenants','id'), "
+                      "GREATEST((SELECT COALESCE(MAX(id), 1) FROM tenants), 1))"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS tenant_memberships (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            role VARCHAR(32) NOT NULL DEFAULT 'viewer',
+            permissions JSONB,
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            UNIQUE (user_id, tenant_id)
+        )"""))
+
+    existing = {r[0] for r in conn.execute(
+        text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).fetchall()}
+
+    for table in TENANT_TABLES:
+        if table not in existing:
+            continue
+        _mig(conn, f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tenant_id INTEGER")
+        _mig(conn, f"UPDATE {table} SET tenant_id = 1 WHERE tenant_id IS NULL")
+        _mig(conn, f"ALTER TABLE {table} ALTER COLUMN tenant_id SET DEFAULT 1")
+        _mig(conn, f"ALTER TABLE {table} ALTER COLUMN tenant_id SET NOT NULL")
+        _mig(conn, f"CREATE INDEX IF NOT EXISTS {table}_tenant_id_idx ON {table} (tenant_id)")
+
+    for table, rewrites in TENANT_UNIQUE_REWRITES.items():
+        if table not in existing:
+            continue
+        for legacy, columns in rewrites:
+            _mig(conn, f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {legacy}")
+            idx = f"{table}_tenant_{columns.split(',')[0].strip()}_key"
+            _mig(conn, f"CREATE UNIQUE INDEX IF NOT EXISTS {idx} ON {table} "
+                       f"(tenant_id, {columns})")
+
+    for idx, table, column in [
+        ("conversions_tenant_received_idx", "conversions_data", "received_at"),
+        ("conversions_tenant_campaign_idx", "conversions_data", "campaign_id"),
+        ("conversions_tenant_click_id_idx", "conversions_data", "click_id"),
+        ("click_forward_logs_tenant_created_idx", "click_forward_logs", "created_at"),
+        ("postback_logs_tenant_received_idx", "postback_logs", "received_at"),
+        ("audit_log_tenant_at_idx", "audit_log", "at"),
+    ]:
+        if table in existing:
+            _mig(conn, f"CREATE INDEX IF NOT EXISTS {idx} ON {table} (tenant_id, {column})")
+
+    # Every user becomes a member of tenant 1: owners/admins for the is_admin
+    # users, their install-global permissions copied onto the membership so
+    # nobody's access changes. Re-run on every boot so a user created by raw SQL
+    # (or before this feature existed) still lands somewhere.
+    _mig(conn, """
+        INSERT INTO tenant_memberships (user_id, tenant_id, role, permissions)
+        SELECT u.id, 1,
+               CASE WHEN u.is_admin AND u.id = (SELECT MIN(id) FROM users WHERE is_admin)
+                         THEN 'owner'
+                    WHEN u.is_admin THEN 'admin'
+                    ELSE 'editor' END,
+               u.permissions
+        FROM users u
+        -- Only users with NO membership at all: a user provisioned into a
+        -- different workspace later must not be silently added to tenant 1.
+        WHERE NOT EXISTS (SELECT 1 FROM tenant_memberships m
+                          WHERE m.user_id = u.id)""")
+
+
 @app.on_event("startup")
 async def startup():
     # Lightweight schema migration for installs created before a column existed.
@@ -352,6 +522,10 @@ async def startup():
             _ensure_meta_ads_tables(conn)
             # Ad-platform OAuth connections + single-use CSRF state.
             _ensure_integrations_tables(conn)
+            # Multi-tenancy phase 1: tenants, memberships, tenant_id columns,
+            # per-tenant uniques. Runs last so every table it touches exists
+            # (the guards inside rely on that).
+            _ensure_tenant_schema(conn)
             conn.commit()
     except Exception as e:
         print("startup migration:", e)
@@ -570,6 +744,12 @@ app.include_router(funnel_templates_router, prefix="/api/funnel-templates", tags
 # always-readable dashboard section rather than the admin settings section.
 from app_pages.workspace import router as workspace_router
 app.include_router(workspace_router, prefix="/api/workspace", tags=["Workspace"],
+                   dependencies=[Depends(require_section("dashboard"))])
+# Multi-tenancy phase 1: workspace list / switching. Any authenticated user may
+# read their own memberships and switch into one; creating a tenant is
+# admin-checked inside the router.
+from app_pages.tenants import router as tenants_router
+app.include_router(tenants_router, prefix="/api/tenants", tags=["Tenants"],
                    dependencies=[Depends(require_section("dashboard"))])
 
 

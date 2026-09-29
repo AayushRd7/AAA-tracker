@@ -28,11 +28,19 @@ def ensure_audit_table():
             entity VARCHAR(64) NOT NULL DEFAULT '',
             entity_id VARCHAR(64) NOT NULL DEFAULT '',
             detail JSONB,
-            ip VARCHAR(64) NOT NULL DEFAULT ''
+            ip VARCHAR(64) NOT NULL DEFAULT '',
+            tenant_id INTEGER NOT NULL DEFAULT 1
         )
     """))
+    db.execute(text("ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS "
+                    "tenant_id INTEGER"))
+    db.execute(text("UPDATE audit_log SET tenant_id = 1 WHERE tenant_id IS NULL"))
+    db.execute(text("ALTER TABLE audit_log ALTER COLUMN tenant_id SET DEFAULT 1"))
+    db.execute(text("ALTER TABLE audit_log ALTER COLUMN tenant_id SET NOT NULL"))
     db.execute(text("CREATE INDEX IF NOT EXISTS audit_log_at_idx ON audit_log (at DESC)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS audit_log_username_idx ON audit_log (username)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS audit_log_tenant_id_idx ON audit_log (tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS audit_log_tenant_at_idx ON audit_log (tenant_id, at)"))
     db.commit()
     db.close()
     _table_ready = True
@@ -40,16 +48,23 @@ def ensure_audit_table():
 
 def audit_event(username: str, action: str, entity: str = "",
                 entity_id: str = "", detail: dict = None, ip: str = ""):
-    """Append one row to audit_log. Never raises — auditing must not break requests."""
+    """Append one row to audit_log. Never raises — auditing must not break requests.
+
+    Raw SQL, so the ORM tenant scoping does not apply here: tenant_id is taken
+    from the request context explicitly (tenant_context), defaulting to tenant 1
+    for background work.
+    """
     try:
+        from tenant_context import current_tenant
         ensure_audit_table()
         db = SessionLocal()
         db.execute(text(
-            "INSERT INTO audit_log (username, action, entity, entity_id, detail, ip) "
-            "VALUES (:u, :a, :e, :eid, CAST(:d AS JSONB), :ip)"),
+            "INSERT INTO audit_log (username, action, entity, entity_id, detail, ip, tenant_id) "
+            "VALUES (:u, :a, :e, :eid, CAST(:d AS JSONB), :ip, :t)"),
             {"u": (username or "")[:255], "a": action[:64], "e": (entity or "")[:64],
              "eid": str(entity_id or "")[:64],
-             "d": json.dumps(detail) if detail else None, "ip": (ip or "")[:64]})
+             "d": json.dumps(detail) if detail else None, "ip": (ip or "")[:64],
+             "t": current_tenant()})
         db.commit()
         db.close()
     except Exception:

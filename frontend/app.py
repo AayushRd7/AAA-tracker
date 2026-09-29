@@ -172,7 +172,8 @@ async def ensure_schema():
                     ip text,
                     ua text,
                     campaign_id integer,
-                    received_at timestamp NOT NULL DEFAULT now()
+                    received_at timestamp NOT NULL DEFAULT now(),
+                    tenant_id integer NOT NULL DEFAULT 1
                 )
             """)
             await conn.execute("""
@@ -186,6 +187,7 @@ async def ensure_schema():
                     click_id VARCHAR(100) NOT NULL,
                     status VARCHAR(50) NOT NULL,
                     sent_at TIMESTAMP NOT NULL DEFAULT now(),
+                    tenant_id integer NOT NULL DEFAULT 1,
                     PRIMARY KEY (click_id, status)
                 )
             """)
@@ -202,7 +204,8 @@ async def ensure_schema():
                     outcome VARCHAR(32),
                     attempt INTEGER DEFAULT 1,
                     response_status INTEGER,
-                    detail TEXT
+                    detail TEXT,
+                    tenant_id integer NOT NULL DEFAULT 1
                 )
             """)
             # CAPI integrations: pixels as first-class records, bindings to a
@@ -269,7 +272,8 @@ async def ensure_schema():
                     url TEXT,
                     result VARCHAR(32) NOT NULL,
                     reason TEXT,
-                    raw JSONB NOT NULL DEFAULT '{}'::jsonb
+                    raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    tenant_id integer NOT NULL DEFAULT 1
                 )
             """)
             await conn.execute("CREATE INDEX IF NOT EXISTS postback_logs_received_at_idx "
@@ -287,7 +291,8 @@ async def ensure_schema():
                     status VARCHAR(32) NOT NULL,
                     reason TEXT,
                     ip TEXT,
-                    user_agent TEXT
+                    user_agent TEXT,
+                    tenant_id integer NOT NULL DEFAULT 1
                 )
             """)
             await conn.execute("CREATE INDEX IF NOT EXISTS click_forward_logs_created_at_idx "
@@ -301,7 +306,8 @@ async def ensure_schema():
                     date_from DATE,
                     date_to DATE,
                     cost DOUBLE PRECISION,
-                    updated_rows INTEGER
+                    updated_rows INTEGER,
+                    tenant_id integer NOT NULL DEFAULT 1
                 )
             """)
             # Saved library entities (filter presets, scripts, funnel templates)
@@ -338,6 +344,18 @@ async def ensure_schema():
                 )
             """)
             # Extend the CAPI delivery trail for the Logs area.
+            # Multi-tenancy: this plane can boot before the backend's startup
+            # migration, so it ensures tenant_id on its own tables too.
+            for _tbl in ("honeypot_hits", "meta_capi_sent", "meta_capi_log",
+                         "postback_logs", "click_forward_logs", "cost_update_logs",
+                         "capi_pixels", "capi_pixel_bindings", "capi_channel_settings",
+                         "capi_pixel_sent"):
+                await conn.execute(
+                    f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS tenant_id INTEGER DEFAULT 1")
+                await conn.execute(
+                    f"UPDATE {_tbl} SET tenant_id = 1 WHERE tenant_id IS NULL")
+                await conn.execute(
+                    f"ALTER TABLE {_tbl} ALTER COLUMN tenant_id SET NOT NULL")
             for _ddl in (
                 "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS platform VARCHAR(32)",
                 "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS pixel_id VARCHAR(100)",
@@ -373,7 +391,11 @@ async def ensure_ch_schema():
             "ADD COLUMN IF NOT EXISTS ip_full String DEFAULT '', "
             # Meta CAPI click identifiers (analytics mirror of the PG columns).
             "ADD COLUMN IF NOT EXISTS fbc String DEFAULT '', "
-            "ADD COLUMN IF NOT EXISTS fbp String DEFAULT ''")
+            "ADD COLUMN IF NOT EXISTS fbp String DEFAULT '', "
+            # Tenant that owns the click — written from the resolved campaign's
+            # tenant_id. DEFAULT 1 keeps rows written before multi-tenancy in
+            # tenant 1; matches install/sql/clickHouse.sql.
+            "ADD COLUMN IF NOT EXISTS tenant_id UInt32 DEFAULT 1")
     except Exception as e:
         release_ch(ch, failed=True)
         log_track(f"ClickHouse schema migration error: {e}")
@@ -395,7 +417,10 @@ async def prune_old_data():
     """Delete clicks older than settings.data_retention.days when enabled."""
     conn = pg_connect()
     cur = conn.cursor()
-    cur.execute("SELECT value FROM settings WHERE name = 'settings'")
+    # settings rows are per tenant; the tracking plane has no request tenant
+    # context, so it reads tenant 1's (this install's) block. Phase 2 iterates
+    # tenants here instead.
+    cur.execute("SELECT value FROM settings WHERE name = 'settings' AND tenant_id = 1")
     row = cur.fetchone()
     conn.close()
     if not row or not row[0]:
@@ -411,14 +436,20 @@ async def prune_old_data():
         return
     ch = acquire_ch()
     try:
+        # Tenant 1 only: this plane reads the retention window from tenant 1's
+        # settings row, so letting the mutation run unfiltered would delete
+        # every other tenant's history. Phase 2 iterates tenants with
+        # per-tenant retention windows.
         await asyncio.to_thread(
             ch.command,
-            f"ALTER TABLE clicks_data DELETE WHERE received_at < now() - INTERVAL {days} DAY")
+            f"ALTER TABLE clicks_data DELETE WHERE tenant_id = 1 "
+            f"AND received_at < now() - INTERVAL {days} DAY",
+            settings={"mutations_sync": 1})
     except Exception:
         release_ch(ch, failed=True)
         raise
     release_ch(ch)
-    log_track(f"🧹 Retention: pruned clicks_data older than {days} days")
+    log_track(f"🧹 Retention: pruned tenant 1's clicks_data older than {days} days")
 
 
 # 🛑 Shutdown
@@ -494,32 +525,43 @@ def schedule_audit_insert(sql: str, *args):
 
 
 def schedule_postback_log(click_id, status, payout, transaction_id, source_ip,
-                          url, result, reason, raw):
-    """Record one inbound S2S postback outcome (see postback_logs)."""
+                          url, result, reason, raw, tenant_id=None):
+    """Record one inbound S2S postback outcome (see postback_logs).
+
+    ``tenant_id`` is supplied by the caller once the click's campaign is known;
+    a postback whose click cannot be resolved (unknown click id, malformed
+    status) lands in tenant 1 — it belongs to no workspace by definition.
+    """
     schedule_audit_insert(
         "INSERT INTO postback_logs (click_id, status, payout, transaction_id, "
-        "source_ip, url, result, reason, raw) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)",
+        "source_ip, url, result, reason, raw, tenant_id) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)",
         str(click_id or "")[:100], str(status or "")[:50], payout,
         (str(transaction_id)[:100] if transaction_id else None),
         str(source_ip or "")[:200] or None, str(url or "")[:2000] or None,
         str(result)[:32], str(reason or "")[:500] or None,
-        json.dumps(raw or {}, default=str)[:20000])
+        json.dumps(raw or {}, default=str)[:20000], int(tenant_id or 1))
 
 
 def schedule_click_forward_log(click_id, campaign_id, flow_index, schema,
-                               offer_id, destination_url, status, reason, request):
-    """Record one redirect decision (see click_forward_logs)."""
+                               offer_id, destination_url, status, reason, request,
+                               tenant_id=None):
+    """Record one redirect decision (see click_forward_logs).
+
+    ``tenant_id`` is the tenant of the resolved campaign; a "campaign not found"
+    row stores tenant 1 — there is no workspace to attribute it to.
+    """
     schedule_audit_insert(
         "INSERT INTO click_forward_logs (click_id, campaign_id, flow_index, schema, "
-        "offer_id, destination_url, status, reason, ip, user_agent) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        "offer_id, destination_url, status, reason, ip, user_agent, tenant_id) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
         str(click_id or "")[:100] or None, campaign_id, flow_index,
         (str(schema)[:32] if schema else None), offer_id,
         str(destination_url)[:2000] or None if destination_url else None,
         str(status)[:32], str(reason or "")[:500] or None,
         resolve_client_ip(request) or None,
-        (request.headers.get("user-agent") or "")[:500] or None)
+        (request.headers.get("user-agent") or "")[:500] or None,
+        int(tenant_id or 1))
 
 
 def log_campaign_gate(campaign, request: Request, campaign_alias: str):
@@ -536,7 +578,8 @@ def log_campaign_gate(campaign, request: Request, campaign_alias: str):
                                    "not_found", "campaign_not_found", request)
     else:
         schedule_click_forward_log(click_id, campaign["id"], None, None, None, None,
-                                   "paused", f"campaign_status:{campaign['status']}", request)
+                                   "paused", f"campaign_status:{campaign['status']}", request,
+                                   tenant_id=campaign["tenant_id"])
 
 
 def resolve_client_ip(request: Request) -> str:
@@ -716,14 +759,57 @@ def do_redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url=url, status_code=302)
 
 
+async def _request_host_tenant(pg, request: Request) -> "int | None":
+    """Tenant owning the request's Host domain, or None when the host is not a
+    domain row (localhost, a bare IP, or a domain not added yet).
+
+    A domain belongs to exactly one tenant, so the Host header is what tells the
+    tracking plane which workspace a visitor is hitting. Multi-tenancy phase 1
+    deliberately does NOT accept a tenant from a query param here: that would be
+    a spoofing surface on the public plane.
+    """
+    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+    if not host:
+        return None
+    try:
+        async with pg.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT tenant_id FROM domains WHERE lower(domain) = $1 "
+                "ORDER BY tenant_id ASC LIMIT 1", host)
+        return int(row["tenant_id"]) if row else None
+    except Exception:
+        return None
+
+
+async def _fetch_campaign_by_alias(pg, alias: str, request: Request):
+    """Tenant-aware campaign lookup for the tracking routes.
+
+    Known host -> the alias is resolved strictly inside that host's tenant, so
+    tenant A can never route traffic to tenant B's campaign (even when both own
+    the same alias — aliases are unique per tenant, not globally).
+    Unknown host -> the lowest tenant owning the alias wins, i.e. the
+    single-tenant behaviour this install had before multi-tenancy.
+    """
+    tenant_id = await _request_host_tenant(pg, request)
+    async with pg.acquire() as conn:
+        if tenant_id is not None:
+            return await conn.fetchrow(
+                "SELECT * FROM campaigns WHERE alias = $1 AND tenant_id = $2",
+                alias, tenant_id)
+        return await conn.fetchrow(
+            "SELECT * FROM campaigns WHERE alias = $1 "
+            "ORDER BY tenant_id ASC, id ASC LIMIT 1", alias)
+
+
 async def get_default_campaign_from_db(domain: str):
+    # Scoped to the tenant that owns the domain: the domain row's default
+    # campaign must belong to the same workspace.
     query = """
-            select *
-            from campaigns
-            where id in (SELECT default_campaign_id
-                         FROM domains
-                         WHERE domain = $1
-                         LIMIT 1); \
+            select c.*
+            from campaigns c
+            join domains d on d.default_campaign_id = c.id
+            where lower(d.domain) = lower($1) and c.tenant_id = d.tenant_id
+            limit 1; \
             """
     async with app.state.pg.acquire() as conn:
         row = await conn.fetchrow(query, domain)
@@ -755,9 +841,18 @@ async def save_click_to_clickhouse(meta: dict, campaign_alias: str):
     break the visitor's redirect.
     """
     try:
+        try:
+            async with app.state.pg.acquire() as _tconn:
+                _trow = await _tconn.fetchrow(
+                    "SELECT tenant_id FROM campaigns WHERE id = $1",
+                    int(meta["campaign_id"]))
+            _tenant = int(_trow["tenant_id"]) if _trow else 1
+        except Exception:
+            _tenant = 1
         row = {
             "received_at": datetime.utcnow(),
             "campaign_id": str(meta["campaign_id"]),
+            "tenant_id": _tenant,
             "offer_id": meta.get("offer_id"),
             "click_id": str(meta.get("click_id") or ""),
             "click": True,
@@ -836,7 +931,9 @@ async def campaign_click(
 
     async with pg.acquire() as conn:
         # 1. Campaign
-        campaign = await conn.fetchrow("SELECT * FROM campaigns WHERE alias = $1", campaign_alias)
+        campaign = await conn.fetchrow(
+            "SELECT * FROM campaigns WHERE alias = $1 AND tenant_id = $2",
+            campaign_alias, await _request_host_tenant(pg, request) or 1)
         if not campaign:
             log_track(f"❌ CAMPAIGN NOT FOUND request {campaign_alias} - {offer_id}")
             return Response("Campaign not found", status_code=404)
@@ -1055,6 +1152,17 @@ async def save_click_to_db(meta: dict):
 
     insert_data["status"] = 'lead'
 
+    # Tenant of the owning campaign (raw SQL — the backend's ORM tenant filter
+    # does not reach this plane).
+    try:
+        async with app.state.pg.acquire() as _tconn:
+            _trow = await _tconn.fetchrow(
+                "SELECT tenant_id FROM campaigns WHERE id = $1",
+                int(meta["campaign_id"]))
+        insert_data["tenant_id"] = int(_trow["tenant_id"]) if _trow else 1
+    except Exception:
+        insert_data["tenant_id"] = 1
+
     # (column, placeholder, value) built together so the numbering always
     # matches the value list — filtering "now()" out of values separately
     # desynced $N indices and silently dropped the click row.
@@ -1254,13 +1362,35 @@ async def _collect_payload(request: Request) -> dict:
     return post_data if isinstance(post_data, dict) else {}
 
 
-async def find_campaign_for_tracking(c_ref: str):
+async def find_campaign_for_tracking(c_ref: str, request: Request = None):
     """Active campaign by numeric id, falling back to alias.
 
     Paused/archived campaigns must not track (status gate): every direct
     endpoint (/t/collect, /p, /i, /click-api, /simulate) resolves through here.
+
+    ``request`` scopes the resolution to the Host domain's tenant (see
+    _fetch_campaign_by_alias); without it the lookup falls back to the lowest
+    tenant owning the ref — the pre-multi-tenancy behaviour.
     """
     pg = app.state.pg
+    if request is not None:
+        tenant_id = await _request_host_tenant(pg, request)
+    else:
+        tenant_id = None
+    if tenant_id is not None:
+        async with pg.acquire() as conn:
+            if str(c_ref).isdecimal():
+                try:
+                    row = await conn.fetchrow(
+                        "SELECT * FROM campaigns WHERE id = $1 AND status = 'active' "
+                        "AND tenant_id = $2", int(c_ref), tenant_id)
+                except (TypeError, ValueError):
+                    row = None
+                if row:
+                    return row
+            return await conn.fetchrow(
+                "SELECT * FROM campaigns WHERE alias = $1 AND status = 'active' "
+                "AND tenant_id = $2", str(c_ref), tenant_id)
     async with pg.acquire() as conn:
         # isdecimal, not isdigit: "²".isdigit() is True but int("²") raises —
         # a crafted campaign ref must 404, not 500.
@@ -1273,7 +1403,8 @@ async def find_campaign_for_tracking(c_ref: str):
             if row:
                 return row
         return await conn.fetchrow(
-            "SELECT * FROM campaigns WHERE alias = $1 AND status = 'active'", str(c_ref))
+            "SELECT * FROM campaigns WHERE alias = $1 AND status = 'active' "
+            "ORDER BY tenant_id ASC, id ASC LIMIT 1", str(c_ref))
 
 
 @app.api_route("/t/collect", methods=["GET", "POST"])
@@ -1287,7 +1418,7 @@ async def direct_collect(request: Request) -> Response:
         return JSONResponse({"detail": "Missing campaign reference (param 'c')"},
                             status_code=400, headers=open_cors_headers())
 
-    campaign = await find_campaign_for_tracking(str(c_ref))
+    campaign = await find_campaign_for_tracking(str(c_ref), request)
     if not campaign:
         return JSONResponse({"detail": "Campaign not found"},
                             status_code=404, headers=open_cors_headers())
@@ -1380,19 +1511,21 @@ async def honeypot_hit(request: Request) -> Response:
     vkey = visitor_key_for(request)
     c_ref = (request.query_params.get("c") or "").strip()
     campaign_id = None
+    campaign = None
     if c_ref:
-        campaign = await find_campaign_for_tracking(c_ref)
+        campaign = await find_campaign_for_tracking(c_ref, request)
         if campaign:
             campaign_id = campaign["id"]
     try:
         async with app.state.pg.acquire() as conn:
             await conn.execute(
-                "INSERT INTO honeypot_hits (visitor_key, ip, ua, campaign_id) "
-                "SELECT $1, $2, $3, $4 "
+                "INSERT INTO honeypot_hits (visitor_key, ip, ua, campaign_id, tenant_id) "
+                "SELECT $1, $2, $3, $4, $5 "
                 "WHERE NOT EXISTS (SELECT 1 FROM honeypot_hits "
                 "WHERE visitor_key = $1 "
                 "AND received_at > NOW() - INTERVAL '1 hour')",
-                vkey, resolve_client_ip(request), str(ua)[:512], campaign_id)
+                vkey, resolve_client_ip(request), str(ua)[:512], campaign_id,
+                int((campaign["tenant_id"] if campaign else 1) or 1))
     except Exception as e:
         log_track(f"Honeypot insert error: {e}")
     return Response(status_code=204)
@@ -1412,7 +1545,11 @@ def load_telegram_config() -> dict:
     try:
         conn = pg_connect()
         cur = conn.cursor()
-        cur.execute("SELECT value FROM settings WHERE name = 'settings'")
+        # settings rows are per tenant; the tracking plane has no request
+        # tenant context, so it reads tenant 1's (this install's) block.
+        # Phase 2 iterates tenants here instead.
+        cur.execute("SELECT value FROM settings WHERE name = 'settings' "
+                    "AND tenant_id = 1")
         row = cur.fetchone()
         conn.close()
         if row and row[0]:
@@ -1445,7 +1582,11 @@ def _read_settings_block(key: str):
     try:
         conn = pg_connect()
         cur = conn.cursor()
-        cur.execute("SELECT value FROM settings WHERE name = 'settings'")
+        # settings rows are per tenant; the tracking plane has no request
+        # tenant context, so it reads tenant 1's (this install's) block.
+        # Phase 2 iterates tenants here instead.
+        cur.execute("SELECT value FROM settings WHERE name = 'settings' "
+                    "AND tenant_id = 1")
         row = cur.fetchone()
         conn.close()
         if row and row[0]:
@@ -2063,7 +2204,8 @@ async def apply_tracking_gate(request: Request, label: str, campaign=None) -> Re
         """Record a blocking tracking-gate decision (Logs area)."""
         schedule_click_forward_log(
             request.query_params.get("click_id"), _gate_campaign_id(),
-            None, None, None, None, "blocked", reason, request)
+            None, None, None, None, "blocked", reason, request,
+            tenant_id=(campaign["tenant_id"] if campaign is not None else None))
 
     rule, blocked = await apply_bot_rules(request)
     if rule:
@@ -2174,7 +2316,7 @@ async def sync_conversion_to_clickhouse(click_id: str):
         pg = app.state.pg
         async with pg.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT status, revenue, profit FROM conversions_data "
+                "SELECT status, revenue, profit, tenant_id FROM conversions_data "
                 "WHERE click_id = $1 ORDER BY received_at DESC LIMIT 1",
                 click_id)
         if not row:
@@ -2185,12 +2327,13 @@ async def sync_conversion_to_clickhouse(click_id: str):
                 ch.command,
                 "ALTER TABLE clicks_data UPDATE "
                 "status = %(status)s, revenue = %(revenue)s, profit = %(profit)s "
-                "WHERE click_id = %(cid)s",
+                "WHERE click_id = %(cid)s AND tenant_id = %(tenant_id)s",
                 parameters={
                     "status": row["status"] or "",
                     "revenue": row["revenue"],
                     "profit": row["profit"],
                     "cid": click_id,
+                    "tenant_id": int(row["tenant_id"] or 1),
                 },
                 settings={"mutations_sync": 1})
         except Exception:
@@ -2235,6 +2378,42 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
     event = {"status": status, "payout": payout_value,
              "received_at": now.isoformat(), "source": source}
     clickless = str(click_id or "").strip().lower() in ("", "none", "0")
+
+    # Tenant of this conversion: the campaign's workspace when the caller
+    # resolved one, else whatever the click's own conversion row carries.
+    # Raw SQL plane — every conversions_data write below stamps it explicitly.
+    tenant_id_value = 1
+    try:
+        async with pg.acquire() as _tconn:
+            if campaign_id is not None:
+                _trow = await _tconn.fetchrow(
+                    "SELECT tenant_id FROM campaigns WHERE id = $1", int(campaign_id))
+            else:
+                _trow = await _tconn.fetchrow(
+                    "SELECT tenant_id FROM conversions_data WHERE click_id = $1 "
+                    "ORDER BY received_at DESC LIMIT 1", click_id)
+        if _trow:
+            tenant_id_value = int(_trow["tenant_id"] or 1)
+        elif not clickless:
+            # First postback for a click that has no PG row yet (the plain
+            # /{alias} redirect only writes ClickHouse). The click row carries
+            # the tenant it was served for, so ask ClickHouse — otherwise the
+            # conversion and its audit rows would land in tenant 1.
+            _ch = None
+            try:
+                _ch = acquire_ch()
+                _res = await asyncio.to_thread(
+                    _ch.query,
+                    "SELECT tenant_id FROM clicks_data WHERE click_id = %(cid)s "
+                    "ORDER BY received_at DESC LIMIT 1",
+                    parameters={"cid": click_id})
+                if _res.result_rows and _res.result_rows[0][0]:
+                    tenant_id_value = int(_res.result_rows[0][0])
+            finally:
+                if _ch is not None:
+                    release_ch(_ch)
+    except Exception:
+        tenant_id_value = tenant_id_value or 1
 
     # conversions_data has no cost column → profit recomputes to revenue.
     # The dedupe guard lives in the WHERE clause of one atomic UPDATE: the
@@ -2293,10 +2472,11 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
 
     async def insert_row(conn, click_id_value: str) -> None:
         cols = ["click_id", "status", "payout", "revenue", "profit", "postback_count",
-                "last_postback_at", "events"]
-        vals = ["$1", "$2", "$3", "$3", "$3", "1", "NOW()", "$4::jsonb"]
-        args = [click_id_value, status, payout_value, json.dumps([event])]
-        idx = 5
+                "last_postback_at", "events", "tenant_id"]
+        vals = ["$1", "$2", "$3", "$3", "$3", "1", "NOW()", "$4::jsonb", "$5"]
+        args = [click_id_value, status, payout_value, json.dumps([event]),
+                int(tenant_id_value or 1)]
+        idx = 6
         # Meta CAPI identifiers from the conversion request (a direct-tracking
         # click may have no PG row until now).
         _fbc, _fbp = meta_click_identifiers(request, None)
@@ -2399,6 +2579,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             "campaign_config": campaign_config,
             "traffic_source_id": traffic_source_id,
             "offer_id": offer_id,
+            "tenant_id": (rowd.get("tenant_id") if row is not None else None) or 1,
             "event_time": int(time.time()),
         }
         background_tasks.add_task(send_meta_capi, conv)
@@ -2511,10 +2692,12 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                     schedule_meta_capi(row["click_id"], row)
                 return {"status": "ok", "click_id": row["click_id"],
                         "updated_status": status, "duplicate": is_duplicate,
+                        "tenant_id": tenant_id_value,
                         "clickless": True, "attributed": True}
             await insert_row(conn, "none")
             return {"status": "ok", "click_id": "none", "updated_status": status,
-                    "duplicate": False, "clickless": True, "attributed": False}
+                    "duplicate": False, "clickless": True, "attributed": False,
+                    "tenant_id": tenant_id_value}
 
         row = await conn.fetchrow(JOINED_CLICK_QUERY, click_id)
 
@@ -2525,7 +2708,8 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             schedule_ch_sync(click_id)
             schedule_meta_capi(click_id, None)
             return {"status": "ok", "click_id": click_id,
-                    "updated_status": status, "duplicate": False}
+                    "updated_status": status, "duplicate": False,
+                    "tenant_id": tenant_id_value}
 
         is_duplicate = await write_conversion(conn, row)
 
@@ -2539,7 +2723,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             schedule_meta_capi(click_id, row)
 
     return {"status": "ok", "click_id": click_id, "updated_status": status,
-            "duplicate": is_duplicate}
+            "duplicate": is_duplicate, "tenant_id": tenant_id_value}
 
 
 # The canonical postback endpoint is /pb with query parameters; it accepts the
@@ -2637,6 +2821,12 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
     request_url = str(request.url)
     initial_tid = _first_postback_param(raw_params, POSTBACK_TRANSACTION_ALIASES)
 
+    # Tenant of the conversion once it is resolved (record_conversion returns
+    # it). Postbacks logged before that — malformed status/payout, denied
+    # access, an unknown click — carry no resolvable workspace and land in
+    # tenant 1.
+    resolved_tenant = {"id": None}
+
     def log_postback(result: str, reason: str, log_status=None, log_payout=None,
                      params=None) -> None:
         """Record this postback outcome; HEAD probes (write=False) are not logged."""
@@ -2647,7 +2837,8 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
             log_status if log_status is not None else status,
             log_payout if log_payout is not None else _to_float_or_none(payout),
             initial_tid, source_ip, request_url, result, reason,
-            params if params is not None else raw_params)
+            params if params is not None else raw_params,
+            tenant_id=resolved_tenant["id"])
 
     # Built-ins (lead/sale/upsale/rejected/hold/trash) + configured custom statuses
     if status not in valid_conversion_statuses():
@@ -2694,6 +2885,8 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
     extra_fields = {k: v for k, v in params.items() if k in PIXEL_EXTRA_FIELDS}
     result = await record_conversion(click_id, status, payout_value, request, background_tasks,
                                      extra_fields or None, source="postback", identity=params)
+    if result.get("tenant_id"):
+        resolved_tenant["id"] = result["tenant_id"]
     log_postback("duplicate" if result.get("duplicate") else "accepted", "",
                  log_status=status, log_payout=payout_value, params=params)
     return result
@@ -2769,7 +2962,7 @@ async def conversion_pixel(campaign_alias: str, request: Request, background_tas
         return Response(content=(detail or "error").encode(), status_code=status_code,
                         media_type="text/plain", headers=open_cors_headers())
 
-    campaign = await find_campaign_for_tracking(campaign_alias)
+    campaign = await find_campaign_for_tracking(campaign_alias, request)
     if not campaign:
         log_track(f"❌ Pixel conversion for unknown campaign '{campaign_alias}'")
         return respond(status_code=404, detail="Campaign not found")
@@ -2832,7 +3025,11 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
         if host:
             pg = app.state.pg
             async with pg.acquire() as conn:
-                row = await conn.fetchrow("SELECT * FROM domains WHERE domain = $1", host)
+                # domains are per tenant; pick deterministically (lowest tenant)
+                # rather than an arbitrary row when the host name is shared.
+                row = await conn.fetchrow(
+                    "SELECT * FROM domains WHERE domain = $1 "
+                    "ORDER BY tenant_id ASC LIMIT 1", host)
                 log_track("🔁 domain lookup for 404 handling")
                 if row and row['handle_404'] == 'handle':
                     log_track('HANDLE 404')
@@ -3033,7 +3230,7 @@ def schedule_matches(schedule: dict) -> bool:
         return True
 
 
-async def flow_click_counts(campaign_id: int, flow_index: int) -> dict:
+async def flow_click_counts(campaign_id: int, flow_index: int, tenant_id: int = 1) -> dict:
     """Click counts for a flow from ClickHouse (per hour / per day / total).
 
     On a query error returns {} so a ClickHouse hiccup never blocks traffic.
@@ -3041,7 +3238,10 @@ async def flow_click_counts(campaign_id: int, flow_index: int) -> dict:
     ch = acquire_ch()
     failed = False
     try:
+        # tenant_id comes from the campaign the caller already resolved (never
+        # from the request) — this plane has no per-request tenant context.
         base = (f"FROM clicks_data WHERE campaign_id = {int(campaign_id)} "
+                f"AND tenant_id = {int(tenant_id or 1)} "
                 f"AND flow_index = {int(flow_index)}")
 
         def _run():
@@ -3149,17 +3349,24 @@ def _load_or_create_bind_secret() -> bytes:
     try:
         conn = pg_connect()
         cur = conn.cursor()
-        cur.execute("SELECT value FROM settings WHERE name = 'aaa_bind_secret'")
+        cur.execute("SELECT value FROM settings WHERE name = 'aaa_bind_secret' "
+                    "AND tenant_id = 1")
         row = cur.fetchone()
         if row and row[0]:
             conn.close()
             return row[0].encode()
         value = secrets.token_urlsafe(32)
+        # Tenant 1's bind secret. Phase-1 limitation: the tracking plane keeps a
+        # single process-wide bind secret, so a second tenant's campaigns share
+        # this key (bind cookies are still validated against the campaign id and
+        # routing hash, so this is not a cross-tenant read path).
         cur.execute(
-            "INSERT INTO settings (name, value) VALUES ('aaa_bind_secret', %s) "
-            "ON CONFLICT (name) DO NOTHING", (value,))
+            "INSERT INTO settings (name, value, tenant_id) "
+            "VALUES ('aaa_bind_secret', %s, 1) "
+            "ON CONFLICT (tenant_id, name) DO NOTHING", (value,))
         conn.commit()
-        cur.execute("SELECT value FROM settings WHERE name = 'aaa_bind_secret'")
+        cur.execute("SELECT value FROM settings WHERE name = 'aaa_bind_secret' "
+                    "AND tenant_id = 1")
         row = cur.fetchone()
         conn.close()
         if row and row[0]:
@@ -3816,7 +4023,8 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
                 continue
             caps = flow.get("caps")
             if caps:
-                counts = await flow_click_counts(campaign["id"], idx)
+                counts = await flow_click_counts(campaign["id"], idx,
+                                                 campaign["tenant_id"])
                 if counts and cap_exceeded(caps, counts):
                     skip_reasons.append("cap")
                     continue
@@ -3947,15 +4155,18 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
                 else:
                     fwd_status = "fallback"
                 schedule_click_forward_log(fwd_click_id, campaign["id"], None, None, None,
-                                           fallback_url, fwd_status, fwd_reason, request)
+                                           fallback_url, fwd_status, fwd_reason, request,
+                                           tenant_id=campaign["tenant_id"])
             else:
                 schedule_click_forward_log(fwd_click_id, campaign["id"], None, None, None,
-                                           None, "not_found", fwd_reason, request)
+                                           None, "not_found", fwd_reason, request,
+                                           tenant_id=campaign["tenant_id"])
         else:
             served_offer = served["offer"] if served["offer"] is not None else flow.get("offer")
             schedule_click_forward_log(
                 fwd_click_id, campaign["id"], chosen_index, flow.get("schema"),
-                served_offer, response.headers.get("location"), "redirected", "", request)
+                served_offer, response.headers.get("location"), "redirected", "", request,
+                tenant_id=campaign["tenant_id"])
 
     # Track THIS campaign's own execution (flow index was recorded above under
     # this campaign's id). Inner redirect_campaign levels track themselves when
@@ -4218,7 +4429,10 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
 
     # Base record
     result_row = {
-        "campaign_id": str(campaign["id"])
+        "campaign_id": str(campaign["id"]),
+        # Tenant isolation for the analytics plane: the row belongs to the
+        # campaign's workspace, never to the viewer's.
+        "tenant_id": int(campaign["tenant_id"] or 1),
     }
 
     # Chosen flow index (set by do_campaign_execution) — powers click caps
@@ -4630,13 +4844,15 @@ def meta_capi_resolve_dataset(cfg: dict, campaign_config=None,
     return str(cfg.get("dataset_id") or "").strip()
 
 
-async def _meta_capi_claim(click_id: str, status: str) -> bool:
+async def _meta_capi_claim(click_id: str, status: str, tenant_id: int = None) -> bool:
     """Atomically claim (click_id, status); False when already sent/reclaimed."""
     try:
         async with app.state.pg.acquire() as conn:
             res = await conn.execute(
-                "INSERT INTO meta_capi_sent (click_id, status) VALUES ($1, $2) "
-                "ON CONFLICT (click_id, status) DO NOTHING", str(click_id), str(status))
+                "INSERT INTO meta_capi_sent (click_id, status, tenant_id) "
+                "VALUES ($1, $2, $3) "
+                "ON CONFLICT (click_id, status) DO NOTHING",
+                str(click_id), str(status), int(tenant_id or 1))
         return res == "INSERT 0 1"
     except Exception as e:
         log_track(f"Meta CAPI dedupe claim error: {e}")
@@ -4653,14 +4869,14 @@ async def _meta_capi_audit(conv: dict, dataset_id: str, event_name: str,
                 await conn.execute(
                     "INSERT INTO meta_capi_log (click_id, status, event_name, dataset_id, "
                     "outcome, attempt, response_status, detail, platform, pixel_id, "
-                    "http_status, response_snippet, attempts) "
-                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+                    "http_status, response_snippet, attempts, tenant_id) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
                     str(conv.get("click_id") or "")[:100], str(conv.get("status") or "")[:50],
                     str(event_name or "")[:100], str(dataset_id or "")[:100],
                     str(outcome)[:32], int(a.get("attempt") or 1), a.get("status_code"),
                     str(detail)[:2000], "meta", str(dataset_id or "")[:100] or None,
                     a.get("status_code"), str(detail)[:2000] or None,
-                    int(a.get("attempt") or 1))
+                    int(a.get("attempt") or 1), int(conv.get("tenant_id") or 1))
     except Exception as e:
         log_track(f"Meta CAPI audit write error: {e}")
 
@@ -4726,14 +4942,16 @@ async def _resolve_capi_pixels(conv: dict) -> list:
     return []
 
 
-async def _meta_capi_pixel_claim(click_id: str, status: str, pixel_id) -> bool:
+async def _meta_capi_pixel_claim(click_id: str, status: str, pixel_id,
+                                 tenant_id: int = None) -> bool:
     """Atomically claim (click_id, status, pixel_id); once per pixel per event."""
     try:
         async with app.state.pg.acquire() as conn:
             res = await conn.execute(
-                "INSERT INTO capi_pixel_sent (click_id, status, pixel_id) "
-                "VALUES ($1, $2, $3) ON CONFLICT (click_id, status, pixel_id) DO NOTHING",
-                str(click_id), str(status), int(pixel_id))
+                "INSERT INTO capi_pixel_sent (click_id, status, pixel_id, tenant_id) "
+                "VALUES ($1, $2, $3, $4) "
+                "ON CONFLICT (click_id, status, pixel_id) DO NOTHING",
+                str(click_id), str(status), int(pixel_id), int(tenant_id or 1))
         return res == "INSERT 0 1"
     except Exception as e:
         log_track(f"Meta CAPI pixel dedupe claim error: {e}")
@@ -4771,7 +4989,8 @@ async def _send_meta_capi_pixel(conv: dict, pixel: dict, cfg: dict):
                   f"[pixel {pixel.get('id')}]: {json.dumps(payload)[:500]}")
         await _meta_capi_audit(conv, dataset_id, event_name, "dry_run", [{"attempt": 1}])
         return
-    if not await _meta_capi_pixel_claim(click_id, status, pixel["id"]):
+    if not await _meta_capi_pixel_claim(click_id, status, pixel["id"],
+                                        conv.get("tenant_id")):
         log_track(f"↩ Meta CAPI duplicate suppressed for {click_id}/{status} "
                   f"pixel {pixel.get('id')}")
         return
@@ -4837,7 +5056,7 @@ async def send_meta_capi(conv: dict):
                       f"{json.dumps(payload)[:500]}")
             await _meta_capi_audit(conv, dataset_id, event_name, "dry_run", [{"attempt": 1}])
             return
-        if not await _meta_capi_claim(click_id, status):
+        if not await _meta_capi_claim(click_id, status, conv.get("tenant_id")):
             log_track(f"↩ Meta CAPI duplicate suppressed for {click_id}/{status}")
             return
         result = await asyncio.to_thread(meta_capi.post_event, cfg, payload, dataset_id)
@@ -5180,7 +5399,8 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
                 continue
             caps = flow.get("caps")
             if caps:
-                counts = await flow_click_counts(campaign["id"], idx)
+                counts = await flow_click_counts(campaign["id"], idx,
+                                                 campaign["tenant_id"])
                 if counts and cap_exceeded(caps, counts):
                     continue
             filters = flow.get("filters", [])
@@ -5336,7 +5556,7 @@ async def impression_tracker(campaign_alias: str, request: Request) -> Response:
     later conversion can attribute. Bot rules apply exactly like /t/collect.
     Opted-out visitors get the GIF with no insert and no cookies.
     """
-    campaign = await find_campaign_for_tracking(campaign_alias)
+    campaign = await find_campaign_for_tracking(campaign_alias, request)
     if not campaign:
         log_track(f"❌ Impression for unknown campaign '{campaign_alias}'")
         return Response(content="Not Found", status_code=404, media_type="text/html")
@@ -5370,7 +5590,7 @@ async def click_api(campaign_alias: str, request: Request) -> Response:
     instead of a redirect. The full normal pipeline runs (enrich, bot rules,
     filters, stickiness, schedule, ClickHouse caps) and the click is tracked;
     no cookies are ever set on this path."""
-    campaign = await find_campaign_for_tracking(campaign_alias)
+    campaign = await find_campaign_for_tracking(campaign_alias, request)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
@@ -5507,7 +5727,7 @@ async def simulate_traffic(campaign_alias: str, request: Request) -> Response:
     no redirects served, no postbacks, no Telegram. Use it to test flow logic
     before sending real traffic. Admin-only."""
     await require_admin(request)
-    campaign = await find_campaign_for_tracking(campaign_alias)
+    campaign = await find_campaign_for_tracking(campaign_alias, request)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
@@ -5705,11 +5925,7 @@ async def get_with_campaign_alias(campaign_alias: str, request: Request):
 
     # get campaign from db
     async with pg.acquire() as conn:
-        campaign = await conn.fetchrow("""
-                                       SELECT *
-                                       FROM campaigns
-                                       WHERE alias = $1
-                                       """, campaign_alias)
+        campaign = await _fetch_campaign_by_alias(pg, campaign_alias, request)
 
     if not campaign or campaign["status"] != "active":
         msg = f"❌ Campaign '{campaign_alias}' not found"
@@ -5734,11 +5950,7 @@ async def head_with_campaign_alias(campaign_alias: str, request: Request):
     pg = request.app.state.pg
 
     async with pg.acquire() as conn:
-        campaign = await conn.fetchrow("""
-                                       SELECT *
-                                       FROM campaigns
-                                       WHERE alias = $1
-                                       """, campaign_alias)
+        campaign = await _fetch_campaign_by_alias(pg, campaign_alias, request)
 
     if not campaign or campaign["status"] != "active":
         return Response(status_code=404)
@@ -5759,11 +5971,7 @@ async def post_with_campaign_alias(campaign_alias: str, request: Request):
 
     # get campaign from db
     async with pg.acquire() as conn:
-        campaign = await conn.fetchrow("""
-                                       SELECT *
-                                       FROM campaigns
-                                       WHERE alias = $1
-                                       """, campaign_alias)
+        campaign = await _fetch_campaign_by_alias(pg, campaign_alias, request)
 
     if not campaign or campaign["status"] != "active":
         msg = f"❌ Campaign '{campaign_alias}' not found"

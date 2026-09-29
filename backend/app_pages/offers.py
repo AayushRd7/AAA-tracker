@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
 from db import get_db
+from tenant_context import current_tenant
 from models.offers import OfferORM
 
 from pydantic import BaseModel
@@ -165,8 +166,9 @@ def bulk_offers(data: OfferBulkIn, request: Request, db: Session = Depends(get_d
         db.commit()
         detail = {"bulk": "tags_remove", "tags": clean, "count": len(offers)}
     elif data.action == 'archive':
-        db.execute(text("UPDATE offers SET archived = true WHERE id = ANY(:ids)"),
-                   {"ids": [o.id for o in offers]})
+        db.execute(text("UPDATE offers SET archived = true "
+                        "WHERE id = ANY(:ids) AND tenant_id = :tid"),
+                   {"ids": [o.id for o in offers], "tid": current_tenant()})
         db.commit()
         detail = {"bulk": "archive", "count": len(offers)}
     elif data.action == 'delete':

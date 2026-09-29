@@ -16,6 +16,7 @@ clears).
 """
 import asyncio
 import json
+from tenant_context import current_tenant
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -96,8 +97,9 @@ def evaluate_rule(ch, rule: dict) -> dict:
     out_conditions = []
     for c in (rule.get("conditions") or []):
         hours = int(c.get("period_hours"))
-        where = "received_at >= now() - toIntervalHour(%(hours)s)"
-        params = {"hours": hours}
+        where = ("tenant_id = %(tenant_id)s AND "
+                 "received_at >= now() - toIntervalHour(%(hours)s)")
+        params = {"hours": hours, "tenant_id": current_tenant()}
         if cid:
             where += " AND campaign_id = %(cid)s"
             params["cid"] = int(cid)
@@ -155,7 +157,8 @@ def _rule_public(r) -> dict:
 
 
 def _get_rule(db: Session, rule_id: int):
-    r = db.execute(text("SELECT * FROM auto_rules WHERE id = :i"), {"i": rule_id}).fetchone()
+    r = db.execute(text("SELECT * FROM auto_rules WHERE id = :i AND tenant_id = :tid"),
+                   {"i": rule_id, "tid": current_tenant()}).fetchone()
     if not r:
         raise HTTPException(status_code=404, detail="Rule not found")
     return r
@@ -171,7 +174,8 @@ def perform_action(rule: dict, evaluation: dict) -> dict:
         db = SessionLocal()
         try:
             res = db.execute(text("UPDATE campaigns SET status = 'paused', updated_at = now() "
-                                  "WHERE id = :i AND status != 'paused'"), {"i": int(cid)})
+                                  "WHERE id = :i AND status != 'paused' AND tenant_id = :tid"),
+                             {"i": int(cid), "tid": current_tenant()})
             db.commit()
             return {"ok": True, "detail": "campaign paused" if res.rowcount
                     else "campaign already paused"}
@@ -214,7 +218,9 @@ async def auto_rules_loop():
         try:
             db = SessionLocal()
             try:
-                rules = db.execute(text("SELECT * FROM auto_rules WHERE enabled = true")).fetchall()
+                rules = db.execute(text("SELECT * FROM auto_rules "
+                                        "WHERE enabled = true AND tenant_id = :tid"),
+                                   {"tid": current_tenant()}).fetchall()
             finally:
                 db.close()
             if rules:
@@ -256,8 +262,10 @@ async def run_rule(rule: dict, ch, persist: bool = False, execute: bool = True) 
         db = SessionLocal()
         try:
             db.execute(text("UPDATE auto_rules SET last_run = now(), "
-                            "last_result = CAST(:r AS JSONB) WHERE id = :i"),
-                       {"r": json.dumps(result), "i": int(rule["id"])})
+                            "last_result = CAST(:r AS JSONB) "
+                            "WHERE id = :i AND tenant_id = :tid"),
+                       {"r": json.dumps(result), "i": int(rule["id"]),
+                        "tid": current_tenant()})
             db.commit()
         finally:
             db.close()
@@ -270,7 +278,8 @@ async def run_rule(rule: dict, ch, persist: bool = False, execute: bool = True) 
 
 @router.get("/")
 def list_rules(db: Session = Depends(get_db)):
-    rows = db.execute(text("SELECT * FROM auto_rules ORDER BY id ASC")).fetchall()
+    rows = db.execute(text("SELECT * FROM auto_rules WHERE tenant_id = :tid "
+                           "ORDER BY id ASC"), {"tid": current_tenant()}).fetchall()
     return {"rules": [_rule_public(r) for r in rows]}
 
 
@@ -281,11 +290,11 @@ def create_rule(payload: RuleIn, request: Request, db: Session = Depends(get_db)
     if data.get("action") == "pause_campaign" and not data.get("campaign_id"):
         raise HTTPException(status_code=400, detail="pause_campaign requires a campaign_id")
     r = db.execute(text("""
-        INSERT INTO auto_rules (name, enabled, scope, campaign_id, conditions, action)
-        VALUES (:n, :e, 'campaign', :cid, CAST(:c AS JSONB), :a) RETURNING id"""),
+        INSERT INTO auto_rules (name, enabled, scope, campaign_id, conditions, action, tenant_id)
+        VALUES (:n, :e, 'campaign', :cid, CAST(:c AS JSONB), :a, :tid) RETURNING id"""),
         {"n": data["name"].strip(), "e": bool(data.get("enabled", True)),
          "cid": data.get("campaign_id"), "c": json.dumps(data["conditions"]),
-         "a": data["action"]}).fetchone()
+         "a": data["action"], "tid": current_tenant()}).fetchone()
     db.commit()
     from auth import get_caller
     caller, _ = get_caller(request)
@@ -313,9 +322,11 @@ def update_rule(rule_id: int, payload: dict, request: Request, db: Session = Dep
         raise HTTPException(status_code=400, detail="pause_campaign requires a campaign_id")
     db.execute(text("""
         UPDATE auto_rules SET name = :n, enabled = :e, campaign_id = :cid,
-            conditions = CAST(:c AS JSONB), action = :a WHERE id = :i"""),
+            conditions = CAST(:c AS JSONB), action = :a
+        WHERE id = :i AND tenant_id = :tid"""),
         {"n": merged["name"], "e": bool(merged["enabled"]), "cid": merged.get("campaign_id"),
-         "c": json.dumps(merged["conditions"]), "a": merged["action"], "i": rule_id})
+         "c": json.dumps(merged["conditions"]), "a": merged["action"], "i": rule_id,
+         "tid": current_tenant()})
     db.commit()
     from auth import get_caller
     caller, _ = get_caller(request)
@@ -329,7 +340,8 @@ def update_rule(rule_id: int, payload: dict, request: Request, db: Session = Dep
 def delete_rule(rule_id: int, request: Request, db: Session = Depends(get_db)):
     from audit_logger import audit_event
     _get_rule(db, rule_id)
-    db.execute(text("DELETE FROM auto_rules WHERE id = :i"), {"i": rule_id})
+    db.execute(text("DELETE FROM auto_rules WHERE id = :i AND tenant_id = :tid"),
+               {"i": rule_id, "tid": current_tenant()})
     db.commit()
     from auth import get_caller
     caller, _ = get_caller(request)

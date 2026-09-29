@@ -8,6 +8,10 @@ from sqlalchemy.orm import sessionmaker, Session
 
 from models.user import UserORM
 
+# Registers the tenant-scoping session events (see tenant_scope.py). Imported
+# here so every process that builds a Session through this module gets them.
+import tenant_scope  # noqa: F401
+
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "tracker_postgres")
 POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5432")
 POSTGRES_DB = os.environ.get("POSTGRES_DB", "db")

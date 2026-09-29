@@ -8177,6 +8177,374 @@ print("ESCAPED-OK")
             except Exception:
                 pass
 
+    print("== Multi-tenancy: tenant isolation (phase 1) ==")
+    # Acceptance gate for phase 1: a second tenant must be able to reuse the
+    # same alias/names, and must be unable to see or touch tenant 1's rows
+    # through any list, detail, update or delete endpoint — and vice versa.
+    mt_pid = os.getpid()
+
+    def pg_scalar(sql):
+        out = subprocess.run(
+            ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-tAc", sql],
+            capture_output=True, text=True, timeout=30)
+        return out.stdout.strip()
+
+    def pg_exec(sql):
+        return subprocess.run(
+            ["docker", "exec", "tracker_postgres", "psql", "-U", "user", "-d", "db", "-c", sql],
+            capture_output=True, text=True, timeout=30).stdout
+
+    def ch_exec(sql):
+        out = subprocess.run(
+            ["docker", "exec", CH_CONTAINER, "clickhouse-client", "-u", CH_USER,
+             "--password", CH_PASS, "-q", sql],
+            capture_output=True, text=True, timeout=60)
+        return out.returncode, out.stdout.strip(), out.stderr.strip()
+
+    mt_alias = f"mt-alias-{mt_pid}"
+    mt_b_name = f"MT Campaign B {mt_pid}"
+    mt_offer = f"MT Offer {mt_pid}"
+    mt_source = f"MT Source {mt_pid}"
+    mt_network = f"MT Network {mt_pid}"
+    mt_b_domain = f"mt-b-{mt_pid}.example.com"
+    mt_a_domain = f"mt-a-{mt_pid}.example.com"
+    mt_b_user = f"mt-b-user-{mt_pid}"
+    mt_b_tenant = None
+    mt_created = {"campaigns": [], "offers": [], "sources": [],
+                  "affiliate_networks": [], "domains": []}
+    sb = requests.Session()
+    sb.verify = not INSECURE
+    # The same-alias case needs a campaign with a live flow on both sides.
+    mt_config = {"flows": [{"type": "default", "position": 1, "enabled": True,
+                            "schema": "redirect", "weight": 100, "filters": [],
+                            "redirect_url": "https://example.com/mt-A"}],
+                 "postbacks": [], "fallback_url": "https://example.com/mt-A-fb"}
+
+    r = s.post(f"{api}/tenants/", json={"name": f"MT Tenant {mt_pid}",
+                                        "slug": f"mt-{mt_pid}",
+                                        "username": mt_b_user, "password": "smokepass1",
+                                        "email": f"mt-{mt_pid}@example.com",
+                                        "role": "owner"})
+    check("isolation: tenant B provisioned", r.status_code == 200 and r.json().get("tenant_id"),
+          r.text[:200])
+    mt_b_tenant = (r.json() or {}).get("tenant_id")
+
+    # Phase 1 keeps `is_admin` install-global (per-tenant users/roles are phase
+    # 2), so B's user needs the admin flag to reach the admin-only sections.
+    r = s.get(f"{api}/users/")
+    mt_b_uid = next((u["id"] for u in (r.json() or []) if u["username"] == mt_b_user), None)
+    check("isolation: tenant B user is listed (users stay install-global in phase 1)",
+          mt_b_uid is not None, r.text[:150])
+    if mt_b_uid:
+        r = s.patch(f"{api}/users/{mt_b_uid}",
+                    json={"username": mt_b_user, "is_admin": True})
+        check("isolation: tenant B user promoted (global admin flag, phase 1)",
+              r.status_code == 200, r.text[:150])
+
+    r = sb.post(f"{api}/login", json={"username": mt_b_user, "password": "smokepass1"})
+    check("isolation: tenant B login", r.status_code == 200, r.text[:150])
+
+    r = sb.get(f"{api}/tenants/")
+    mt_b_list = r.json() if r.status_code == 200 else {}
+    check("isolation: B's session resolves to tenant B only",
+          mt_b_list.get("current_tenant_id") == mt_b_tenant
+          and [t["tenant_id"] for t in mt_b_list.get("tenants", [])] == [mt_b_tenant],
+          r.text[:200])
+    check("isolation: B cannot switch into tenant 1 (403)",
+          sb.post(f"{api}/tenants/switch", json={"tenant_id": 1}).status_code == 403,
+          "switch into a non-member tenant must be refused")
+
+    # ---- tenant A (tenant 1) entities ----
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"MT Campaign A {mt_pid}", "alias": mt_alias, "type": "campaign",
+        "status": "active", "redirect_mode": "position", "config": mt_config})
+    mt_a_campaign = (r.json() or {}).get("id")
+    check("isolation: A campaign created", r.status_code == 200 and mt_a_campaign, r.text[:200])
+    mt_created["campaigns"].append(mt_a_campaign)
+
+    r = s.post(f"{api}/offers/", json={"name": mt_offer, "url": "https://example.com/mt-a"})
+    mt_a_offer = (r.json() or {}).get("id")
+    check("isolation: A offer created", r.status_code == 200 and mt_a_offer, r.text[:200])
+    mt_created["offers"].append(mt_a_offer)
+
+    r = s.post(f"{api}/sources/", json={"name": mt_source, "traffic_loss": 0})
+    mt_a_source = (r.json() or {}).get("id")
+    check("isolation: A source created", r.status_code == 200 and mt_a_source, r.text[:200])
+    mt_created["sources"].append(mt_a_source)
+
+    r = s.post(f"{api}/affiliate-networks/", json={"name": mt_network})
+    mt_a_network = (r.json() or {}).get("id")
+    check("isolation: A network created", r.status_code == 200 and mt_a_network, r.text[:200])
+    mt_created["affiliate_networks"].append(mt_a_network)
+
+    r = s.post(f"{api}/domains/", json={"domain": mt_a_domain})
+    mt_a_domain_id = (r.json() or {}).get("id")
+    check("isolation: A domain created", r.status_code == 200 and mt_a_domain_id, r.text[:200])
+    mt_created["domains"].append(mt_a_domain_id)
+
+    # ---- tenant B: the SAME alias / names (per-tenant uniques) ----
+    r = sb.post(f"{api}/campaigns/", json={
+        "name": mt_b_name, "alias": mt_alias, "type": "campaign",
+        "status": "active", "redirect_mode": "position",
+        "domain_id": None,
+        "config": dict(mt_config, flows=[dict(mt_config["flows"][0],
+                                              redirect_url="https://example.com/mt-B")])})
+    mt_b_campaign = (r.json() or {}).get("id")
+    check("isolation: B reuses A's campaign alias (per-tenant unique)",
+          r.status_code == 200 and mt_b_campaign, r.text[:200])
+    mt_created["campaigns"].append(mt_b_campaign)
+
+    r = sb.post(f"{api}/offers/", json={"name": mt_offer, "url": "https://example.com/mt-b"})
+    mt_b_offer = (r.json() or {}).get("id")
+    check("isolation: B reuses A's offer name", r.status_code == 200 and mt_b_offer, r.text[:200])
+    mt_created["offers"].append(mt_b_offer)
+
+    r = sb.post(f"{api}/sources/", json={"name": mt_source, "traffic_loss": 0})
+    mt_b_source = (r.json() or {}).get("id")
+    check("isolation: B reuses A's source name", r.status_code == 200 and mt_b_source, r.text[:200])
+    mt_created["sources"].append(mt_b_source)
+
+    r = sb.post(f"{api}/affiliate-networks/", json={"name": mt_network})
+    mt_b_network = (r.json() or {}).get("id")
+    check("isolation: B reuses A's network name", r.status_code == 200 and mt_b_network, r.text[:200])
+    mt_created["affiliate_networks"].append(mt_b_network)
+
+    r = sb.post(f"{api}/domains/", json={"domain": mt_b_domain})
+    mt_b_domain_id = (r.json() or {}).get("id")
+    check("isolation: B domain created", r.status_code == 200 and mt_b_domain_id, r.text[:200])
+    mt_created["domains"].append(mt_b_domain_id)
+
+    # ---- lists never cross tenants ----
+    def ids_of(session, path, key="id"):
+        rr = session.get(f"{api}/{path}")
+        return {row.get(key) for row in (rr.json() if rr.status_code == 200 else [])}
+
+    for path, a_id, b_id, label in [
+        ("campaigns/", mt_a_campaign, mt_b_campaign, "campaigns"),
+        ("offers/", mt_a_offer, mt_b_offer, "offers"),
+        ("sources/", mt_a_source, mt_b_source, "sources"),
+        ("affiliate-networks/", mt_a_network, mt_b_network, "networks"),
+    ]:
+        a_ids = ids_of(s, path)
+        b_ids = ids_of(sb, path)
+        check(f"isolation: A's {label} list excludes B's row", b_id not in a_ids, str(sorted(a_ids))[:120])
+        check(f"isolation: B's {label} list excludes A's row", a_id not in b_ids, str(sorted(b_ids))[:120])
+
+    r = s.get(f"{api}/domains/")
+    a_domains = {d.get("domain") for d in (r.json() if r.status_code == 200 else [])}
+    r = sb.get(f"{api}/domains/")
+    b_domains = {d.get("domain") for d in (r.json() if r.status_code == 200 else [])}
+    check("isolation: A's domain list excludes B's domain", mt_b_domain not in a_domains, str(a_domains)[:120])
+    check("isolation: B's domain list excludes A's domain", mt_a_domain not in b_domains, str(b_domains)[:120])
+
+    # ---- detail / update / delete of the other tenant's rows ----
+    def cross_tenant_blocked(session, label, method, path, json_body=None):
+        fn = getattr(session, method)
+        rr = fn(f"{api}/{path}", json=json_body) if json_body is not None else fn(f"{api}/{path}")
+        check(f"isolation: {label}", rr.status_code in (403, 404),
+              f"got {rr.status_code} {rr.text[:120]}")
+
+    # Detail reads that exist for a campaign id (there is no plain
+    # GET /campaigns/{id}); both must 404 across tenants.
+    cross_tenant_blocked(sb, "B cannot read A's campaign detail", "get",
+                         f"optimizer/{mt_a_campaign}")
+    cross_tenant_blocked(sb, "B cannot read A's campaign funnel report", "get",
+                         f"reports/funnel/{mt_a_campaign}")
+    cross_tenant_blocked(s, "A cannot read B's campaign detail", "get",
+                         f"optimizer/{mt_b_campaign}")
+    cross_tenant_blocked(s, "A cannot read B's campaign funnel report", "get",
+                         f"reports/funnel/{mt_b_campaign}")
+
+    # Complete, valid payloads so validation passes and the request genuinely
+    # attempts a cross-tenant write.
+    mt_campaign_put = {"name": "hijacked", "alias": mt_alias, "type": "campaign",
+                       "status": "active", "redirect_mode": "position", "config": mt_config}
+    mt_offer_patch = {"name": mt_offer, "url": "https://example.com/hijacked"}
+    mt_source_patch = {"name": mt_source, "traffic_loss": 0}
+    mt_network_patch = {"name": mt_network}
+
+    cross_tenant_blocked(sb, "B cannot update A's campaign by id", "put",
+                         f"campaigns/{mt_a_campaign}", mt_campaign_put)
+    cross_tenant_blocked(sb, "B cannot delete A's campaign by id", "delete",
+                         f"campaigns/{mt_a_campaign}")
+    cross_tenant_blocked(sb, "B cannot update A's offer by id", "patch",
+                         f"offers/{mt_a_offer}", mt_offer_patch)
+    cross_tenant_blocked(sb, "B cannot delete A's offer by id", "delete", f"offers/{mt_a_offer}")
+    cross_tenant_blocked(sb, "B cannot update A's source by id", "patch",
+                         f"sources/{mt_a_source}", mt_source_patch)
+    cross_tenant_blocked(sb, "B cannot delete A's source by id", "delete", f"sources/{mt_a_source}")
+    cross_tenant_blocked(sb, "B cannot update A's domain by id", "put",
+                         f"domains/{mt_a_domain_id}",
+                         {"domain": mt_a_domain, "group_name": "hijacked"})
+    cross_tenant_blocked(sb, "B cannot delete A's domain by id", "delete", f"domains/{mt_a_domain_id}")
+    cross_tenant_blocked(sb, "B cannot update A's network by id", "patch",
+                         f"affiliate-networks/{mt_a_network}", mt_network_patch)
+    cross_tenant_blocked(sb, "B cannot delete A's network by id", "delete",
+                         f"affiliate-networks/{mt_a_network}")
+
+    cross_tenant_blocked(s, "A cannot update B's campaign by id", "put",
+                         f"campaigns/{mt_b_campaign}", mt_campaign_put)
+    cross_tenant_blocked(s, "A cannot delete B's campaign by id", "delete",
+                         f"campaigns/{mt_b_campaign}")
+    cross_tenant_blocked(s, "A cannot update B's offer by id", "patch",
+                         f"offers/{mt_b_offer}", mt_offer_patch)
+    cross_tenant_blocked(s, "A cannot delete B's offer by id", "delete", f"offers/{mt_b_offer}")
+    cross_tenant_blocked(s, "A cannot update B's source by id", "patch",
+                         f"sources/{mt_b_source}", mt_source_patch)
+    cross_tenant_blocked(s, "A cannot delete B's source by id", "delete", f"sources/{mt_b_source}")
+    cross_tenant_blocked(s, "A cannot update B's network by id", "patch",
+                         f"affiliate-networks/{mt_b_network}", mt_network_patch)
+    cross_tenant_blocked(s, "A cannot delete B's network by id", "delete",
+                         f"affiliate-networks/{mt_b_network}")
+    if mt_b_domain_id:
+        cross_tenant_blocked(s, "A cannot update B's domain by id", "put",
+                             f"domains/{mt_b_domain_id}",
+                             {"domain": mt_b_domain, "group_name": "hijacked"})
+        cross_tenant_blocked(s, "A cannot delete B's domain by id", "delete",
+                             f"domains/{mt_b_domain_id}")
+
+    # The blocked deletes must not have deleted anything.
+    check("isolation: A's campaign survives B's delete attempts",
+          str(mt_a_campaign) in pg_scalar(
+              f"SELECT id FROM campaigns WHERE id = {int(mt_a_campaign)}"))
+    check("isolation: B's campaign survives A's delete attempts",
+          str(mt_b_campaign) in pg_scalar(
+              f"SELECT id FROM campaigns WHERE id = {int(mt_b_campaign)}"))
+
+    # ---- conversions ----
+    r = sb.post(f"{api}/reports/conversion", json={
+        "click_id": f"mt-b-conv-{mt_pid}", "status": "sale", "payout": 7, "revenue": 9})
+    mt_b_conv = (r.json() or {}).get("id")
+    check("isolation: B conversion created", r.status_code == 200 and mt_b_conv, r.text[:200])
+    r = sb.get(f"{api}/reports/?offset=0&limit=200")
+    b_conv_ids = {c.get("id") for c in ((r.json() or {}).get("items") or [])}
+    check("isolation: B's conversion log contains B's conversion", mt_b_conv in b_conv_ids,
+          f"missing {mt_b_conv}")
+    r = s.get(f"{api}/reports/?offset=0&limit=200")
+    a_conv = r.json() if r.status_code == 200 else {}
+    a_conv_ids = {c.get("id") for c in (a_conv.get("items") or [])}
+    check("isolation: A's conversion log excludes B's conversion", mt_b_conv not in a_conv_ids,
+          f"leaked {mt_b_conv}")
+    r = s.patch(f"{api}/reports/{mt_b_conv}", json={"status": "trash"})
+    check("isolation: A cannot update B's conversion", r.status_code in (403, 404),
+          f"got {r.status_code}")
+    r = s.delete(f"{api}/reports/{mt_b_conv}")
+    check("isolation: A cannot delete B's conversion", r.status_code in (403, 404),
+          f"got {r.status_code}")
+    check("isolation: B's conversion survived A's delete", str(mt_b_conv) in pg_scalar(
+        f"SELECT id FROM conversions_data WHERE id = {int(mt_b_conv)}"))
+
+    # ---- tracking plane: Host -> tenant, same alias on both sides ----
+    r = requests.get(f"{BASE}/{mt_alias}", verify=not INSECURE, allow_redirects=False)
+    check("isolation: unknown host resolves the lowest tenant's alias (tenant 1)",
+          r.status_code in (301, 302, 307, 308)
+          and "example.com/mt-A" in (r.headers.get("location") or ""),
+          f"{r.status_code} {r.headers.get('location', '')}")
+    # An explicit click id (the plain redirect records an empty one) so the
+    # postback below can reference exactly this click.
+    mt_click_id = f"mt-b-click-{mt_pid}"
+    r = requests.get(f"{BASE}/{mt_alias}?click_id={mt_click_id}", verify=not INSECURE,
+                     allow_redirects=False, headers={"Host": mt_b_domain})
+    check("isolation: B's domain host resolves B's campaign, not A's",
+          r.status_code in (301, 302, 307, 308)
+          and "example.com/mt-B" in (r.headers.get("location") or ""),
+          f"{r.status_code} {r.headers.get('location', '')}")
+    r = requests.get(f"{BASE}/{mt_alias}", verify=not INSECURE, allow_redirects=False,
+                     headers={"Host": mt_a_domain})
+    check("isolation: A's domain host resolves A's campaign",
+          r.status_code in (301, 302, 307, 308)
+          and "example.com/mt-A" in (r.headers.get("location") or ""),
+          f"{r.status_code} {r.headers.get('location', '')}")
+
+    # ---- ClickHouse: the click row carries the campaign's tenant ----
+    _rc, chips, ch_err = ch_exec(
+        f"SELECT count() FROM clicks_data WHERE tenant_id = {int(mt_b_tenant)} "
+        f"AND campaign_id = {int(mt_b_campaign)}")
+    check("isolation: B's click landed in clicks_data with tenant_id = B",
+          chips == "1", f"{chips!r} {ch_err[:120]}")
+    _rc, chips, _e = ch_exec(
+        f"SELECT count() FROM clicks_data WHERE tenant_id = 1 "
+        f"AND campaign_id = {int(mt_b_campaign)}")
+    check("isolation: no clicks_data row mislabels B's campaign as tenant 1", chips == "0", chips)
+
+    # A's click log must not contain B's campaign; B's must.
+    r = s.post(f"{api}/dashboard/click-log", json={"campaigns": [mt_b_campaign], "limit": 5})
+    check("isolation: A's click log excludes B's campaign clicks",
+          r.status_code == 200 and r.json() == [], r.text[:150])
+    r = sb.post(f"{api}/dashboard/click-log", json={"campaigns": [mt_b_campaign], "limit": 5})
+    check("isolation: B's click log includes B's campaign clicks",
+          r.status_code == 200 and len(r.json()) >= 1, r.text[:150])
+
+    # ---- postback log ----
+    # The click row exists (asserted above); its click_id is the one we sent.
+    _rc, mt_click_check, _e = ch_exec(
+        f"SELECT click_id FROM clicks_data WHERE tenant_id = {int(mt_b_tenant)} "
+        f"AND campaign_id = {int(mt_b_campaign)} ORDER BY received_at DESC LIMIT 1")
+    check("isolation: B's click row carries the click id the request sent",
+          mt_click_check == mt_click_id, f"{mt_click_check!r}")
+    if mt_click_check:
+        requests.get(f"{BASE}/pb?clickid={mt_click_id}&status=sale&payout=3",
+                     verify=not INSECURE)
+        r = sb.get(f"{api}/logs/postbacks?offset=0&limit=200")
+        b_log = r.json() if r.status_code == 200 else {}
+        check("isolation: B's postback log contains B's click",
+              any(mt_click_id in json.dumps(i) for i in (b_log.get("items") or [])),
+              r.text[:150])
+        r = s.get(f"{api}/logs/postbacks?offset=0&limit=200")
+        a_log = r.json() if r.status_code == 200 else {}
+        check("isolation: A's postback log excludes B's click",
+              not any(mt_click_id in json.dumps(i) for i in (a_log.get("items") or [])),
+              "cross-tenant postback log leak")
+        r = sb.get(f"{api}/logs/click-forwarding?offset=0&limit=200")
+        b_fwd = r.json() if r.status_code == 200 else {}
+        r = s.get(f"{api}/logs/click-forwarding?offset=0&limit=200")
+        a_fwd = r.json() if r.status_code == 200 else {}
+        b_fwd_ids = {i.get("id") for i in (b_fwd.get("items") or [])}
+        a_fwd_ids = {i.get("id") for i in (a_fwd.get("items") or [])}
+        check("isolation: B's click-forwarding log is non-empty and shares no row id with A's",
+              bool(b_fwd_ids) and not (b_fwd_ids & a_fwd_ids),
+              f"a={len(a_fwd_ids)} b={len(b_fwd_ids)} shared={len(b_fwd_ids & a_fwd_ids)}")
+    else:
+        check("isolation: pending-scope: postback + forward log checks (no click id found)",
+              False, "no clicks_data row to drive the postback")
+
+    # ---- audit log: B's actions are written into tenant B's trail ----
+    check("isolation: B's audit rows carry tenant B",
+          pg_scalar(f"SELECT count(*) FROM audit_log WHERE tenant_id = "
+                    f"{int(mt_b_tenant)}") != "0", "no tenant-2 audit rows")
+    r = s.get(f"{api}/audit/", params={"q": mt_b_name, "page_size": 100})
+    check("isolation: A's audit search cannot reach B's entity names",
+          r.status_code == 200 and not (r.json() or {}).get("entries"),
+          r.text[:150])
+    r = sb.get(f"{api}/audit/", params={"q": mt_b_name, "page_size": 100})
+    check("isolation: B's audit search finds B's own entity names",
+          r.status_code == 200 and bool((r.json() or {}).get("entries")), r.text[:150])
+
+    # ---- self-cleanup: tenant B and everything it owns ----
+    for table in ("campaigns", "offers", "sources", "affiliate_networks", "domains",
+                  "landings", "capi_pixels", "capi_pixel_bindings",
+                  "capi_channel_settings", "capi_pixel_sent", "meta_capi_sent",
+                  "meta_capi_log", "ad_cost_daily", "integration_connections",
+                  "scripts", "filter_presets", "funnel_templates", "domain_groups",
+                  "auto_rules", "monitor_state", "honeypot_hits", "postback_logs",
+                  "click_forward_logs", "cost_update_logs", "conversions_data",
+                  "audit_log", "settings"):
+        pg_exec(f"DELETE FROM {table} WHERE tenant_id = {int(mt_b_tenant)}")
+    ch_exec(f"ALTER TABLE clicks_data DELETE WHERE tenant_id = {int(mt_b_tenant)}")
+    pg_exec(f"DELETE FROM auth_sessions WHERE username = '{mt_b_user}'")
+    pg_exec(f"DELETE FROM users WHERE username = '{mt_b_user}'")
+    pg_exec(f"DELETE FROM tenants WHERE id = {int(mt_b_tenant)}")
+    # tenant 1's own MT rows
+    for table in ("campaigns", "offers", "sources", "affiliate_networks", "domains"):
+        pg_exec(f"DELETE FROM {table} WHERE id IN ({', '.join(str(i) for i in mt_created[table] if i)})")
+    ch_exec(f"ALTER TABLE clicks_data DELETE WHERE campaign_id IN "
+            f"({int(mt_a_campaign)}, {int(mt_b_campaign)})")
+    pg_exec("DELETE FROM conversions_data WHERE click_id LIKE 'mt-b-conv-%'")
+    check("isolation: tenant B cleaned up",
+          pg_scalar(f"SELECT count(*) FROM tenants WHERE id = {int(mt_b_tenant)}") == "0")
+    check("isolation: tenant B rows cleaned up",
+          pg_scalar(f"SELECT count(*) FROM campaigns WHERE tenant_id = {int(mt_b_tenant)}") == "0")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

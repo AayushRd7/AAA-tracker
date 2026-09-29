@@ -35,6 +35,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db, SessionLocal
+from tenant_context import current_tenant
 from models.settings import SettingsORM
 from clickHouse import get_clickhouse_client
 
@@ -67,7 +68,9 @@ def _load_main_settings(db: Session) -> dict:
 def _save_block(db: Session, block: dict) -> None:
     """Upsert the insights_last block inside the settings row (FOR UPDATE)."""
     row = db.execute(
-        text("SELECT id, value FROM settings WHERE name = 'settings' FOR UPDATE")
+        text("SELECT id, value FROM settings "
+             "WHERE name = 'settings' AND tenant_id = :tid FOR UPDATE"),
+        {"tid": current_tenant()}
     ).fetchone()
     if row:
         try:
@@ -101,8 +104,9 @@ def _clickhouse_windows(ch, campaign_id: int) -> dict:
             sumIf(toFloat64(cost), received_at < now() - toIntervalHour(24)) AS base_cost,
             sumIf(toFloat64(revenue), received_at < now() - toIntervalHour(24)) AS base_revenue
         FROM clicks_data
-        WHERE campaign_id = %(cid)s AND received_at >= now() - toIntervalDay(8)""",
-        parameters={"cid": int(campaign_id)}).result_rows
+        WHERE campaign_id = %(cid)s AND tenant_id = %(tenant_id)s
+          AND received_at >= now() - toIntervalDay(8)""",
+        parameters={"cid": int(campaign_id), "tenant_id": current_tenant()}).result_rows
     row = rows[0] if rows else (0,) * 9
     return {
         "cur_clicks": int(row[0] or 0), "cur_click_outs": int(row[1] or 0),
@@ -121,10 +125,11 @@ def _conversions_by_day(db: Session, campaign_id: int) -> dict:
         SELECT to_char(received_at, 'YYYY-MM-DD') AS day, count(*) AS convs,
                COALESCE(sum(revenue), 0) AS revenue
         FROM conversions_data
-        WHERE campaign_id = :cid
+        WHERE tenant_id = :tid
+          AND campaign_id = :cid
           AND received_at >= date_trunc('day', now()) - interval '7 days'
           AND status NOT IN ('rejected', 'trash')
-        GROUP BY day"""), {"cid": int(campaign_id)}).fetchall()
+        GROUP BY day"""), {"cid": int(campaign_id), "tid": current_tenant()}).fetchall()
     return {r[0]: {"convs": int(r[1] or 0), "revenue": float(r[2] or 0)}
             for r in rows}
 
@@ -247,7 +252,8 @@ def run_analysis(caller: str = "insights") -> dict:
         prev_block = _load_main_settings(db).get(SETTINGS_BLOCK) or {}
         campaigns = db.execute(text(
             "SELECT id, name, config FROM campaigns "
-            "WHERE status = 'active' AND archived = false ORDER BY id ASC")).fetchall()
+            "WHERE status = 'active' AND archived = false AND tenant_id = :tid "
+            "ORDER BY id ASC"), {"tid": current_tenant()}).fetchall()
 
         ch = get_clickhouse_client()
         findings, analyzed, skipped = [], 0, 0

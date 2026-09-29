@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db, engine, SessionLocal
 from audit_logger import audit_event
+from tenant_context import current_tenant
 
 import json
 
@@ -35,8 +36,8 @@ def _set_archived(entity: str, row_id: int, archived: bool) -> bool:
     table = ARCHIVABLE[entity]
     with engine.connect() as conn:
         res = conn.execute(
-            text(f"UPDATE {table} SET archived = :a WHERE id = :i"),
-            {"a": archived, "i": row_id})
+            text(f"UPDATE {table} SET archived = :a WHERE id = :i AND tenant_id = :tid"),
+            {"a": archived, "i": row_id, "tid": current_tenant()})
         conn.commit()
         return res.rowcount > 0
 
@@ -55,8 +56,9 @@ def _check_ownership(entity: str, row_id: int, request: Request):
         if entity == "campaigns":
             if not user:
                 raise HTTPException(status_code=403, detail="Not allowed")
-            row = db.execute(text("SELECT owner_id FROM campaigns WHERE id = :i"),
-                             {"i": row_id}).fetchone()
+            row = db.execute(text("SELECT owner_id FROM campaigns "
+                                  "WHERE id = :i AND tenant_id = :tid"),
+                             {"i": row_id, "tid": current_tenant()}).fetchone()
             if not row or row[0] != user[0]:
                 raise HTTPException(status_code=403,
                                     detail="You can only archive your own campaigns")
@@ -70,7 +72,9 @@ def _check_ownership(entity: str, row_id: int, request: Request):
 def list_archived(db: Session = Depends(get_db)):
     out = {}
     for entity, table in ARCHIVABLE.items():
-        rows = db.execute(text(f"SELECT id FROM {table} WHERE archived = true")).fetchall()
+        rows = db.execute(text(f"SELECT id FROM {table} "
+                               "WHERE archived = true AND tenant_id = :tid"),
+                          {"tid": current_tenant()}).fetchall()
         out[entity] = [r[0] for r in rows]
     return out
 
@@ -101,7 +105,7 @@ def restore(entity: str, row_id: int, request: Request):
 
 def _audit_filters(user, action, entity, q, date_from, date_to):
     """Shared WHERE builder for the audit list and its CSV export."""
-    where, params = [], {}
+    where, params = ["tenant_id = :tid"], {"tid": current_tenant()}
     if user:
         where.append("username = :u")
         params["u"] = user
@@ -157,13 +161,16 @@ def read_audit(user: str = "", action: str = "", entity: str = "",
 def audit_facets(db: Session = Depends(get_db)):
     """Distinct filter values actually present in the log (object types, actions,
     users) so the UI dropdowns stay in sync with real data."""
+    tid = {"tid": current_tenant()}
     entities = [r[0] for r in db.execute(text(
-        "SELECT DISTINCT entity FROM audit_log WHERE entity <> '' ORDER BY entity")).fetchall()]
+        "SELECT DISTINCT entity FROM audit_log WHERE tenant_id = :tid "
+        "AND entity <> '' ORDER BY entity"), tid).fetchall()]
     actions = [r[0] for r in db.execute(text(
-        "SELECT DISTINCT action FROM audit_log WHERE action <> '' ORDER BY action")).fetchall()]
+        "SELECT DISTINCT action FROM audit_log WHERE tenant_id = :tid "
+        "AND action <> '' ORDER BY action"), tid).fetchall()]
     users = [r[0] for r in db.execute(text(
-        "SELECT DISTINCT username FROM audit_log WHERE username <> '' "
-        "ORDER BY username LIMIT 200")).fetchall()]
+        "SELECT DISTINCT username FROM audit_log WHERE tenant_id = :tid "
+        "AND username <> '' ORDER BY username LIMIT 200"), tid).fetchall()]
     return {"entities": entities, "actions": actions, "users": users}
 
 

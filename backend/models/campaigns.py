@@ -1,11 +1,11 @@
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, Boolean,
-    ForeignKey, Enum as SQLAEnum
+    ForeignKey, Enum as SQLAEnum, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
-from models.base import Base
+from models.base import Base, TenantMixin
 import enum
 
 # === ENUM TYPES ===
@@ -22,12 +22,19 @@ class RedirectMode(str, enum.Enum):
     weight = 'weight'
 
 # === MODEL ===
-class CampaignORM(Base):
+class CampaignORM(TenantMixin, Base):
     __tablename__ = "campaigns"
+    # name/alias are unique per tenant, not globally (a second tenant may reuse
+    # an alias). The composite constraints are created by init.sql / the
+    # startup migration; declared here so the model matches the schema.
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="campaigns_tenant_name_key"),
+        UniqueConstraint("tenant_id", "alias", name="campaigns_tenant_alias_key"),
+    )
 
     id = Column(Integer, primary_key=True)
-    name = Column(String(255), nullable=False, unique=True)
-    alias = Column(String(255), nullable=False, unique=True)
+    name = Column(String(255), nullable=False)
+    alias = Column(String(255), nullable=False)
     type = Column(SQLAEnum(CampaignType), nullable=False, default=CampaignType.campaign)
     status = Column(SQLAEnum(CampaignStatus), nullable=False, default=CampaignStatus.active)
     redirect_mode = Column(SQLAEnum(RedirectMode), nullable=False, default=RedirectMode.position)

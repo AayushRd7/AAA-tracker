@@ -22,7 +22,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from db import get_db
-from models.base import Base
+from models.base import Base, TenantMixin
 
 router = APIRouter()
 
@@ -33,7 +33,7 @@ EXPORT_MAX = 50_000
 LIST_MAX = 5_000
 
 
-class PostbackLog(Base):
+class PostbackLog(TenantMixin, Base):
     __tablename__ = "postback_logs"
 
     id = Column(Integer, primary_key=True)
@@ -49,7 +49,7 @@ class PostbackLog(Base):
     raw = Column(JSONB)
 
 
-class ClickForwardLog(Base):
+class ClickForwardLog(TenantMixin, Base):
     __tablename__ = "click_forward_logs"
 
     id = Column(Integer, primary_key=True)
@@ -66,7 +66,7 @@ class ClickForwardLog(Base):
     user_agent = Column(String)
 
 
-class CostUpdateLog(Base):
+class CostUpdateLog(TenantMixin, Base):
     __tablename__ = "cost_update_logs"
 
     id = Column(Integer, primary_key=True)
@@ -79,7 +79,7 @@ class CostUpdateLog(Base):
     updated_rows = Column(Integer)
 
 
-class MetaCapiLog(Base):
+class MetaCapiLog(TenantMixin, Base):
     __tablename__ = "meta_capi_log"
 
     id = Column(Integer, primary_key=True)

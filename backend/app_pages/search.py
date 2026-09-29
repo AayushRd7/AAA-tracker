@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db
+from tenant_context import current_tenant
 
 router = APIRouter()
 
@@ -70,12 +71,13 @@ def global_search(request: Request, q: str = "", db: Session = Depends(get_db)):
 
     if allowed("campaigns"):
         scope = " AND owner_id = :my_id" if (own_campaigns and my_id) else ""
-        params = {"like": like, "lim": GROUP_LIMIT}
+        params = {"like": like, "lim": GROUP_LIMIT, "tid": current_tenant()}
         if own_campaigns and my_id:
             params["my_id"] = my_id
         rows = db.execute(text(f"""
             SELECT id, name, alias, tags FROM campaigns
-            WHERE (name ILIKE :like OR alias ILIKE :like OR tags::text ILIKE :like){scope}
+            WHERE tenant_id = :tid
+              AND (name ILIKE :like OR alias ILIKE :like OR tags::text ILIKE :like){scope}
             ORDER BY id ASC LIMIT :lim"""), params).fetchall()
         if rows:
             out["campaigns"] = [{"id": r[0], "name": r[1],
@@ -86,8 +88,10 @@ def global_search(request: Request, q: str = "", db: Session = Depends(get_db)):
     if allowed("offers"):
         rows = db.execute(text("""
             SELECT id, name, url FROM offers
-            WHERE name ILIKE :like OR url ILIKE :like OR array_to_string(tags, ' ') ILIKE :like
-            ORDER BY id ASC LIMIT :lim"""), {"like": like, "lim": GROUP_LIMIT}).fetchall()
+            WHERE tenant_id = :tid
+              AND (name ILIKE :like OR url ILIKE :like OR array_to_string(tags, ' ') ILIKE :like)
+            ORDER BY id ASC LIMIT :lim"""),
+            {"like": like, "lim": GROUP_LIMIT, "tid": current_tenant()}).fetchall()
         if rows:
             out["offers"] = [{"id": r[0], "name": r[1],
                               "snippet": _snippet(r[2], term)} for r in rows]
@@ -95,30 +99,38 @@ def global_search(request: Request, q: str = "", db: Session = Depends(get_db)):
     if allowed("landings"):
         rows = db.execute(text("""
             SELECT id, name, folder FROM landings
-            WHERE name ILIKE :like OR folder ILIKE :like OR tags ILIKE :like
-            ORDER BY id ASC LIMIT :lim"""), {"like": like, "lim": GROUP_LIMIT}).fetchall()
+            WHERE tenant_id = :tid
+              AND (name ILIKE :like OR folder ILIKE :like OR tags ILIKE :like)
+            ORDER BY id ASC LIMIT :lim"""),
+            {"like": like, "lim": GROUP_LIMIT, "tid": current_tenant()}).fetchall()
         if rows:
             out["landings"] = [{"id": r[0], "name": r[1],
                                 "snippet": _snippet(r[2], term)} for r in rows]
 
     if allowed("domains"):
         rows = db.execute(text("""
-            SELECT id, domain FROM domains WHERE domain ILIKE :like
-            ORDER BY id ASC LIMIT :lim"""), {"like": like, "lim": GROUP_LIMIT}).fetchall()
+            SELECT id, domain FROM domains
+            WHERE tenant_id = :tid AND domain ILIKE :like
+            ORDER BY id ASC LIMIT :lim"""),
+            {"like": like, "lim": GROUP_LIMIT, "tid": current_tenant()}).fetchall()
         if rows:
             out["domains"] = [{"id": r[0], "name": r[1], "snippet": r[1]} for r in rows]
 
     if allowed("sources"):
         rows = db.execute(text("""
-            SELECT id, name FROM sources WHERE name ILIKE :like
-            ORDER BY id ASC LIMIT :lim"""), {"like": like, "lim": GROUP_LIMIT}).fetchall()
+            SELECT id, name FROM sources
+            WHERE tenant_id = :tid AND name ILIKE :like
+            ORDER BY id ASC LIMIT :lim"""),
+            {"like": like, "lim": GROUP_LIMIT, "tid": current_tenant()}).fetchall()
         if rows:
             out["sources"] = [{"id": r[0], "name": r[1], "snippet": r[1]} for r in rows]
 
     if allowed("affiliates"):
         rows = db.execute(text("""
-            SELECT id, name FROM affiliate_networks WHERE name ILIKE :like
-            ORDER BY id ASC LIMIT :lim"""), {"like": like, "lim": GROUP_LIMIT}).fetchall()
+            SELECT id, name FROM affiliate_networks
+            WHERE tenant_id = :tid AND name ILIKE :like
+            ORDER BY id ASC LIMIT :lim"""),
+            {"like": like, "lim": GROUP_LIMIT, "tid": current_tenant()}).fetchall()
         if rows:
             out["affiliates"] = [{"id": r[0], "name": r[1], "snippet": r[1]} for r in rows]
 
@@ -126,15 +138,16 @@ def global_search(request: Request, q: str = "", db: Session = Depends(get_db)):
         conv_sql = """
             SELECT id, click_id, external_id, transaction_id, status
             FROM conversions_data
-            WHERE (click_id ILIKE :like OR external_id ILIKE :like
+            WHERE tenant_id = :tid
+              AND (click_id ILIKE :like OR external_id ILIKE :like
                OR transaction_id ILIKE :like)"""
-        conv_params = {"like": like, "lim": CONVERSION_LIMIT}
+        conv_params = {"like": like, "lim": CONVERSION_LIMIT, "tid": current_tenant()}
         # campaigns:'own' parity with the conversions list: a scoped caller
         # only searches conversions of campaigns they own (unattributable
         # rows stay hidden).
         if own_campaigns and my_id:
             conv_sql += (" AND campaign_id IN (SELECT id FROM campaigns "
-                         "WHERE owner_id = :my_id)")
+                         "WHERE tenant_id = :tid AND owner_id = :my_id)")
             conv_params["my_id"] = my_id
         conv_sql += " ORDER BY id DESC LIMIT :lim"
         rows = db.execute(text(conv_sql), conv_params).fetchall()

@@ -9,6 +9,7 @@ from sqlalchemy.future import select
 from sqlalchemy import text
 
 from db import get_db
+from tenant_context import current_tenant
 from models.domain import DomainORM
 from models.user import UserORM
 from models.domain_groups import DomainGroupORM, DomainGroupDomainORM, DomainGroupUserORM
@@ -78,11 +79,13 @@ async def get_domains(request: Request, db: Session = Depends(get_db)):
             rows = db.execute(
                 text("""
                     SELECT dgd.domain_id FROM domain_group_domains dgd
-                    WHERE dgd.group_id NOT IN (
+                    JOIN domain_groups dg ON dg.id = dgd.group_id
+                    WHERE dg.tenant_id = :tid
+                      AND dgd.group_id NOT IN (
                         SELECT group_id FROM domain_group_users WHERE user_id = :uid
                     )
                 """),
-                {"uid": user.id},
+                {"uid": user.id, "tid": current_tenant()},
             ).fetchall()
             hidden_ids = {r[0] for r in rows}
 

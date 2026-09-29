@@ -3,6 +3,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from hashlib import md5
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 
@@ -291,6 +292,15 @@ def create_user(user: UserCreateUpdate, request: Request, db: Session = Depends(
     try:
         db.commit()
         db.refresh(new_user)
+        # Multi-tenancy: a user is only visible in a workspace through a
+        # membership. A new user joins the workspace the creating admin is in.
+        from tenant_context import current_tenant
+        db.execute(text(
+            "INSERT INTO tenant_memberships (user_id, tenant_id, role, permissions) "
+            "VALUES (:u, :t, :r, NULL) ON CONFLICT (user_id, tenant_id) DO NOTHING"),
+            {"u": new_user.id, "t": current_tenant(),
+             "r": "admin" if new_user.is_admin else "editor"})
+        db.commit()
         _audit(user.username, "user_created", "user", user.username, request=request)
         return {"message": "User created", "id": new_user.id}
     except IntegrityError as e:

@@ -200,13 +200,21 @@ Model: **tenant → team members → resources**. A user can belong to several t
 sub-workspaces are tenant rows with a `parent_tenant_id`. The current install becomes **tenant #1**
 and its data is backfilled to it, so nothing changes for the existing deployment.
 
-### Phase 1 — schema + isolation (in progress)
-- [ ] `tenants` (with `parent_tenant_id`) and `tenant_memberships` (user ↔ tenant, role, per-tenant permissions)
-- [ ] `tenant_id` on every tenant-owned table, backfilled to tenant #1; global tables stay global (users, sessions)
-- [ ] unique constraints become **per-tenant** (alias, domain, source/network name, landing folder/name, settings key) so two tenants can use the same names
-- [ ] current tenant resolved from the session + a workspace switcher in the app bar
-- [ ] isolation enforced centrally (ORM scoping + explicit predicates for raw SQL and every ClickHouse query)
-- [ ] acceptance gate: isolation tests proving tenant A can never read or modify tenant B's rows, and vice versa
+### Phase 1 — schema + isolation ✅ shipped 2026-09-29
+- [x] `tenants` (with `parent_tenant_id`) and `tenant_memberships` (user ↔ tenant, role, per-tenant permissions)
+- [x] `tenant_id` on 27 tenant-owned tables, backfilled to tenant #1; global tables stay global (users, sessions, tenants, memberships, oauth states)
+- [x] unique constraints became per-tenant (campaign name/alias, domain, offer/source/network name, landing folder/name, settings key, domain-group name, integration platform, ad-cost day)
+- [x] current tenant resolved from the session (validated against membership) + a workspace switcher in the app bar + `/api/tenants` endpoints
+- [x] isolation enforced centrally: `TenantMixin` + `do_orm_execute` scoping + a `before_flush` stamp that overrides caller-supplied tenants; raw SQL audited and given explicit predicates; every ClickHouse query filtered
+- [x] acceptance gate: 74 isolation assertions in the smoke suite (cross-tenant read/update/delete, same-alias independence, ClickHouse tenant stamping, host→campaign resolution)
+- Also fixed along the way (pre-existing faults the isolation work surfaced): Meta cost-sync and optimizer bound-parameter crashes, a CAPI pixel claim that meant no pixel was ever sent, a cross-tenant read of stored integration connections, and tenant-unaware conversion attribution + retention prune
+
+### Phase 1 — known gaps (carried into phase 2)
+- [ ] per-tenant users/roles/invites (users and `is_admin` are still install-global)
+- [ ] per-tenant settings seeded on tenant creation; per-tenant retention and bind secret
+- [ ] `parent_tenant_id` stored but not traversed (no inherited access/settings yet)
+- [ ] the four `UPDATE settings … WHERE id` sites rely on a preceding tenant-scoped `SELECT … FOR UPDATE` rather than an inline predicate
+- [ ] a new tenant's campaign is unreachable until one of its domains exists (host-based resolution)
 
 ### Phase 2 — per-tenant everything
 - [ ] settings document per tenant (each tenant gets its own rows; the shared "name" key becomes per-tenant)

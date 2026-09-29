@@ -1,14 +1,18 @@
 # models/domain.py
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, func
-from models.base import Base
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, func, UniqueConstraint
+from models.base import Base, TenantMixin
 
 
-class DomainORM(Base):
+class DomainORM(TenantMixin, Base):
     __tablename__ = "domains"
+    # domain is unique per tenant (composite constraint created by the schema
+    # migration), not globally.
+    __table_args__ = (UniqueConstraint("tenant_id", "domain",
+                                       name="domains_tenant_domain_key"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    domain = Column(String(255), unique=True, nullable=False)
+    domain = Column(String(255), nullable=False)
     redirect_https = Column(Boolean, nullable=False, server_default="true")
     handle_404 = Column(String(50), nullable=False, server_default="error")
     default_campaign_id = Column(Integer, nullable=True)

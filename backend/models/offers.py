@@ -1,12 +1,14 @@
-from sqlalchemy import Column, Integer, String, Text, Numeric, TIMESTAMP, func, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Text, Numeric, TIMESTAMP, func, ForeignKey, Boolean, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY
-from models.base import Base
+from models.base import Base, TenantMixin
 
-class OfferORM(Base):
+class OfferORM(TenantMixin, Base):
     __tablename__ = "offers"
+    __table_args__ = (UniqueConstraint("tenant_id", "name",
+                                       name="offers_tenant_name_key"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), unique=True, nullable=False)
+    name = Column(String(255), nullable=False)
     url = Column(Text, nullable=False)
     affiliate_network_id = Column(Integer, ForeignKey("affiliate_networks.id", ondelete="SET NULL"))
     countries = Column(JSONB)

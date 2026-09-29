@@ -7,7 +7,8 @@ from sqlalchemy import or_
 from sqlalchemy import text
 from sqlalchemy import func, case
 from db import get_db
-from models.base import Base
+from tenant_context import current_tenant
+from models.base import Base, TenantMixin
 from models.settings import SettingsORM
 from models.user import UserORM
 from models.campaigns import CampaignORM
@@ -21,7 +22,7 @@ from typing import Optional, List
 
 router = APIRouter()
 
-class Conversion(Base):
+class Conversion(TenantMixin, Base):
     __tablename__ = "conversions_data"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -255,10 +256,12 @@ def _build_conversions_query(request: Request, db: Session):
         try:
             res = ch.query(
                 "SELECT DISTINCT visitor_id FROM clicks_data "
-                "WHERE toDate(received_at) BETWEEN toDate(%(df)s) AND toDate(%(dt)s) "
+                "WHERE tenant_id = %(tenant_id)s "
+                "AND toDate(received_at) BETWEEN toDate(%(df)s) AND toDate(%(dt)s) "
                 "AND visitor_id != '' "
                 "LIMIT %(cap)s",
                 parameters={"df": date_from, "dt": date_to,
+                            "tenant_id": current_tenant(),
                             "cap": CONVERSION_CLICK_WINDOW_ID_CAP + 1},
             )
             ids = [row[0] for row in res.result_rows if row and row[0]]
@@ -334,8 +337,9 @@ def get_funnel_report(campaign_id: int, request: Request, db: Session = Depends(
     funnel campaigns); conversion-side aggregates from conversions_data
     (funnel_step = the step at click-out time). Non-funnel campaigns 404."""
     row = db.execute(
-        text("SELECT id, name, config, owner_id FROM campaigns WHERE id = :cid"),
-        {"cid": campaign_id}).mappings().first()
+        text("SELECT id, name, config, owner_id FROM campaigns "
+             "WHERE id = :cid AND tenant_id = :tid"),
+        {"cid": campaign_id, "tid": current_tenant()}).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
@@ -368,8 +372,9 @@ def get_funnel_report(campaign_id: int, request: Request, db: Session = Depends(
     try:
         res = ch.query(
             "SELECT flow_index, count() FROM clicks_data "
-            "WHERE campaign_id = %(cid)s GROUP BY flow_index",
-            parameters={"cid": campaign_id})
+            "WHERE campaign_id = %(cid)s AND tenant_id = %(tenant_id)s "
+            "GROUP BY flow_index",
+            parameters={"cid": campaign_id, "tenant_id": current_tenant()})
         visits_by_step = {int(r[0]): int(r[1]) for r in res.result_rows}
     except Exception:
         visits_by_step = {}
@@ -385,9 +390,9 @@ def get_funnel_report(campaign_id: int, request: Request, db: Session = Depends(
                COALESCE(SUM(revenue) FILTER (WHERE status NOT IN ('rejected', 'trash')), 0) AS revenue,
                COALESCE(SUM(profit)  FILTER (WHERE status NOT IN ('rejected', 'trash')), 0) AS profit
         FROM conversions_data
-        WHERE campaign_id = :cid AND funnel_step IS NOT NULL
+        WHERE tenant_id = :tid AND campaign_id = :cid AND funnel_step IS NOT NULL
         GROUP BY funnel_step
-    """), {"cid": campaign_id}).mappings().all()
+    """), {"cid": campaign_id, "tid": current_tenant()}).mappings().all()
     agg_by_step = {int(r["funnel_step"]): r for r in agg_rows}
 
     steps_out = []

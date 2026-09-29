@@ -209,11 +209,14 @@ def _tool_sources_list(args: BaseModel, request: Request, db: Session) -> Any:
 
 def _tool_conversions_recent(args: _ConversionsIn, request: Request, db: Session) -> Any:
     limit = max(1, min(int(args.limit), 100))
+    # Raw SQL is not covered by the ORM's tenant scoping, so the tenant predicate has to be
+    # written here explicitly — without it this tool would return every tenant's conversions.
+    from tenant_context import current_tenant
     sql = ("SELECT received_at, click_id, campaign_id, offer_id, status, "
-           "payout, revenue, external_id FROM conversions_data")
-    params = {"lim": limit}
+           "payout, revenue, external_id FROM conversions_data WHERE tenant_id = :tid")
+    params = {"lim": limit, "tid": current_tenant()}
     if args.campaign_id is not None:
-        sql += " WHERE campaign_id = :cid"
+        sql += " AND campaign_id = :cid"
         params["cid"] = int(args.campaign_id)
     sql += " ORDER BY received_at DESC LIMIT :lim"
     rows = db.execute(text(sql), params).fetchall()

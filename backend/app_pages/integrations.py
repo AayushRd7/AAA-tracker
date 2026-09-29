@@ -71,6 +71,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db, SessionLocal
+from tenant_context import current_tenant
 from models.settings import SettingsORM
 
 # Reuse the Meta Graph client primitives (timeout, bounded retries + backoff,
@@ -341,11 +342,15 @@ def consume_state(db: Session, state: str, platform: str, username: str):
 # ---------------------------------------------------------------------------
 
 def _connection_row(db: Session, platform: str):
+    from tenant_context import current_tenant
+    # Raw SQL: the ORM tenant filter does not reach here, so the predicate is
+    # written out — without it a tenant could read another tenant's stored
+    # (encrypted) access token.
     return db.execute(text(
         "SELECT platform, access_token, token_type, expires_at, scopes, "
         "account_label, raw, created_at, updated_at "
-        "FROM integration_connections WHERE platform = :p"),
-        {"p": platform}).fetchone()
+        "FROM integration_connections WHERE platform = :p AND tenant_id = :tid"),
+        {"p": platform, "tid": current_tenant()}).fetchone()
 
 
 def _connection_view(row) -> dict:
@@ -389,9 +394,9 @@ def store_connection(db: Session, platform: str, raw_token: str, token_type: str
     db.execute(text("""
         INSERT INTO integration_connections
             (platform, access_token, token_type, expires_at, scopes,
-             account_label, raw, created_at, updated_at)
-        VALUES (:p, :t, :tt, :e, :sc, :al, CAST(:raw AS JSONB), now(), now())
-        ON CONFLICT (platform) DO UPDATE SET
+             account_label, raw, created_at, updated_at, tenant_id)
+        VALUES (:p, :t, :tt, :e, :sc, :al, CAST(:raw AS JSONB), now(), now(), :tid)
+        ON CONFLICT (tenant_id, platform) DO UPDATE SET
             access_token = EXCLUDED.access_token,
             token_type = EXCLUDED.token_type,
             expires_at = EXCLUDED.expires_at,
@@ -401,14 +406,15 @@ def store_connection(db: Session, platform: str, raw_token: str, token_type: str
             updated_at = now()
     """), {"p": platform, "t": cipher, "tt": token_type or "bearer",
            "e": expires_at, "sc": scopes or "", "al": (account_label or "")[:255],
-           "raw": json.dumps(raw or {})})
+           "raw": json.dumps(raw or {}), "tid": current_tenant()})
     db.commit()
     return True
 
 
 def clear_connection(db: Session, platform: str) -> bool:
-    res = db.execute(text("DELETE FROM integration_connections WHERE platform = :p"),
-                     {"p": platform})
+    res = db.execute(text("DELETE FROM integration_connections "
+                          "WHERE platform = :p AND tenant_id = :tid"),
+                     {"p": platform, "tid": current_tenant()})
     db.commit()
     return bool(res.rowcount)
 

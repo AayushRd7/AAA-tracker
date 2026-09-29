@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db, SessionLocal
+from tenant_context import current_tenant
 from models.settings import SettingsORM
 
 router = APIRouter()
@@ -97,10 +98,14 @@ def extract_targets(db: Session) -> list:
     every enabled flow of every active, non-archived campaign."""
     campaigns = db.execute(text(
         "SELECT id, name, config FROM campaigns "
-        "WHERE status = 'active' AND archived = false")).fetchall()
-    offers = {o[0]: o[1] for o in db.execute(text("SELECT id, url FROM offers")).fetchall()}
+        "WHERE status = 'active' AND archived = false AND tenant_id = :tid"),
+        {"tid": current_tenant()}).fetchall()
+    offers = {o[0]: o[1] for o in db.execute(
+        text("SELECT id, url FROM offers WHERE tenant_id = :tid"),
+        {"tid": current_tenant()}).fetchall()}
     landings = {l[0]: l[1] for l in db.execute(
-        text("SELECT id, link FROM landings WHERE link IS NOT NULL AND link != ''")).fetchall()}
+        text("SELECT id, link FROM landings WHERE link IS NOT NULL AND link != '' "
+             "AND tenant_id = :tid"), {"tid": current_tenant()}).fetchall()}
 
     targets = []
     seen = set()
@@ -172,7 +177,8 @@ async def _check_url(client: httpx.AsyncClient, url: str):
 def _latest_fail_counts(db: Session) -> dict:
     rows = db.execute(text("""
         SELECT DISTINCT ON (url) url, fail_count
-        FROM monitor_state ORDER BY url, checked_at DESC""")).fetchall()
+        FROM monitor_state WHERE tenant_id = :tid
+        ORDER BY url, checked_at DESC"""), {"tid": current_tenant()}).fetchall()
     return {r[0]: (r[1] or 0) for r in rows}
 
 
@@ -180,8 +186,9 @@ def _auto_disable_flow(db: Session, target: dict) -> bool:
     """Flip the owning flow's enabled flag to false in campaign config.
     The tracking plane treats enabled=false flows as ineligible, so traffic
     immediately skips the dead destination. Returns True when flipped."""
-    row = db.execute(text("SELECT config FROM campaigns WHERE id = :i"),
-                     {"i": target["campaign_id"]}).fetchone()
+    row = db.execute(text("SELECT config FROM campaigns WHERE id = :i "
+                          "AND tenant_id = :tid"),
+                     {"i": target["campaign_id"], "tid": current_tenant()}).fetchone()
     if not row:
         return False
     config = row[0] or {}
@@ -195,8 +202,9 @@ def _auto_disable_flow(db: Session, target: dict) -> bool:
             changed = True
     if changed:
         db.execute(text("UPDATE campaigns SET config = CAST(:c AS JSONB), "
-                        "updated_at = now() WHERE id = :i"),
-                   {"c": json.dumps(config), "i": target["campaign_id"]})
+                        "updated_at = now() WHERE id = :i AND tenant_id = :tid"),
+                   {"c": json.dumps(config), "i": target["campaign_id"],
+                    "tid": current_tenant()})
         db.commit()
     return changed
 
@@ -237,11 +245,11 @@ async def run_monitor_cycle() -> dict:
                 dead += 1
             fail_count = (prev_fails.get(target["url"], 0) + 1) if status == "dead" else 0
             db.execute(text("""
-                INSERT INTO monitor_state (entity, entity_id, campaign_id, url, status, checked_at, fail_count)
-                VALUES (:e, :eid, :cid, :u, :s, now(), :fc)"""),
+                INSERT INTO monitor_state (entity, entity_id, campaign_id, url, status, checked_at, fail_count, tenant_id)
+                VALUES (:e, :eid, :cid, :u, :s, now(), :fc, :tid)"""),
                 {"e": target["entity"], "eid": target["entity_id"],
                  "cid": target["campaign_id"], "u": target["url"],
-                 "s": status, "fc": fail_count})
+                 "s": status, "fc": fail_count, "tid": current_tenant()})
             db.commit()
 
             if fail_count == FAIL_THRESHOLD:
@@ -260,8 +268,9 @@ async def run_monitor_cycle() -> dict:
                 await asyncio.to_thread(send_telegram_alert, msg)
         # retention: monitor_state grows one row per target per cycle — drop
         # anything older than RETENTION_DAYS each cycle.
-        db.execute(text("DELETE FROM monitor_state WHERE checked_at < now() - make_interval(days => :d)"),
-                   {"d": RETENTION_DAYS})
+        db.execute(text("DELETE FROM monitor_state WHERE tenant_id = :tid "
+                        "AND checked_at < now() - make_interval(days => :d)"),
+                   {"d": RETENTION_DAYS, "tid": current_tenant()})
         db.commit()
         return {"checked": checked, "dead": dead, "targets": len(targets)}
     finally:
@@ -293,8 +302,9 @@ def monitor_status(db: Session = Depends(get_db)):
         SELECT DISTINCT ON (m.url) m.id, m.entity, m.entity_id, m.campaign_id,
                m.url, m.status, m.checked_at, m.fail_count, c.name
         FROM monitor_state m
-        LEFT JOIN campaigns c ON c.id = m.campaign_id
-        ORDER BY m.url, m.checked_at DESC""")).fetchall()
+        LEFT JOIN campaigns c ON c.id = m.campaign_id AND c.tenant_id = m.tenant_id
+        WHERE m.tenant_id = :tid
+        ORDER BY m.url, m.checked_at DESC"""), {"tid": current_tenant()}).fetchall()
     items = [{"id": r[0], "entity": r[1], "entity_id": r[2],
               "campaign_id": r[3], "campaign_name": r[8],
               "url": r[4], "status": r[5],

@@ -22,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db
+from tenant_context import current_tenant
 from models.settings import SettingsORM
 
 router = APIRouter()
@@ -51,8 +52,17 @@ def ensure_fraud_schema(ch) -> None:
                     ip VARCHAR(64),
                     ua TEXT,
                     campaign_id INTEGER,
-                    received_at TIMESTAMP NOT NULL DEFAULT now()
+                    received_at TIMESTAMP NOT NULL DEFAULT now(),
+                    tenant_id INTEGER NOT NULL DEFAULT 1
                 )"""))
+            # A database created before multi-tenancy (or by an older build of
+            # this module) needs the column added in place.
+            conn.execute(text("ALTER TABLE honeypot_hits "
+                              "ADD COLUMN IF NOT EXISTS tenant_id INTEGER"))
+            conn.execute(text("UPDATE honeypot_hits SET tenant_id = 1 "
+                              "WHERE tenant_id IS NULL"))
+            conn.execute(text("ALTER TABLE honeypot_hits "
+                              "ALTER COLUMN tenant_id SET NOT NULL"))
             conn.commit()
     except Exception as e:
         print("fraud schema (postgres):", e)
@@ -108,7 +118,10 @@ def _validate_bot_lists(block: dict) -> dict:
 @router.get("/summary")
 def fraud_summary(request: Request, db: Session = Depends(get_db)):
     ch = request.state.ch
-    period = "received_at >= now() - toIntervalHour(24)"
+    # Interpolated (not parameterised): the value is an int from the request
+    # context, never user input.
+    period = (f"tenant_id = {int(current_tenant())} "
+              "AND received_at >= now() - toIntervalHour(24)")
 
     row = ch.query(f"""
         SELECT count() AS total,
@@ -155,7 +168,9 @@ def fraud_summary(request: Request, db: Session = Depends(get_db)):
                 "last_seen": str(r[3])} for r in ua_rows]
 
     shield_rows = db.execute(text(
-        "SELECT id, name, config FROM campaigns WHERE archived = false")).fetchall()
+        "SELECT id, name, config FROM campaigns "
+        "WHERE archived = false AND tenant_id = :tid"),
+        {"tid": current_tenant()}).fetchall()
     shields = []
     for cid, cname, config in shield_rows:
         shield = (config or {}).get("shield") or {}
@@ -188,8 +203,9 @@ def fraud_summary(request: Request, db: Session = Depends(get_db)):
 def fraud_feed(request: Request, after: str = None, limit: int = FEED_LIMIT):
     ch = request.state.ch
     limit = min(max(int(limit or FEED_LIMIT), 1), 500)
-    conditions = [f"(is_bot = true OR fraud_score >= {FRAUD_SCORE_THRESHOLD})"]
-    params = {"limit": limit}
+    conditions = ["tenant_id = %(tenant_id)s",
+                  f"(is_bot = true OR fraud_score >= {FRAUD_SCORE_THRESHOLD})"]
+    params = {"limit": limit, "tenant_id": current_tenant()}
     if after:
         conditions.append("received_at > %(after)s")
         params["after"] = after
@@ -231,7 +247,9 @@ def put_bot_lists(payload: dict, request: Request, db: Session = Depends(get_db)
     block = _validate_bot_lists((payload or {}).get("bot_lists") or payload or {})
 
     row = db.execute(
-        text("SELECT id, value FROM settings WHERE name = 'settings' FOR UPDATE")
+        text("SELECT id, value FROM settings "
+             "WHERE name = 'settings' AND tenant_id = :tid FOR UPDATE"),
+        {"tid": current_tenant()}
     ).fetchone()
     if row:
         try:
@@ -259,7 +277,9 @@ def honeypot_hits(request: Request, limit: int = 100, db: Session = Depends(get_
     limit = min(max(int(limit or 100), 1), 500)
     rows = db.execute(text(
         "SELECT id, visitor_key, ip, ua, campaign_id, received_at "
-        "FROM honeypot_hits ORDER BY received_at DESC LIMIT :l"), {"l": limit}).fetchall()
+        "FROM honeypot_hits WHERE tenant_id = :tid "
+        "ORDER BY received_at DESC LIMIT :l"),
+        {"l": limit, "tid": current_tenant()}).fetchall()
     return {"hits": [{
         "id": r[0], "visitor_key": r[1], "ip": r[2], "ua": r[3],
         "campaign_id": r[4],
@@ -353,8 +373,9 @@ def db_campaign_exists(campaign_id: int) -> bool:
     from db import SessionLocal
     db = SessionLocal()
     try:
-        row = db.execute(text("SELECT 1 FROM campaigns WHERE id = :i"),
-                         {"i": campaign_id}).fetchone()
+        row = db.execute(text("SELECT 1 FROM campaigns "
+                              "WHERE id = :i AND tenant_id = :tid"),
+                         {"i": campaign_id, "tid": current_tenant()}).fetchone()
         return row is not None
     finally:
         db.close()
@@ -362,7 +383,9 @@ def db_campaign_exists(campaign_id: int) -> bool:
 
 def _save_blacklists_block(db: Session, lists: list) -> None:
     row = db.execute(
-        text("SELECT id, value FROM settings WHERE name = 'settings' FOR UPDATE")
+        text("SELECT id, value FROM settings "
+             "WHERE name = 'settings' AND tenant_id = :tid FOR UPDATE"),
+        {"tid": current_tenant()}
     ).fetchone()
     if row:
         try:
