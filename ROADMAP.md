@@ -193,16 +193,6 @@ Everything here is data we already write; the gap is that there is no surface to
 - [ ] **Workspace settings** — decimal places, divider, default table template, grouping-view toggle.
 - [ ] **Health-center style incidents** — see Wave 17's conversion health item.
 
-## 🏢 Wave 21 — Publisher / network-side portal (needs a product decision)
-
-Only if we want to serve the supply side, not just media buyers:
-
-- [ ] **Publishers** entity with a balance ledger (campaign earnings / referral / total).
-- [ ] **Payout workflow** — requested / paid / pending amounts, payment date, status, note, invoice attachment.
-- [ ] **Whitelabel publisher portal** (branded domain for affiliates).
-- [ ] **Referral commissions** — multi-step percentages with approval states.
-- [ ] Publisher statistics + publisher-scoped custom domains.
-
 ## 🔜 Queued — will be completed later
 
 - **Remaining G95 leftovers**: Google Safe Browsing checks (needs an API key) · server-side GeoIP DB (needs a MaxMind license or equivalent) — both implemented as opt-in settings the moment a key/license exists.
