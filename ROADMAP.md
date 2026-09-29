@@ -193,6 +193,34 @@ Everything here is data we already write; the gap is that there is no surface to
 - [ ] **Workspace settings** — decimal places, divider, default table template, grouping-view toggle.
 - [ ] **Health-center style incidents** — see Wave 17's conversion health item.
 
+
+## 🏢 Multi-tenancy — SaaS foundation (in progress)
+
+Model: **tenant → team members → resources**. A user can belong to several tenants; an agency's
+sub-workspaces are tenant rows with a `parent_tenant_id`. The current install becomes **tenant #1**
+and its data is backfilled to it, so nothing changes for the existing deployment.
+
+### Phase 1 — schema + isolation (in progress)
+- [ ] `tenants` (with `parent_tenant_id`) and `tenant_memberships` (user ↔ tenant, role, per-tenant permissions)
+- [ ] `tenant_id` on every tenant-owned table, backfilled to tenant #1; global tables stay global (users, sessions)
+- [ ] unique constraints become **per-tenant** (alias, domain, source/network name, landing folder/name, settings key) so two tenants can use the same names
+- [ ] current tenant resolved from the session + a workspace switcher in the app bar
+- [ ] isolation enforced centrally (ORM scoping + explicit predicates for raw SQL and every ClickHouse query)
+- [ ] acceptance gate: isolation tests proving tenant A can never read or modify tenant B's rows, and vice versa
+
+### Phase 2 — per-tenant everything
+- [ ] settings document per tenant (each tenant gets its own rows; the shared "name" key becomes per-tenant)
+- [ ] permissions/roles per membership rather than per user (a user can be an editor in one tenant, viewer in another)
+- [ ] audit log, logs area and every report scoped and filtered by tenant
+- [ ] per-tenant CAPI/Meta connections, cost sync accounts and integration connections
+- [ ] plan/quota fields on the tenant (seat count, retention, feature flags)
+
+### Phase 3 — onboarding, whitelabel, billing, sub-workspaces
+- [ ] self-serve signup + tenant onboarding (invite members, first campaign)
+- [ ] whitelabel: custom domain and branding per tenant
+- [ ] billing: plans, seats, usage metering, invoices
+- [ ] agency sub-workspace management (create/switch/inherit, roll-up reporting across children)
+
 ## 🔜 Queued — will be completed later
 
 - **Remaining G95 leftovers**: Google Safe Browsing checks (needs an API key) · server-side GeoIP DB (needs a MaxMind license or equivalent) — both implemented as opt-in settings the moment a key/license exists.
