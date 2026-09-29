@@ -70,6 +70,28 @@ def run_postgres_install(recreate: bool):
     with open(INIT_SQL_FILE, "r", encoding="utf-8") as f:
         cur.execute(f.read())
 
+    # A fresh install creates the admin user HERE, after the services have already booted — so
+    # the app's startup backfill (which grants every user a workspace membership) may never see
+    # it. The result is a login that "succeeds" and then 403s on every request. Ensure tenant 1
+    # and a membership for every user that has none, exactly as the app's migration does.
+    cur.execute("INSERT INTO tenants (id, name, slug) VALUES (1, 'Default', 'default') "
+                "ON CONFLICT DO NOTHING")
+    cur.execute("SELECT setval(pg_get_serial_sequence('tenants','id'), "
+                "GREATEST((SELECT COALESCE(MAX(id), 1) FROM tenants), 1))")
+    cur.execute("""
+        INSERT INTO tenant_memberships (user_id, tenant_id, role, permissions)
+        SELECT u.id, 1,
+               CASE WHEN u.is_admin AND u.id = (SELECT MIN(id) FROM users WHERE is_admin)
+                         THEN 'owner'
+                    WHEN u.is_admin THEN 'admin'
+                    ELSE 'editor' END,
+               u.permissions
+        FROM users u
+        WHERE NOT EXISTS (SELECT 1 FROM tenant_memberships m WHERE m.user_id = u.id)
+        ON CONFLICT (user_id, tenant_id) DO NOTHING
+    """)
+    print("  ▸ memberships: every user belongs to a workspace")
+
     cur.close()
     conn.close()
     print("  ▸ postgres: schema ready")
