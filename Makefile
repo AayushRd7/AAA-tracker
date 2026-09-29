@@ -50,6 +50,15 @@ check:
 		printf '      sudo chmod +x /usr/local/bin/docker-compose\n\n'; \
 		exit 1; }
 	$(call step,using $(COMPOSE))
+	@# A nested checkout (this repo inside another copy of it) silently fights for the same
+	@# compose project name, container names and volumes, so whichever directory ran `up` last
+	@# owns the bind mounts. Warn loudly instead of letting the wrong copy be served.
+	@if [ -f ../docker-compose.yml ] && grep -q 'container_name: *tracker_' ../docker-compose.yml 2>/dev/null; then \
+		printf '  $(Y)$(B)!$(R) nested checkout: %s is inside another copy of this repo.\n' "$$(pwd)"; \
+		printf '    Both use the same compose project and container names, so whichever directory ran\n'; \
+		printf '    "up" last owns the mounts — edits or pulls here may appear to do nothing.\n'; \
+		printf '    Run every command from ONE checkout and remove the other.\n'; \
+	fi
 
 # First-run configuration: create .env from .env.example. An existing .env is never
 # touched. Placeholder credentials are replaced with generated ones ONLY when no
