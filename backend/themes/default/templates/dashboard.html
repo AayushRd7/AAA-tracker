@@ -546,7 +546,7 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(this.livePayload)
                 })
-                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.visits = Array.isArray(data) ? data : [];
                     })
@@ -561,7 +561,7 @@
             // --- fraud watch (admin-only endpoint; silently hidden for others) ---
             loadFraudSummary() {
                 fetch('/backend/api/fraud/summary', {credentials: 'include'})
-                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.fraudSummary = data;
                     })
@@ -575,7 +575,7 @@
             // --- G56 insights card (admin-only endpoint; hidden otherwise/empty) ---
             loadInsightsSummary() {
                 fetch('/backend/api/insights/latest', {credentials: 'include'})
-                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         const counts = {critical: 0, warning: 0, info: 0};
                         (data.findings || []).forEach(f => {
@@ -624,7 +624,7 @@
                 if (document.hidden) return;  // pause while the tab is in the background
                 const params = this.liveAfter ? '?after=' + encodeURIComponent(this.liveAfter) : '';
                 fetch('/backend/api/dashboard/live-clicks' + params)
-                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(window.fetchJsonFromResponse)
                     .then(rows => {
                         if (!Array.isArray(rows) || !rows.length) return;
                         const fresh = [];
@@ -680,7 +680,7 @@
             },
             loadAnnotations() {
                 fetch('/backend/api/settings/annotations', {credentials: 'include'})
-                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.annotations = data.annotations || [];
                         this.applyChartAnnotations();
@@ -696,7 +696,7 @@
                     credentials: 'include',
                     body: JSON.stringify(payload)
                 })
-                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(window.fetchJsonFromResponse)
                     .then(() => {
                         this.newAnnotation.text = '';
                         this.loadAnnotations();
@@ -793,7 +793,7 @@
             },
             loadFiltersData() {
                 fetch('/backend/api/campaigns/')
-                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.campaigns = Array.isArray(data) ? data : [];
                     })
@@ -819,7 +819,7 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 })
-                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         const m = data.metrics;
                         const roiNum = parseFloat(m.roi) || 0;

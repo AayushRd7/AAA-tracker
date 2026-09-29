@@ -2148,13 +2148,15 @@
                         [],
                     funnel:
                         {enabled: false, steps: []},
-                    funnelTemplates: [],
-                    selectedFunnelTemplate: null,
                     shield:
                         {enabled: false, action: 'blank', honeypot: false,
                             whitelists: {ips: [], referers: [], ua_regex: ''}}
                 }
                 ,
+                // Funnel-template picker state: these belong to the component (the template
+                // binds them bare), not inside `form`, or Vue cannot resolve them.
+                funnelTemplates: [],
+                selectedFunnelTemplate: null,
                 baseParamsIdMapping:[],
                 flowSchemes: ['position', 'weight'],
                 flowActionItems: [
@@ -2521,8 +2523,7 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({lines: this.importText})
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    const data = await window.fetchJsonFromResponse(res);
                     this.importResults = data.results || [];
                     this.$root.$emit('show-message', {type: 'success',
                         text: `Import done: ${data.imported} ok, ${data.failed} failed`});
@@ -2567,8 +2568,7 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify(body)
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    const data = await window.fetchJsonFromResponse(res);
                     // keep the running state perceptible even on a fast response
                     const elapsed = Date.now() - startedAt;
                     if (elapsed < 450)
@@ -2606,7 +2606,7 @@
                 fetch("/backend/api/settings/", {
                     credentials: "include"
                 })
-                    .then((r) => r.json())
+                    .then(window.fetchJsonFromResponse)
                     .then((data) => {
                         if (data.subIdMapping) {
                             this.baseParamsIdMapping = JSON.parse(JSON.stringify(data.subIdMapping));

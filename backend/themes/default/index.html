@@ -68,6 +68,27 @@
     <div class="overlay_message" id="overlay_message">Loading...</div>
 </div>
 <script type="application/javascript">
+    // Parse a fetch Response as JSON, but never blow up on an error page.
+    // A gateway timeout (504) or a 5xx returns nginx's HTML page; calling res.json() on it
+    // produced "Unexpected token '<'" and hid the real status. This reports the status.
+    window.fetchJsonFromResponse = async function (res) {
+        const ctype = (res.headers.get('content-type') || '').toLowerCase();
+        if (!res.ok) {
+            let detail = '';
+            if (ctype.includes('json')) {
+                try { detail = (await res.json()).detail || ''; } catch (e) { /* ignore */ }
+            }
+            throw new Error('HTTP ' + res.status + (detail ? ': ' + detail : ''));
+        }
+        if (!ctype.includes('json')) {
+            throw new Error('HTTP ' + res.status + ' — the server returned ' + (ctype || 'an empty body'));
+        }
+        return res.json();
+    };
+    Vue.prototype.$fetchJson = async function (url, options) {
+        return window.fetchJsonFromResponse(await fetch(url, options));
+    };
+
     Vue.prototype.$formatDate = function(dateStr, locale = 'en-US') {
       if (!dateStr) return '';
       const options = {
