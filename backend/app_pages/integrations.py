@@ -764,6 +764,13 @@ def _settings_redirect(platform: str, ok: bool, message: str = "", **extra):
                             status_code=302)
 
 
+# The provider is given the URL derive_callback_url() advertises, so the route
+# must answer at exactly that path — ``/callback``. The older
+# ``/oauth/callback`` stays as an alias so a redirect URI registered before the
+# rename keeps working. A mismatch here means the provider's redirect lands on a
+# 404 and no connection can ever complete, which no unit test would notice
+# because both sides build the URL from the same helper.
+@router.get("/{platform}/callback")
 @router.get("/{platform}/oauth/callback")
 async def oauth_callback(platform: str, request: Request, code: str = None,
                          state: str = None, error: str = None,
