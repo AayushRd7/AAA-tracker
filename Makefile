@@ -26,7 +26,7 @@ warn = @printf '  $(Y)$(B)!$(R) %s\n' "$(1)"
 
 SCHEME ?= http
 
-.PHONY: banner check env preclean reset summary doctor install install-db install-db-fresh \
+.PHONY: banner check check-ci env preclean reset summary doctor install install-db install-db-fresh \
         install-local install-no-sll install-http install-prod-domain generate-local-cert \
         certificate stop start restart update logs reload-nginx seed-demo-data start-http \
         restart-nginx clear-logs
@@ -34,6 +34,12 @@ SCHEME ?= http
 banner:
 	@printf '\n$(B)$(C)  AAA TRACKER$(R) $(D)·$(R) $(B)setup$(R)\n'
 	@printf '$(D)  ─────────────────────────────────────────────$(R)\n\n'
+
+# A workflow file with a YAML typo does not fail a job — no job starts at all, and
+# GitHub only says the run had a workflow file issue. Nothing else parses those files
+# before a push, so parse them here.
+check-ci:
+	@python3 scripts/check-ci-yaml.py
 
 # Preflight: fail with an actionable message instead of "No such file or directory".
 check:

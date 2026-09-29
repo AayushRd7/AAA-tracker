@@ -14,6 +14,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: PyYAML (the workflow files are parsed below)
+        run: python -m pip install --quiet pyyaml
       - name: Compile all backend + frontend sources
         run: |
           python -m compileall -q backend/app.py backend/auth.py backend/clickHouse.py backend/db.py backend/schemas.py backend/email_reports.py backend/app_pages backend/models backend/tests backend/install frontend
@@ -42,7 +44,7 @@ jobs:
           echo "ok: Makefile is compose-flavour agnostic"
 
       - name: Makefile dry-run (parses, no docker needed)
-        run: make -n install >/dev/null && echo "ok: make install parses"
+        run: 'make -n install >/dev/null && echo "ok: make install parses"'
 
       - name: Shell syntax (installer + doctor)
         run: |
@@ -119,6 +121,10 @@ jobs:
           grep -q 'container_name:' docker-compose.yml || { echo "no container_name in compose"; exit 1; }
           grep -q -- '--remove-orphans' Makefile || { echo "compose up should pass --remove-orphans"; exit 1; }
           echo "ok: leftover-container handling present"
+
+      - name: Workflow files parse as YAML
+        # A typo here stops every run from starting, and no job reports it.
+        run: make check-ci
 
       # Live smoke tests need the full stack running — run them locally or
       # against your dev server:
