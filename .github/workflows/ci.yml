@@ -66,7 +66,10 @@ jobs:
       - name: Install SQL idempotency guard
         run: |
           # A re-install must never need to drop tables: schema statements are
-          # IF NOT EXISTS and every seed row is ON CONFLICT DO NOTHING.
+          # IF NOT EXISTS and every seed row is idempotent (ON CONFLICT DO NOTHING,
+          # or WHERE NOT EXISTS). Checked statement by statement with the same
+          # splitter the installer uses — counting the words across the file gets
+          # it wrong, since both guards are legitimate.
           # (Python instead of grep -P so this also runs on BSD grep.)
           python3 - <<'EOF'
           import re, sys
@@ -81,14 +84,26 @@ jobs:
               print("\n".join(bad))
               sys.exit(1)
 
-          init = open("backend/install/sql/init.sql").read()
-          inserts, guards = init.count("INSERT INTO"), init.count("ON CONFLICT")
-          if inserts != guards:
-              print(f"seed rows missing ON CONFLICT: {inserts} inserts vs {guards} guards")
-              sys.exit(1)
-          print(f"ok: install SQL is idempotent ({inserts} guarded seeds)")
-          EOF
+          src = open("backend/install/install.py").read()
+          ns = {}
+          exec(src[src.index("def split_sql_statements"):src.index("def run_clickhouse_install")], ns)
+          split = ns["split_sql_statements"]
 
+          seeds = 0
+          for path in ("backend/install/sql/init.sql", "backend/install/sql/clickHouse.sql"):
+              for statement in split(open(path).read()):
+                  if not re.search(r"\bINSERT\s+INTO\b", statement, re.I):
+                      continue
+                  seeds += 1
+                  upper = statement.upper()
+                  if "ON CONFLICT" not in upper and "NOT EXISTS" not in upper:
+                      bad.append(f"{path}: unguarded seed: {' '.join(statement.split())[:80]}")
+          if bad:
+              print("non-idempotent seed rows:")
+              print("\n".join(bad))
+              sys.exit(1)
+          print(f"ok: install SQL is idempotent ({seeds} seeds, all guarded)")
+          EOF
       - name: Install SQL statement split guard
         run: |
           # A ';' inside a comment used to truncate a statement and break fresh installs
