@@ -23,6 +23,17 @@ app = FastAPI(
 )
 app.state = SimpleNamespace()
 
+# Self-diagnosis for a wedged worker: register a stack-dump signal so a stalled
+# process can be inspected without a debugger attached (containers rarely allow
+# ptrace). `docker exec tracker_backend kill -USR1 <worker-pid>` writes every
+# thread's stack to stderr, which is the container log.
+import faulthandler as _faulthandler
+import signal as _signal
+try:
+    _faulthandler.register(_signal.SIGUSR1, chain=False)
+except Exception:  # pragma: no cover - diagnostics only
+    pass
+
 
 def _session_token_from_scope(scope) -> str:
     """The session cookie value from an ASGI scope ('' when absent)."""
