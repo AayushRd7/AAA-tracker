@@ -9323,6 +9323,357 @@ print("ESCAPED-OK")
         except Exception:
             pass
 
+    # =====================================================================
+    print("== Multi-tenancy phase 3: invitations, onboarding, hierarchy traversal ==")
+    # Invitations are one-time, expiring grants of a role in ONE workspace; only
+    # the token's SHA-256 hash is stored. A workspace's owner/admin also reaches
+    # its DESCENDANTS (walking parent_tenant_id upward from the target), never
+    # its parent or a sibling — and only the visited workspace's data is visible.
+    p3_pid = os.getpid()
+    import hashlib as _p3_hashlib
+    p3_parent = p3_child = p3_sibling = p3_fresh = p3_other = None
+    p3_owner = f"p3-owner-{p3_pid}"
+    p3_admin = f"p3-admin-{p3_pid}"
+    p3_member = f"p3-member-{p3_pid}"
+    p3_invitee = f"p3-invitee-{p3_pid}"
+    p3_other_owner = f"p3-other-{p3_pid}"
+    p3_child_admin = f"p3-childadmin-{p3_pid}"
+    p3_other_invitee = f"p3-otherinvitee-{p3_pid}"
+    p3_expired_token = f"p3-expired-token-{p3_pid}"
+    p3_camp = f"p3-camp-{p3_pid}"
+    p3_parent_camp = None
+    p3_created_invites = []
+
+    def p3_login(username, password="smokepass1"):
+        sess = requests.Session()
+        sess.verify = not INSECURE
+        rr = sess.post(f"{api}/login", json={"username": username, "password": password})
+        check(f"p3: login {username}", rr.status_code == 200, rr.text[:120])
+        return sess
+
+    def p3_lookup(token):
+        return requests.get(f"{api}/invitations/lookup", params={"token": token},
+                            verify=not INSECURE)
+
+    def p3_accept(token, username, email=None):
+        body = {"token": token, "username": username, "password": "smokepass1"}
+        if email:
+            body["email"] = email
+        return requests.post(f"{api}/invitations/accept", json=body, verify=not INSECURE)
+
+    try:
+        # ---- fixtures: a parent workspace, its children, an unrelated one ----
+        r = s.post(f"{api}/tenants/", json={
+            "name": f"P3 Parent {p3_pid}", "slug": f"p3-parent-{p3_pid}",
+            "username": p3_owner, "password": "smokepass1",
+            "email": f"{p3_owner}@example.com", "role": "owner"})
+        p3_parent = (r.json() or {}).get("tenant_id")
+        check("p3: parent workspace provisioned", r.status_code == 200 and bool(p3_parent),
+              r.text[:200])
+        for label in ("child", "sibling", "fresh"):
+            r = s.post(f"{api}/tenants/", json={
+                "name": f"P3 {label.title()} {p3_pid}", "slug": f"p3-{label}-{p3_pid}",
+                "parent_tenant_id": p3_parent})
+            tid = (r.json() or {}).get("tenant_id")
+            if label == "child":
+                p3_child = tid
+            elif label == "sibling":
+                p3_sibling = tid
+            else:
+                p3_fresh = tid
+            check(f"p3: {label} child workspace provisioned", r.status_code == 200, r.text[:200])
+        r = s.post(f"{api}/tenants/", json={
+            "name": f"P3 Other {p3_pid}", "slug": f"p3-other-{p3_pid}",
+            "username": p3_other_owner, "password": "smokepass1",
+            "email": f"{p3_other_owner}@example.com", "role": "owner"})
+        p3_other = (r.json() or {}).get("tenant_id")
+        check("p3: unrelated workspace provisioned", r.status_code == 200 and bool(p3_other),
+              r.text[:200])
+
+        sp = p3_login(p3_owner)
+        so3 = p3_login(p3_other_owner)
+        r = sp.post(f"{api}/members/", json={"username": p3_admin,
+                                             "email": f"{p3_admin}@example.com",
+                                             "password": "smokepass1", "role": "admin"})
+        check("p3: parent admin created", r.status_code == 200, r.text[:200])
+        r = sp.post(f"{api}/members/", json={"username": p3_member,
+                                             "email": f"{p3_member}@example.com",
+                                             "password": "smokepass1", "role": "viewer"})
+        check("p3: parent viewer created", r.status_code == 200, r.text[:200])
+        sa3 = p3_login(p3_admin)
+        sv3 = p3_login(p3_member)
+
+        # ---- invite lifecycle: create -> public lookup -> accept -> login ----
+        inv_token = inv_id = None
+        r = sp.post(f"{api}/invitations/",
+                    json={"email": f"{p3_invitee}@example.com", "role": "editor"})
+        inv = r.json() if r.status_code == 200 else {}
+        inv_token = inv.get("token")
+        inv_id = inv.get("id")
+        check("p3: owner creates an invitation with a one-time token",
+              r.status_code == 200 and bool(inv_token), r.text[:200])
+        if inv_id:
+            p3_created_invites.append(inv_id)
+        check("p3: creation returns a ready-to-use accept URL carrying the token",
+              bool(inv.get("accept_url")) and inv_token in (inv.get("accept_url") or ""),
+              str(inv.get("accept_url"))[:140])
+        check("p3: the invitation records its expiry",
+              bool(inv.get("expires_at")), str(inv.get("expires_at")))
+
+        r = p3_lookup(inv_token)
+        lk = r.json() if r.status_code == 200 else {}
+        check("p3: public lookup resolves the invitation without a session",
+              r.status_code == 200 and lk.get("role") == "editor"
+              and lk.get("workspace_name") == f"P3 Parent {p3_pid}"
+              and lk.get("email") == f"{p3_invitee}@example.com", r.text[:200])
+        check("p3: lookup never returns the raw token", inv_token not in r.text,
+              "raw token leaked by lookup")
+
+        r = sp.get(f"{api}/invitations/")
+        listing = r.json() if r.status_code == 200 else {}
+        pending = listing.get("invitations") or []
+        check("p3: the owner lists the workspace's pending invitations",
+              r.status_code == 200 and any(i.get("id") == inv_id for i in pending),
+              r.text[:200])
+        check("p3: no list item carries a token or a hash",
+              all("token" not in i and "token_hash" not in i for i in pending),
+              str(pending)[:200])
+        check("p3: the handed-out token never appears in the list response",
+              inv_token not in r.text, "raw token in list response")
+
+        r = p3_accept(inv_token, p3_invitee, email=f"{p3_invitee}@example.com")
+        check("p3: the invitation is accepted", r.status_code == 200, r.text[:200])
+        si = p3_login(p3_invitee)
+        r = si.get(f"{api}/tenants/")
+        il = r.json() if r.status_code == 200 else {}
+        check("p3: the invitee lands in the inviting workspace with the invited role",
+              il.get("current_tenant_id") == p3_parent and il.get("role") == "editor"
+              and [t["tenant_id"] for t in il.get("tenants", [])] == [p3_parent], r.text[:200])
+        r = p3_accept(inv_token, f"p3-again-{p3_pid}")
+        check("p3: the same token cannot be accepted twice (410)", r.status_code == 410,
+              f"got {r.status_code} {r.text[:120]}")
+        r = p3_lookup(inv_token)
+        check("p3: lookup of an accepted token is 410", r.status_code == 410, str(r.status_code))
+
+        stored_hash = pg_scalar(f"SELECT token_hash FROM tenant_invitations "
+                                f"WHERE id = {int(inv_id)}")
+        check("p3: only a sha256 hash of the token is stored",
+              bool(stored_hash) and stored_hash != inv_token and len(stored_hash) == 64
+              and stored_hash == _p3_hashlib.sha256(inv_token.encode()).hexdigest(),
+              stored_hash[:24])
+
+        # ---- revoke a pending invitation ----
+        rev_token = rev_id = None
+        r = sp.post(f"{api}/invitations/", json={"username": f"p3-revoked-{p3_pid}",
+                                                 "role": "viewer"})
+        rev = r.json() if r.status_code == 200 else {}
+        rev_token, rev_id = rev.get("token"), rev.get("id")
+        check("p3: a username invitation is created", r.status_code == 200 and bool(rev_token),
+              r.text[:200])
+        if rev_id:
+            p3_created_invites.append(rev_id)
+        r = sp.delete(f"{api}/invitations/{rev_id}")
+        check("p3: a pending invitation is revoked", r.status_code == 200, r.text[:150])
+        r = p3_lookup(rev_token)
+        check("p3: lookup of a revoked invitation is 410", r.status_code == 410, str(r.status_code))
+        r = p3_accept(rev_token, f"p3-revokedinvitee-{p3_pid}")
+        check("p3: a revoked invitation cannot be accepted (410)", r.status_code == 410,
+              f"got {r.status_code} {r.text[:120]}")
+
+        # ---- duplicate pending invitation ----
+        r = sp.post(f"{api}/invitations/", json={"email": f"p3-dup-{p3_pid}@example.com",
+                                                 "role": "viewer"})
+        dup1 = r.json() if r.status_code == 200 else {}
+        if dup1.get("id"):
+            p3_created_invites.append(dup1["id"])
+        check("p3: first pending invitation created", r.status_code == 200, r.text[:150])
+        r = sp.post(f"{api}/invitations/", json={"email": f"p3-dup-{p3_pid}@example.com",
+                                                 "role": "editor"})
+        check("p3: a second pending invitation for the same invitee is 409",
+              r.status_code == 409, str(r.status_code))
+
+        # ---- unknown / expired tokens ----
+        r = p3_lookup(f"p3-nope-{p3_pid}")
+        check("p3: an unknown token is 404", r.status_code == 404, str(r.status_code))
+        pg_exec("INSERT INTO tenant_invitations (tenant_id, email, role, token_hash, invited_by, "
+                "expires_at) VALUES "
+                f"({int(p3_parent)}, 'p3-expired-{p3_pid}@example.com', 'viewer', "
+                f"'{_p3_hashlib.sha256(p3_expired_token.encode()).hexdigest()}', 'smoke', "
+                "now() - interval '1 day')")
+        r = p3_lookup(p3_expired_token)
+        check("p3: an expired token is 410", r.status_code == 410, str(r.status_code))
+        r = p3_accept(p3_expired_token, f"p3-expireduser-{p3_pid}")
+        check("p3: an expired invitation cannot be accepted (410)", r.status_code == 410,
+              f"got {r.status_code} {r.text[:120]}")
+
+        # ---- role ceiling + viewer cannot manage ----
+        r = sa3.post(f"{api}/invitations/", json={"email": f"p3-ceiling-{p3_pid}@example.com",
+                                                  "role": "owner"})
+        check("p3: an admin cannot invite an owner (role ceiling, 403)",
+              r.status_code == 403, str(r.status_code))
+        r = sa3.post(f"{api}/invitations/", json={"email": f"p3-ceiling-ok-{p3_pid}@example.com",
+                                                  "role": "editor"})
+        check("p3: an admin may invite below their own role", r.status_code == 200, r.text[:200])
+        pg_exec(f"DELETE FROM tenant_invitations "
+                f"WHERE email = 'p3-ceiling-ok-{p3_pid}@example.com'")
+        r = sv3.get(f"{api}/invitations/")
+        check("p3: a workspace viewer cannot list invitations (403)",
+              r.status_code == 403, str(r.status_code))
+        r = sv3.post(f"{api}/invitations/", json={"email": "p3-viewer-invite@example.com",
+                                                  "role": "viewer"})
+        check("p3: a workspace viewer cannot create invitations (403)",
+              r.status_code == 403, str(r.status_code))
+        r = sv3.delete(f"{api}/invitations/{inv_id}")
+        check("p3: a workspace viewer cannot revoke invitations (403)",
+              r.status_code == 403, str(r.status_code))
+
+        # ---- isolation: another workspace's manager reaches nothing here ----
+        r = so3.get(f"{api}/invitations/")
+        other_pending = ((r.json() or {}).get("invitations") or []) if r.status_code == 200 else []
+        check("p3: another workspace's list is its own, never this one's",
+              r.status_code == 200
+              and all(i.get("id") not in p3_created_invites for i in other_pending),
+              r.text[:200])
+        r = so3.post(f"{api}/invitations/", json={"email": f"{p3_other_invitee}@example.com",
+                                                  "role": "editor"})
+        other_inv = r.json() if r.status_code == 200 else {}
+        check("p3: a manager can invite into their own workspace",
+              r.status_code == 200 and bool(other_inv.get("token")), r.text[:200])
+        check("p3: that invitation belongs to the other workspace",
+              pg_scalar(f"SELECT tenant_id FROM tenant_invitations "
+                        f"WHERE id = {int(other_inv.get('id') or 0)}") == str(p3_other))
+        r = so3.delete(f"{api}/invitations/{inv_id}")
+        check("p3: another workspace cannot revoke this one's invitation",
+              r.status_code in (403, 404), str(r.status_code))
+        check("p3: that delete attempt did not revoke this workspace's invitation",
+              pg_scalar(f"SELECT count(*) FROM tenant_invitations WHERE id = {int(inv_id)} "
+                        "AND revoked_at IS NULL") == "1")
+        r = p3_accept(other_inv.get("token"), p3_other_invitee,
+                      email=f"{p3_other_invitee}@example.com")
+        check("p3: the other workspace's invitation is accepted", r.status_code == 200,
+              r.text[:200])
+        check("p3: acceptance creates a membership ONLY in the inviting workspace",
+              pg_scalar("SELECT count(*) FROM tenant_memberships m JOIN users u ON u.id = m.user_id "
+                        f"WHERE u.username = '{p3_other_invitee}' "
+                        f"AND m.tenant_id = {int(p3_other)}") == "1"
+              and pg_scalar("SELECT count(*) FROM tenant_memberships m "
+                            "JOIN users u ON u.id = m.user_id "
+                            f"WHERE u.username = '{p3_other_invitee}' "
+                            f"AND m.tenant_id = {int(p3_parent)}") == "0")
+        soi = p3_login(p3_other_invitee)
+        r = soi.get(f"{api}/tenants/")
+        check("p3: the invitee's session resolves to the inviting workspace only",
+              r.status_code == 200 and (r.json() or {}).get("current_tenant_id") == p3_other,
+              r.text[:150])
+
+        # ---- hierarchy traversal ----
+        r = sp.post(f"{api}/campaigns/", json={
+            "name": f"P3 Parent Campaign {p3_pid}", "alias": p3_camp, "type": "campaign",
+            "status": "active", "redirect_mode": "position",
+            "config": {"flows": [], "postbacks": [], "hide_referrer": False}})
+        p3_parent_camp = (r.json() or {}).get("id")
+        check("p3: the parent workspace has a campaign",
+              r.status_code == 200 and bool(p3_parent_camp), r.text[:150])
+
+        r = sp.get(f"{api}/tenants/")
+        tl = r.json() if r.status_code == 200 else {}
+        p3_tids = [t["tenant_id"] for t in tl.get("tenants", [])]
+        check("p3: the parent owner sees its child workspaces",
+              r.status_code == 200 and all(tid in p3_tids for tid in (p3_child, p3_sibling, p3_fresh)),
+              str(p3_tids))
+        check("p3: can_switch is true when there are children to move into",
+              tl.get("can_switch") is True, str(tl.get("can_switch")))
+        check("p3: child workspaces are offered with the inherited role",
+              all(t.get("role") == "owner" for t in tl.get("tenants", [])
+                  if t.get("tenant_id") in (p3_child, p3_sibling, p3_fresh)),
+              str([(t.get("tenant_id"), t.get("role")) for t in tl.get("tenants", [])]))
+
+        r = sp.post(f"{api}/tenants/switch", json={"tenant_id": p3_child})
+        check("p3: the parent owner switches into the child workspace",
+              r.status_code == 200 and (r.json() or {}).get("role") == "owner", r.text[:150])
+        r = sp.get(f"{api}/tenants/current")
+        check("p3: the session's current workspace is the child",
+              r.status_code == 200 and (r.json() or {}).get("tenant_id") == p3_child,
+              r.text[:150])
+        r = sp.get(f"{api}/campaigns/")
+        child_aliases = {c["alias"] for c in (r.json() if r.status_code == 200 else [])}
+        check("p3: inside the child only the child's data is visible",
+              r.status_code == 200 and p3_camp not in child_aliases, str(child_aliases)[:150])
+        r = sp.get(f"{api}/tenants/")
+        child_view_ids = [t["tenant_id"] for t in ((r.json() or {}).get("tenants") or [])]
+        check("p3: the child does not expose its sibling workspaces",
+              p3_sibling not in child_view_ids and p3_fresh not in child_view_ids,
+              str(child_view_ids))
+        r = sp.post(f"{api}/tenants/switch", json={"tenant_id": p3_parent})
+        check("p3: switching back to the parent works", r.status_code == 200, r.text[:150])
+        r = sp.get(f"{api}/campaigns/")
+        check("p3: the parent's data is visible again after switching back",
+              p3_camp in {c["alias"] for c in (r.json() if r.status_code == 200 else [])},
+              r.text[:150])
+
+        r = sv3.post(f"{api}/tenants/switch", json={"tenant_id": p3_child})
+        check("p3: a plain member of the parent cannot switch into the child (403)",
+              r.status_code == 403, str(r.status_code))
+
+        # ---- a child-only admin cannot reach the parent ----
+        r = s.post(f"{api}/members/", params={"tenant_id": p3_child},
+                   json={"username": p3_child_admin,
+                         "email": f"{p3_child_admin}@example.com",
+                         "password": "smokepass1", "role": "admin"})
+        check("p3: child admin provisioned", r.status_code == 200, r.text[:200])
+        sc3 = p3_login(p3_child_admin)
+        r = sc3.get(f"{api}/tenants/")
+        check("p3: the child admin's session starts in the child",
+              r.status_code == 200 and (r.json() or {}).get("current_tenant_id") == p3_child,
+              r.text[:150])
+        r = sc3.post(f"{api}/tenants/switch", json={"tenant_id": p3_parent})
+        check("p3: a child admin cannot switch up into the parent (403)",
+              r.status_code == 403, str(r.status_code))
+
+        # ---- onboarding checklist ----
+        r = sp.post(f"{api}/tenants/switch", json={"tenant_id": p3_fresh})
+        check("p3: the owner enters the fresh child workspace", r.status_code == 200,
+              r.text[:150])
+        r = sp.get(f"{api}/tenants/onboarding")
+        ob = r.json() if r.status_code == 200 else {}
+        ob_keys = ("has_team", "has_traffic_source", "has_campaign", "has_offer",
+                   "has_domain", "has_integration")
+        check("p3: a fresh workspace's checklist is all false",
+              r.status_code == 200 and all(ob.get(k) is False for k in ob_keys), r.text[:250])
+        check("p3: a fresh workspace's checklist names the next step",
+              isinstance(ob.get("next_step"), str) and ob.get("next_step") in ob_keys,
+              str(ob.get("next_step")))
+
+        r = sp.post(f"{api}/tenants/switch", json={"tenant_id": p3_parent})
+        r = sp.get(f"{api}/tenants/onboarding")
+        ob2 = r.json() if r.status_code == 200 else {}
+        check("p3: the parent's checklist reflects its own members and campaign",
+              r.status_code == 200 and ob2.get("has_team") is True
+              and ob2.get("has_campaign") is True
+              and ob2.get("has_traffic_source") is False
+              and ob2.get("next_step") == "has_traffic_source", str(ob2))
+
+        # ---- audit trail ----
+        check("p3: invitation mutations are audit-logged",
+              pg_scalar(f"SELECT count(*) FROM audit_log WHERE tenant_id = {int(p3_parent)} "
+                        "AND action IN ('invitation_created','invitation_revoked',"
+                        "'invitation_accepted')") != "0")
+    finally:
+        p3_ids = ",".join(str(int(t)) for t in
+                          (p3_parent, p3_child, p3_sibling, p3_fresh, p3_other) if t) or "0"
+        pg_exec(f"DELETE FROM tenant_invitations WHERE tenant_id IN ({p3_ids})")
+        pg_exec(f"DELETE FROM settings WHERE tenant_id IN ({p3_ids})")
+        pg_exec(f"DELETE FROM campaigns WHERE tenant_id IN ({p3_ids})")
+        pg_exec("DELETE FROM tenant_memberships WHERE user_id IN "
+                f"(SELECT id FROM users WHERE username LIKE 'p3-%-{p3_pid}')")
+        pg_exec(f"DELETE FROM auth_sessions WHERE username LIKE 'p3-%-{p3_pid}'")
+        pg_exec(f"DELETE FROM users WHERE username LIKE 'p3-%-{p3_pid}'")
+        pg_exec(f"DELETE FROM tenants WHERE id IN ({p3_ids})")
+        check("p3: test tenants cleaned up",
+              pg_scalar(f"SELECT count(*) FROM tenants WHERE id IN ({p3_ids})") == "0")
+        check("p3: test users cleaned up",
+              pg_scalar(f"SELECT count(*) FROM users WHERE username LIKE 'p3-%-{p3_pid}'") == "0")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

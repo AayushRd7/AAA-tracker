@@ -100,6 +100,24 @@ CREATE TABLE IF NOT EXISTS tenant_memberships (
     UNIQUE (user_id, tenant_id)
 );
 
+-- Multi-tenancy phase 3: single-use, expiring workspace invitations. Only the
+-- SHA-256 hash of the token is stored, so a database dump cannot be replayed as
+-- a credential; the raw token exists in the POST /api/invitations response and
+-- nowhere else.
+CREATE TABLE IF NOT EXISTS tenant_invitations (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    email VARCHAR(255),
+    username VARCHAR(255),
+    role VARCHAR(32) NOT NULL DEFAULT 'viewer',
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    invited_by VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    expires_at TIMESTAMP NOT NULL,
+    accepted_at TIMESTAMP,
+    revoked_at TIMESTAMP
+);
+
 -- tenant_id on every tenant-owned table, plus the composite uniques that used
 -- to be global. Everything here is idempotent for installs that predate
 -- multi-tenancy: add nullable -> backfill -> NOT NULL DEFAULT 1 (the "safe

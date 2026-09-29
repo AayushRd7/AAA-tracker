@@ -505,8 +505,10 @@ def resolve_session_tenant(token: str) -> tuple[Optional[int], bool]:
       middleware leaves the default tenant 1 in place (every data endpoint
       requires auth anyway).
     * authenticated with memberships -> the stored tenant when it is still a
-      membership, else the lowest tenant_id the user belongs to (persisted back
-      onto the session). This is the "membership revoked mid-session" fallback.
+      membership OR a descendant of a workspace the user manages (owner/admin —
+      the phase-3 traversal), else the lowest tenant_id the user belongs to
+      (persisted back onto the session). This is the "membership revoked
+      mid-session" fallback.
     * authenticated with no memberships -> (None, False): the caller gets 403
       from require_api_auth.
     """
@@ -528,7 +530,15 @@ def resolve_session_tenant(token: str) -> tuple[Optional[int], bool]:
                 return None, False
             member_ids = [m["tenant_id"] for m in memberships]
             stored = int(row.current_tenant_id) if row.current_tenant_id is not None else None
-            tenant_id = stored if stored in member_ids else member_ids[0]
+            tenant_id = stored if stored in member_ids else None
+            if tenant_id is None and stored is not None \
+                    and managed_ancestor_role(db, row.username, stored):
+                # The session is parked in a DESCENDANT of a workspace the user
+                # manages (see POST /api/tenants/switch): keep it there. Any
+                # other non-membership tenant falls back to the first membership.
+                tenant_id = stored
+            if tenant_id is None:
+                tenant_id = member_ids[0]
             if stored != tenant_id:
                 db.execute(text("UPDATE auth_sessions SET current_tenant_id = :tid "
                                 "WHERE token = :t"), {"tid": tenant_id, "t": token})
@@ -554,6 +564,50 @@ def caller_role_in_tenant(db: Session, username: str, tenant_id: int) -> Optiona
         "WHERE u.username = :u AND m.tenant_id = :t"),
         {"u": username, "t": int(tenant_id)}).fetchone()
     return row[0] if row else None
+
+
+# Manager roles that traverse the workspace hierarchy (phase 3): an owner or
+# admin of a workspace also acts in that workspace's descendants.
+MANAGER_ROLES = ("owner", "admin")
+
+
+def managed_ancestor_role(db: Session, username: Optional[str],
+                          tenant_id: int) -> Optional[str]:
+    """The owner/admin role the caller holds in ``tenant_id`` or one of its
+    ANCESTORS, or None.
+
+    Walks the ``parent_tenant_id`` chain upward from the target workspace and
+    returns the first owner/admin role found. Access therefore only ever flows
+    *down* the tree: a manager of a parent reaches every descendant, a manager
+    of a child never reaches its parent, and a sibling or cousin of a managed
+    workspace stays out of reach. The visited set guards against a malformed
+    ``parent_tenant_id`` cycle.
+    """
+    if not username:
+        return None
+    seen = set()
+    current = int(tenant_id)
+    while current is not None and current not in seen:
+        seen.add(current)
+        role = caller_role_in_tenant(db, username, current)
+        if role in MANAGER_ROLES:
+            return role
+        row = db.execute(text("SELECT parent_tenant_id FROM tenants WHERE id = :t"),
+                         {"t": current}).fetchone()
+        if not row or row[0] is None:
+            return None
+        current = int(row[0])
+    return None
+
+
+def effective_tenant_role(db: Session, username: Optional[str],
+                          tenant_id: int) -> Optional[str]:
+    """The role the caller exercises in ``tenant_id``: a direct membership, or
+    the role inherited from a managed ancestor workspace (hierarchy traversal)."""
+    role = caller_role_in_tenant(db, username, tenant_id)
+    if role:
+        return role
+    return managed_ancestor_role(db, username, tenant_id)
 
 
 def require_api_auth(request: Request, authorization: Optional[str] = Header(None)):
@@ -638,8 +692,14 @@ def denied_permissions() -> dict:
 def membership_for(db: Session, username: Optional[str],
                    tenant_id: Optional[int] = None):
     """(user_id, role, raw_permissions_dict) for `username` in `tenant_id`
-    (default: the request's current tenant), or None when they are not a member.
-    Raw SQL: tenant_memberships/users are install-global tables."""
+    (default: the request's current tenant), or None when they hold no authority
+    there.
+
+    A direct membership wins. Otherwise the caller may still act in `tenant_id`
+    through hierarchy traversal: if they hold owner/admin in one of its
+    ANCESTORS, they act there with that role (phase 3 — access flows down the
+    tree only, never up). Raw SQL: tenant_memberships/users/tenants are
+    install-global tables."""
     if not username:
         return None
     tid = current_tenant() if tenant_id is None else int(tenant_id)
@@ -649,7 +709,14 @@ def membership_for(db: Session, username: Optional[str],
         "WHERE u.username = :u AND m.tenant_id = :t"),
         {"u": username, "t": tid}).fetchone()
     if not row:
-        return None
+        role = managed_ancestor_role(db, username, tid)
+        if not role:
+            return None
+        user_row = db.execute(text("SELECT id FROM users WHERE username = :u"),
+                              {"u": username}).fetchone()
+        if not user_row:
+            return None
+        return int(user_row[0]), role, {}
     return int(row[0]), (row[1] or "viewer"), (row[2] or {})
 
 

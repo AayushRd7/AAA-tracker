@@ -405,6 +405,23 @@ def _ensure_tenant_schema(conn):
             created_at TIMESTAMP NOT NULL DEFAULT now(),
             UNIQUE (user_id, tenant_id)
         )"""))
+    # Phase 3: single-use, expiring workspace invitations. Only the SHA-256 hash
+    # of the token is stored — the raw token exists in the creation response and
+    # nowhere else (app_pages/invitations.py).
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS tenant_invitations (
+            id SERIAL PRIMARY KEY,
+            tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            email VARCHAR(255),
+            username VARCHAR(255),
+            role VARCHAR(32) NOT NULL DEFAULT 'viewer',
+            token_hash VARCHAR(64) NOT NULL UNIQUE,
+            invited_by VARCHAR(255),
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            expires_at TIMESTAMP NOT NULL,
+            accepted_at TIMESTAMP,
+            revoked_at TIMESTAMP
+        )"""))
 
     existing = {r[0] for r in conn.execute(
         text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).fetchall()}
@@ -791,6 +808,13 @@ app.include_router(tenants_router, prefix="/api/tenants", tags=["Tenants"],
 from app_pages.members import router as members_router
 app.include_router(members_router, prefix="/api/members", tags=["Members"],
                    dependencies=[Depends(require_api_auth)])
+
+# Multi-tenancy phase 3: workspace invitations. No router-level dependency on
+# purpose — `lookup` and `accept` are public (the invitee has no account yet);
+# the other three endpoints require authentication and resolve owner/admin
+# authority inside the request's workspace in the handlers.
+from app_pages.invitations import router as invitations_router
+app.include_router(invitations_router, prefix="/api/invitations", tags=["Invitations"])
 
 
 # G52: minimal public view for shared reports — shell-less, token in the query

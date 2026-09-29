@@ -1,12 +1,14 @@
 """Tenant (workspace) API — multi-tenancy phase 1.
 
-Three session-scoped endpoints plus a provisioning endpoint:
+Session-scoped endpoints:
 
-* ``GET  /api/tenants``         — the caller's tenants, the current one, the role
-* ``POST /api/tenants/switch``  — move the *session* into another membership
-* ``GET  /api/tenants/current`` — the tenant this session is working in
-* ``POST /api/tenants``         — admin only: create a tenant, optionally with
-                                  its first user + owner membership
+* ``GET  /api/tenants``           — the caller's tenants + the current one + role
+* ``POST /api/tenants/switch``    — move the *session* into another workspace
+* ``GET  /api/tenants/current``   — the workspace this session is working in
+* ``GET  /api/tenants/onboarding``— the current workspace's setup checklist
+* ``POST /api/tenants``           — platform operator only: create a workspace,
+                                    optionally with its first user + owner
+                                    membership
 
 No endpoint accepts a tenant id for *reading data*: the active tenant always
 comes from the session (auth_sessions.current_tenant_id), which the middleware
@@ -17,9 +19,20 @@ after checking the membership.
 Phase 1 did not cover per-tenant settings; phase 2B seeds the new tenant's
 settings document on create (documented defaults + its own API token).
 
-Still deliberately out of scope: per-tenant users (users are install-global —
-every tenant's admin sees every user), invites, billing, white-label branding
-and hierarchy traversal.
+Phase 3 adds invitations (``app_pages/invitations.py``: a single-use, hashed
+token that grants one role in one workspace) and **hierarchy traversal**. A
+caller who holds owner/admin in a workspace may switch the session into any of
+its DESCENDANTS — the walk goes UP the ``parent_tenant_id`` chain from the
+target, so they act there with that manager role for the rest of the session.
+Access only flows down the tree: a manager of a parent reaches every descendant,
+a manager of a child never reaches its parent, and a sibling or cousin of a
+managed workspace stays out of reach. While the session is parked in a child,
+only the child's resources are visible (session-scoped isolation guarantees it);
+``GET /api/tenants`` offers the current workspace's direct children to a manager.
+
+Still deliberately out of scope: per-tenant user accounts (users stay
+install-global rows; only the membership is scoped), billing and white-label
+branding.
 """
 from typing import Optional
 
@@ -28,8 +41,9 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from auth import (TENANT_ROLES, caller_role_in_tenant, get_caller, get_session_username,
-                  hash_password, is_platform_operator, list_user_memberships, session_token,
+from auth import (TENANT_ROLES, caller_role_in_tenant, effective_tenant_role,
+                  get_caller, get_session_username, hash_password, is_platform_operator,
+                  list_user_memberships, managed_ancestor_role, session_token,
                   set_session_tenant)
 from db import get_db
 from tenant_context import current_tenant
@@ -38,6 +52,11 @@ from tenant_settings import seed_tenant_settings
 router = APIRouter()
 
 VALID_ROLES = set(TENANT_ROLES)
+MANAGER_ROLES = {"owner", "admin"}
+
+# The onboarding checklist, in the order a new workspace normally needs it.
+ONBOARDING_STEPS = ("has_team", "has_traffic_source", "has_campaign", "has_offer",
+                    "has_domain", "has_integration")
 
 
 class TenantSwitch(BaseModel):
@@ -61,24 +80,53 @@ def _caller_username(request: Request) -> Optional[str]:
     return get_session_username(request)
 
 
+def _tenant_entry(row, role: str, via_parent: bool = False) -> dict:
+    """One workspace shaped like a membership row (same keys the UI reads)."""
+    return {"tenant_id": int(row[0]), "role": role, "name": row[1], "slug": row[2],
+            "status": row[3], "via_parent": via_parent}
+
+
 @router.get("/")
 def list_tenants(request: Request, db: Session = Depends(get_db)):
-    """The caller's tenants + which one is current. A Bearer api_token principal
-    is workspace-scoped and has no memberships; it sees the workspace the token
-    belongs to (the request's current tenant) and cannot switch out of it."""
+    """The caller's tenants + which one is current, plus the direct children of
+    the current workspace that the caller may move into.
+
+    Hierarchy traversal (phase 3): a caller holding owner/admin in the current
+    workspace also sees its DIRECT children (``parent_tenant_id = current``)
+    with the inherited role, and ``can_switch`` is true whenever there is
+    somewhere to move. A session parked in a descendant (no membership there)
+    reports that workspace with the role inherited from its managed ancestor. A
+    Bearer api_token principal is workspace-scoped and has no memberships; it
+    sees its own workspace and cannot switch out of it."""
     username = _caller_username(request)
     current = current_tenant()
     if not username:
         row = db.execute(text("SELECT id, name, slug, status FROM tenants WHERE id = :t"),
                          {"t": current}).fetchone()
-        tenants = ([{"tenant_id": int(row[0]), "role": "admin", "name": row[1],
-                     "slug": row[2], "status": row[3]}] if row else [])
+        tenants = ([_tenant_entry(row, "admin")] if row else [])
         return {"tenants": tenants, "current_tenant_id": current,
                 "role": "admin", "can_switch": False}
+
     memberships = list_user_memberships(db, username)
     role = next((m["role"] for m in memberships if m["tenant_id"] == current), None)
-    return {"tenants": memberships, "current_tenant_id": current, "role": role,
-            "can_switch": len(memberships) > 1}
+    tenants = list(memberships)
+    if role is None:
+        # The session may be parked in a DESCENDANT of a workspace the caller
+        # manages (POST /switch) — report the inherited role and the tenant.
+        role = managed_ancestor_role(db, username, current)
+        row = db.execute(text("SELECT id, name, slug, status FROM tenants WHERE id = :t"),
+                         {"t": current}).fetchone() if role else None
+        if row:
+            tenants.insert(0, _tenant_entry(row, role, via_parent=True))
+    if role in MANAGER_ROLES:
+        known = {t["tenant_id"] for t in tenants}
+        children = db.execute(text(
+            "SELECT id, name, slug, status FROM tenants WHERE parent_tenant_id = :t "
+            "ORDER BY id ASC"), {"t": current}).fetchall()
+        tenants += [_tenant_entry(c, role, via_parent=True) for c in children
+                    if int(c[0]) not in known]
+    return {"tenants": tenants, "current_tenant_id": current, "role": role,
+            "can_switch": len(tenants) > 1}
 
 
 @router.get("/current")
@@ -89,24 +137,70 @@ def get_current_tenant(request: Request, db: Session = Depends(get_db)):
     if not row:
         raise HTTPException(status_code=404, detail="Tenant not found")
     username = _caller_username(request)
-    role = caller_role_in_tenant(db, username, current) if username else "admin"
+    # A session parked in a descendant has no membership there: report the role
+    # inherited from the managed ancestor workspace.
+    role = effective_tenant_role(db, username, current) if username else "admin"
     return {"tenant_id": int(row[0]), "name": row[1], "slug": row[2],
             "parent_tenant_id": row[3], "status": row[4], "role": role}
+
+
+@router.get("/onboarding")
+def onboarding(request: Request, db: Session = Depends(get_db)):
+    """The current workspace's setup checklist: booleans plus ``next_step`` (the
+    first unmet item, None when everything is done).
+
+    Every count filters on the request's CURRENT tenant only, so a parent
+    workspace's members/data never show up in a child's checklist. "Has a
+    configured integration" means the workspace owns a CAPI pixel or an
+    integration connection."""
+    tenant_id = current_tenant()
+
+    def present(sql: str) -> bool:
+        return int(db.execute(text(sql), {"t": tenant_id}).scalar() or 0) > 0
+
+    checks = {
+        "has_team": present("SELECT count(*) FROM tenant_memberships "
+                            "WHERE tenant_id = :t AND role <> 'owner'"),
+        "has_traffic_source": present("SELECT count(*) FROM sources WHERE tenant_id = :t"),
+        "has_campaign": present("SELECT count(*) FROM campaigns WHERE tenant_id = :t"),
+        "has_offer": present("SELECT count(*) FROM offers WHERE tenant_id = :t"),
+        "has_domain": present("SELECT count(*) FROM domains WHERE tenant_id = :t"),
+        "has_integration": present(
+            "SELECT (SELECT count(*) FROM capi_pixels WHERE tenant_id = :t) "
+            "+ (SELECT count(*) FROM integration_connections WHERE tenant_id = :t)"),
+    }
+    next_step = next((step for step in ONBOARDING_STEPS if not checks[step]), None)
+    return {"tenant_id": int(tenant_id), **checks, "next_step": next_step,
+            "complete": next_step is None}
 
 
 @router.post("/switch")
 def switch_tenant(data: TenantSwitch, request: Request, db: Session = Depends(get_db)):
     """Persist a new current tenant on the caller's session (audited).
 
-    Membership-checked: a tenant the caller is not a member of is a 403 and the
-    session value is not written, so this endpoint cannot be used to reach
-    another tenant's data.
-    """
+    A caller may move into
+
+    * a workspace they hold a membership in (any role) — unchanged phase-1
+      behaviour; or
+    * a workspace that is a DESCENDANT of one where they hold owner/admin,
+      found by walking ``parent_tenant_id`` upward from the target. They then
+      act there with that manager role for the rest of the session.
+
+    It never allows a workspace the caller has no membership in and no managed
+    ancestor of, nor a sibling/cousin of a managed workspace, nor any *parent*
+    from a *child* — the walk only ever goes up. A refused switch is a 403 and
+    the session value is not written. While the session is parked in the child,
+    only the child's resources are visible (session-scoped isolation: the
+    middleware + tenant_scope)."""
     from audit_logger import audit_event
     username = _caller_username(request)
     if not username:
         raise HTTPException(status_code=403, detail="Tenant switching needs a user session")
     role = caller_role_in_tenant(db, username, data.tenant_id)
+    via_parent = False
+    if not role:
+        role = managed_ancestor_role(db, username, data.tenant_id)
+        via_parent = role is not None
     if not role:
         raise HTTPException(status_code=403, detail="Not a member of that workspace")
     token = session_token(request)
@@ -114,8 +208,10 @@ def switch_tenant(data: TenantSwitch, request: Request, db: Session = Depends(ge
         raise HTTPException(status_code=401, detail="Not authenticated")
     set_session_tenant(db, token, data.tenant_id)
     audit_event(username, "tenant_switch", "tenant", str(data.tenant_id),
-                {"role": role}, request.client.host if request.client else "")
-    return {"message": "Switched", "tenant_id": int(data.tenant_id), "role": role}
+                {"role": role, "via_parent": via_parent},
+                request.client.host if request.client else "")
+    return {"message": "Switched", "tenant_id": int(data.tenant_id), "role": role,
+            "via_parent": via_parent}
 
 
 @router.post("/")
