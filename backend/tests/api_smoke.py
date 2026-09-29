@@ -3136,7 +3136,8 @@ print("ESCAPED-OK")
           and isinstance(body.get("postgres", {}).get("latency_ms"), (int, float)),
           r.text[:200])
     check("status: loop timestamps section shaped",
-          set((body.get("loops") or {}).keys()) == {"monitor", "rules", "optimizer"},
+          set((body.get("loops") or {}).keys()) == {"monitor", "rules", "optimizer",
+                                                   "meta_ads"},
           str((body.get("loops") or {}).keys()))
     r = requests.get(f"{api}/status", verify=not INSECURE)
     check("status: unauthenticated 401", r.status_code == 401, str(r.status_code))
@@ -6376,12 +6377,25 @@ print("ESCAPED-OK")
     check("qp: canonical identical refire still dedupes",
           r.status_code == 200 and r.json().get("duplicate") is True, r.text[:150])
 
-    # the legacy path form is removed: unmatched routes 404 and write nothing
-    r = requests.get(f"{BASE}/pb/{qp_tag}-gone/sale/1", verify=not INSECURE)
-    check("qp: legacy path-style /pb is gone (404)", r.status_code == 404, str(r.status_code))
-    r = requests.get(f"{BASE}/pb/{qp_path}/sale/1.25", verify=not INSECURE)
-    check("qp: path-style /pb for an existing click still 404s",
-          r.status_code == 404, str(r.status_code))
+    # the legacy path form is retired: it now redirects to the canonical query form so
+    # networks that were already configured with it keep working
+    r = requests.get(f"{BASE}/pb/{qp_tag}-gone/sale/1", verify=not INSECURE, allow_redirects=False)
+    check("qp: legacy path-style /pb redirects (301) to the query form",
+          r.status_code == 301 and f"clickid={qp_tag}-gone" in (r.headers.get("location") or ""),
+          f"{r.status_code} {r.headers.get('location')}")
+    r = requests.get(f"{BASE}/pb/{qp_path}/sale/1.25", params={"transaction_id": "legacy-redirect"},
+                     verify=not INSECURE, allow_redirects=False)
+    loc = r.headers.get("location") or ""
+    check("qp: legacy redirect carries the click id, status, payout and extra params",
+          r.status_code == 301 and "clickid=" in loc and "status=sale" in loc
+          and "payout=1.25" in loc and "transaction_id=legacy-redirect" in loc, loc)
+    r = requests.get(f"{BASE}/pb/{qp_path}/sale/1.25", verify=not INSECURE,
+                     params={"transaction_id": "legacy-redirect"})
+    check("qp: following the legacy redirect records the conversion",
+          r.status_code == 200 and r.json().get("click_id") == qp_path, r.text[:150])
+    r = requests.post(f"{BASE}/pb/{qp_path}/sale/3", verify=not INSECURE, allow_redirects=False)
+    check("qp: legacy path-style POST redirects with 308 (method preserved)",
+          r.status_code == 308, str(r.status_code))
 
     # -- per-status Mode: 'new' inserts an extra row, 'repeated' accumulates --
     print("== Postback Mode (new vs repeated) ==")
@@ -7101,6 +7115,347 @@ print("ESCAPED-OK")
     # cleanup the conversions this block created
     for w19b_cid_conv in w19b_conv_ids:
         s.delete(f"{api}/reports/{w19b_cid_conv}")
+
+    # ===== Meta Ads cost auto-sync: mock Graph endpoint + end-to-end =====
+    import time as _meta_time
+    import threading as _meta_threading
+    import http.server as _meta_httpserver
+    import socketserver as _meta_socketserver
+
+    meta_pid = os.getpid()
+    meta_port = 22000 + (meta_pid % 1000)
+    meta_base = f"http://host.docker.internal:{meta_port}"
+    meta_acct = f"primary-{meta_pid}"
+    meta_token = f"tok-meta-{meta_pid}"
+    meta_captured = []
+    _meta_socketserver.TCPServer.allow_reuse_address = True
+
+    meta_day = ch_query("SELECT toString(toDate(now()))")
+
+    def _meta_row(pcid, cname, spend, impressions, clicks):
+        return {"campaign_id": pcid, "campaign_name": cname, "date_start": meta_day,
+                "spend": str(spend), "impressions": str(impressions), "clicks": str(clicks)}
+
+    class _MetaGraph(_meta_httpserver.BaseHTTPRequestHandler):
+        def do_GET(self):
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+            meta_captured.append({"path": self.path, "path_only": parsed.path,
+                                  "params": params})
+
+            def _send(code, obj):
+                body = json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            if "/ready" in self.path:
+                _send(200, {"ready": True})
+                return
+            if "fail500" in self.path:
+                _send(500, {"error": "server error"})
+                return
+            if "fail429" in self.path:
+                _send(429, {"error": "rate limited"})
+                return
+            if "page2" in self.path:
+                # second page: name-matched, tracking-matched, zero-click and unmatched rows
+                _send(200, {"data": [
+                    _meta_row(f"mvn-{meta_pid}", f"MV Name {meta_pid}", 6, 60, 3),
+                    _meta_row(f"mvtrk-{meta_pid}", f"mv-utm-{meta_pid}", 8, 80, 4),
+                    _meta_row(f"mvz-{meta_pid}", f"MV Zero {meta_pid}", 3, 30, 5),
+                    _meta_row(f"mvnone-{meta_pid}", f"MV Nobody {meta_pid}", 4, 40, 1),
+                ]})
+                return
+            _send(200, {
+                "data": [_meta_row(f"mvid-{meta_pid}", f"MV ID {meta_pid}", 10, 100, 2)],
+                "paging": {"next": f"{meta_base}/page2-{meta_pid}"},
+            })
+
+        def log_message(self, *args):
+            pass
+
+    meta_srv = _meta_socketserver.TCPServer(("0.0.0.0", meta_port), _MetaGraph)
+    meta_srv.daemon_threads = True
+    _meta_threading.Thread(target=meta_srv.serve_forever, daemon=True).start()
+
+    # Reachability from the backend container (where the sync runs).
+    meta_probe = ""
+    try:
+        meta_probe = subprocess.run(
+            ["docker", "exec", "tracker_backend", "python", "-c",
+             f"import urllib.request;print(urllib.request.urlopen('{meta_base}/ready',timeout=5).read().decode())"],
+            capture_output=True, text=True, timeout=15).stdout
+    except Exception:
+        pass
+    if "ready" not in meta_probe:
+        try:
+            meta_probe = requests.get(f"http://127.0.0.1:{meta_port}/ready", timeout=5).text
+        except Exception:
+            pass
+    check("meta-ads: mock Graph receiver reachable from the backend container",
+          "ready" in meta_probe, meta_probe[:80])
+
+    def meta_mk(name, alias, platform_id=None, config=None):
+        body = {"name": name, "alias": alias, "type": "campaign", "status": "active",
+                "redirect_mode": "position",
+                "config": config or {"flows": [], "postbacks": [], "hide_referrer": False}}
+        if platform_id is not None:
+            body["ad_platform_campaign_id"] = platform_id
+        return s.post(f"{api}/campaigns/", json=body)
+
+    r = meta_mk(f"MV ID {meta_pid}", f"smoke-meta-id-{meta_pid}", f"mvid-{meta_pid}")
+    meta_id_cid = r.json().get("id")
+    r = meta_mk(f"MV Name {meta_pid}", f"smoke-meta-name-{meta_pid}")
+    meta_name_cid = r.json().get("id")
+    r = meta_mk(f"MV Track {meta_pid}", f"smoke-meta-track-{meta_pid}", None,
+                {"flows": [], "postbacks": [], "hide_referrer": False,
+                 "utm_campaign": f"mv-utm-{meta_pid}"})
+    meta_track_cid = r.json().get("id")
+    r = meta_mk(f"MV Zero {meta_pid}", f"smoke-meta-zero-{meta_pid}")
+    meta_zero_cid = r.json().get("id")
+    check("meta-ads: four test campaigns created",
+          all([meta_id_cid, meta_name_cid, meta_track_cid, meta_zero_cid]),
+          f"{meta_id_cid},{meta_name_cid},{meta_track_cid},{meta_zero_cid}")
+
+    r = s.get(f"{api}/campaigns/")
+    listed = next((c for c in r.json() if c["alias"] == f"smoke-meta-id-{meta_pid}"), {})
+    check("meta-ads: campaign API exposes ad_platform_campaign_id",
+          listed.get("ad_platform_campaign_id") == f"mvid-{meta_pid}",
+          str(listed.get("ad_platform_campaign_id")))
+
+    def meta_set(**over):
+        cfg = {"enabled": True, "ad_account_ids": [meta_acct], "access_token": meta_token,
+               "api_version": "v21.0", "dry_run": False, "cadence": "hourly",
+               "backfill_days": 7, "graph_base_url": meta_base, "match_preference": "auto"}
+        cfg.update(over)
+        return s.post(f"{api}/settings/", json={"settings": {"meta_ads": cfg}})
+
+    def meta_sync():
+        return s.post(f"{api}/meta-ads/sync")
+
+    def meta_rows():
+        return pg_exec_out(
+            f"SELECT count(*) FROM ad_cost_daily WHERE ad_account_id = '{meta_acct}'").strip()
+
+    meta_saved = ((s.get(f"{api}/settings/").json().get("settings") or {})
+                  .get("meta_ads"))
+    meta_uid = None
+    try:
+        # -- dry-run: builds + logs the request and matching, writes nothing --
+        r = meta_set(dry_run=True)
+        check("meta-ads: dry-run config saved", r.status_code == 200, r.text[:120])
+        r = meta_sync()
+        dry = r.json() if r.status_code == 200 else {}
+        check("meta-ads: dry-run sync returns dry_run status",
+              r.status_code == 200 and dry.get("status") == "dry_run", r.text[:200])
+        check("meta-ads: dry-run reported would-allocate targets",
+              len(dry.get("would_allocate") or []) == 4, str(dry.get("would_allocate"))[:200])
+        check("meta-ads: dry-run reports matching (4 matched, 1 unmatched)",
+              dry.get("matched") == 4 and dry.get("unmatched") == 1,
+              f"matched={dry.get('matched')} unmatched={dry.get('unmatched')}")
+        check("meta-ads: dry-run masks the token in the logged request",
+              bool(dry.get("requests")) and meta_token not in json.dumps(dry.get("requests")),
+              str(dry.get("requests"))[:150])
+        check("meta-ads: dry-run writes no ad_cost_daily rows", meta_rows() == "0", meta_rows())
+
+        # -- seed tracker clicks for the matched campaigns --
+        def meta_seed(cid, clicks, visits=0):
+            total = int(clicks) + int(visits)
+            if total <= 0:
+                return
+            ch_query(
+                "INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, cost) "
+                f"SELECT now(), {cid}, number < {int(clicks)}, '', "
+                f"'meta-seed-{meta_pid}-{cid}-' || toString(number), 0 FROM numbers({total})")
+
+        meta_seed(meta_id_cid, 2, visits=1)   # spend 10 / 2 clicks = 5 each
+        meta_seed(meta_name_cid, 3)           # spend 6 / 3 = 2 each
+        meta_seed(meta_track_cid, 4)          # spend 8 / 4 = 2 each
+        # meta_zero_cid deliberately has no clicks -> stored but not allocated
+
+        # -- live sync: request shape, matching, storage + allocation --
+        r = meta_set(dry_run=False)
+        check("meta-ads: live config saved", r.status_code == 200, r.text[:120])
+        r = meta_sync()
+        live = r.json() if r.status_code == 200 else {}
+        check("meta-ads: live sync returns ok",
+              r.status_code == 200 and live.get("status") == "ok", r.text[:250])
+
+        insights = next((c for c in meta_captured if c["path_only"].endswith("/insights")), None)
+        check("meta-ads: insights path is /{api_version}/act_{account}/insights",
+              bool(insights) and insights["path_only"] == f"/v21.0/act_{meta_acct}/insights",
+              str(insights and insights["path_only"]))
+        ip = (insights or {}).get("params", {})
+        check("meta-ads: insights level=campaign + time_increment=1",
+              ip.get("level") == "campaign" and ip.get("time_increment") == "1", str(ip)[:200])
+        check("meta-ads: insights fields are the contract",
+              ip.get("fields") == "campaign_id,campaign_name,spend,impressions,clicks",
+              str(ip.get("fields")))
+        check("meta-ads: insights use an explicit time_range for the backfill",
+              "time_range" in ip and meta_day in ip.get("time_range", ""), str(ip.get("time_range")))
+        check("meta-ads: access token passed to Graph",
+              ip.get("access_token") == meta_token, str(ip.get("access_token"))[:40])
+        check("meta-ads: paging.next is followed verbatim",
+              any(c["path_only"].endswith(f"/page2-{meta_pid}") for c in meta_captured),
+              str([c["path_only"] for c in meta_captured])[:200])
+
+        strat = {(m["platform_campaign_id"]): m["strategy"] for m in (live.get("matches") or [])}
+        check("meta-ads: matched by ad_platform_campaign_id",
+              strat.get(f"mvid-{meta_pid}") == "ad_platform_campaign_id", str(strat))
+        check("meta-ads: fallback match by campaign name",
+              strat.get(f"mvn-{meta_pid}") == "name", str(strat))
+        check("meta-ads: fallback match by utm_campaign tracking id",
+              strat.get(f"mvtrk-{meta_pid}") == "tracking_id", str(strat))
+        check("meta-ads: unmatched campaign reported as unmatched",
+              live.get("matched") == 4 and live.get("unmatched") == 1
+              and any(u["platform_campaign_id"] == f"mvnone-{meta_pid}"
+                      for u in (live.get("unmatched_rows") or [])),
+              f"m={live.get('matched')} u={live.get('unmatched')}")
+
+        check("meta-ads: one audit row per campaign+day (5 rows incl. unmatched/zero-click)",
+              meta_rows() == "5", meta_rows())
+        matched_ids = pg_exec_out(
+            f"SELECT matched_campaign_id FROM ad_cost_daily "
+            f"WHERE ad_account_id='{meta_acct}' AND platform_campaign_id='mvnone-{meta_pid}'").strip()
+        check("meta-ads: unmatched row stores a NULL matched_campaign_id", matched_ids == "",
+              matched_ids)
+        check("meta-ads: zero-click matched day is stored but allocates nothing",
+              live.get("zero_click_days") == 1, str(live.get("zero_click_days")))
+
+        # allocation: per-click cost = spend / that day's clicks
+        a_cost = ch_query(
+            f"SELECT DISTINCT toString(cost) FROM clicks_data WHERE campaign_id={meta_id_cid} AND click=true")
+        a_total = ch_query(
+            f"SELECT toString(sum(cost)) FROM clicks_data WHERE campaign_id={meta_id_cid} AND click=true")
+        b_total = ch_query(
+            f"SELECT toString(sum(cost)) FROM clicks_data WHERE campaign_id={meta_name_cid} AND click=true")
+        c_total = ch_query(
+            f"SELECT toString(sum(cost)) FROM clicks_data WHERE campaign_id={meta_track_cid} AND click=true")
+        z_total = ch_query(
+            f"SELECT toString(ifNull(sum(cost), 0)) FROM clicks_data WHERE campaign_id={meta_zero_cid}")
+        a_visit = ch_query(
+            f"SELECT DISTINCT toString(cost) FROM clicks_data WHERE campaign_id={meta_id_cid} AND click=false")
+        check("meta-ads: per-click cost = spend / clicks (10/2 = 5)",
+              a_cost in ("5", "5.0"), a_cost)
+        check("meta-ads: campaign day total cost equals platform spend",
+              a_total in ("10", "10.0") and b_total in ("6", "6.0") and c_total in ("8", "8.0"),
+              f"a={a_total} b={b_total} c={c_total}")
+        check("meta-ads: visit rows are not allocated",
+              a_visit in ("0", "0.0"), a_visit)
+        check("meta-ads: zero-click campaign got no cost", z_total in ("0", "", "0.0"), z_total)
+
+        # -- idempotency: same payload twice -> still one row per campaign+day --
+        r = meta_sync()
+        check("meta-ads: re-sync stays ok", r.status_code == 200, r.text[:150])
+        check("meta-ads: re-sync does not duplicate ad_cost_daily rows", meta_rows() == "5",
+              meta_rows())
+        a_cost2 = ch_query(
+            f"SELECT DISTINCT toString(cost) FROM clicks_data WHERE campaign_id={meta_id_cid} AND click=true")
+        check("meta-ads: re-sync does not double the allocated cost", a_cost2 == a_cost,
+              f"{a_cost} -> {a_cost2}")
+
+        # -- re-run REPLACES rather than adds: clobber, then re-sync restores --
+        s.post(f"{api}/costs/update", json={
+            "campaign_id": meta_id_cid,
+            "period": {"from": meta_day, "to": meta_day}, "cost": 99})
+        r = meta_sync()
+        a_cost3 = ch_query(
+            f"SELECT DISTINCT toString(cost) FROM clicks_data WHERE campaign_id={meta_id_cid} AND click=true")
+        check("meta-ads: re-sync replaces a clobbered day (99 -> 5, never adds)",
+              r.status_code == 200 and a_cost3 in ("5", "5.0"), f"after={a_cost3}")
+
+        # -- dry-run after live still writes nothing --
+        meta_set(dry_run=True)
+        before = meta_rows()
+        r = meta_sync()
+        check("meta-ads: dry-run after live writes nothing",
+              r.status_code == 200 and (r.json() or {}).get("status") == "dry_run"
+              and meta_rows() == before, r.text[:150])
+        meta_set(dry_run=False)
+
+        # -- 500 / 429 are retried and leave the endpoint healthy --
+        meta_set(dry_run=False, ad_account_ids=[f"fail500-{meta_pid}"])
+        r = meta_sync()
+        j500 = r.json() if r.status_code == 200 else {}
+        check("meta-ads: Graph 500 returns a status (not an exception)",
+              r.status_code == 200 and j500.get("status") == "ok"
+              and j500.get("errors"), r.text[:200])
+        check("meta-ads: Graph 500 is retried (bounded)",
+              int(j500.get("attempts") or 0) >= 3, str(j500.get("attempts")))
+        meta_set(dry_run=False, ad_account_ids=[f"fail429-{meta_pid}"])
+        r = meta_sync()
+        j429 = r.json() if r.status_code == 200 else {}
+        check("meta-ads: Graph 429 is retried and the endpoint stays healthy",
+              r.status_code == 200 and j429.get("errors")
+              and int(j429.get("attempts") or 0) >= 3, r.text[:200])
+
+        # -- status endpoint shape (after restoring the good account) --
+        meta_set(dry_run=False)
+        meta_sync()
+        r = s.get(f"{api}/meta-ads/status")
+        st = r.json() if r.status_code == 200 else {}
+        check("meta-ads: status endpoint shape",
+              r.status_code == 200
+              and st.get("enabled") is True and st.get("dry_run") is False
+              and st.get("cadence") == "hourly" and st.get("api_version") == "v21.0"
+              and st.get("last_sync_at") and isinstance(st.get("last_result"), dict)
+              and st.get("matched") == 4 and st.get("unmatched") == 1
+              and "last_error" in st, str(st)[:250])
+
+        # -- token masked for a settings-reading non-admin, nulled on export --
+        r = s.get(f"{api}/settings/")
+        admin_token = ((r.json().get("settings") or {}).get("meta_ads") or {}).get("access_token")
+        check("meta-ads: admin sees the real token", admin_token == meta_token,
+              str(admin_token)[:40])
+        r = s.get(f"{api}/settings/export")
+        export_token = (((r.json().get("data") or {}).get("settings") or {})
+                        .get("meta_ads") or {}).get("access_token")
+        check("meta-ads: settings export nulls the token", export_token is None,
+              str(export_token)[:40])
+
+        meta_user = f"smoke-meta-user-{meta_pid}"
+        r = s.post(f"{api}/users/", json={
+            "username": meta_user, "password": "smokepass1",
+            "permissions": {"sections": {"settings": True}, "write": False}})
+        meta_uid = (r.json() or {}).get("id")
+        meta_user_sess = requests.Session()
+        meta_user_sess.verify = not INSECURE
+        meta_user_sess.post(f"{api}/login", json={"username": meta_user, "password": "smokepass1"})
+        r = meta_user_sess.get(f"{api}/settings/")
+        masked = ((r.json().get("settings") or {}).get("meta_ads") or {}).get("access_token")
+        check("meta-ads: non-admin GET masks the token",
+              meta_token not in r.text and bool(masked) and "\u2022" in masked,
+              str(masked)[:40])
+
+        # -- served pages carry the new UI markers --
+        rp = s.get(f"{BASE}/backend/settings")
+        check("meta-ads: Settings page serves the cost-sync card",
+              rp.status_code == 200 and "Meta Ads cost sync" in rp.text
+              and "syncMetaAdsNow" in rp.text, f"{rp.status_code}")
+        rc = s.get(f"{BASE}/backend/campaigns")
+        check("meta-ads: campaign editor serves the ad-platform campaign id field",
+              rc.status_code == 200 and "Ad-platform campaign ID" in rc.text
+              and "ad_platform_campaign_id" in rc.text, f"{rc.status_code}")
+    finally:
+        # -- restore settings + tear down everything this block created --
+        if meta_saved is None:
+            s.post(f"{api}/settings/", json={"settings": {"meta_ads": None}})
+        else:
+            s.post(f"{api}/settings/", json={"settings": {"meta_ads": meta_saved}})
+        for _mc in (meta_id_cid, meta_name_cid, meta_track_cid, meta_zero_cid):
+            if _mc:
+                s.delete(f"{api}/campaigns/{_mc}")
+        pg_exec(f"DELETE FROM ad_cost_daily WHERE ad_account_id LIKE '%-{meta_pid}'")
+        if meta_uid:
+            s.delete(f"{api}/users/{meta_uid}")
+        try:
+            meta_srv.shutdown()
+            meta_srv.server_close()
+        except Exception:
+            pass
 
     print("== Cleanup ==")
     if conv_id:

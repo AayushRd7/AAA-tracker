@@ -2699,6 +2699,32 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
     return result
 
 
+# The path-style form was retired in favour of the query form, but networks that were
+# already configured with it must keep working: redirect the old shape to the canonical
+# one, preserving any extra query parameters. 301 for GET/HEAD, 308 for POST (which keeps
+# the method and body rather than degrading to a GET).
+def _legacy_postback_target(click_id: str, status: str, payout: str, request: Request) -> str:
+    from urllib.parse import quote
+    target = (f"/pb?clickid={quote(str(click_id), safe='')}"
+              f"&status={quote(str(status), safe='')}"
+              f"&payout={quote(str(payout), safe='')}")
+    extra = request.url.query
+    return f"{target}&{extra}" if extra else target
+
+
+@app.get("/pb/{click_id}/{status}/{payout}")
+@app.head("/pb/{click_id}/{status}/{payout}")
+async def legacy_postback_redirect(click_id: str, status: str, payout: str, request: Request):
+    return RedirectResponse(_legacy_postback_target(click_id, status, payout, request),
+                            status_code=301)
+
+
+@app.post("/pb/{click_id}/{status}/{payout}")
+async def legacy_postback_redirect_post(click_id: str, status: str, payout: str, request: Request):
+    return RedirectResponse(_legacy_postback_target(click_id, status, payout, request),
+                            status_code=308)
+
+
 @app.get("/pb")
 @app.post("/pb")
 @app.head("/pb")

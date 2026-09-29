@@ -26,6 +26,8 @@ class CampaignIn(BaseModel):
     domain_id: Optional[int] = None
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
+    # Meta Ads cost auto-sync — optional ad-platform campaign id (match key).
+    ad_platform_campaign_id: Optional[str] = None
     config: Optional[dict] = None
 
 

@@ -60,12 +60,14 @@ def system_status(request: Request, db: Session = Depends(get_db)):
     except Exception:
         conversions_24h = 0
 
-    from app_pages import monitor, rules, optimizer
+    from app_pages import monitor, rules, optimizer, meta_ads
     loops = {
         "monitor": monitor._loop_last_run.isoformat() if monitor._loop_last_run else None,
         "rules": rules._loop_last_run.isoformat() if rules._loop_last_run else None,
         "optimizer": (optimizer._loop_last_run.isoformat()
                       if optimizer._loop_last_run else None),
+        "meta_ads": (meta_ads._loop_last_run.isoformat()
+                     if meta_ads._loop_last_run else None),
     }
 
     status = {

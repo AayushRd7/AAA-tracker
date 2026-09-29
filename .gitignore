@@ -7,3 +7,4 @@ __pycache__
 ssl/*.key
 ssl/*.crt
 /COMPETITOR-GAP.md
+/INTEGRATIONS-SETUP.md

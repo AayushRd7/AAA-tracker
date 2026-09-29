@@ -1114,6 +1114,137 @@
                 </v-col>
             </v-row>
 
+            <v-row>
+                <v-col cols="12">
+                    <v-card class="pa-4" id="meta-ads-cost-sync">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-chart-line</v-icon>
+                            Meta Ads cost sync
+                            <v-spacer></v-spacer>
+                            <v-chip v-if="metaAdsStatus" x-small :color="metaAdsStatus.enabled ? 'green' : 'grey'" dark>
+                                {{ metaAdsStatus.enabled ? 'enabled' : 'disabled' }}
+                            </v-chip>
+                        </v-card-title>
+                        <v-card-text>
+                            <div class="caption grey--text mb-2">
+                                Pulls daily spend/impressions/clicks from Meta for the configured ad
+                                accounts and writes each matched campaign-day's spend into the tracker
+                                cost (per-click). Runs off the redirect/postback path on a schedule, or
+                                on demand with Sync now.
+                            </div>
+                            <v-switch
+                                    v-model="settings.meta_ads.enabled"
+                                    label="Enable Meta Ads cost sync"
+                                    inset dense hide-details
+                            ></v-switch>
+                            <v-switch
+                                    v-model="settings.meta_ads.dry_run"
+                                    label="Dry-run (build + log the request and matching, write nothing)"
+                                    inset dense hide-details
+                                    :disabled="!settings.meta_ads.enabled"
+                            ></v-switch>
+
+                            <v-row dense class="mt-3">
+                                <v-col cols="12" md="6">
+                                    <v-combobox
+                                            label="Ad account IDs"
+                                            v-model="settings.meta_ads.ad_account_ids"
+                                            multiple chips small-chips deletable-chips
+                                            :disabled="!settings.meta_ads.enabled"
+                                            outlined dense
+                                            hint="Meta ad account ids (the numeric part of act_…)"
+                                            persistent-hint
+                                    ></v-combobox>
+                                </v-col>
+                                <v-col cols="12" md="6">
+                                    <v-text-field
+                                            label="Access token"
+                                            v-model="settings.meta_ads.access_token"
+                                            :disabled="!settings.meta_ads.enabled"
+                                            :append-icon="showMetaAdsToken ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                                            :type="showMetaAdsToken ? 'text' : 'password'"
+                                            @click:append="showMetaAdsToken = !showMetaAdsToken"
+                                            outlined dense
+                                            hint="Stored as a secret (masked for non-admins, nulled on export)."
+                                            persistent-hint
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="12" md="4">
+                                    <v-text-field
+                                            label="API version"
+                                            v-model="settings.meta_ads.api_version"
+                                            :disabled="!settings.meta_ads.enabled"
+                                            outlined dense
+                                            hint="e.g. v21.0"
+                                            persistent-hint
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="12" md="4">
+                                    <v-select
+                                            label="Cadence"
+                                            :items="metaAdsCadences"
+                                            v-model="settings.meta_ads.cadence"
+                                            :disabled="!settings.meta_ads.enabled"
+                                            outlined dense
+                                    ></v-select>
+                                </v-col>
+                                <v-col cols="12" md="4">
+                                    <v-text-field
+                                            label="Backfill days"
+                                            v-model="settings.meta_ads.backfill_days"
+                                            type="number"
+                                            :disabled="!settings.meta_ads.enabled"
+                                            outlined dense
+                                            hint="Window re-synced each run (0 = yesterday preset)"
+                                            persistent-hint
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="12" md="6">
+                                    <v-select
+                                            label="Campaign matching"
+                                            :items="metaAdsMatchPreferences"
+                                            v-model="settings.meta_ads.match_preference"
+                                            :disabled="!settings.meta_ads.enabled"
+                                            outlined dense
+                                            hint="How platform campaigns are matched to tracker campaigns"
+                                            persistent-hint
+                                    ></v-select>
+                                </v-col>
+                                <v-col cols="12" md="6">
+                                    <v-text-field
+                                            label="Graph base URL (test only)"
+                                            v-model="settings.meta_ads.graph_base_url"
+                                            :disabled="!settings.meta_ads.enabled"
+                                            outlined dense
+                                            hint="Leave empty for https://graph.facebook.com"
+                                            persistent-hint
+                                    ></v-text-field>
+                                </v-col>
+                            </v-row>
+
+                            <div class="d-flex align-center mt-3">
+                                <v-btn small outlined color="primary" :loading="metaAdsSyncing"
+                                       @click="syncMetaAdsNow">
+                                    <v-icon small class="mr-1">mdi-sync</v-icon>Sync now
+                                </v-btn>
+                                <div class="caption grey--text ml-3" v-if="metaAdsStatus">
+                                    Last sync: {{ metaAdsStatus.last_sync_at || 'never' }}
+                                    <span v-if="metaAdsStatus.last_result">
+                                        — {{ metaAdsStatus.last_result.status }}
+                                        (matched {{ metaAdsStatus.last_result.matched || 0 }},
+                                        unmatched {{ metaAdsStatus.last_result.unmatched || 0 }})
+                                    </span>
+                                    <span v-if="metaAdsStatus.last_error" class="red--text">
+                                        — error: {{ metaAdsStatus.last_error }}
+                                    </span>
+                                </div>
+                            </div>
+                            <pre v-if="metaAdsResult" class="caption mt-2">{{ metaAdsResult }}</pre>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+            </v-row>
+
             <v-dialog v-model="capiDialog" max-width="780" scrollable>
                 <v-card>
                     <v-card-title>
@@ -1416,6 +1547,19 @@
                         include_customer_match: true,
                         pixel_overrides: {},
                     },
+                    // Meta Ads cost auto-sync (Meta only): pulls daily spend and
+                    // allocates it into clicks_data.cost for matched campaigns.
+                    meta_ads: {
+                        enabled: false,
+                        ad_account_ids: [],
+                        access_token: '',
+                        api_version: 'v21.0',
+                        dry_run: true,
+                        cadence: 'hourly',
+                        backfill_days: 7,
+                        graph_base_url: '',
+                        match_preference: 'auto',
+                    },
                     // Wave 19A: table display preferences. `default_columns`
                     // and `column_templates` are written by the Logs / Reports
                     // column menus and preserved here so the settings save
@@ -1445,6 +1589,21 @@
                     'attempts', 'http_status', 'updated_rows', 'flow_index', 'is_bot'],
                 metaTesting: false,
                 metaTestResult: '',
+                // Meta Ads cost sync card state
+                metaAdsStatus: null,
+                metaAdsSyncing: false,
+                metaAdsResult: '',
+                showMetaAdsToken: false,
+                metaAdsCadences: [
+                    {text: 'Hourly', value: 'hourly'},
+                    {text: 'Daily', value: 'daily'},
+                ],
+                metaAdsMatchPreferences: [
+                    {text: 'Auto (id, then name, then tracking id)', value: 'auto'},
+                    {text: 'Ad-platform campaign id only', value: 'ad_platform_campaign_id'},
+                    {text: 'Campaign name only', value: 'name'},
+                    {text: 'Tracking id (utm_campaign / sub_id)', value: 'tracking_id'},
+                ],
                 capiPixels: [],
                 capiDialog: false,
                 capiSaving: false,
@@ -1723,6 +1882,17 @@
                         if (!Array.isArray(this.settings.meta_capi.send_statuses)) {
                             this.settings.meta_capi.send_statuses = mcDefaults.send_statuses.slice();
                         }
+                        const maDefaults = {
+                            enabled: false, ad_account_ids: [], access_token: '',
+                            api_version: 'v21.0', dry_run: true, cadence: 'hourly',
+                            backfill_days: 7, graph_base_url: '', match_preference: 'auto',
+                        };
+                        this.settings.meta_ads = Object.assign(
+                            {}, maDefaults, this.settings.meta_ads || {});
+                        if (!Array.isArray(this.settings.meta_ads.ad_account_ids)) {
+                            this.settings.meta_ads.ad_account_ids = [];
+                        }
+                        this.loadMetaAdsStatus();
                         if (!Array.isArray(this.settings.custom_statuses)) this.settings.custom_statuses = [];
                         this.settings.workspace = Object.assign(
                             {}, {decimals: 2, divider: 'comma', row_coloring: [],
@@ -1976,6 +2146,42 @@
                         text: "Test event failed: " + sanitizeToastMessage(e.message)});
                 } finally {
                     this.metaTesting = false;
+                }
+            },
+            loadMetaAdsStatus() {
+                fetch("/backend/api/meta-ads/status", {credentials: "include"})
+                    .then(r => r.json())
+                    .then(data => { this.metaAdsStatus = data; })
+                    .catch(() => { /* status is advisory — the card still saves */ });
+            },
+            async syncMetaAdsNow() {
+                this.metaAdsSyncing = true;
+                this.metaAdsResult = '';
+                try {
+                    await this.saveSettings(true);
+                    const res = await fetch("/backend/api/meta-ads/sync", {
+                        method: "POST", credentials: "include"
+                    });
+                    const data = await res.json();
+                    this.metaAdsResult = JSON.stringify(data, null, 2);
+                    this.loadMetaAdsStatus();
+                    const status = data.status || "";
+                    if (status === "ok") {
+                        this.$root.$emit("show-message", {type: "success",
+                            text: `Meta Ads sync done — matched ${data.matched || 0}, ` +
+                                  `unmatched ${data.unmatched || 0}`});
+                    } else if (status === "dry_run") {
+                        this.$root.$emit("show-message", {type: "warning",
+                            text: "Dry-run — request built, nothing written (see result)"});
+                    } else {
+                        this.$root.$emit("show-message", {type: "warning",
+                            text: sanitizeToastMessage(data.reason || status || "Sync skipped")});
+                    }
+                } catch (e) {
+                    this.$root.$emit("show-message", {type: "error",
+                        text: "Meta Ads sync failed: " + sanitizeToastMessage(e.message)});
+                } finally {
+                    this.metaAdsSyncing = false;
                 }
             },
             generateToken() {

@@ -1,0 +1,641 @@
+"""Meta Ads cost auto-sync.
+
+Pulls daily spend/impressions/clicks from the Meta Marketing API (Graph
+`insights`, level=campaign, time_increment=1) for the configured ad accounts,
+stores the raw audit trail in Postgres `ad_cost_daily`, and allocates each
+matched campaign-day's spend into the existing per-click ``cost`` on
+ClickHouse ``clicks_data``.
+
+COST PRECEDENCE (important — read before touching the allocation code)
+---------------------------------------------------------------------
+Reports and ROAS read ``cost`` from ``clicks_data`` (see
+``clickHouse.get_report_breakdown``: ``sumOrNull(toFloat64(cost))``). Keeping a
+single cost field avoids a metric-layer rewrite and any double counting:
+the platform's spend for a matched campaign+day is *authoritative for that day*
+and is written into ``clicks_data.cost`` for that campaign's clicks on that
+day. Per-click cost = platform spend / that day's tracker clicks; re-running a
+day REPLACES its values (an absolute UPDATE, never an add) so re-syncs are
+idempotent. The retroactive cost tool (``app_pages/costs.py``) stays for manual
+corrections and for campaigns with no platform mapping — the last writer wins
+per campaign+day. Days with zero tracker clicks store the daily audit row but
+allocate nothing.
+
+Matching order (see ``match_insight``): the explicit
+``campaigns.ad_platform_campaign_id`` column first, then the tracker campaign
+``name`` (exact, then case-insensitive/trimmed), then the campaign's configured
+tracking identifiers (``utm_campaign`` / ``sub_id_*``). The settings
+``match_preference`` narrows which of those strategies may run.
+
+Everything here runs off the request hot path: the background loop and the
+manual ``POST /api/meta-ads/sync`` both call ``run_sync`` in a worker thread.
+HTTP calls have a timeout and bounded retries; the ClickHouse mutation uses the
+same ``ALTER TABLE ... UPDATE ... SETTINGS mutations_sync = 1`` mechanism as the
+retroactive cost tool. No error is ever raised into a request path or a loop tick.
+"""
+import asyncio
+import json
+import threading
+from datetime import datetime, date, timedelta
+
+import httpx
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from db import get_db, SessionLocal
+from models.settings import SettingsORM
+from clickHouse import get_clickhouse_client
+
+router = APIRouter()
+
+PLATFORM = "meta"
+DEFAULT_GRAPH_BASE = "https://graph.facebook.com"
+HOURLY_SECONDS = 60 * 60
+DAILY_SECONDS = 24 * 60 * 60
+HTTP_TIMEOUT_SECONDS = 15
+MAX_HTTP_ATTEMPTS = 3          # 1 try + 2 retries on network / 5xx / 429
+MAX_PAGING_PAGES = 100         # safety cap when following paging.next verbatim
+MATCH_PREFERENCES = ("auto", "ad_platform_campaign_id", "name", "tracking_id")
+
+# Settings block defaults — the shape saved under the 'meta_ads' settings key.
+DEFAULTS = {
+    "enabled": False,
+    "ad_account_ids": [],
+    "access_token": "",
+    "api_version": "v21.0",
+    "dry_run": True,           # default ON — a fresh install never writes costs
+    "cadence": "hourly",       # hourly | daily
+    "backfill_days": 7,
+    "graph_base_url": "",      # empty -> the real Graph host
+    "match_preference": "auto",
+}
+
+# Heartbeats / last-run state surfaced on /api/meta-ads/status and the system
+# status page. In-memory only — a restart clears them.
+_loop_last_run = None
+_last_sync_at = None
+_last_result = None
+_last_error = None
+_running = False
+_state_lock = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Settings helpers
+# ---------------------------------------------------------------------------
+
+def load_settings() -> dict:
+    """Current meta_ads block merged over DEFAULTS (never raises)."""
+    cfg = dict(DEFAULTS)
+    db = SessionLocal()
+    try:
+        row = db.query(SettingsORM).filter_by(name="settings").first()
+        if row and row.value:
+            block = (json.loads(row.value) or {}).get("meta_ads")
+            if isinstance(block, dict):
+                for k, v in block.items():
+                    if k in cfg and v is None:
+                        continue
+                    cfg[k] = v
+    except Exception:
+        pass
+    finally:
+        db.close()
+    return _normalise(cfg)
+
+
+def _normalise(cfg: dict) -> dict:
+    """Coerce a stored block into usable types without dropping unknown keys."""
+    out = dict(cfg)
+    out["enabled"] = bool(out.get("enabled", False))
+    out["dry_run"] = bool(out.get("dry_run", True))
+    ids = out.get("ad_account_ids")
+    if isinstance(ids, str):
+        ids = [ids]
+    out["ad_account_ids"] = [str(i).strip() for i in (ids or []) if str(i).strip()]
+    out["access_token"] = str(out.get("access_token") or "").strip()
+    out["api_version"] = str(out.get("api_version") or "v21.0").strip()
+    out["cadence"] = "daily" if str(out.get("cadence")).lower() == "daily" else "hourly"
+    try:
+        out["backfill_days"] = max(0, int(out.get("backfill_days", 7)))
+    except (TypeError, ValueError):
+        out["backfill_days"] = 7
+    out["graph_base_url"] = str(out.get("graph_base_url") or "").strip()
+    if out.get("match_preference") not in MATCH_PREFERENCES:
+        out["match_preference"] = "auto"
+    return out
+
+
+def _credentials_ready(cfg: dict) -> bool:
+    return bool(cfg.get("access_token")) and bool(cfg.get("ad_account_ids"))
+
+
+# ---------------------------------------------------------------------------
+# Graph client
+# ---------------------------------------------------------------------------
+
+def _insights_url(cfg: dict, account_id: str) -> str:
+    base = (cfg.get("graph_base_url") or DEFAULT_GRAPH_BASE).rstrip("/")
+    return f"{base}/{cfg['api_version']}/act_{account_id}/insights"
+
+
+def build_insights_request(cfg: dict, account_id: str) -> dict:
+    """The exact query the sync will issue for one ad account.
+
+    Uses an explicit JSON ``time_range`` (backfill window) whenever
+    ``backfill_days`` > 0, otherwise Meta's ``date_preset=yesterday``. The
+    fields list is the contract: campaign_id,campaign_name,spend,impressions,clicks.
+    """
+    params = {
+        "level": "campaign",
+        "time_increment": 1,
+        "fields": "campaign_id,campaign_name,spend,impressions,clicks",
+        "access_token": cfg.get("access_token") or "",
+    }
+    backfill = int(cfg.get("backfill_days") or 0)
+    if backfill > 0:
+        until = date.today()
+        since = until - timedelta(days=backfill)
+        params["time_range"] = json.dumps({"since": since.isoformat(),
+                                           "until": until.isoformat()})
+    else:
+        params["date_preset"] = "yesterday"
+    return {"url": _insights_url(cfg, account_id), "params": params}
+
+
+def _masked_request(req: dict) -> dict:
+    """Same-shaped request with the token redacted — safe to log / return."""
+    out = {"url": req["url"], "params": dict(req["params"])}
+    if "access_token" in out["params"]:
+        out["params"]["access_token"] = "\u2022" * 8
+    return out
+
+
+def _get_with_retries(client: httpx.Client, url: str, params: dict):
+    """GET with bounded retries + backoff on network errors / 5xx / 429.
+
+    Returns (response_or_None, attempts, error_str). Never raises.
+    """
+    delay = 0.25
+    last_err = ""
+    for attempt in range(1, MAX_HTTP_ATTEMPTS + 1):
+        try:
+            resp = client.get(url, params=params)
+            if resp.status_code >= 500 or resp.status_code == 429:
+                last_err = f"HTTP {resp.status_code}"
+                if attempt < MAX_HTTP_ATTEMPTS:
+                    import time as _t
+                    _t.sleep(delay)
+                    delay *= 2
+                    continue
+                return None, attempt, last_err
+            return resp, attempt, ""
+        except Exception as e:  # network / timeout
+            last_err = repr(e)[:200]
+            if attempt < MAX_HTTP_ATTEMPTS:
+                import time as _t
+                _t.sleep(delay)
+                delay *= 2
+                continue
+            return None, attempt, last_err
+    return None, MAX_HTTP_ATTEMPTS, last_err
+
+
+def fetch_insights(cfg: dict, account_id: str):
+    """Fetch every insight row for one account, following paging.next verbatim.
+
+    Returns (rows, attempts, error). ``rows`` is [] on error; the caller decides
+    whether that is fatal (it is recorded, never raised).
+    """
+    req = build_insights_request(cfg, account_id)
+    rows = []
+    attempts = 0
+    timeout = httpx.Timeout(HTTP_TIMEOUT_SECONDS)
+    with httpx.Client(timeout=timeout) as client:
+        resp, attempts, err = _get_with_retries(client, req["url"], req["params"])
+        if resp is None:
+            return [], attempts, err
+        if resp.status_code != 200:
+            return [], attempts, f"HTTP {resp.status_code}: {resp.text[:200]}"
+        pages = 0
+        nxt = None
+        data = _safe_json(resp)
+        while pages < MAX_PAGING_PAGES:
+            pages += 1
+            for row in (data.get("data") or []):
+                if isinstance(row, dict):
+                    rows.append(row)
+            nxt = ((data.get("paging") or {}).get("next") or "").strip()
+            if not nxt:
+                break
+            # paging.next is an absolute URL carrying its own query string —
+            # follow it verbatim (no extra params, no token injection).
+            nresp, nattempts, nerr = _get_with_retries(client, nxt, None)
+            attempts += nattempts
+            if nresp is None or nresp.status_code != 200:
+                return rows, attempts, nerr or f"HTTP {nresp.status_code if nresp else '?'}"
+            data = _safe_json(nresp)
+        return rows, attempts, ""
+
+
+def _safe_json(resp) -> dict:
+    try:
+        data = resp.json()
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Campaign matching
+# ---------------------------------------------------------------------------
+
+def _tracking_identifiers(config: dict) -> set:
+    """The campaign's configured utm_campaign / sub_id-style identifiers.
+
+    Sources: explicit top-level config keys (``utm_campaign``, ``sub_id_1`` …)
+    plus ``config.paramsIdMapping`` entries whose ``parameter`` is a tracking id
+    and whose ``token``/``value`` is a literal (macros like {{…}}/{…} are
+    template placeholders, not matchable values, so they are skipped).
+    """
+    out = set()
+    if isinstance(config, dict):
+        for key in list(config.keys()):
+            if key == "utm_campaign" or key.startswith("sub_id") or key == "subid":
+                val = config.get(key)
+                if isinstance(val, str) and val.strip() and not _is_macro(val):
+                    out.add(val.strip())
+        for item in (config.get("paramsIdMapping") or []):
+            if not isinstance(item, dict):
+                continue
+            param = str(item.get("parameter") or "").strip().lower()
+            if not (param == "utm_campaign" or param.startswith("sub_id") or param == "subid"):
+                continue
+            for key in ("token", "value"):
+                val = item.get(key)
+                if isinstance(val, str) and val.strip() and not _is_macro(val):
+                    out.add(val.strip())
+    return out
+
+
+def _is_macro(value: str) -> bool:
+    v = value.strip()
+    return ("{" in v or "}" in v)
+
+
+def _build_index(db: Session) -> dict:
+    """Index every non-archived campaign for the three match strategies."""
+    rows = db.execute(text(
+        "SELECT id, name, ad_platform_campaign_id, config FROM campaigns "
+        "WHERE archived = false")).fetchall()
+    by_id, by_name, by_name_ci, by_tracking = {}, {}, {}, {}
+    for cid, name, platform_id, config in rows:
+        if platform_id:
+            by_id.setdefault(str(platform_id).strip(), cid)
+        if name:
+            by_name.setdefault(name, cid)
+            by_name_ci.setdefault(name.strip().lower(), cid)
+        for ident in _tracking_identifiers(config):
+            by_tracking.setdefault(ident, cid)
+            by_tracking.setdefault(ident.lower(), cid)
+    return {"id": by_id, "name": by_name, "name_ci": by_name_ci,
+            "tracking": by_tracking}
+
+
+def match_insight(index: dict, platform_campaign_id: str, campaign_name: str,
+                  preference: str = "auto"):
+    """Resolve one Graph insight row to a tracker campaign id.
+
+    Returns ``(campaign_id, strategy)``; strategy is one of
+    ``ad_platform_campaign_id`` / ``name`` / ``name_ci`` / ``tracking_id`` /
+    ``None`` (unmatched). ``preference`` gates which strategies may run:
+    ``auto`` runs all in order; the other values restrict to exactly one.
+    """
+    pref = preference if preference in MATCH_PREFERENCES else "auto"
+    pid = (str(platform_campaign_id) or "").strip()
+    name = (str(campaign_name) or "").strip()
+
+    if pref in ("auto", "ad_platform_campaign_id") and pid:
+        cid = index["id"].get(pid)
+        if cid is not None:
+            return cid, "ad_platform_campaign_id"
+    if pref in ("auto", "name") and name:
+        cid = index["name"].get(name)
+        if cid is not None:
+            return cid, "name"
+        cid = index["name_ci"].get(name.lower())
+        if cid is not None:
+            return cid, "name_ci"
+    if pref in ("auto", "tracking_id"):
+        candidates = []
+        if pid:
+            candidates.append(pid)
+        if name:
+            candidates.append(name)
+            candidates.append(name.lower())
+        for cand in candidates:
+            cid = index["tracking"].get(cand)
+            if cid is not None:
+                return cid, "tracking_id"
+    return None, None
+
+
+# ---------------------------------------------------------------------------
+# Persistence + allocation
+# ---------------------------------------------------------------------------
+
+def _upsert_daily_row(db: Session, account_id: str, row: dict, matched_campaign_id):
+    db.execute(text("""
+        INSERT INTO ad_cost_daily
+            (platform, ad_account_id, platform_campaign_id, campaign_name, date,
+             spend, impressions, clicks, matched_campaign_id, synced_at)
+        VALUES (:platform, :acct, :pcid, :cname, :day,
+                :spend, :impressions, :clicks, :matched, now())
+        ON CONFLICT (platform, ad_account_id, platform_campaign_id, date)
+        DO UPDATE SET campaign_name = EXCLUDED.campaign_name,
+                      spend = EXCLUDED.spend,
+                      impressions = EXCLUDED.impressions,
+                      clicks = EXCLUDED.clicks,
+                      matched_campaign_id = EXCLUDED.matched_campaign_id,
+                      synced_at = now()
+    """), {"platform": PLATFORM, "acct": account_id, "pcid": row["platform_campaign_id"],
+           "cname": row["campaign_name"], "day": row["date"], "spend": row["spend"],
+           "impressions": row["impressions"], "clicks": row["clicks"],
+           "matched": matched_campaign_id})
+
+
+def _click_counts(ch, campaign_dates: dict) -> dict:
+    """{(campaign_id, day_iso): click_count} for the matched campaign+days.
+
+    ``clicks`` throughout this module means the tracker's click rows
+    (``click = true``) — the same rows the allocation UPDATE targets.
+    """
+    if not campaign_dates:
+        return {}
+    cids = tuple(campaign_dates.keys())
+    days = sorted({d for dates in campaign_dates.values() for d in dates})
+    out = {}
+    try:
+        rows = ch.query(
+            "SELECT campaign_id, toString(toDate(received_at)) AS day, "
+            "countIf(click = true) AS clicks FROM clicks_data "
+            "WHERE campaign_id IN %(cids)s AND toString(toDate(received_at)) IN %(days)s "
+            "GROUP BY campaign_id, day",
+            parameters={"cids": cids, "days": tuple(days)}).result_rows
+        for cid, day, clicks in rows:
+            out[(int(cid), str(day))] = int(clicks or 0)
+    except Exception as e:
+        print("meta-ads: click-count query failed:", repr(e))
+    return out
+
+
+def _allocate(ch, campaign_id: int, day: str, spend: float, clicks: int) -> int:
+    """Write per-click cost for one campaign+day. Returns rows touched.
+
+    Absolute UPDATE (replace, never add) with mutations_sync=1 so a re-run
+    overwrites the day rather than stacking. ``clicks`` is that day's tracker
+    click-row count, so total allocated cost == the platform's spend.
+    """
+    if clicks <= 0:
+        return 0
+    per_click = float(spend) / clicks
+    ch.command(
+        "ALTER TABLE clicks_data UPDATE cost = %(cost)s "
+        "WHERE campaign_id = %(cid)s AND toDate(received_at) = toDate(%(day)s) "
+        "AND click = true",
+        parameters={"cost": per_click, "cid": int(campaign_id), "day": str(day)},
+        settings={"mutations_sync": 1})
+    return clicks
+
+
+# ---------------------------------------------------------------------------
+# The sync itself
+# ---------------------------------------------------------------------------
+
+def run_sync(trigger: str = "manual", dry_run=None) -> dict:
+    """One full sync pass. Safe to call from the loop or the API — never raises.
+
+    With ``dry_run`` true (the default unless explicitly overridden) it still
+    issues the read-only Graph request and computes the matching, logs the
+    request it would send and what it would allocate, and writes NOTHING: no
+    Postgres rows and no ClickHouse mutation.
+    """
+    global _last_sync_at, _last_result, _last_error, _running
+    if not _state_lock.acquire(blocking=False):
+        return {"status": "skipped", "reason": "already_running"}
+    try:
+        _running = True
+        cfg = load_settings()
+        if not cfg["enabled"]:
+            res = {"status": "skipped", "reason": "disabled"}
+            _last_result = res
+            return res
+        if not _credentials_ready(cfg):
+            res = {"status": "skipped", "reason": "missing_credentials"}
+            _last_result = res
+            return res
+
+        is_dry = cfg["dry_run"] if dry_run is None else bool(dry_run)
+        db = SessionLocal()
+        ch = None
+        try:
+            index = _build_index(db)
+            summary = {
+                "status": "dry_run" if is_dry else "ok",
+                "dry_run": is_dry,
+                "trigger": trigger,
+                "accounts": 0, "rows": 0, "matched": 0, "unmatched": 0,
+                "allocated_campaigns": 0, "zero_click_days": 0,
+                "updated_rows": 0, "errors": [],
+                "requests": [], "matches": [], "unmatched_rows": [],
+            }
+            alloc_targets = []  # (campaign_id, day, spend)
+            for account_id in cfg["ad_account_ids"]:
+                summary["accounts"] += 1
+                req = build_insights_request(cfg, account_id)
+                # Always record the request (token masked) so dry-run is auditable.
+                summary["requests"].append(_masked_request(req))
+                print(f"meta-ads[{trigger}]: GET {req['url']} "
+                      f"params={_masked_request(req)['params']}")
+                rows, attempts, err = fetch_insights(cfg, account_id)
+                summary.setdefault("attempts", 0)
+                summary["attempts"] += attempts
+                if err:
+                    summary["errors"].append({"account_id": account_id, "error": err})
+                    print(f"meta-ads[{trigger}]: account {account_id} error: {err}")
+                    continue
+                for raw in rows:
+                    parsed = _parse_insight_row(raw, account_id)
+                    if parsed is None:
+                        continue
+                    summary["rows"] += 1
+                    cid, strategy = match_insight(
+                        index, parsed["platform_campaign_id"],
+                        parsed["campaign_name"], cfg.get("match_preference", "auto"))
+                    decision = {"platform_campaign_id": parsed["platform_campaign_id"],
+                                "campaign_name": parsed["campaign_name"],
+                                "date": parsed["date"], "spend": parsed["spend"],
+                                "matched_campaign_id": cid, "strategy": strategy,
+                                "ad_account_id": account_id}
+                    if cid is None:
+                        summary["unmatched"] += 1
+                        summary["unmatched_rows"].append(decision)
+                    else:
+                        summary["matched"] += 1
+                        if len(summary["matches"]) < 50:
+                            summary["matches"].append(decision)
+                        alloc_targets.append((cid, parsed["date"], parsed["spend"]))
+
+                    if is_dry:
+                        continue  # writes nothing at all
+                    parsed["matched_campaign_id"] = cid
+                    _upsert_daily_row(db, account_id, parsed, cid)
+            if is_dry:
+                # Report the allocation the run WOULD have done, without touching CH.
+                _describe_allocation(alloc_targets, summary)
+                _last_sync_at = datetime.utcnow()
+                _last_result = summary
+                _last_error = None
+                return summary
+
+            db.commit()
+            # ClickHouse allocation (off the request path, mutations_sync=1).
+            ch = get_clickhouse_client()
+            try:
+                _describe_allocation(alloc_targets, summary, execute=True, ch=ch)
+            finally:
+                ch.close()
+            _last_sync_at = datetime.utcnow()
+            _last_result = summary
+            _last_error = None
+            return summary
+        except Exception as e:
+            db.rollback()
+            _last_error = repr(e)[:300]
+            print("meta-ads: sync error:", repr(e))
+            res = {"status": "error", "dry_run": is_dry, "trigger": trigger,
+                   "error": repr(e)[:300]}
+            _last_result = res
+            return res
+        finally:
+            db.close()
+    finally:
+        _running = False
+        _state_lock.release()
+
+
+def _parse_insight_row(raw: dict, account_id: str):
+    """Normalise one Graph insight row; returns None when it carries no date."""
+    day = str(raw.get("date_start") or "").strip()
+    if not day:
+        return None
+    try:
+        spend = float(raw.get("spend") or 0)
+    except (TypeError, ValueError):
+        spend = 0.0
+    try:
+        impressions = int(float(raw.get("impressions") or 0))
+    except (TypeError, ValueError):
+        impressions = 0
+    try:
+        clicks = int(float(raw.get("clicks") or 0))
+    except (TypeError, ValueError):
+        clicks = 0
+    return {
+        "platform_campaign_id": str(raw.get("campaign_id") or "").strip(),
+        "campaign_name": str(raw.get("campaign_name") or "").strip(),
+        "date": day, "spend": spend, "impressions": impressions, "clicks": clicks,
+        "ad_account_id": account_id,
+    }
+
+
+def _describe_allocation(targets, summary: dict, execute: bool = False, ch=None) -> None:
+    """Either report or perform (execute=True) the per campaign+day allocation."""
+    grouped = {}
+    for cid, day, spend in targets:
+        grouped.setdefault((cid, day), spend)
+    if execute and ch is not None:
+        counts = _click_counts(ch, {cid: {day} for (cid, day) in grouped})
+        for (cid, day), spend in grouped.items():
+            clicks = counts.get((int(cid), str(day)), 0)
+            if clicks <= 0:
+                summary["zero_click_days"] += 1
+                continue
+            rows = _allocate(ch, cid, day, spend, clicks)
+            summary["allocated_campaigns"] += 1
+            summary["updated_rows"] += rows
+    else:
+        # Dry-run: describe without any ClickHouse read/mutation.
+        summary["would_allocate"] = [
+            {"campaign_id": cid, "date": day, "spend": round(spend, 4)}
+            for (cid, day), spend in list(grouped.items())[:50]
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Background loop
+# ---------------------------------------------------------------------------
+
+async def meta_ads_loop():
+    """Scheduled cost sync honouring the configured cadence.
+
+    Skipped entirely (no HTTP, no write) when disabled or when the token /
+    account ids are missing. A run never overlaps: ``run_sync`` takes a
+    non-blocking lock and returns ``already_running`` if one is in flight.
+    """
+    global _loop_last_run
+    await asyncio.sleep(120)  # stagger behind monitor (60) / rules (90) / optimizer (150)
+    while True:
+        try:
+            cfg = load_settings()
+            if cfg["enabled"] and _credentials_ready(cfg):
+                result = await asyncio.to_thread(run_sync, "loop")
+                _loop_last_run = datetime.utcnow()
+                print(f"Meta Ads sync ({cfg['cadence']}): {result.get('status')} "
+                      f"matched={result.get('matched')} unmatched={result.get('unmatched')}")
+            interval = DAILY_SECONDS if cfg["cadence"] == "daily" else HOURLY_SECONDS
+        except Exception as e:
+            print("Meta Ads loop error:", repr(e))
+            interval = HOURLY_SECONDS
+        await asyncio.sleep(interval)
+
+
+# ---------------------------------------------------------------------------
+# API
+# ---------------------------------------------------------------------------
+
+@router.post("/sync")
+async def sync_now(request: Request):
+    """Run one cost sync immediately (admin/settings plane). Never raises."""
+    from audit_logger import audit_event
+    from auth import get_caller
+    result = await asyncio.to_thread(run_sync, "manual")
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "meta_ads_sync", "meta_ads", "",
+                {"status": result.get("status"), "dry_run": result.get("dry_run"),
+                 "matched": result.get("matched"), "unmatched": result.get("unmatched")},
+                request.client.host if request.client else "")
+    return result
+
+
+@router.get("/status")
+def status(db: Session = Depends(get_db)):
+    """Enabled/dry-run/cadence/api-version + last run state, matched/unmatched."""
+    cfg = load_settings()
+    return {
+        "enabled": cfg["enabled"],
+        "dry_run": cfg["dry_run"],
+        "cadence": cfg["cadence"],
+        "api_version": cfg["api_version"],
+        "ad_account_ids": cfg["ad_account_ids"],
+        "match_preference": cfg["match_preference"],
+        "backfill_days": cfg["backfill_days"],
+        "graph_base_url": cfg["graph_base_url"] or DEFAULT_GRAPH_BASE,
+        "running": _running,
+        "last_sync_at": _last_sync_at.isoformat() if _last_sync_at else None,
+        "last_result": _last_result,
+        "last_error": _last_error,
+        "matched": (_last_result or {}).get("matched"),
+        "unmatched": (_last_result or {}).get("unmatched"),
+        "loop_last_run": _loop_last_run.isoformat() if _loop_last_run else None,
+    }

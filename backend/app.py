@@ -178,6 +178,35 @@ def _ensure_wave18_tables(conn):
         )"""))
 
 
+def _ensure_meta_ads_tables(conn):
+    """Idempotent Meta Ads cost-sync schema (raw daily platform audit trail).
+
+    One row per platform + ad account + platform campaign + day; the UNIQUE
+    key backs the upsert in app_pages/meta_ads.py, so re-syncing a day replaces
+    its totals instead of duplicating them. This is the source of truth for
+    what the platform reported; matched_campaign_id records the mapping (NULL
+    for unmatched rows).
+    """
+    from sqlalchemy import text
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS ad_cost_daily (
+            id BIGSERIAL PRIMARY KEY,
+            platform VARCHAR(32) NOT NULL DEFAULT 'meta',
+            ad_account_id VARCHAR(64) NOT NULL,
+            platform_campaign_id VARCHAR(64) NOT NULL DEFAULT '',
+            campaign_name VARCHAR(255) NOT NULL DEFAULT '',
+            date DATE NOT NULL,
+            spend DOUBLE PRECISION NOT NULL DEFAULT 0,
+            impressions BIGINT NOT NULL DEFAULT 0,
+            clicks BIGINT NOT NULL DEFAULT 0,
+            matched_campaign_id INTEGER,
+            synced_at TIMESTAMP NOT NULL DEFAULT now(),
+            UNIQUE (platform, ad_account_id, platform_campaign_id, date)
+        )"""))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ad_cost_daily_date_idx "
+                      "ON ad_cost_daily (date)"))
+
+
 # Registered as the app's startup hook. It was defined but never wired, so every
 # backend-side migration below (user security columns, archived flags, ownership, monitor
 # state, auto rules, domain groups, CAPI records, log trails, tooling tables) silently
@@ -203,6 +232,9 @@ async def startup():
     try:
         with engine.connect() as conn:
             _mig(conn, "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb")
+            # Meta Ads cost auto-sync: the optional ad-platform campaign id
+            # (primary match key; NULL until set in the campaign editor).
+            _mig(conn, "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS ad_platform_campaign_id VARCHAR(64)")
             # G62/G63 — user security columns
             _mig(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT")
             _mig(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false")
@@ -281,6 +313,8 @@ async def startup():
             _ensure_logs_tables(conn)
             # Saved library entities: filter presets, scripts, funnel templates.
             _ensure_wave18_tables(conn)
+            # Meta Ads cost auto-sync raw audit table (ad_cost_daily).
+            _ensure_meta_ads_tables(conn)
             conn.commit()
     except Exception as e:
         print("startup migration:", e)
@@ -312,6 +346,9 @@ async def startup():
     asyncio.create_task(monitor_loop())
     asyncio.create_task(auto_rules_loop())
     asyncio.create_task(optimizer_loop())
+    # Meta Ads cost auto-sync loop (skipped internally when disabled).
+    from app_pages.meta_ads import meta_ads_loop
+    asyncio.create_task(meta_ads_loop())
 
 
 @app.middleware("http")
@@ -464,6 +501,10 @@ app.include_router(status_router, prefix="/api/status", tags=["Status"],
 # Retroactive cost update — same admin plane as monitoring/rules/fraud.
 from app_pages.costs import router as costs_router
 app.include_router(costs_router, prefix="/api/costs", tags=["Costs"],
+                   dependencies=[Depends(require_section_write("settings"))])
+# Meta Ads cost auto-sync — same admin plane as monitoring/rules/fraud.
+from app_pages.meta_ads import router as meta_ads_router
+app.include_router(meta_ads_router, prefix="/api/meta-ads", tags=["Meta Ads"],
                    dependencies=[Depends(require_section_write("settings"))])
 # Logs area — admin-only audit surface. Gated by the "logs" section write flag
 # (the section entry is pending in auth.py; see the NAV_SECTIONS TODO).

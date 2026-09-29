@@ -141,6 +141,16 @@
                                                     </v-col>
 
                                                     <v-col cols="12">
+                                                        <v-text-field
+                                                                label="Ad-platform campaign ID"
+                                                                v-model="form.ad_platform_campaign_id"
+                                                                outlined dense
+                                                                hint="Meta Ads campaign id — used by the Meta Ads cost sync to match spend to this campaign. Optional."
+                                                                persistent-hint
+                                                        ></v-text-field>
+                                                    </v-col>
+
+                                                    <v-col cols="12">
                                                         <v-combobox
                                                                 label="Tags"
                                                                 v-model="form.tags"
@@ -3139,6 +3149,7 @@
                     traffic_source_id: this.form.traffic_source_id,
                     notes: this.form.notes,
                     tags: (this.form.tags || []).map(t => String(t).trim()).filter(Boolean),
+                    ad_platform_campaign_id: (this.form.ad_platform_campaign_id || '').trim() || null,
                     config: {
                         integration_method: this.form.integration_method,
                         send_se_referrer: this.form.send_se_referrer,
@@ -3251,6 +3262,7 @@
                     traffic_source_id: item.traffic_source_id,
                     notes: item.notes || '',
                     tags: [...(item.tags || [])],
+                    ad_platform_campaign_id: item.ad_platform_campaign_id || '',
                     integration_method: item.config?.integration_method || null,
                     send_se_referrer: item.config?.send_se_referrer ?? true,
                     use_title_as_keyword: item.config?.use_title_as_keyword ?? true,
@@ -3812,6 +3824,7 @@
                     traffic_source_id: null,
                     notes: '',
                     tags: [],
+                    ad_platform_campaign_id: '',
                     flowScheme: 'position',
                     integration_method: null,
                     send_se_referrer: true,

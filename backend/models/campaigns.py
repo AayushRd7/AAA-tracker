@@ -35,6 +35,8 @@ class CampaignORM(Base):
     traffic_source_id = Column(Integer, ForeignKey("sources.id"), nullable=True)
     # D1c — owning user for the campaigns:'own' permission scope
     owner_id = Column(Integer, nullable=True)
+    # Meta Ads cost auto-sync — the platform's campaign id (primary match key)
+    ad_platform_campaign_id = Column(String(64), nullable=True)
     # G66 — soft-delete flag (archive without purging)
     archived = Column(Boolean, nullable=False, default=False)
     notes = Column(Text, nullable=True)

@@ -177,9 +177,33 @@ CREATE TABLE IF NOT EXISTS campaigns (
     config JSONB,
     notes TEXT,
     tags JSONB DEFAULT '[]'::jsonb,
+    ad_platform_campaign_id VARCHAR(64),
     created_at TIMESTAMP DEFAULT now(),
     updated_at TIMESTAMP DEFAULT now()
 );
+
+-- Meta Ads cost auto-sync: the ad-platform campaign id is added idempotently
+-- for installs created before the column existed (matches the startup _mig).
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS ad_platform_campaign_id VARCHAR(64);
+
+-- Meta Ads cost auto-sync: raw daily platform audit trail. One row per
+-- platform + ad account + platform campaign + day; the UNIQUE key backs the
+-- idempotent upsert so re-syncing a day replaces its totals.
+CREATE TABLE IF NOT EXISTS ad_cost_daily (
+    id BIGSERIAL PRIMARY KEY,
+    platform VARCHAR(32) NOT NULL DEFAULT 'meta',
+    ad_account_id VARCHAR(64) NOT NULL,
+    platform_campaign_id VARCHAR(64) NOT NULL DEFAULT '',
+    campaign_name VARCHAR(255) NOT NULL DEFAULT '',
+    date DATE NOT NULL,
+    spend DOUBLE PRECISION NOT NULL DEFAULT 0,
+    impressions BIGINT NOT NULL DEFAULT 0,
+    clicks BIGINT NOT NULL DEFAULT 0,
+    matched_campaign_id INTEGER,
+    synced_at TIMESTAMP NOT NULL DEFAULT now(),
+    UNIQUE (platform, ad_account_id, platform_campaign_id, date)
+);
+CREATE INDEX IF NOT EXISTS ad_cost_daily_date_idx ON ad_cost_daily (date);
 
 CREATE TABLE IF NOT EXISTS conversions_data (
     id SERIAL PRIMARY KEY,
