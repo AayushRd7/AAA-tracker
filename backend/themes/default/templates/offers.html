@@ -181,17 +181,42 @@
 
                     <v-divider class="my-4"></v-divider>
                     <v-subheader class="pl-0">CAPI integration</v-subheader>
-                    <v-select
-                            label="CAPI pixel"
-                            :items="capiPixelOptions"
-                            v-model="capiPixelId"
-                            outlined
-                            dense
-                            hide-details
-                            clearable
-                            hint="Bind at the offer/website level to send every conversion of this offer, from any channel. Configure a pixel in ONE place (offer or channel) to avoid duplicate events."
-                            persistent-hint
-                    ></v-select>
+                    <div v-for="(row, index) in capiPixelIds" :key="index"
+                         class="d-flex align-center mt-3">
+                        <v-select
+                                label="CAPI pixel"
+                                :items="capiPixelOptions"
+                                v-model="capiPixelIds[index]"
+                                outlined
+                                dense
+                                hide-details
+                                clearable
+                                class="bot-rule-grow"
+                                hint="Bind at the offer/website level to send every conversion of this offer, from any channel. Configure a pixel in ONE place (offer or channel) to avoid duplicate events."
+                                persistent-hint
+                        ></v-select>
+                        <v-tooltip bottom>
+                            <template v-slot:activator="{ on, attrs }">
+                                <v-btn icon small class="ml-1" v-bind="attrs" v-on="on"
+                                       :disabled="!row" @click="editCapiPixel">
+                                    <v-icon small>mdi-pencil-outline</v-icon>
+                                </v-btn>
+                            </template>
+                            <span>Edit pixels in CAPI integrations (Settings)</span>
+                        </v-tooltip>
+                        <v-tooltip bottom>
+                            <template v-slot:activator="{ on, attrs }">
+                                <v-btn icon small v-bind="attrs" v-on="on"
+                                       :disabled="!row" @click="deleteCapiPixel(row)">
+                                    <v-icon small color="red">mdi-delete-outline</v-icon>
+                                </v-btn>
+                            </template>
+                            <span>Delete this pixel</span>
+                        </v-tooltip>
+                    </div>
+                    <v-btn x-small text color="primary" class="mt-1" @click="addCapiPixelRow">
+                        <v-icon x-small class="mr-1">mdi-plus</v-icon>Add pixel
+                    </v-btn>
                     <div class="caption grey--text mt-1">
                         Pixels are managed in Settings → CAPI integrations.
                     </div>
@@ -448,7 +473,7 @@
                     overflow_offer_id: null
                 },
                 capiPixels: [],
-                capiPixelId: null,
+                capiPixelIds: [],
                 countryOptions: [
                     {code: 'AF', name: 'Afghanistan'}, {code: 'AX', name: 'Aland Islands'}, {code: 'AL', name: 'Albania'},
                     {code: 'DZ', name: 'Algeria'}, {code: 'AS', name: 'American Samoa'}, {code: 'AD', name: 'Andorra'},
@@ -587,7 +612,7 @@
                 }
             },
             async loadCapiBinding(offerId) {
-                this.capiPixelId = null;
+                this.capiPixelIds = [];
                 if (!offerId) return;
                 try {
                     const res = await fetch(
@@ -595,13 +620,33 @@
                         {credentials: "include"});
                     if (!res.ok) return;
                     const data = await res.json();
-                    this.capiPixelId = (data.pixel_ids || [])[0] || null;
+                    this.capiPixelIds = (data.pixel_ids || []).slice();
                 } catch (e) {
                     /* non-fatal */
                 }
             },
+            addCapiPixelRow() {
+                this.capiPixelIds.push(null);
+            },
+            editCapiPixel() {
+                window.location.href = "/backend/settings";
+            },
+            async deleteCapiPixel(pixelId) {
+                const id = pixelId || null;
+                if (!id) return;
+                const pixel = this.capiPixels.find(p => p.id === id);
+                if (!window.confirm(`Delete pixel “${(pixel && pixel.title) || id}”?`)) return;
+                const res = await fetch(`/backend/api/settings/capi-pixels/${id}`,
+                                        {method: "DELETE", credentials: "include"});
+                if (res.ok) {
+                    this.capiPixelIds = this.capiPixelIds.filter(x => x !== id);
+                    await this.loadCapiPixels();
+                }
+            },
             async saveCapiBinding(offerId) {
                 if (!offerId) return;
+                const ids = this.capiPixelIds.filter(
+                    id => id !== null && id !== undefined && id !== '');
                 try {
                     await fetch("/backend/api/settings/capi-bindings", {
                         method: "PUT",
@@ -609,7 +654,7 @@
                         headers: {"Content-Type": "application/json"},
                         body: JSON.stringify({
                             scope: "offer", scope_id: offerId,
-                            pixel_ids: this.capiPixelId ? [this.capiPixelId] : []
+                            pixel_ids: ids
                         })
                     });
                 } catch (e) {
@@ -878,7 +923,7 @@
                     overflow_offer_id: null
                 };
                 this.loadCapiPixels();
-                this.capiPixelId = null;
+                this.capiPixelIds = [];
             },
 
             openEdit(offer) {

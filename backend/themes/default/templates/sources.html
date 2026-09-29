@@ -195,11 +195,12 @@
                             hint="When off, this channel sends no conversions to its pixel."
                             persistent-hint
                     ></v-switch>
-                    <div class="d-flex align-center mt-3">
+                    <div v-for="(row, index) in capiPixelIds" :key="index"
+                         class="d-flex align-center mt-3">
                         <v-select
                                 label="CAPI pixel"
                                 :items="capiPixelOptions"
-                                v-model="capiPixelId"
+                                v-model="capiPixelIds[index]"
                                 outlined dense hide-details
                                 clearable
                                 class="bot-rule-grow"
@@ -209,7 +210,7 @@
                         <v-tooltip bottom>
                             <template v-slot:activator="{ on, attrs }">
                                 <v-btn icon small class="ml-1" v-bind="attrs" v-on="on"
-                                       :disabled="!capiPixelId" @click="editCapiPixel">
+                                       :disabled="!row" @click="editCapiPixel">
                                     <v-icon small>mdi-pencil-outline</v-icon>
                                 </v-btn>
                             </template>
@@ -218,15 +219,22 @@
                         <v-tooltip bottom>
                             <template v-slot:activator="{ on, attrs }">
                                 <v-btn icon small v-bind="attrs" v-on="on"
-                                       :disabled="!capiPixelId" @click="deleteCapiPixel">
+                                       :disabled="!row" @click="deleteCapiPixel(row)">
                                     <v-icon small color="red">mdi-delete-outline</v-icon>
                                 </v-btn>
                             </template>
                             <span>Delete this pixel</span>
                         </v-tooltip>
                     </div>
-                    <v-btn x-small text color="primary" class="mt-1" @click="openQuickPixel">
+                    <div v-if="capiPixelIds.length" class="caption grey--text mt-1">
+                        Configure a pixel in ONE place (offer or channel) to avoid
+                        duplicate events.
+                    </div>
+                    <v-btn x-small text color="primary" class="mt-1" @click="addCapiPixelRow">
                         <v-icon x-small class="mr-1">mdi-plus</v-icon>Add pixel
+                    </v-btn>
+                    <v-btn x-small text class="mt-1 ml-2" @click="openQuickPixel">
+                        <v-icon x-small class="mr-1">mdi-plus</v-icon>Create new pixel
                     </v-btn>
 
                     <v-switch
@@ -458,7 +466,7 @@
                     settings: []
                 },
                 capiPixels: [],
-                capiPixelId: null,
+                capiPixelIds: [],
                 capiActive: true,
                 capiCostSync: false,
                 capiQuickDialog: false,
@@ -554,7 +562,7 @@
                 }
             },
             async loadCapiBinding(sourceId) {
-                this.capiPixelId = null;
+                this.capiPixelIds = [];
                 this.capiActive = true;
                 this.capiCostSync = false;
                 if (!sourceId) return;
@@ -564,15 +572,20 @@
                         {credentials: "include"});
                     if (!res.ok) return;
                     const data = await res.json();
-                    this.capiPixelId = (data.pixel_ids || [])[0] || null;
+                    this.capiPixelIds = (data.pixel_ids || []).slice();
                     this.capiActive = data.active !== false;
                     this.capiCostSync = !!data.impression_cost_sync;
                 } catch (e) {
                     /* non-fatal */
                 }
             },
+            addCapiPixelRow() {
+                this.capiPixelIds.push(null);
+            },
             async saveCapiBinding(sourceId) {
                 if (!sourceId) return;
+                const ids = this.capiPixelIds.filter(
+                    id => id !== null && id !== undefined && id !== '');
                 try {
                     await fetch("/backend/api/settings/capi-bindings", {
                         method: "PUT",
@@ -580,7 +593,7 @@
                         headers: {"Content-Type": "application/json"},
                         body: JSON.stringify({
                             scope: "channel", scope_id: sourceId,
-                            pixel_ids: this.capiPixelId ? [this.capiPixelId] : [],
+                            pixel_ids: ids,
                             active: !!this.capiActive,
                             impression_cost_sync: !!this.capiCostSync
                         })
@@ -620,7 +633,7 @@
                     this.capiQuickDialog = false;
                     await this.loadCapiPixels();
                     const created = data.pixel || {};
-                    if (created.id) this.capiPixelId = created.id;
+                    if (created.id) this.capiPixelIds.push(created.id);
                 } catch (e) {
                     this.$root.$emit("show-message", {type: "error",
                         text: sanitizeToastMessage(e.message)});
@@ -629,14 +642,15 @@
             editCapiPixel() {
                 window.location.href = "/backend/settings";
             },
-            async deleteCapiPixel() {
-                if (!this.capiPixelId) return;
-                const pixel = this.capiPixels.find(p => p.id === this.capiPixelId);
-                if (!window.confirm(`Delete pixel “${(pixel && pixel.title) || this.capiPixelId}”?`)) return;
-                const res = await fetch(`/backend/api/settings/capi-pixels/${this.capiPixelId}`,
+            async deleteCapiPixel(pixelId) {
+                const id = pixelId || null;
+                if (!id) return;
+                const pixel = this.capiPixels.find(p => p.id === id);
+                if (!window.confirm(`Delete pixel “${(pixel && pixel.title) || id}”?`)) return;
+                const res = await fetch(`/backend/api/settings/capi-pixels/${id}`,
                                         {method: "DELETE", credentials: "include"});
                 if (res.ok) {
-                    this.capiPixelId = null;
+                    this.capiPixelIds = this.capiPixelIds.filter(x => x !== id);
                     await this.loadCapiPixels();
                 }
             },

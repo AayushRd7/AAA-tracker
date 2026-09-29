@@ -9034,6 +9034,295 @@ print("ESCAPED-OK")
           pg_scalar("SELECT coalesce(value::jsonb->>'apiToken','') FROM settings "
                     "WHERE name = 'settings' AND tenant_id = 1").strip() == p2_t1_token_before)
 
+    # ===== CAPI pixels: more than one pixel bound to a single channel =====
+    # Self-contained: the earlier pixel block tore its receiver down, so start a
+    # fresh one on a new port and reuse its capture list + helper functions.
+    mb_port = 21000 + (os.getpid() % 1000)
+    mb_srv = None
+    _capi_socketserver.TCPServer.allow_reuse_address = True
+    for _attempt in range(8):
+        try:
+            mb_srv = _capi_socketserver.TCPServer(("0.0.0.0", mb_port), _CapiReceiver)
+            break
+        except OSError:
+            mb_port += 1
+    mb_base = f"http://host.docker.internal:{mb_port}"
+    if mb_srv is not None:
+        mb_srv.daemon_threads = True
+        _capi_threading.Thread(target=mb_srv.serve_forever, daemon=True).start()
+
+    mb_tag = f"smoke-mb-{os.getpid()}"
+    mb_saved = (s.get(f"{api}/settings/").json().get("settings") or {}).get("meta_capi")
+    mb_src = mb_cid = mb_px1 = mb_px2 = None
+    try:
+        def mb_mk(title, dataset):
+            return s.post(f"{api}/settings/capi-pixels", json={
+                "title": title, "platform": "meta", "pixel_id": dataset,
+                "access_token": f"{mb_tag}-tok-{dataset}", "default_event_name": "Lead",
+                "action_source": "website", "status": "active",
+                "custom_matching": False, "conversion_matching": [],
+                "payout_customisations": []})
+
+        r = mb_mk("M1", f"{mb_tag}-ds1")
+        mb_px1 = (r.json().get("pixel") or {}).get("id")
+        r = mb_mk("M2", f"{mb_tag}-ds2")
+        mb_px2 = (r.json().get("pixel") or {}).get("id")
+        check("capi-pixels: two pixels created for the multi-bind check",
+              bool(mb_px1) and bool(mb_px2), r.text[:150])
+
+        r = s.post(f"{api}/sources/", json={"name": f"{mb_tag}-src"})
+        mb_src = r.json().get("id")
+        r = s.post(f"{api}/campaigns/", json={
+            "name": f"{mb_tag}-chan", "alias": f"{mb_tag}-chan", "type": "campaign",
+            "status": "active", "redirect_mode": "position", "traffic_source_id": mb_src,
+            "config": {"flows": [], "postbacks": [], "hide_referrer": False}})
+        mb_cid = r.json().get("id")
+
+        # Global CAPI config gates the send; point it at the fresh receiver.
+        s.post(f"{api}/settings/", json={"settings": {"meta_capi": {
+            "enabled": True, "dry_run": False, "graph_base_url": mb_base,
+            "dataset_id": "", "access_token": "", "test_event_code": "",
+            "default_currency": "USD", "send_statuses": ["lead", "sale", "upsale"],
+            "include_customer_match": True, "status_events": {}, "pixel_overrides": {}}}})
+        settle_settings_cache()
+
+        # Bind BOTH pixels to the one channel, order preserved on read.
+        r = px_bind("channel", mb_src, [mb_px1, mb_px2], active=True)
+        check("capi-pixels: channel binds two pixels (order preserved)",
+              r.status_code == 200 and r.json().get("pixel_ids") == [mb_px1, mb_px2],
+              r.text[:200])
+        r = s.get(f"{api}/settings/capi-bindings",
+                  params={"scope": "channel", "scope_id": mb_src})
+        check("capi-pixels: both bound pixels round-trip on read",
+              r.json().get("pixel_ids") == [mb_px1, mb_px2], r.text[:200])
+
+        # A conversion on the channel reaches BOTH datasets exactly once each.
+        mb_click = f"{mb_tag}-click"
+        px_seed(mb_click, cid=mb_cid, status="sale", payout=5)
+        before1 = len(capi_paths(f"{mb_tag}-ds1"))
+        before2 = len(capi_paths(f"{mb_tag}-ds2"))
+        requests.get(f"{BASE}/pb?clickid={mb_click}&status=sale&payout=5",
+                     verify=not INSECURE)
+        capi_wait_click(mb_click, 2)
+        _capi_time.sleep(1.5)
+        check("capi-pixels: multi-bound conversion reaches both pixels exactly once",
+              capi_click_count(mb_click) == 2
+              and len(capi_paths(f"{mb_tag}-ds1")) - before1 == 1
+              and len(capi_paths(f"{mb_tag}-ds2")) - before2 == 1,
+              f"count={capi_click_count(mb_click)} "
+              f"ds1={len(capi_paths(mb_tag + '-ds1'))} "
+              f"ds2={len(capi_paths(mb_tag + '-ds2'))}")
+
+        # Removing one of the two leaves the other bound.
+        px_bind("channel", mb_src, [mb_px2], active=True)
+        r = s.get(f"{api}/settings/capi-bindings",
+                  params={"scope": "channel", "scope_id": mb_src})
+        check("capi-pixels: removing one of two bound pixels leaves the other",
+              r.json().get("pixel_ids") == [mb_px2], r.text[:200])
+    finally:
+        if mb_saved is None:
+            s.post(f"{api}/settings/", json={"settings": {"meta_capi": None}})
+        else:
+            s.post(f"{api}/settings/", json={"settings": {"meta_capi": mb_saved}})
+        for _mb_px in (mb_px1, mb_px2):
+            if _mb_px:
+                s.delete(f"{api}/settings/capi-pixels/{_mb_px}")
+        if mb_src:
+            pg_exec(f"DELETE FROM capi_channel_settings WHERE source_id = {mb_src}")
+        pg_exec(f"DELETE FROM capi_pixel_sent WHERE click_id LIKE '{mb_tag}%'")
+        pg_exec(f"DELETE FROM meta_capi_log WHERE click_id LIKE '{mb_tag}%'")
+        pg_exec(f"DELETE FROM conversions_data WHERE click_id LIKE '{mb_tag}%'")
+        if mb_cid:
+            s.delete(f"{api}/campaigns/{mb_cid}")
+        if mb_src:
+            s.delete(f"{api}/sources/{mb_src}")
+        try:
+            if mb_srv is not None:
+                mb_srv.shutdown()
+                mb_srv.server_close()
+        except Exception:
+            pass
+
+    # ===== Meta Ads: channel impression cost sync for zero-click days =====
+    import http.server as _ics_httpserver
+    import socketserver as _ics_socketserver
+    import threading as _ics_threading
+
+    ics_pid = os.getpid()
+    ics_port = 25000 + (ics_pid % 1000)
+    ics_acct = f"impspend-{ics_pid}"
+    ics_token = f"tok-ics-{ics_pid}"
+    ics_day = ch_query("SELECT toString(toDate(now()))")
+    ics_captured = []
+
+    class _IcsGraph(_ics_httpserver.BaseHTTPRequestHandler):
+        def do_GET(self):
+            from urllib.parse import urlparse
+            ics_captured.append(urlparse(self.path).path)
+
+            def _send(code, obj):
+                body = json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            if "/ready" in self.path:
+                _send(200, {"ready": True})
+                return
+            # Two campaigns, both with platform spend but zero tracker clicks.
+            _send(200, {"data": [
+                {"campaign_id": f"ics-a-{ics_pid}", "campaign_name": f"ICS A {ics_pid}",
+                 "date_start": ics_day, "spend": "7", "impressions": "700", "clicks": "0"},
+                {"campaign_id": f"ics-b-{ics_pid}", "campaign_name": f"ICS B {ics_pid}",
+                 "date_start": ics_day, "spend": "4", "impressions": "400", "clicks": "0"},
+            ]})
+
+        def log_message(self, *args):
+            pass
+
+    ics_srv = None
+    _ics_socketserver.TCPServer.allow_reuse_address = True
+    for _attempt in range(8):
+        try:
+            ics_srv = _ics_socketserver.TCPServer(("0.0.0.0", ics_port), _IcsGraph)
+            break
+        except OSError:
+            ics_port += 1
+    ics_base = f"http://host.docker.internal:{ics_port}"
+    if ics_srv is not None:
+        ics_srv.daemon_threads = True
+        _ics_threading.Thread(target=ics_srv.serve_forever, daemon=True).start()
+
+    ics_probe = ""
+    try:
+        ics_probe = subprocess.run(
+            ["docker", "exec", "tracker_backend", "python", "-c",
+             f"import urllib.request;print(urllib.request.urlopen('{ics_base}/ready',timeout=5).read().decode())"],
+            capture_output=True, text=True, timeout=15).stdout
+    except Exception:
+        pass
+    if "ready" not in ics_probe:
+        try:
+            ics_probe = requests.get(f"http://127.0.0.1:{ics_port}/ready", timeout=5).text
+        except Exception:
+            pass
+    check("meta-ads: impression-sync mock Graph receiver reachable",
+          "ready" in ics_probe, ics_probe[:80])
+
+    ics_tag = f"smoke-ics-{ics_pid}"
+    ics_saved = ((s.get(f"{api}/settings/").json().get("settings") or {}).get("meta_ads"))
+    ics_src_on = ics_src_off = ics_cid_on = ics_cid_off = None
+    try:
+        r = s.post(f"{api}/sources/", json={"name": f"{ics_tag}-on"})
+        ics_src_on = r.json().get("id")
+        r = s.post(f"{api}/sources/", json={"name": f"{ics_tag}-off"})
+        ics_src_off = r.json().get("id")
+        r = px_bind("channel", ics_src_on, [], active=True, impression_cost_sync=True)
+        check("meta-ads: impression cost sync enabled on the channel",
+              r.status_code == 200 and r.json().get("impression_cost_sync") is True,
+              r.text[:150])
+        r = px_bind("channel", ics_src_off, [], active=True, impression_cost_sync=False)
+        check("meta-ads: second channel left on the default (off)",
+              r.status_code == 200 and r.json().get("impression_cost_sync") is False,
+              r.text[:150])
+
+        r = s.post(f"{api}/campaigns/", json={
+            "name": f"ICS A {ics_pid}", "alias": f"{ics_tag}-a", "type": "campaign",
+            "status": "active", "redirect_mode": "position",
+            "traffic_source_id": ics_src_on,
+            "ad_platform_campaign_id": f"ics-a-{ics_pid}",
+            "config": {"flows": [], "postbacks": [], "hide_referrer": False}})
+        ics_cid_on = r.json().get("id")
+        r = s.post(f"{api}/campaigns/", json={
+            "name": f"ICS B {ics_pid}", "alias": f"{ics_tag}-b", "type": "campaign",
+            "status": "active", "redirect_mode": "position",
+            "traffic_source_id": ics_src_off,
+            "ad_platform_campaign_id": f"ics-b-{ics_pid}",
+            "config": {"flows": [], "postbacks": [], "hide_referrer": False}})
+        ics_cid_off = r.json().get("id")
+        check("meta-ads: two zero-click campaigns created",
+              bool(ics_cid_on) and bool(ics_cid_off), r.text[:150])
+
+        def ics_set(**over):
+            cfg = {"enabled": True, "ad_account_ids": [ics_acct], "access_token": ics_token,
+                   "api_version": "v21.0", "dry_run": False, "cadence": "hourly",
+                   "backfill_days": 7, "graph_base_url": ics_base, "match_preference": "auto"}
+            cfg.update(over)
+            return s.post(f"{api}/settings/", json={"settings": {"meta_ads": cfg}})
+
+        def ics_sys_count(cid):
+            return ch_query(
+                f"SELECT count() FROM clicks_data WHERE campaign_id={cid} "
+                f"AND visitor_id LIKE 'system-%'")
+
+        def ics_total(cid):
+            return ch_query(
+                f"SELECT toString(ifNull(sum(cost), 0)) FROM clicks_data "
+                f"WHERE campaign_id={cid}")
+
+        # -- dry-run with the flag on writes nothing at all --
+        ics_set(dry_run=True)
+        r = s.post(f"{api}/meta-ads/sync")
+        check("meta-ads: dry-run impression sync returns dry_run",
+              r.status_code == 200 and (r.json() or {}).get("status") == "dry_run",
+              r.text[:150])
+        check("meta-ads: dry-run with the flag on writes no system click",
+              ics_sys_count(ics_cid_on) in ("0", ""), ics_sys_count(ics_cid_on))
+        check("meta-ads: dry-run with the flag on writes no ad_cost_daily row",
+              pg_scalar(f"SELECT count(*) FROM ad_cost_daily "
+                        f"WHERE ad_account_id='{ics_acct}'") == "0",
+              pg_scalar(f"SELECT count(*) FROM ad_cost_daily "
+                        f"WHERE ad_account_id='{ics_acct}'"))
+
+        # -- live: the flagged zero-click day gets ONE system click = the spend --
+        ics_set(dry_run=False)
+        r = s.post(f"{api}/meta-ads/sync")
+        live = r.json() if r.status_code == 200 else {}
+        check("meta-ads: live impression sync returns ok",
+              r.status_code == 200 and live.get("status") == "ok", r.text[:200])
+        check("meta-ads: flagged zero-click day allocates exactly one system click",
+              ics_sys_count(ics_cid_on) == "1", ics_sys_count(ics_cid_on))
+        check("meta-ads: system click carries the day's whole spend",
+              ics_total(ics_cid_on) in ("7", "7.0"), ics_total(ics_cid_on))
+        check("meta-ads: campaign-day total cost equals the platform spend",
+              ics_total(ics_cid_on) in ("7", "7.0"), ics_total(ics_cid_on))
+
+        # -- unflagged channel keeps today's behaviour: nothing allocated --
+        check("meta-ads: unflagged zero-click day still allocates nothing",
+              ics_sys_count(ics_cid_off) in ("0", "")
+              and ics_total(ics_cid_off) in ("0", "", "0.0"),
+              f"sys={ics_sys_count(ics_cid_off)} total={ics_total(ics_cid_off)}")
+
+        # -- re-run REPLACES, never stacks --
+        r = s.post(f"{api}/meta-ads/sync")
+        check("meta-ads: re-sync keeps exactly one system click",
+              r.status_code == 200 and ics_sys_count(ics_cid_on) == "1",
+              ics_sys_count(ics_cid_on))
+        check("meta-ads: re-sync keeps the day's cost equal to the spend",
+              ics_total(ics_cid_on) in ("7", "7.0"), ics_total(ics_cid_on))
+    finally:
+        if ics_saved is None:
+            s.post(f"{api}/settings/", json={"settings": {"meta_ads": None}})
+        else:
+            s.post(f"{api}/settings/", json={"settings": {"meta_ads": ics_saved}})
+        for _ics_cid in (ics_cid_on, ics_cid_off):
+            if _ics_cid:
+                s.delete(f"{api}/campaigns/{_ics_cid}")
+        pg_exec(f"DELETE FROM ad_cost_daily WHERE ad_account_id = '{ics_acct}'")
+        for _ics_src in (ics_src_on, ics_src_off):
+            if _ics_src:
+                pg_exec(f"DELETE FROM capi_channel_settings WHERE source_id = {_ics_src}")
+                s.delete(f"{api}/sources/{_ics_src}")
+        ch_query(f"ALTER TABLE clicks_data DELETE WHERE campaign_id IN "
+                 f"({ics_cid_on or -1}, {ics_cid_off or -1}) SETTINGS mutations_sync = 1")
+        try:
+            if ics_srv is not None:
+                ics_srv.shutdown()
+                ics_srv.server_close()
+        except Exception:
+            pass
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

@@ -18,7 +18,9 @@ day REPLACES its values (an absolute UPDATE, never an add) so re-syncs are
 idempotent. The retroactive cost tool (``app_pages/costs.py``) stays for manual
 corrections and for campaigns with no platform mapping — the last writer wins
 per campaign+day. Days with zero tracker clicks store the daily audit row but
-allocate nothing.
+allocate nothing — unless the campaign's traffic source enabled impression cost
+sync, in which case one synthetic ``system-`` click is recorded for that
+campaign+day and the whole day's spend is attached to it (re-run replaces it).
 
 Matching order (see ``match_insight``): the explicit
 ``campaigns.ad_platform_campaign_id`` column first, then the tracker campaign
@@ -428,6 +430,55 @@ def _allocate(ch, campaign_id: int, day: str, spend: float, clicks: int) -> int:
     return clicks
 
 
+def _impression_cost_campaigns(db: Session) -> set:
+    """Tracker campaign ids whose traffic source has impression cost sync on.
+
+    A campaign whose ``traffic_source_id`` points at a channel with the flag
+    set keeps a day's platform spend even when it has zero tracker clicks —
+    the spend is recorded on one synthetic system click instead of vanishing.
+    """
+    try:
+        rows = db.execute(text(
+            "SELECT c.id FROM campaigns c "
+            "JOIN capi_channel_settings s ON s.source_id = c.traffic_source_id "
+            "WHERE c.tenant_id = :tid AND s.impression_cost_sync = true"),
+            {"tid": current_tenant()}).fetchall()
+        return {int(r[0]) for r in rows}
+    except Exception as e:
+        print("meta-ads: impression cost-sync lookup failed:", repr(e))
+        return set()
+
+
+def _record_impression_cost(ch, campaign_id: int, day: str, spend: float) -> int:
+    """Record ONE synthetic system click carrying a day's whole spend.
+
+    Impression-only campaigns have platform spend but no tracker click rows, so
+    the day's spend would otherwise disappear. The row is obviously
+    system-generated (visitor/click id ``system-meta-cost-…``) and re-running
+    replaces it for the same campaign+day (delete + insert), never stacking.
+    """
+    cid = int(campaign_id)
+    tenant = int(current_tenant())
+    marker = f"system-meta-cost-{cid}-{day}"
+    ch.command(
+        "ALTER TABLE clicks_data DELETE WHERE tenant_id = %(tenant_id)s "
+        "AND campaign_id = %(cid)s AND toDate(received_at) = toDate(%(day)s) "
+        "AND click_id = %(marker)s",
+        parameters={"tenant_id": tenant, "cid": cid, "day": str(day),
+                    "marker": marker},
+        settings={"mutations_sync": 1})
+    try:
+        received = datetime.strptime(str(day), "%Y-%m-%d")
+    except (TypeError, ValueError):
+        received = datetime.utcnow()
+    ch.insert(
+        "clicks_data",
+        [[received, cid, tenant, True, "system", marker, marker, float(spend)]],
+        column_names=["received_at", "campaign_id", "tenant_id", "click",
+                      "status", "visitor_id", "click_id", "cost"])
+    return 1
+
+
 # ---------------------------------------------------------------------------
 # The sync itself
 # ---------------------------------------------------------------------------
@@ -466,6 +517,7 @@ def run_sync(trigger: str = "manual", dry_run=None) -> dict:
                 "trigger": trigger,
                 "accounts": 0, "rows": 0, "matched": 0, "unmatched": 0,
                 "allocated_campaigns": 0, "zero_click_days": 0,
+                "impression_only_days": 0,
                 "updated_rows": 0, "errors": [],
                 "requests": [], "matches": [], "unmatched_rows": [],
             }
@@ -520,7 +572,9 @@ def run_sync(trigger: str = "manual", dry_run=None) -> dict:
             # ClickHouse allocation (off the request path, mutations_sync=1).
             ch = get_clickhouse_client()
             try:
-                _describe_allocation(alloc_targets, summary, execute=True, ch=ch)
+                impression_sync_cids = _impression_cost_campaigns(db)
+                _describe_allocation(alloc_targets, summary, execute=True, ch=ch,
+                                     impression_sync_cids=impression_sync_cids)
             finally:
                 ch.close()
             _record_run(result=summary, error=None, sync_at=datetime.utcnow())
@@ -564,8 +618,14 @@ def _parse_insight_row(raw: dict, account_id: str):
     }
 
 
-def _describe_allocation(targets, summary: dict, execute: bool = False, ch=None) -> None:
-    """Either report or perform (execute=True) the per campaign+day allocation."""
+def _describe_allocation(targets, summary: dict, execute: bool = False, ch=None,
+                         impression_sync_cids=None) -> None:
+    """Either report or perform (execute=True) the per campaign+day allocation.
+
+    ``impression_sync_cids`` are the campaigns whose channel enabled impression
+    cost sync: a day they spent on with zero tracker clicks gets one synthetic
+    system click carrying the spend instead of being dropped."""
+    impression_sync_cids = impression_sync_cids or set()
     grouped = {}
     for cid, day, spend in targets:
         grouped.setdefault((cid, day), spend)
@@ -574,7 +634,12 @@ def _describe_allocation(targets, summary: dict, execute: bool = False, ch=None)
         for (cid, day), spend in grouped.items():
             clicks = counts.get((int(cid), str(day)), 0)
             if clicks <= 0:
-                summary["zero_click_days"] += 1
+                if int(cid) in impression_sync_cids:
+                    summary["updated_rows"] += _record_impression_cost(
+                        ch, cid, day, spend)
+                    summary["impression_only_days"] += 1
+                else:
+                    summary["zero_click_days"] += 1
                 continue
             rows = _allocate(ch, cid, day, spend, clicks)
             summary["allocated_campaigns"] += 1
