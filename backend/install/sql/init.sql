@@ -68,18 +68,28 @@ CREATE TABLE IF NOT EXISTS tenants (
     slug VARCHAR(255) NOT NULL UNIQUE,
     parent_tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'active',
+    -- Phase 2A plan fields: plan/seats gate membership now, retention and
+    -- feature flags drive later phases. seats NULL = unlimited.
+    plan TEXT NOT NULL DEFAULT 'free',
+    seats INTEGER,
+    retention_days INTEGER,
+    features JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
     updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS seats INTEGER;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS retention_days INTEGER;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 INSERT INTO tenants (id, name, slug) VALUES (1, 'Default', 'default')
 ON CONFLICT DO NOTHING;
 SELECT setval(pg_get_serial_sequence('tenants', 'id'),
               GREATEST((SELECT COALESCE(MAX(id), 1) FROM tenants), 1));
 
--- A user's role/permissions per tenant. users.permissions (install-global in
--- phase 1) is copied here so the phase-2 per-tenant permission plane has a
--- home; phase 1 reads users.permissions.
+-- A user's role/permissions per tenant. users.permissions is copied here by
+-- the phase-1 backfill; from phase 2A on, authority resolves from the
+-- membership (role defaults layered under these explicit overrides).
 CREATE TABLE IF NOT EXISTS tenant_memberships (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -10,7 +10,6 @@ from db import get_db
 from tenant_context import current_tenant
 from models.base import Base, TenantMixin
 from models.settings import SettingsORM
-from models.user import UserORM
 from models.campaigns import CampaignORM
 
 import csv
@@ -102,34 +101,34 @@ def _conversions_scope(request: Request, db: Session, query):
     """G63/D1c parity with campaigns:'own' — a scoped caller only sees
     conversions whose campaign they own; unattributable rows (NULL campaign_id)
     are hidden from them. Admins and regular users pass through."""
-    from auth import get_caller
+    from auth import get_caller, membership_for
     username, is_admin = get_caller(request)
     if is_admin or not username:
         return query
-    user = db.query(UserORM).filter(UserORM.username == username).first()
-    raw = (user.permissions or {}) if user else {}
-    if raw.get("campaigns") != "own":
+    member = membership_for(db, username)
+    raw = member[2] if member else {}
+    if raw.get("campaigns") != "own" or not member:
         return query
-    owned = db.query(CampaignORM.id).filter(CampaignORM.owner_id == user.id)
+    owned = db.query(CampaignORM.id).filter(CampaignORM.owner_id == member[0])
     return query.filter(Conversion.campaign_id.in_(owned))
 
 
 def _require_conversion_access(request: Request, db: Session, conv: "Conversion") -> None:
     """Mutation counterpart of _conversions_scope: scoped users may only touch
     conversions on campaigns they own (unattributable rows are off-limits)."""
-    from auth import get_caller
+    from auth import get_caller, membership_for
     username, is_admin = get_caller(request)
     if is_admin or not username:
         return
-    user = db.query(UserORM).filter(UserORM.username == username).first()
-    raw = (user.permissions or {}) if user else {}
-    if raw.get("campaigns") != "own":
+    member = membership_for(db, username)
+    raw = member[2] if member else {}
+    if raw.get("campaigns") != "own" or not member:
         return
     if conv.campaign_id is None:
         raise HTTPException(status_code=403,
                             detail="You can only modify conversions of your own campaigns")
     owner_id = db.query(CampaignORM.owner_id).filter_by(id=conv.campaign_id).scalar()
-    if owner_id != user.id:
+    if owner_id != member[0]:
         raise HTTPException(status_code=403,
                             detail="You can only modify conversions of your own campaigns")
 
@@ -345,12 +344,12 @@ def get_funnel_report(campaign_id: int, request: Request, db: Session = Depends(
 
     # campaigns:'own' parity with the list/export: a scoped caller only reads
     # funnels of campaigns they own (404, since it's invisible to them).
-    from auth import get_caller
+    from auth import get_caller, membership_for
     username, is_admin = get_caller(request)
     if not is_admin and username:
-        user = db.query(UserORM).filter(UserORM.username == username).first()
-        if user and (user.permissions or {}).get("campaigns") == "own" \
-                and row["owner_id"] != user.id:
+        member = membership_for(db, username)
+        if member and (member[2] or {}).get("campaigns") == "own" \
+                and row["owner_id"] != member[0]:
             raise HTTPException(status_code=404, detail="Campaign not found")
 
     raw_config = row["config"]

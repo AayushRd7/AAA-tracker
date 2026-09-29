@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 
 from models.user import UserORM
 from models.settings import SettingsORM
+from tenant_context import current_tenant
 
 router = APIRouter()
 
@@ -524,39 +525,97 @@ def require_api_auth(request: Request, authorization: Optional[str] = Header(Non
     return user_type
 
 
-# ====== G63: per-resource permissions ======
-# Sections a non-admin user can read by default (today's behavior). The admin
-# sections were already admin-only in the UI; the API now enforces the same.
+# ====== G63 / phase 2A: per-resource permissions ======
+# Sections a workspace can grant. Admin-only sections are the workspace's
+# management plane; the rest are content. Phase 2A resolves authority from the
+# caller's *membership in the request's tenant*, never from the users row.
 PERMISSION_SECTIONS = ["dashboard", "campaigns", "landings", "affiliates", "offers",
                        "sources", "reports", "domains", "settings", "users", "documentation",
                        "fraud", "optimizer", "conversion-tracking", "logs", "scripts"]
 ADMIN_ONLY_SECTIONS = {"users", "settings", "domains", "fraud", "optimizer",
                        "conversion-tracking", "logs", "scripts"}
 
+# Role -> default permission map. This is the documented matrix:
+#   owner  — everything in the tenant, including ownership transfer.
+#   admin  — everything in the tenant except changing the owner.
+#   editor — read+write on content sections; no workspace/user/settings plane.
+#   viewer — read-only on content sections.
+# A membership's explicit `permissions` JSONB (copied from users.permissions by
+# the phase-1 backfill, editable via /api/members) is layered on top per section.
+ROLE_DEFAULT_WRITE = {"owner": True, "admin": True, "editor": True, "viewer": False}
+ROLE_HAS_ADMIN_SECTIONS = {"owner": True, "admin": True, "editor": False, "viewer": False}
 
-def resolve_permissions(user) -> dict:
-    """Effective permission map: {sections: {name: bool, ...}, write: bool}.
 
-    NULL/missing permissions column = defaults (admin: everything; non-admin:
-    all non-admin sections read+write).
-    """
-    sections = {s: True for s in PERMISSION_SECTIONS}
-    if user is None or user.is_admin:
-        return {"sections": sections, "write": True}
-    raw = user.permissions or {}
-    raw_sections = raw.get("sections") or {}
-    for s in PERMISSION_SECTIONS:
-        default = s not in ADMIN_ONLY_SECTIONS
-        sections[s] = bool(raw_sections.get(s, default))
-    return {"sections": sections, "write": bool(raw.get("write", True))}
+def role_default_permissions(role: Optional[str]) -> dict:
+    role = (role or "viewer").lower()
+    admin_ok = ROLE_HAS_ADMIN_SECTIONS.get(role, False)
+    sections = {s: (True if s not in ADMIN_ONLY_SECTIONS else admin_ok)
+                for s in PERMISSION_SECTIONS}
+    return {"sections": sections, "write": bool(ROLE_DEFAULT_WRITE.get(role, False))}
+
+
+def resolve_membership_permissions(raw: Optional[dict], role: Optional[str]) -> dict:
+    """Effective map = role defaults layered under the membership's explicit
+    per-section overrides (and the optional global write flag). Extra keys in
+    the raw blob (e.g. campaigns:'own') are carried through for callers that
+    consume them."""
+    perms = role_default_permissions(role)
+    raw = raw if isinstance(raw, dict) else {}
+    raw_sections = raw.get("sections")
+    if isinstance(raw_sections, dict):
+        for s in PERMISSION_SECTIONS:
+            if s in raw_sections:
+                perms["sections"][s] = bool(raw_sections[s])
+    if "write" in raw:
+        perms["write"] = bool(raw["write"])
+    for k, v in raw.items():
+        if k not in ("sections", "write"):
+            perms[k] = v
+    return perms
+
+
+def denied_permissions() -> dict:
+    """A permission map that grants nothing — used when the caller holds no
+    membership for the request's tenant (deny, never fall back to the user row)."""
+    return {"sections": {s: False for s in PERMISSION_SECTIONS}, "write": False}
+
+
+def membership_for(db: Session, username: Optional[str],
+                   tenant_id: Optional[int] = None):
+    """(user_id, role, raw_permissions_dict) for `username` in `tenant_id`
+    (default: the request's current tenant), or None when they are not a member.
+    Raw SQL: tenant_memberships/users are install-global tables."""
+    if not username:
+        return None
+    tid = current_tenant() if tenant_id is None else int(tenant_id)
+    row = db.execute(text(
+        "SELECT u.id, m.role, m.permissions FROM tenant_memberships m "
+        "JOIN users u ON u.id = m.user_id "
+        "WHERE u.username = :u AND m.tenant_id = :t"),
+        {"u": username, "t": tid}).fetchone()
+    if not row:
+        return None
+    return int(row[0]), (row[1] or "viewer"), (row[2] or {})
+
+
+def effective_permissions(db: Session, username: Optional[str],
+                          tenant_id: Optional[int] = None) -> Optional[dict]:
+    """The caller's effective permission map for `tenant_id`, or None when they
+    hold no membership there."""
+    m = membership_for(db, username, tenant_id)
+    if not m:
+        return None
+    return resolve_membership_permissions(m[2], m[1])
 
 
 def get_user_permissions(username: Optional[str]) -> dict:
+    """Effective permissions for the request's current tenant. A missing
+    membership (or an unauthenticated caller) grants nothing."""
     if not username:
-        return resolve_permissions(None)
+        return denied_permissions()
     db = SessionLocal()
     try:
-        return resolve_permissions(get_user(db, username))
+        return effective_permissions(db, username) or denied_permissions()
     finally:
         db.close()
 
@@ -568,10 +627,12 @@ def _is_self_service(request: Request) -> bool:
 
 
 def require_section(section: str):
-    """Dependency factory: caller must be authenticated AND able to read `section`."""
+    """Dependency factory: caller must be authenticated AND, through their
+    membership in the request's tenant, able to read `section`. The Bearer
+    api_token principal is install-wide and skips this gate."""
     async def checker(request: Request, authorization: Optional[str] = Header(None)):
         principal = require_api_auth(request, authorization)
-        if principal in ("admin", "api_token"):
+        if principal == "api_token":
             return principal
         # Self-service account endpoints (change password, 2FA) are for every user
         if section == "users" and _is_self_service(request):
@@ -584,10 +645,11 @@ def require_section(section: str):
 
 
 def require_section_write(section: str):
-    """Dependency factory: on top of section read access, non-admins need write=true."""
+    """Dependency factory: on top of section read access, the membership needs
+    write=true for mutating methods. The api_token principal is install-wide."""
     async def checker(request: Request, authorization: Optional[str] = Header(None)):
         principal = await require_section(section)(request, authorization)
-        if principal in ("admin", "api_token"):
+        if principal == "api_token":
             return principal
         if section == "users" and _is_self_service(request):
             return principal

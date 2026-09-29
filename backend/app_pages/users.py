@@ -9,6 +9,7 @@ from datetime import datetime
 
 import base64
 import io
+import json
 import secrets
 
 import pyotp
@@ -68,6 +69,27 @@ def _audit(username, action, entity="user", entity_id="", detail=None, request=N
     from audit_logger import audit_event
     audit_event(username, action, entity, entity_id, detail,
                 _client_ip(request) if request is not None else "")
+
+
+def _require_platform_admin(request: Request) -> str:
+    """Phase 2A: the install-wide user plane (co-located 2FA/password reset,
+    global enable/disable) is the platform operator's, not a workspace's.
+    Membership authority lives in /api/members."""
+    caller, is_admin = get_caller(request)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Platform operator only")
+    return caller or "api_token"
+
+
+def _sync_membership_permissions(db: Session, user_id: int, permissions) -> None:
+    """Mirror a users.permissions write onto the user's membership in the
+    current tenant, where phase 2A reads authority from."""
+    from tenant_context import current_tenant
+    db.execute(text(
+        "UPDATE tenant_memberships SET permissions = CAST(:p AS JSONB) "
+        "WHERE user_id = :u AND tenant_id = :t"),
+        {"p": json.dumps(permissions) if permissions is not None else None,
+         "u": int(user_id), "t": current_tenant()})
 
 
 def _other_active_admins(db: Session, user_obj: UserORM) -> int:
@@ -165,9 +187,7 @@ def totp_disable(data: TotpDisableRequest, request: Request, db: Session = Depen
 
 @router.post("/{user_id}/totp/reset")
 def admin_totp_reset(user_id: int, request: Request, db: Session = Depends(get_db)):
-    caller, is_admin = get_caller(request)
-    if not is_admin:
-        raise HTTPException(status_code=403, detail="Admin only")
+    caller = _require_platform_admin(request)
     user_obj = db.query(UserORM).filter(UserORM.id == user_id).first()
     if not user_obj:
         raise HTTPException(status_code=404, detail="User not found")
@@ -250,10 +270,8 @@ def revoke_my_session(session_id: str, request: Request, db: Session = Depends(g
 
 @router.get("/{user_id}/sessions")
 def admin_user_sessions(user_id: int, request: Request, db: Session = Depends(get_db)):
-    """Admin view of another user's active sessions."""
-    caller, is_admin = get_caller(request)
-    if not is_admin:
-        raise HTTPException(status_code=403, detail="Admin only")
+    """Platform-operator view of another user's active sessions."""
+    _require_platform_admin(request)
     user_obj = db.query(UserORM).filter(UserORM.id == user_id).first()
     if not user_obj:
         raise HTTPException(status_code=404, detail="User not found")
@@ -264,13 +282,17 @@ def admin_user_sessions(user_id: int, request: Request, db: Session = Depends(ge
 # ====== List all users ======
 
 @router.get("/", response_model=List[UserOut])
-def get_users(db: Session = Depends(get_db)):
+def get_users(request: Request, db: Session = Depends(get_db)):
+    # Install-wide user list — platform operator only. Workspace members are
+    # listed per tenant by /api/members.
+    _require_platform_admin(request)
     return db.query(UserORM).order_by(UserORM.id.asc()).all()
 
 # ====== Create a user ======
 
 @router.post("/")
 def create_user(user: UserCreateUpdate, request: Request, db: Session = Depends(get_db)):
+    _require_platform_admin(request)
     if not user.password:
         raise HTTPException(status_code=400, detail="Password is required")
 
@@ -293,13 +315,17 @@ def create_user(user: UserCreateUpdate, request: Request, db: Session = Depends(
         db.commit()
         db.refresh(new_user)
         # Multi-tenancy: a user is only visible in a workspace through a
-        # membership. A new user joins the workspace the creating admin is in.
+        # membership. A new user joins the workspace the creating admin is in,
+        # and its permissions seed the membership (phase 2A reads authority
+        # from the membership, not the users row).
         from tenant_context import current_tenant
         db.execute(text(
             "INSERT INTO tenant_memberships (user_id, tenant_id, role, permissions) "
-            "VALUES (:u, :t, :r, NULL) ON CONFLICT (user_id, tenant_id) DO NOTHING"),
+            "VALUES (:u, :t, :r, CAST(:p AS JSONB)) "
+            "ON CONFLICT (user_id, tenant_id) DO NOTHING"),
             {"u": new_user.id, "t": current_tenant(),
-             "r": "admin" if new_user.is_admin else "editor"})
+             "r": "admin" if new_user.is_admin else "editor",
+             "p": json.dumps(new_user.permissions) if new_user.permissions is not None else None})
         db.commit()
         _audit(user.username, "user_created", "user", user.username, request=request)
         return {"message": "User created", "id": new_user.id}
@@ -315,6 +341,7 @@ def create_user(user: UserCreateUpdate, request: Request, db: Session = Depends(
 
 @router.patch("/{user_id}")
 def update_user(user_id: int, user: UserCreateUpdate, request: Request, db: Session = Depends(get_db)):
+    _require_platform_admin(request)
     user_obj = db.query(UserORM).filter(UserORM.id == user_id).first()
     if not user_obj:
         raise HTTPException(status_code=404, detail="User not found")
@@ -360,6 +387,9 @@ def update_user(user_id: int, user: UserCreateUpdate, request: Request, db: Sess
         user_obj.permissions = user.permissions
         changes["permissions"] = user.permissions
 
+    if user.clear_permissions or user.permissions is not None:
+        _sync_membership_permissions(db, user_obj.id, user_obj.permissions)
+
     db.commit()
     db.refresh(user_obj)
     _audit(user_obj.username, "user_updated", "user", user_obj.username,
@@ -370,6 +400,7 @@ def update_user(user_id: int, user: UserCreateUpdate, request: Request, db: Sess
 
 @router.delete("/{user_id}")
 def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
+    _require_platform_admin(request)
     user_obj = db.query(UserORM).filter(UserORM.id == user_id).first()
     if not user_obj:
         raise HTTPException(status_code=404, detail="User not found")

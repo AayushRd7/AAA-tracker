@@ -8545,6 +8545,232 @@ print("ESCAPED-OK")
     check("isolation: tenant B rows cleaned up",
           pg_scalar(f"SELECT count(*) FROM campaigns WHERE tenant_id = {int(mt_b_tenant)}") == "0")
 
+    # =====================================================================
+    print("== Multi-tenancy phase 2A: roles, permissions, members ==")
+    # Authority comes from the *membership in the current tenant*, not the
+    # users row: a viewer cannot write while the same user as editor can, and
+    # the same user can differ per tenant. A tenant's members are managed from
+    # inside that tenant; users.is_admin is only the platform-operator flag.
+    rp_pid = os.getpid()
+
+    def rp_login(username, password="smokepass1"):
+        sess = requests.Session()
+        sess.verify = not INSECURE
+        rr = sess.post(f"{api}/login", json={"username": username, "password": password})
+        check(f"phase2: login {username}", rr.status_code == 200, rr.text[:120])
+        return sess
+
+    def rp_campaign_payload(alias, url="https://example.com/rp"):
+        return {"name": alias, "alias": alias, "type": "campaign", "status": "active",
+                "redirect_mode": "weight",
+                "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                                      "schema": "redirect", "redirect_url": url,
+                                      "weight": 100, "filters": []}],
+                           "postbacks": [], "fallback_url": url}}
+
+    # --- a workspace T with one member per role ---
+    r = s.post(f"{api}/tenants/", json={"name": f"RP Tenant {rp_pid}",
+                                        "slug": f"rp-{rp_pid}"})
+    rp_t = (r.json() or {}).get("tenant_id")
+    check("phase2: workspace T provisioned", r.status_code == 200 and bool(rp_t), r.text[:150])
+
+    rp_owner = f"rp-owner-{rp_pid}"
+    rp_admin = f"rp-admin-{rp_pid}"
+    rp_editor = f"rp-editor-{rp_pid}"
+    rp_viewer = f"rp-viewer-{rp_pid}"
+    rp_pa = f"rp-pa-{rp_pid}"           # platform operator, but only a viewer in T
+    rp_nobody = f"rp-nobody-{rp_pid}"   # platform operator with no membership
+    rp_multi = f"rp-multi-{rp_pid}"     # editor in tenant 1, viewer in T
+
+    for uname, role in ((rp_owner, "owner"), (rp_admin, "admin"),
+                        (rp_editor, "editor"), (rp_viewer, "viewer")):
+        r = s.post(f"{api}/members/", params={"tenant_id": rp_t},
+                   json={"username": uname, "email": f"{uname}@example.com",
+                         "password": "smokepass1", "role": role})
+        check(f"phase2: new {role} member created", r.status_code == 200, r.text[:200])
+    r = s.post(f"{api}/members/", params={"tenant_id": rp_t},
+               json={"username": rp_pa, "email": f"{rp_pa}@example.com",
+                     "password": "smokepass1", "role": "viewer"})
+    check("phase2: platform user seeded as viewer", r.status_code == 200, r.text[:200])
+    r = s.post(f"{api}/members/", params={"tenant_id": rp_t},
+               json={"username": rp_nobody, "email": f"{rp_nobody}@example.com",
+                     "password": "smokepass1", "role": "editor"})
+    check("phase2: transient member created", r.status_code == 200, r.text[:200])
+
+    # An EXISTING user joins T by username (the other half of add-member).
+    r = s.post(f"{api}/users/", json={"username": rp_multi, "password": "smokepass1",
+                                      "email": f"{rp_multi}@example.com"})
+    check("phase2: existing user created (editor in tenant 1)", r.status_code == 200, r.text[:200])
+    r = s.post(f"{api}/members/", params={"tenant_id": rp_t},
+               json={"username": rp_multi, "role": "viewer"})
+    check("phase2: existing user joined T as viewer", r.status_code == 200, r.text[:200])
+
+    r = s.get(f"{api}/members/", params={"tenant_id": rp_t})
+    rp_members = (r.json() or {}).get("members") or []
+    rp_ids = {m["username"]: m["user_id"] for m in rp_members}
+    check("phase2: member list carries role + platform flag",
+          r.status_code == 200 and len(rp_members) == 7
+          and all(k in rp_ids for k in (rp_owner, rp_admin, rp_editor, rp_viewer,
+                                        rp_pa, rp_nobody, rp_multi))
+          and next(m for m in rp_members if m["username"] == rp_owner)["role"] == "owner",
+          r.text[:250])
+
+    # Promote the two platform operators (global flag — not workspace authority).
+    for uname in (rp_pa, rp_nobody):
+        r = s.patch(f"{api}/users/{rp_ids[uname]}", json={"username": uname, "is_admin": True})
+        check(f"phase2: {uname} promoted to platform operator", r.status_code == 200, r.text[:150])
+
+    sm = rp_login(rp_multi)
+    se = rp_login(rp_editor)
+    sa = rp_login(rp_admin)
+    so = rp_login(rp_owner)
+    sv = rp_login(rp_viewer)
+    spa = rp_login(rp_pa)
+
+    # --- resolution is per tenant, not per user ---
+    r = sm.post(f"{api}/campaigns/", json=rp_campaign_payload(f"smoke-rp-t1-{rp_pid}"))
+    check("phase2: multi-tenant user writes in tenant 1 (editor)", r.status_code == 200, r.text[:200])
+    r = sm.post(f"{api}/tenants/switch", json={"tenant_id": rp_t})
+    check("phase2: multi-tenant user switches into T", r.status_code == 200, r.text[:150])
+    r = sm.post(f"{api}/campaigns/", json=rp_campaign_payload(f"smoke-rp-t2-{rp_pid}"))
+    check("phase2: same user is read-only in T (viewer)", r.status_code == 403, str(r.status_code))
+
+    # --- viewer cannot write, editor can ---
+    r = sv.get(f"{api}/campaigns/")
+    check("phase2: viewer reads content", r.status_code == 200, r.text[:120])
+    r = sv.post(f"{api}/campaigns/", json=rp_campaign_payload(f"smoke-rp-v-{rp_pid}"))
+    check("phase2: viewer cannot write (403)", r.status_code == 403, str(r.status_code))
+    r = se.post(f"{api}/campaigns/", json=rp_campaign_payload(f"smoke-rp-e-{rp_pid}"))
+    check("phase2: editor can write content", r.status_code == 200, r.text[:200])
+
+    # --- an editor cannot manage members; an admin can, within limits ---
+    r = se.get(f"{api}/members/")
+    check("phase2: editor cannot list members (403)", r.status_code == 403, str(r.status_code))
+    r = se.post(f"{api}/members/", json={"username": rp_viewer, "role": "viewer"})
+    check("phase2: editor cannot add a member (403)", r.status_code == 403, str(r.status_code))
+    r = se.put(f"{api}/members/{rp_ids[rp_viewer]}", json={"role": "admin"})
+    check("phase2: editor cannot change a role (403)", r.status_code == 403, str(r.status_code))
+    r = se.delete(f"{api}/members/{rp_ids[rp_viewer]}")
+    check("phase2: editor cannot remove a member (403)", r.status_code == 403, str(r.status_code))
+
+    r = sa.get(f"{api}/members/")
+    check("phase2: admin lists workspace members",
+          r.status_code == 200 and len((r.json() or {}).get("members") or []) == 7, r.text[:200])
+    r = sa.put(f"{api}/members/{rp_ids[rp_editor]}", json={"role": "viewer"})
+    check("phase2: admin changes a member role", r.status_code == 200, r.text[:150])
+    r = sa.put(f"{api}/members/{rp_ids[rp_editor]}", json={"role": "editor"})
+    check("phase2: admin restores a member role", r.status_code == 200, r.text[:150])
+    r = sa.put(f"{api}/members/{rp_ids[rp_viewer]}", json={"role": "owner"})
+    check("phase2: admin cannot promote to owner (400)", r.status_code == 400, str(r.status_code))
+    r = sa.put(f"{api}/members/{rp_ids[rp_owner]}", json={"role": "admin"})
+    check("phase2: admin cannot demote the owner (400)", r.status_code == 400, str(r.status_code))
+    r = sa.delete(f"{api}/members/{rp_ids[rp_owner]}")
+    check("phase2: admin cannot remove the owner (400)", r.status_code == 400, str(r.status_code))
+    r = sa.put(f"{api}/members/{rp_ids[rp_admin]}", json={"role": "editor"})
+    check("phase2: admin cannot change their own role (400)", r.status_code == 400, str(r.status_code))
+
+    # --- a non-platform admin cannot reach another workspace's members ---
+    r = sa.get(f"{api}/members/", params={"tenant_id": 1})
+    check("phase2: admin cannot list another workspace's members",
+          r.status_code == 403, str(r.status_code))
+    r = sa.post(f"{api}/members/", params={"tenant_id": 1},
+                json={"username": rp_viewer, "role": "viewer"})
+    check("phase2: admin's ?tenant_id= is refused (403)", r.status_code == 403, str(r.status_code))
+    r = sa.put(f"{api}/members/{rp_ids[rp_viewer]}", params={"tenant_id": 1}, json={"role": "admin"})
+    check("phase2: admin cannot modify another workspace's member",
+          r.status_code == 403, str(r.status_code))
+    r = sa.delete(f"{api}/members/{rp_ids[rp_viewer]}", params={"tenant_id": 1})
+    check("phase2: admin cannot remove another workspace's member",
+          r.status_code == 403, str(r.status_code))
+
+    # --- the platform flag does not grant authority inside a viewer membership ---
+    r = spa.get(f"{api}/campaigns/")
+    check("phase2: platform operator reads as their membership allows", r.status_code == 200,
+          r.text[:120])
+    r = spa.post(f"{api}/campaigns/", json=rp_campaign_payload(f"smoke-rp-pa-{rp_pid}"))
+    check("phase2: platform flag grants no write beyond the viewer membership",
+          r.status_code == 403, str(r.status_code))
+
+    # --- ownership transfer is explicit and single-owner ---
+    r = so.post(f"{api}/members/{rp_ids[rp_admin]}/transfer-ownership")
+    check("phase2: owner transfers ownership", r.status_code == 200, r.text[:150])
+    r = s.get(f"{api}/members/", params={"tenant_id": rp_t})
+    rp_roles = {m["username"]: m["role"] for m in (r.json() or {}).get("members", [])}
+    check("phase2: target is owner and previous owner steps down to admin",
+          rp_roles.get(rp_admin) == "owner" and rp_roles.get(rp_owner) == "admin", str(rp_roles))
+    r = so.post(f"{api}/members/{rp_ids[rp_owner]}/transfer-ownership")
+    check("phase2: a demoted admin cannot transfer ownership (403)",
+          r.status_code in (400, 403), str(r.status_code))
+    r = sa.post(f"{api}/members/{rp_ids[rp_owner]}/transfer-ownership")
+    check("phase2: the new owner transfers ownership back", r.status_code == 200, r.text[:150])
+
+    # --- removing a member removes the membership only ---
+    r = sa.delete(f"{api}/members/{rp_ids[rp_multi]}")
+    check("phase2: admin removes a membership", r.status_code == 200, r.text[:150])
+    check("phase2: the global user row survives",
+          pg_scalar(f"SELECT count(*) FROM users WHERE username = '{rp_multi}'") == "1")
+    check("phase2: the removed member's sessions survive",
+          pg_scalar(f"SELECT count(*) FROM auth_sessions WHERE username = '{rp_multi}'") != "0")
+    check("phase2: the T membership itself is gone",
+          pg_scalar("SELECT count(*) FROM tenant_memberships m JOIN users u ON u.id = m.user_id "
+                    f"WHERE u.username = '{rp_multi}' AND m.tenant_id = {int(rp_t)}") == "0")
+    rp_m2 = rp_login(rp_multi)
+    r = rp_m2.get(f"{api}/campaigns/")
+    check("phase2: the removed member still reaches their other workspace",
+          r.status_code == 200, r.text[:120])
+
+    # --- a platform operator with NO membership has no tenant access ---
+    r = s.delete(f"{api}/members/{rp_ids[rp_nobody]}", params={"tenant_id": rp_t})
+    check("phase2: platform removes a member from T", r.status_code == 200, r.text[:150])
+    rp_nb = rp_login(rp_nobody)
+    r = rp_nb.get(f"{api}/campaigns/")
+    check("phase2: platform flag alone gives no tenant access (403)",
+          r.status_code == 403, str(r.status_code))
+
+    # --- seat limit ---
+    r = s.post(f"{api}/tenants/", json={"name": f"RP Seats {rp_pid}",
+                                        "slug": f"rp-seats-{rp_pid}"})
+    rp_seats = (r.json() or {}).get("tenant_id")
+    check("phase2: seats workspace provisioned", r.status_code == 200 and bool(rp_seats), r.text[:150])
+    pg_exec(f"UPDATE tenants SET seats = 2 WHERE id = {int(rp_seats)}")
+    for i in (1, 2):
+        r = s.post(f"{api}/members/", params={"tenant_id": rp_seats},
+                   json={"username": f"rp-seat{i}-{rp_pid}",
+                         "email": f"rp-seat{i}-{rp_pid}@example.com",
+                         "password": "smokepass1", "role": "editor"})
+        check(f"phase2: seat {i} of 2 filled", r.status_code == 200, r.text[:150])
+    r = s.post(f"{api}/members/", params={"tenant_id": rp_seats},
+               json={"username": f"rp-seat3-{rp_pid}",
+                     "email": f"rp-seat3-{rp_pid}@example.com",
+                     "password": "smokepass1", "role": "editor"})
+    check("phase2: a 2-seat workspace refuses the third member (400)",
+          r.status_code == 400, str(r.status_code))
+    pg_exec(f"UPDATE tenants SET seats = NULL WHERE id = {int(rp_seats)}")
+    r = s.post(f"{api}/members/", params={"tenant_id": rp_seats},
+               json={"username": f"rp-seat3-{rp_pid}",
+                     "email": f"rp-seat3-{rp_pid}@example.com",
+                     "password": "smokepass1", "role": "editor"})
+    check("phase2: seats NULL is unlimited", r.status_code == 200, r.text[:150])
+
+    check("phase2: member mutations are audit-logged",
+          pg_scalar("SELECT count(*) FROM audit_log WHERE tenant_id = 1 AND action IN "
+                    "('member_added','member_updated','member_removed',"
+                    "'ownership_transferred')") != "0")
+
+    # --- phase 2A self-cleanup ---
+    pg_exec("DELETE FROM campaigns WHERE alias LIKE 'smoke-rp-%'")
+    pg_exec(f"DELETE FROM campaigns WHERE tenant_id IN ({int(rp_t)}, {int(rp_seats)})")
+    pg_exec("DELETE FROM tenant_memberships WHERE user_id IN "
+            f"(SELECT id FROM users WHERE username LIKE 'rp-%-{rp_pid}')")
+    pg_exec(f"DELETE FROM auth_sessions WHERE username LIKE 'rp-%-{rp_pid}'")
+    pg_exec(f"DELETE FROM users WHERE username LIKE 'rp-%-{rp_pid}'")
+    pg_exec(f"DELETE FROM tenants WHERE id IN ({int(rp_t)}, {int(rp_seats)})")
+    check("phase2: test tenants cleaned up",
+          pg_scalar(f"SELECT count(*) FROM tenants WHERE id IN "
+                    f"({int(rp_t)}, {int(rp_seats)})") == "0")
+    check("phase2: test users cleaned up",
+          pg_scalar(f"SELECT count(*) FROM users WHERE username LIKE 'rp-%-{rp_pid}'") == "0")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

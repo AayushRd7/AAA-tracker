@@ -11,7 +11,6 @@ from schemas import Filters
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case, text
 from db import get_db
-from models.user import UserORM
 from models.campaigns import CampaignORM
 
 from pydantic import BaseModel
@@ -214,16 +213,16 @@ def _click_scope_campaign_ids(request: Request, db: Session) -> Optional[List[in
     """campaigns:'own' parity with reports.py: scoped callers are limited to
     clicks on campaigns they own. Returns None for admins and unscoped users;
     a (possibly empty) campaign-id list for scoped ones."""
-    from auth import get_caller
+    from auth import get_caller, membership_for
     username, is_admin = get_caller(request)
     if is_admin or not username:
         return None
-    user = db.query(UserORM).filter(UserORM.username == username).first()
-    raw = (user.permissions or {}) if user else {}
-    if raw.get("campaigns") != "own":
+    member = membership_for(db, username)
+    raw = member[2] if member else {}
+    if raw.get("campaigns") != "own" or not member:
         return None
     return [r[0] for r in db.query(CampaignORM.id)
-                    .filter(CampaignORM.owner_id == user.id).all()]
+                    .filter(CampaignORM.owner_id == member[0]).all()]
 
 
 def _apply_click_scope(f: dict, scope: Optional[List[int]]):

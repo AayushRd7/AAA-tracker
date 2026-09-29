@@ -44,24 +44,23 @@ def global_search(request: Request, q: str = "", db: Session = Depends(get_db)):
     if len(term) < 2:
         raise HTTPException(status_code=400, detail="Query must be at least 2 characters")
 
-    from auth import get_caller
+    from auth import get_caller, membership_for, resolve_membership_permissions
     caller, is_admin = get_caller(request)
-    perms = {}
-    if caller and not is_admin:
-        row = db.execute(text("SELECT permissions FROM users WHERE username = :u"),
-                         {"u": caller}).fetchone()
-        raw = row[0] if row and row[0] else {}
-        perms = raw.get("sections") or {}
-        own_campaigns = raw.get("campaigns") == "own"
-    else:
-        own_campaigns = False
+    own_campaigns = False
+    caller_perms = None
+    if caller:
+        # Authority comes from the membership in the current tenant, not the
+        # users row: a platform operator with no membership here sees nothing.
+        member = membership_for(db, caller)
+        if member:
+            raw = member[2] or {}
+            own_campaigns = raw.get("campaigns") == "own"
+            caller_perms = resolve_membership_permissions(raw, member[1])
 
     def allowed(section: str) -> bool:
-        # Mirror resolve_permissions defaults: sections absent from the user's
-        # permission map default to open EXCEPT admin-only ones (domains,
-        # settings, users) which default to denied.
-        from auth import ADMIN_ONLY_SECTIONS
-        return is_admin or perms.get(section, section not in ADMIN_ONLY_SECTIONS)
+        if caller is None:
+            return True  # install-wide Bearer api_token principal
+        return bool(caller_perms and caller_perms["sections"].get(section, False))
 
     like = f"%{_escape_like(term)}%"
     out = {}

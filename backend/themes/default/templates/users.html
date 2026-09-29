@@ -4,17 +4,128 @@
         <v-row align="center" class="mb-4">
             <v-col>
                 <div class="page-title">Users</div>
-                <div class="page-subtitle">Manage dashboard users</div>
+                <div class="page-subtitle">Workspace members and platform users</div>
             </v-col>
             <v-col class="d-flex justify-end" cols="auto">
-                <v-btn color="primary" elevation="0" @click="openCreate">
+                <v-btn v-if="isPlatformAdmin" color="primary" elevation="0" @click="openCreate">
                     <v-icon small class="mr-1">mdi-plus</v-icon>
                     Add user
                 </v-btn>
             </v-col>
         </v-row>
 
-        <v-dialog v-model="dialog">
+        <!-- Workspace members: the current tenant's memberships. Authority
+             comes from the membership role, so a viewer/editor sees no controls. -->
+        <v-row dense>
+            <v-col>
+                <v-card>
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-account-multiple-outline</v-icon>
+                        Workspace members
+                        <span v-if="membersMeta.seats !== null && membersMeta.seats !== undefined"
+                              class="caption grey--text ml-2">({{ membersMeta.member_count }} / {{ membersMeta.seats }} seats)</span>
+                        <v-spacer></v-spacer>
+                        <v-btn color="primary" elevation="0" small
+                               :disabled="!canManageMembers" @click="openAddMember">
+                            <v-icon small class="mr-1">mdi-account-plus-outline</v-icon>
+                            Add member
+                        </v-btn>
+                    </v-card-title>
+                    <v-card-text>
+                        <div class="caption grey--text mb-2">
+                            Members of this workspace. Roles: owner (everything incl. ownership),
+                            admin (everything except ownership), editor (content write), viewer (read-only).
+                        </div>
+                        <v-data-table
+                                :headers="memberHeaders"
+                                :items="members"
+                                dense
+                                :loading="loadingMembers"
+                                :items-per-page="10"
+                                :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                        >
+                            <template v-slot:item.role="{ item }">
+                                <v-select v-if="canManageMembers && item.role !== 'owner'"
+                                          :items="assignableRoles"
+                                          :value="item.role"
+                                          dense hide-details outlined
+                                          style="max-width: 150px"
+                                          @change="changeRole(item, $event)"></v-select>
+                                <span v-else class="status-chip"
+                                      :class="item.role === 'owner' ? 'status-chip--success' : 'status-chip--neutral'">{{ item.role }}</span>
+                            </template>
+                            <template v-slot:item.is_platform_admin="{ item }">
+                                <span v-if="item.is_platform_admin" class="status-chip status-chip--success">Platform</span>
+                                <span v-else class="grey--text">—</span>
+                            </template>
+                            <template v-slot:item.last_login="{ item }">
+                                {{ item.last_login ? $formatDate(item.last_login) : '—' }}
+                            </template>
+                            <template v-slot:item.created_at="{ item }">
+                                {{ $formatDate(item.created_at) }}
+                            </template>
+                            <template v-slot:item.actions="{ item }">
+                                <v-tooltip bottom v-if="canManageMembers && item.role !== 'owner'">
+                                    <template v-slot:activator="{ on, attrs }">
+                                        <v-btn icon small color="primary" v-bind="attrs" v-on="on"
+                                               @click="transferOwnership(item)">
+                                            <v-icon small>mdi-crown-outline</v-icon>
+                                        </v-btn>
+                                    </template>
+                                    <span>Make owner</span>
+                                </v-tooltip>
+                                <v-tooltip bottom v-if="canManageMembers && item.role !== 'owner'">
+                                    <template v-slot:activator="{ on, attrs }">
+                                        <v-btn icon small color="red" v-bind="attrs" v-on="on"
+                                               @click="removeMember(item)">
+                                            <v-icon small>mdi-account-remove-outline</v-icon>
+                                        </v-btn>
+                                    </template>
+                                    <span>Remove from workspace</span>
+                                </v-tooltip>
+                                <span v-if="!canManageMembers || item.role === 'owner'"
+                                      class="caption grey--text">—</span>
+                            </template>
+                            <template v-slot:no-data>
+                                <div class="empty-state">
+                                    <v-icon>mdi-account-multiple-outline</v-icon>
+                                    <div class="mt-2">No members</div>
+                                </div>
+                            </template>
+                        </v-data-table>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <!-- Add-member dialog: an existing user gains a membership, or a brand
+             new user is created with one. -->
+        <v-dialog v-model="addMemberDialog" max-width="520">
+            <v-card>
+                <v-card-title><span class="text-h6">Add workspace member</span></v-card-title>
+                <v-card-text>
+                    <v-btn-toggle v-model="addForm.mode" mandatory dense class="mb-4">
+                        <v-btn small value="existing">Existing user</v-btn>
+                        <v-btn small value="new">New user</v-btn>
+                    </v-btn-toggle>
+                    <v-text-field label="Username" v-model="addForm.username" outlined dense></v-text-field>
+                    <template v-if="addForm.mode === 'new'">
+                        <v-text-field label="Email" v-model="addForm.email" outlined dense></v-text-field>
+                        <v-text-field label="Password" v-model="addForm.password" type="password"
+                                      outlined dense></v-text-field>
+                    </template>
+                    <v-select label="Role" :items="assignableRoles" v-model="addForm.role"
+                              outlined dense></v-select>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="addMemberDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" @click="saveMember">Add</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="dialog" v-if="isPlatformAdmin">
             <v-card class="dialog-md">
                 <v-card-title>
                     <span class="text-h6">{{ isEdit ? 'Edit user' : 'Add user' }}</span>
@@ -116,9 +227,16 @@
         </v-dialog>
 
 
-        <v-row dense class="mt-4">
+        <!-- Platform operators only: the install-wide user list. 2FA reset,
+             password change and enable/disable stay global because sessions and
+             2FA are user-level, not workspace-level. -->
+        <v-row dense class="mt-4" v-if="isPlatformAdmin">
             <v-col>
                 <v-card>
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-account-supervisor-outline</v-icon>
+                        Platform users
+                    </v-card-title>
                     <v-data-table v-col-resize:users="headers"
                             :headers="headers"
                             :items="users"
@@ -303,6 +421,22 @@
                 ],
                 users: [],
                 loadingUsers: false,
+                isPlatformAdmin: false,
+                // Workspace members (phase 2A)
+                members: [],
+                loadingMembers: false,
+                membersMeta: {seats: null, member_count: 0, caller_role: '', can_manage: false},
+                memberHeaders: [
+                    {text: 'Username', value: 'username'},
+                    {text: 'Email', value: 'email'},
+                    {text: 'Role', value: 'role'},
+                    {text: 'Platform', value: 'is_platform_admin'},
+                    {text: 'Last login', value: 'last_login'},
+                    {text: 'Created', value: 'created_at'},
+                    {text: 'Actions', value: 'actions', sortable: false},
+                ],
+                addMemberDialog: false,
+                addForm: {mode: 'existing', username: '', email: '', password: '', role: 'editor'},
                 mySessions: [],
                 loadingSessions: false,
                 sessionsDialog: false,
@@ -348,14 +482,143 @@
             hasOtherSessions() {
                 return this.mySessions.some(s => !s.current);
             },
+            // Ownership is never assigned by the role picker (server rejects it);
+            // it moves through the explicit "Make owner" action.
+            assignableRoles() {
+                return ['admin', 'editor', 'viewer'];
+            },
+            canManageMembers() {
+                return !!this.membersMeta.can_manage;
+            },
         },
         mounted() {
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
-            this.loadUsers();
+            this.loadMe();
+            this.loadMembers();
             this.loadMySessions();
             this.$root.$on('load-users', this.loadUsers);
         },
         methods: {
+            loadMe() {
+                fetch("/backend/api/users/me", {credentials: "include"})
+                    .then(res => res.ok ? res.json() : {})
+                    .then(data => {
+                        this.isPlatformAdmin = !!data.is_admin;
+                        if (this.isPlatformAdmin) this.loadUsers();
+                    })
+                    .catch(() => {});
+            },
+            loadMembers() {
+                this.loadingMembers = true;
+                fetch("/backend/api/members/", {credentials: "include"})
+                    .then(res => res.ok ? res.json() : {})
+                    .then(data => {
+                        this.members = data.members || [];
+                        this.membersMeta = {
+                            seats: data.seats === undefined ? null : data.seats,
+                            member_count: data.member_count || 0,
+                            caller_role: data.caller_role || '',
+                            can_manage: !!data.can_manage,
+                        };
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.loadingMembers = false;
+                    });
+            },
+            openAddMember() {
+                this.addForm = {mode: 'existing', username: '', email: '', password: '', role: 'editor'};
+                this.addMemberDialog = true;
+            },
+            saveMember() {
+                const f = this.addForm;
+                if (!f.username) {
+                    this.$root.$emit("show-message", {type: "error", text: "Username is required."});
+                    return;
+                }
+                if (f.mode === 'new' && !f.password) {
+                    this.$root.$emit("show-message", {type: "error", text: "Password is required for a new user."});
+                    return;
+                }
+                const payload = {username: f.username, role: f.role};
+                if (f.mode === 'new') {
+                    payload.email = f.email;
+                    payload.password = f.password;
+                }
+                fetch("/backend/api/members/", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(payload),
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(data.detail || "Failed to add member");
+                        this.addMemberDialog = false;
+                        this.$root.$emit("show-message", {type: "success", text: "Member added"});
+                        this.loadMembers();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    });
+            },
+            changeRole(member, role) {
+                if (!role || role === member.role) return;
+                fetch(`/backend/api/members/${member.user_id}`, {
+                    method: "PUT",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({role: role}),
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(data.detail || "Failed to update role");
+                        this.$root.$emit("show-message", {type: "success", text: `Role updated for ${member.username}`});
+                        this.loadMembers();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                        this.loadMembers();
+                    });
+            },
+            async removeMember(member) {
+                const ok = await this.$refs.confirm.open('Remove member',
+                    `Remove ${member.username} from this workspace? Their user account and other memberships are untouched.`, 'Remove');
+                if (!ok) return;
+                fetch(`/backend/api/members/${member.user_id}`, {
+                    method: "DELETE",
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(data.detail || "Failed to remove member");
+                        this.$root.$emit("show-message", {type: "success", text: "Member removed"});
+                        this.loadMembers();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    });
+            },
+            async transferOwnership(member) {
+                const ok = await this.$refs.confirm.open('Transfer ownership',
+                    `Make ${member.username} the owner of this workspace? You will be demoted to admin.`, 'Transfer');
+                if (!ok) return;
+                fetch(`/backend/api/members/${member.user_id}/transfer-ownership`, {
+                    method: "POST",
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(data.detail || "Failed to transfer ownership");
+                        this.$root.$emit("show-message", {type: "success", text: "Ownership transferred"});
+                        this.loadMembers();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    });
+            },
             loadUsers() {
                 this.loadingUsers = true;
                 fetch("/backend/api/users/", {

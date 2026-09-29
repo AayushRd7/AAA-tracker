@@ -64,33 +64,33 @@ def _client_ip(request: Request) -> str:
 
 
 def _owner_scope(request: Request, db: Session, query):
-    """G63/D1c: a non-admin whose permissions carry campaigns:'own' only sees
-    campaigns they own; everyone else (admins, default users) sees all."""
-    from auth import get_caller
+    """G63/D1c: a caller whose *membership* permissions carry campaigns:'own'
+    only sees campaigns they own; everyone else (admins, default users) sees all."""
+    from auth import get_caller, membership_for
     username, is_admin = get_caller(request)
     if is_admin or not username:
         return query
-    user = db.query(UserORM).filter(UserORM.username == username).first()
-    raw = (user.permissions or {}) if user else {}
-    if raw.get("campaigns") == "own":
-        query = query.filter(CampaignORM.owner_id == user.id)
+    member = membership_for(db, username)
+    raw = member[2] if member else {}
+    if raw.get("campaigns") == "own" and member:
+        query = query.filter(CampaignORM.owner_id == member[0])
     return query
 
 
 def _require_mutation_access(request: Request, db: Session, campaigns) -> None:
-    """G63/D1c: campaigns:'own' users may only mutate campaigns they own —
+    """G63/D1c: campaigns:'own' callers may only mutate campaigns they own —
     enforced on every mutation path (PUT/DELETE/clone/tags/bulk/import),
     not just list/export/metrics. Admins and regular users pass."""
-    from auth import get_caller
+    from auth import get_caller, membership_for
     username, is_admin = get_caller(request)
     if is_admin or not username:
         return
-    user = db.query(UserORM).filter(UserORM.username == username).first()
-    raw = (user.permissions or {}) if user else {}
-    if raw.get("campaigns") != "own":
+    member = membership_for(db, username)
+    raw = member[2] if member else {}
+    if raw.get("campaigns") != "own" or not member:
         return
     for campaign in campaigns:
-        if campaign is not None and campaign.owner_id != user.id:
+        if campaign is not None and campaign.owner_id != member[0]:
             raise HTTPException(status_code=403,
                                 detail="You can only modify your own campaigns")
 

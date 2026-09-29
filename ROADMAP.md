@@ -216,12 +216,17 @@ and its data is backfilled to it, so nothing changes for the existing deployment
 - [ ] the four `UPDATE settings … WHERE id` sites rely on a preceding tenant-scoped `SELECT … FOR UPDATE` rather than an inline predicate
 - [ ] a new tenant's campaign is unreachable until one of its domains exists (host-based resolution)
 
-### Phase 2 — per-tenant everything
-- [ ] settings document per tenant (each tenant gets its own rows; the shared "name" key becomes per-tenant)
-- [ ] permissions/roles per membership rather than per user (a user can be an editor in one tenant, viewer in another)
-- [ ] audit log, logs area and every report scoped and filtered by tenant
-- [ ] per-tenant CAPI/Meta connections, cost sync accounts and integration connections
-- [ ] plan/quota fields on the tenant (seat count, retention, feature flags)
+### Phase 2 — per-tenant everything (in progress)
+- [x] permissions/roles per membership rather than per user (owner | admin | editor | viewer with documented defaults; a user can be editor in one tenant and viewer in another) — shipped
+- [x] workspace member management: list/add/update/remove members, transfer ownership, seat limit, guardrails (no self-escalation, last owner protected)
+- [x] settings rows are already per-tenant (phase 1 composite unique); the audit log, logs area and reports are tenant-scoped
+- [x] plan/quota columns on the tenant (plan, seats, retention_days, features) with the seat limit enforced
+- [ ] seed a tenant's settings document on creation (currency, timezone, defaults)
+- [ ] per-tenant retention enforcement and a prune that iterates tenants (today it is pinned to tenant 1)
+- [ ] per-tenant bind secret (today tenant 1's is used)
+- [ ] background loops must iterate tenants (monitor, auto-rules, optimizer, insights, email reports, Meta cost sync) instead of only tenant 1
+- [ ] scope the install-wide API token to a tenant (it currently bypasses every gate)
+- [ ] per-tenant CAPI/Meta connection setup surfaced in the UI
 
 ### Phase 3 — onboarding, whitelabel, billing, sub-workspaces
 - [ ] self-serve signup + tenant onboarding (invite members, first campaign)

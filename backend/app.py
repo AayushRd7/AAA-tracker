@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, Depends
-from auth import require_section, require_section_write, resolve_session_tenant
+from auth import (require_api_auth, require_section, require_section_write,
+                  resolve_session_tenant)
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -361,6 +362,12 @@ def _ensure_tenant_schema(conn):
             created_at TIMESTAMP NOT NULL DEFAULT now(),
             updated_at TIMESTAMP NOT NULL DEFAULT now()
         )"""))
+    # Phase 2A plan fields: the seat limit now, retention/billing later.
+    _mig(conn, "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'")
+    _mig(conn, "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS seats INTEGER")
+    _mig(conn, "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS retention_days INTEGER")
+    _mig(conn, "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "
+               "features JSONB NOT NULL DEFAULT '{}'::jsonb")
     # Tenant #1 is this install.
     conn.execute(text("INSERT INTO tenants (id, name, slug) VALUES (1, 'Default', 'default') "
                       "ON CONFLICT DO NOTHING"))
@@ -751,6 +758,14 @@ app.include_router(workspace_router, prefix="/api/workspace", tags=["Workspace"]
 from app_pages.tenants import router as tenants_router
 app.include_router(tenants_router, prefix="/api/tenants", tags=["Tenants"],
                    dependencies=[Depends(require_section("dashboard"))])
+
+# Multi-tenancy phase 2A: workspace member management. Authenticated only at
+# the router level — each handler resolves authority from the caller's
+# membership role in the target tenant (owners/admins manage, platforms may
+# pass ?tenant_id=).
+from app_pages.members import router as members_router
+app.include_router(members_router, prefix="/api/members", tags=["Members"],
+                   dependencies=[Depends(require_api_auth)])
 
 
 # G52: minimal public view for shared reports — shell-less, token in the query
