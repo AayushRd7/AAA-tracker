@@ -160,7 +160,7 @@ def get_conversion_aggregates(db: Session, filters: dict, dimension: str,
 
 
 @router.post("/visits")
-async def get_visits(
+def get_visits(
         request: Request,
         filters: Filters,
         db: Session = Depends(get_db)
@@ -181,7 +181,7 @@ async def get_visits(
 
 
 @router.get("/live-clicks")
-async def live_clicks(request: Request, after: Optional[str] = None, limit: int = 20,
+def live_clicks(request: Request, after: Optional[str] = None, limit: int = 20,
                       db: Session = Depends(get_db)):
     """G51: raw live click feed. Latest rows first; ``after`` (ISO timestamp)
     polls for rows newer than the last seen one."""
@@ -302,7 +302,7 @@ class MetricsRequest(Filters):
 
 
 @router.post("/metrics")
-async def get_metrics(request: Request, body: MetricsRequest,
+def get_metrics(request: Request, body: MetricsRequest,
                       db: Session = Depends(get_db)):
     _require_iso_dates(body.date_from, body.date_to)
     try:
@@ -351,13 +351,13 @@ async def get_metrics(request: Request, body: MetricsRequest,
 
 
 @router.get("/dimensions")
-async def get_dimensions():
+def get_dimensions():
     """Available breakdown dimensions for the report builder."""
     return [{"key": k, "label": k.replace("_", " ")} for k in REPORT_DIMENSIONS]
 
 
 @router.post("/breakdown")
-async def get_breakdown(request: Request, body: ReportRequest, db: Session = Depends(get_db)):
+def get_breakdown(request: Request, body: ReportRequest, db: Session = Depends(get_db)):
     try:
         ch = request.state.ch
         dimensions = body.dimensions or ([body.dimension] if body.dimension else [])
@@ -462,7 +462,7 @@ async def get_breakdown(request: Request, body: ReportRequest, db: Session = Dep
 
 
 @router.post("/click-log")
-async def get_click_log_view(request: Request, filters: ClickLogFilters,
+def get_click_log_view(request: Request, filters: ClickLogFilters,
                              db: Session = Depends(get_db)):
     try:
         ch = request.state.ch
@@ -502,7 +502,7 @@ def _csv_safe(value):
 
 
 @router.post("/click-log/export")
-async def export_click_log(request: Request, filters: ClickLogFilters,
+def export_click_log(request: Request, filters: ClickLogFilters,
                            db: Session = Depends(get_db)):
     """CSV export of the click log with the same drill-down filters (no cap on
     the usual 500-row view — up to CLICK_LOG_EXPORT_MAX rows)."""
@@ -567,7 +567,7 @@ def _public_rate_limited(token: str) -> bool:
 
 
 @public_router.post("/public/report/{token}")
-async def public_shared_report(token: str, request: Request, db: Session = Depends(get_db)):
+def public_shared_report(token: str, request: Request, db: Session = Depends(get_db)):
     """Serve a shared saved report's breakdown data. No auth — the token IS
     the capability. Only the saved config's dimensions/filters are exposed."""
     if _public_rate_limited(token):
