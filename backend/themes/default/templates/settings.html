@@ -1149,10 +1149,11 @@
                                     <v-combobox
                                             label="Ad account IDs"
                                             v-model="settings.meta_ads.ad_account_ids"
+                                            :items="metaAdsAccountOptions"
                                             multiple chips small-chips deletable-chips
                                             :disabled="!settings.meta_ads.enabled"
                                             outlined dense
-                                            hint="Meta ad account ids (the numeric part of act_…)"
+                                            hint="Meta ad account ids (the numeric part of act_…). Connect Meta under Integrations to pick discovered accounts."
                                             persistent-hint
                                     ></v-combobox>
                                 </v-col>
@@ -1240,6 +1241,99 @@
                                 </div>
                             </div>
                             <pre v-if="metaAdsResult" class="caption mt-2">{{ metaAdsResult }}</pre>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+            </v-row>
+
+            <v-row>
+                <v-col cols="12">
+                    <v-card class="pa-4" id="integrations-card">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-connection</v-icon>
+                            Integrations
+                            <v-spacer></v-spacer>
+                            <v-chip v-if="integrationsConnectedCount" x-small color="green" dark>
+                                {{ integrationsConnectedCount }} connected
+                            </v-chip>
+                        </v-card-title>
+                        <v-card-text>
+                            <div class="caption grey--text mb-2">
+                                Connect an ad platform with OAuth so its ad accounts, datasets and
+                                campaigns can be picked here instead of pasted by hand. Meta is
+                                available now; the other platforms are placeholders. App
+                                credentials come from this deployment's environment — they are
+                                never entered in the UI.
+                            </div>
+                            <div v-for="row in integrationRows" :key="row.platform"
+                                 class="integration-row py-3"
+                                 :id="'integration-row-' + row.platform">
+                                <div class="d-flex align-center mb-2">
+                                    <strong>{{ row.label }}</strong>
+                                    <v-chip x-small class="ml-2" dark
+                                            :color="row.connected ? 'green' : (row.connect_available ? 'blue-grey' : 'grey')">
+                                        {{ row.connected ? 'connected'
+                                           : (!row.implemented ? 'coming soon'
+                                              : (!row.configured ? 'not configured by this deployment'
+                                                 : 'not connected')) }}
+                                    </v-chip>
+                                </div>
+                                <div class="d-flex align-center flex-wrap mb-2">
+                                    <v-btn small color="primary" class="mr-2"
+                                           :disabled="!row.connect_available"
+                                           @click="connectIntegration(row.platform)">
+                                        <v-icon small class="mr-1">mdi-link-variant</v-icon>Connect
+                                    </v-btn>
+                                    <v-btn small outlined color="error"
+                                           v-if="row.connection && row.connection.has_token"
+                                           @click="disconnectIntegration(row.platform)">
+                                        <v-icon small class="mr-1">mdi-link-variant-off</v-icon>Disconnect
+                                    </v-btn>
+                                    <span v-if="!row.configured && row.implemented"
+                                          class="caption grey--text ml-2">
+                                        Set {{ row.env_vars.join(' + ') }} in the environment to enable.
+                                    </span>
+                                </div>
+                                <div class="d-flex align-center">
+                                    <v-text-field
+                                            label="Callback URL"
+                                            :value="row.callback_url"
+                                            readonly outlined dense hide-details
+                                            class="integration-callback"
+                                            :id="'integration-callback-' + row.platform"
+                                    ></v-text-field>
+                                    <v-btn icon small class="ml-1"
+                                           @click="copyIntegrationCallback(row.callback_url)"
+                                           :id="'integration-copy-' + row.platform">
+                                        <v-icon small>mdi-content-copy</v-icon>
+                                    </v-btn>
+                                </div>
+                                <div v-if="row.connected" class="caption mt-2" :id="'integration-status-' + row.platform">
+                                    <span class="green--text">Connected as {{ row.connection.account_label || row.label }}</span>
+                                    <span v-if="integrationAssets[row.platform]">
+                                        · {{ integrationAssets[row.platform].counts.ad_accounts }} ad accounts
+                                        · {{ integrationAssets[row.platform].counts.datasets }} datasets
+                                    </span>
+                                    <span v-if="row.connection.expires_at">
+                                        · expires {{ row.connection.expires_at.slice(0, 10) }}
+                                    </span>
+                                </div>
+                                <div v-else-if="row.connection && row.connection.reconnect_needed"
+                                     class="caption mt-2" :id="'integration-reconnect-' + row.platform">
+                                    <span class="red--text">
+                                        Needs reconnect — the stored token cannot be read or has expired.
+                                    </span>
+                                </div>
+                                <div v-if="integrationAssets[row.platform]" class="caption grey--text mt-1">
+                                    <span v-if="integrationAssets[row.platform].ad_accounts.length">
+                                        Accounts:
+                                        {{ integrationAssets[row.platform].ad_accounts.map(a => a.name || a.id).join(', ') }}
+                                    </span>
+                                    <span v-if="integrationAssets[row.platform].error" class="red--text">
+                                        — {{ integrationAssets[row.platform].error }}
+                                    </span>
+                                </div>
+                            </div>
                         </v-card-text>
                     </v-card>
                 </v-col>
@@ -1604,6 +1698,10 @@
                     {text: 'Campaign name only', value: 'name'},
                     {text: 'Tracking id (utm_campaign / sub_id)', value: 'tracking_id'},
                 ],
+                // Integrations (ad-platform OAuth Connect) card state
+                integrationsData: null,
+                integrationAssets: {},
+                integrationRows: [],
                 capiPixels: [],
                 capiDialog: false,
                 capiSaving: false,
@@ -1728,6 +1826,8 @@
             this.loadAuditFacets();
             this.loadMonitorStatus();
             this.loadRules();
+            this.loadIntegrations();
+            this.handleIntegrationRedirect();
             this.$root.$on('load-settings', this.loadSettings);
         },
         watch: {
@@ -1740,6 +1840,19 @@
             auditSortDesc() { this.loadAudit(1); },
         },
         computed:{
+              integrationsConnectedCount() {
+                return this.integrationRows.filter(r => r.connected).length;
+              },
+              // Discovered Meta ad accounts feed the cost-sync account picker.
+              metaAdsAccountOptions() {
+                const assets = this.integrationAssets.meta;
+                if (!assets) { return []; }
+                return (assets.ad_accounts || []).map(a => {
+                  const num = String(a.id || '').replace(/^act_/, '') || a.account_id;
+                  const label = a.name ? `${a.name} (${num})` : num;
+                  return {text: label, value: String(num)};
+                });
+              },
               postbackUrl() {
                 return `${window.location.origin}/pb?clickid={clickid}&payout={payout}&status={status}&tid={tid}`;
               },
@@ -1798,9 +1911,10 @@
                 this.settings.workspace.row_coloring.push(
                     {column: 'roi', operator: '<', value: 0, color: 'red'});
             },
-            copyText(text) {
+            copyText(text, message) {
                 navigator.clipboard.writeText(text).then(() => {
-                    this.$root.$emit("show-message", {type: "success", text: "Copied to clipboard"});
+                    this.$root.$emit("show-message", {type: "success",
+                        text: message || "Copied to clipboard"});
                 });
             },
             insertFallbackToken(token) {
@@ -2183,6 +2297,76 @@
                 } finally {
                     this.metaAdsSyncing = false;
                 }
+            },
+            // ---- Integrations (ad-platform OAuth Connect) ----
+            loadIntegrations() {
+                fetch("/backend/api/integrations", {credentials: "include"})
+                    .then(r => r.json())
+                    .then(data => {
+                        this.integrationsData = data;
+                        const src = data.platforms || {};
+                        // Rows are read-only views of the server's platform list
+                        // (credentials live in the deployment environment, not here).
+                        this.integrationRows = ['meta', 'snapchat', 'tiktok',
+                            'pinterest', 'google']
+                            .filter(p => src[p])
+                            .map(p => Object.assign({platform: p}, src[p]));
+                        Object.keys(src).forEach(p => {
+                            if (src[p].connected) this.loadIntegrationAssets(p);
+                        });
+                    })
+                    .catch(() => { /* card is advisory until it loads */ });
+            },
+            loadIntegrationAssets(platform) {
+                fetch("/backend/api/integrations/" + platform + "/assets",
+                      {credentials: "include"})
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data && data.counts) {
+                            Vue.set(this.integrationAssets, platform, data);
+                        }
+                    })
+                    .catch(() => { /* assets are optional */ });
+            },
+            connectIntegration(platform) {
+                // Full-page redirect: the backend 302s the browser to the provider.
+                window.location.href = "/backend/api/integrations/" + platform + "/oauth/start";
+            },
+            disconnectIntegration(platform) {
+                fetch("/backend/api/integrations/" + platform + "/connection",
+                      {method: 'DELETE', credentials: 'include'})
+                    .then(r => r.json())
+                    .then(() => {
+                        this.$root.$emit("show-message", {type: "success",
+                            text: "Disconnected"});
+                        Vue.delete(this.integrationAssets, platform);
+                        this.loadIntegrations();
+                    })
+                    .catch(e => this.$root.$emit("show-message", {type: "error",
+                        text: sanitizeToastMessage(e.message)}));
+            },
+            copyIntegrationCallback(url) {
+                this.copyText(url, "Callback URL copied");
+            },
+            handleIntegrationRedirect() {
+                // The OAuth callback 302s back to /backend/settings?integration=…&status=…
+                const q = new URLSearchParams(window.location.search);
+                const platform = q.get('integration');
+                if (!platform) { return; }
+                const status = q.get('status');
+                const message = sanitizeToastMessage(q.get('message') || '');
+                if (status === 'ok') {
+                    const counts = [];
+                    if (q.get('accounts') !== null) counts.push(q.get('accounts') + ' ad accounts');
+                    if (q.get('datasets') !== null) counts.push(q.get('datasets') + ' datasets');
+                    this.$root.$emit("show-message", {type: "success",
+                        text: (message || ("Connected " + platform)) +
+                              (counts.length ? ' — ' + counts.join(', ') : '')});
+                } else {
+                    this.$root.$emit("show-message", {type: "error",
+                        text: "Connect failed: " + (message || "unknown error")});
+                }
+                window.history.replaceState({}, '', window.location.pathname);
             },
             generateToken() {
                 this.settings.apiToken = Math.random().toString(36).substring(2, 12);

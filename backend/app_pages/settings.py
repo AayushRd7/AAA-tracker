@@ -632,6 +632,19 @@ def export_settings(db: Session = Depends(get_db)):
             data[row.name] = json.loads(row.value)
         except Exception:
             data[row.name] = row.value
+    # Ad-platform OAuth tokens live in their own table (not settings), but they
+    # are exported too so a backup shows the connections — the token itself is
+    # nulled by _sanitize_for_export (access_token matches SECRET_KEY_RE).
+    try:
+        conn_rows = db.execute(text(
+            "SELECT platform, access_token, token_type, expires_at, scopes, "
+            "account_label FROM integration_connections ORDER BY platform")).fetchall()
+        data["integration_connections"] = [
+            {"platform": r[0], "access_token": r[1], "token_type": r[2],
+             "expires_at": r[3].isoformat() if r[3] else None,
+             "scopes": r[4], "account_label": r[5]} for r in conn_rows]
+    except Exception:
+        pass
     doc = {"exported_at": int(time.time()), "data": _sanitize_for_export(data)}
     return JSONResponse(
         content=doc,

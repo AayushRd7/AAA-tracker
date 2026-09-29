@@ -207,6 +207,41 @@ def _ensure_meta_ads_tables(conn):
                       "ON ad_cost_daily (date)"))
 
 
+def _ensure_integrations_tables(conn):
+    """Idempotent ad-platform OAuth schema.
+
+    ``integration_connections`` holds one stored token per platform (the
+    UNIQUE platform key backs the upsert in app_pages/integrations.py);
+    ``oauth_states`` is the single-use CSRF state with a 10-minute TTL, deleted
+    on consumption. Scope-creep note: business-owned pixel listing needs the
+    ``business_management`` scope, which the Connect flow deliberately does not
+    request.
+    """
+    from sqlalchemy import text
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS integration_connections (
+            id BIGSERIAL PRIMARY KEY,
+            platform VARCHAR(32) NOT NULL UNIQUE,
+            access_token TEXT,
+            token_type VARCHAR(32) NOT NULL DEFAULT 'bearer',
+            expires_at TIMESTAMP,
+            scopes TEXT NOT NULL DEFAULT '',
+            account_label VARCHAR(255) NOT NULL DEFAULT '',
+            raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            updated_at TIMESTAMP NOT NULL DEFAULT now()
+        )"""))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS oauth_states (
+            state TEXT PRIMARY KEY,
+            platform VARCHAR(32) NOT NULL,
+            username VARCHAR(255) NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL DEFAULT now()
+        )"""))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS oauth_states_created_at_idx "
+                      "ON oauth_states (created_at)"))
+
+
 # Registered as the app's startup hook. It was defined but never wired, so every
 # backend-side migration below (user security columns, archived flags, ownership, monitor
 # state, auto rules, domain groups, CAPI records, log trails, tooling tables) silently
@@ -315,6 +350,8 @@ async def startup():
             _ensure_wave18_tables(conn)
             # Meta Ads cost auto-sync raw audit table (ad_cost_daily).
             _ensure_meta_ads_tables(conn)
+            # Ad-platform OAuth connections + single-use CSRF state.
+            _ensure_integrations_tables(conn)
             conn.commit()
     except Exception as e:
         print("startup migration:", e)
@@ -505,6 +542,10 @@ app.include_router(costs_router, prefix="/api/costs", tags=["Costs"],
 # Meta Ads cost auto-sync — same admin plane as monitoring/rules/fraud.
 from app_pages.meta_ads import router as meta_ads_router
 app.include_router(meta_ads_router, prefix="/api/meta-ads", tags=["Meta Ads"],
+                   dependencies=[Depends(require_section_write("settings"))])
+# Ad-platform OAuth "Connect" flow (Meta first) — same admin plane.
+from app_pages.integrations import router as integrations_router
+app.include_router(integrations_router, prefix="/api/integrations", tags=["Integrations"],
                    dependencies=[Depends(require_section_write("settings"))])
 # Logs area — admin-only audit surface. Gated by the "logs" section write flag
 # (the section entry is pending in auth.py; see the NAV_SECTIONS TODO).

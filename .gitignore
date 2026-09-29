@@ -9,3 +9,4 @@ ssl/*.crt
 /COMPETITOR-GAP.md
 /INTEGRATIONS-SETUP.md
 /brand/
+.DS_Store

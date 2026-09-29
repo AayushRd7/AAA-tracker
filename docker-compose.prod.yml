@@ -22,6 +22,22 @@ services:
       # audit rows carry the real client IP
       "--proxy-headers", "--forwarded-allow-ips", "*"
     ]
+    environment:
+      # Ad-platform OAuth "Connect" apps (see .env.example): app credentials and
+      # the token-encryption key come from the environment.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      INTEGRATIONS_ENCRYPTION_KEY: ${INTEGRATIONS_ENCRYPTION_KEY:-}
+      META_APP_ID: ${META_APP_ID:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      SNAPCHAT_CLIENT_ID: ${SNAPCHAT_CLIENT_ID:-}
+      SNAPCHAT_CLIENT_SECRET: ${SNAPCHAT_CLIENT_SECRET:-}
+      TIKTOK_APP_ID: ${TIKTOK_APP_ID:-}
+      TIKTOK_APP_SECRET: ${TIKTOK_APP_SECRET:-}
+      PINTEREST_APP_ID: ${PINTEREST_APP_ID:-}
+      PINTEREST_APP_SECRET: ${PINTEREST_APP_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
 
   clickhouse:
     ulimits:

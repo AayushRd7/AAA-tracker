@@ -205,6 +205,30 @@ CREATE TABLE IF NOT EXISTS ad_cost_daily (
 );
 CREATE INDEX IF NOT EXISTS ad_cost_daily_date_idx ON ad_cost_daily (date);
 
+-- Ad-platform OAuth: one stored token per platform (the UNIQUE platform key
+-- backs the upsert in app_pages/integrations.py) and the single-use CSRF state
+-- with a 10-minute TTL (deleted on consumption). access_token is masked in API
+-- responses and nulled in the settings export.
+CREATE TABLE IF NOT EXISTS integration_connections (
+    id BIGSERIAL PRIMARY KEY,
+    platform VARCHAR(32) NOT NULL UNIQUE,
+    access_token TEXT,
+    token_type VARCHAR(32) NOT NULL DEFAULT 'bearer',
+    expires_at TIMESTAMP,
+    scopes TEXT NOT NULL DEFAULT '',
+    account_label VARCHAR(255) NOT NULL DEFAULT '',
+    raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS oauth_states (
+    state TEXT PRIMARY KEY,
+    platform VARCHAR(32) NOT NULL,
+    username VARCHAR(255) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS oauth_states_created_at_idx ON oauth_states (created_at);
+
 CREATE TABLE IF NOT EXISTS conversions_data (
     id SERIAL PRIMARY KEY,
     received_at TIMESTAMP DEFAULT NOW(),

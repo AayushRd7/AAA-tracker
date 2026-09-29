@@ -7695,6 +7695,488 @@ print("ESCAPED-OK")
             except Exception:
                 pass
 
+    # ===== Integrations: Meta OAuth "Connect" flow (mock provider) =====
+    # App credentials come from the ENVIRONMENT (META_APP_ID / META_APP_SECRET /
+    # INTEGRATIONS_ENCRYPTION_KEY) — never settings. The mock provider is reached
+    # through the test-only graph_base_url / oauth_base_url settings overrides. If
+    # the app env vars are absent the flow checks are replaced by the "not
+    # configured" degradation checks, so the suite stays green either way.
+    import threading as _int_threading
+    import http.server as _int_httpserver
+    import socketserver as _int_socketserver
+    from urllib.parse import (urlparse as _int_urlparse, parse_qs as _int_parse_qs,
+                              unquote as _int_unquote)
+
+    int_pid = os.getpid()
+    int_port = 24000 + (int_pid % 1000)
+    int_base = f"http://host.docker.internal:{int_port}"
+    int_short = f"shorttoken-{int_pid}"
+    int_long = f"longtoken-{int_pid}"
+    int_secret = os.environ.get("META_APP_SECRET", "")
+    int_flow = bool(os.environ.get("META_APP_ID") and int_secret)
+    int_captured = []
+    _int_socketserver.TCPServer.allow_reuse_address = True
+
+    class _IntegrGraph(_int_httpserver.BaseHTTPRequestHandler):
+        def _send(self, code, obj):
+            body = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            parsed = _int_urlparse(self.path)
+            params = {k: v[0] for k, v in _int_parse_qs(parsed.query).items()}
+            int_captured.append({"method": "GET", "path_only": parsed.path,
+                                 "params": params})
+            if parsed.path.endswith("/oauth/access_token"):
+                if params.get("grant_type") == "fb_exchange_token":
+                    if params.get("fb_exchange_token") == f"fail-{int_pid}":
+                        self._send(500, {"error": {"message": "upgrade boom"}})
+                        return
+                    self._send(200, {"access_token": int_long, "token_type": "bearer",
+                                     "expires_in": 5184000})
+                    return
+                if params.get("code") == f"retry500-{int_pid}":
+                    self._send(500, {"error": {"message": "exchange boom"}})
+                    return
+                if params.get("code") == f"badcode-{int_pid}":
+                    self._send(400, {"error": {"message": "Invalid verification code",
+                                               "code": 100}})
+                    return
+                self._send(200, {"access_token": int_short, "token_type": "bearer",
+                                 "expires_in": 3600})
+                return
+            if parsed.path.endswith("/me/adaccounts2"):
+                self._send(200, {"data": [{"id": f"act_b{int_pid}", "name": "Int Account B",
+                                           "account_id": "22", "currency": "EUR",
+                                           "account_status": 1}]})
+                return
+            if parsed.path.endswith("/me/adaccounts"):
+                self._send(200, {
+                    "data": [{"id": f"act_a{int_pid}", "name": "Int Account A",
+                              "account_id": "11", "currency": "USD",
+                              "account_status": 1}],
+                    "paging": {"next": f"{int_base}/v21.0/me/adaccounts2?after=x-{int_pid}"},
+                })
+                return
+            if parsed.path.endswith("/adspixels"):
+                self._send(200, {"data": [{"id": f"px-{int_pid}",
+                                           "name": f"Int Pixel {int_pid}"}]})
+                return
+            if parsed.path.endswith("/campaigns"):
+                self._send(200, {"data": [{"id": f"camp-{int_pid}",
+                                           "name": f"Int Campaign {int_pid}",
+                                           "status": "ACTIVE"}]})
+                return
+            if parsed.path.endswith("/me"):
+                self._send(200, {"id": f"u-{int_pid}", "name": f"Int User {int_pid}"})
+                return
+            self._send(200, {"data": []})
+
+        def do_DELETE(self):
+            parsed = _int_urlparse(self.path)
+            int_captured.append({"method": "DELETE", "path_only": parsed.path,
+                                 "params": {k: v[0] for k, v in
+                                            _int_parse_qs(parsed.query).items()}})
+            self._send(200, {"success": True})
+
+        def log_message(self, *args):
+            pass
+
+    int_srv = None
+    for _attempt in range(8):
+        try:
+            int_srv = _int_socketserver.TCPServer(("0.0.0.0", int_port), _IntegrGraph)
+            int_base = f"http://host.docker.internal:{int_port}"
+            break
+        except OSError:
+            int_port += 1
+    if int_srv is not None:
+        int_srv.daemon_threads = True
+        _int_threading.Thread(target=int_srv.serve_forever, daemon=True).start()
+
+    int_probe = ""
+    if int_srv is not None:
+        try:
+            int_probe = subprocess.run(
+                ["docker", "exec", "tracker_backend", "python", "-c",
+                 f"import urllib.request;print(urllib.request.urlopen('{int_base}/v21.0/me',timeout=5).read().decode())"],
+                capture_output=True, text=True, timeout=15).stdout
+        except Exception:
+            pass
+    check("integrations: mock provider reachable from the backend container",
+          "Int User" in int_probe, int_probe[:80])
+
+    def int_set(**over):
+        cfg = {"graph_base_url": int_base, "oauth_base_url": int_base}
+        cfg.update(over)
+        return s.post(f"{api}/settings/", json={"settings": {"integrations": cfg}})
+
+    def int_start(platform="meta"):
+        r = s.get(f"{api}/integrations/{platform}/oauth/start", allow_redirects=False)
+        loc = r.headers.get("location") or ""
+        q = {k: v[0] for k, v in _int_parse_qs(_int_urlparse(loc).query).items()}
+        return r, q.get("state"), loc, _int_unquote(q.get("redirect_uri") or "")
+
+    def int_callback(state, code=None, error=None, extra=""):
+        url = f"{api}/integrations/meta/oauth/callback?state={state}{extra}"
+        if code is not None:
+            url += f"&code={code}"
+        if error is not None:
+            url += f"&error={error}"
+        return s.get(url, allow_redirects=False)
+
+    def int_meta():
+        j = s.get(f"{api}/integrations").json()
+        return (j.get("platforms") or {}).get("meta") or {}
+
+    int_saved = ((s.get(f"{api}/settings/").json().get("settings") or {})
+                 .get("integrations"))
+    int_texts = []
+    try:
+        s.delete(f"{api}/integrations/meta/connection")
+        r = int_set()
+        check("integrations: endpoint host overrides saved", r.status_code == 200, r.text[:120])
+
+        # -- listing: no credentials returned; callback URL derived + https --
+        r = s.get(f"{api}/integrations")
+        int_texts.append(r.text)
+        jl = r.json() if r.status_code == 200 else {}
+        meta = (jl.get("platforms") or {}).get("meta") or {}
+        # The advertised callback URL depends on the deployment (PUBLIC_BASE_URL or the
+        # request host), so assert the shape and then require the flow to use exactly the
+        # advertised URI — that consistency is the thing that breaks in production.
+        _cb_suffix = "/backend/api/integrations/meta/callback"
+        check("integrations: GET lists every platform with a callback URL",
+              r.status_code == 200 and len(jl.get("platforms") or {}) == 5,
+              str(list((jl.get("platforms") or {}).keys())))
+        _advertised_cb = meta.get("callback_url") or ""
+        check("integrations: callback URL is https with the /backend prefix",
+              _advertised_cb.startswith("https://") and _advertised_cb.endswith(_cb_suffix),
+              str(_advertised_cb))
+        _env_public = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+        if _env_public:
+            check("integrations: callback URL honours PUBLIC_BASE_URL when the suite sets it",
+                  _advertised_cb == f"{_env_public}{_cb_suffix}", _advertised_cb)
+        check("integrations: no client id/secret keys in the response",
+              "client_secret" not in r.text and "client_id" not in r.text,
+              r.text[:160])
+        check("integrations: no app secret appears in the response",
+              not int_secret or int_secret not in r.text,
+              "secret leaked")
+        check("integrations: token encryption key status is reported",
+              isinstance(jl.get("encryption_configured"), bool)
+              and (not int_flow or jl.get("encryption_configured") is True),
+              str(jl.get("encryption_configured")))
+        check("integrations: unimplemented platforms are flagged",
+              (jl.get("platforms", {}).get("snapchat") or {}).get("implemented") is False,
+              str((jl.get("platforms", {}).get("snapchat") or {}).get("implemented")))
+
+        # -- env absent -> "not configured by this deployment", clean degradation --
+        unconfigured = [p for p in ("snapchat", "tiktok", "pinterest", "google")
+                        if not (jl.get("platforms", {}).get(p) or {}).get("configured")]
+        check("integrations: platforms without env vars report configured=false",
+              len(unconfigured) == 4, str(unconfigured))
+        check("integrations: such platforms disable Connect (connect_available=false)",
+              all((jl.get("platforms", {}).get(p) or {}).get("connect_available") is False
+                  for p in unconfigured), str(unconfigured))
+        rs = s.get(f"{api}/integrations/snapchat/oauth/start", allow_redirects=False)
+        check("integrations: Connect for an unconfigured platform degrades cleanly (no 5xx)",
+              rs.status_code < 500 and rs.status_code in (400, 302, 307), str(rs.status_code))
+        ra = s.get(f"{api}/integrations/snapchat/assets")
+        check("integrations: assets for an unconfigured platform degrade cleanly",
+              ra.status_code == 200 and ra.json().get("connected") is False,
+              f"{ra.status_code} {ra.text[:120]}")
+
+        # -- PUBLIC_BASE_URL derivation: set vs request-host fallback (in-process) --
+        snippet = (
+            "from app_pages.integrations import derive_callback_url\n"
+            "from starlette.requests import Request\n"
+            "scope={'type':'http','method':'GET','path':'/x','root_path':'/backend',"
+            "'scheme':'http','headers':[],'query_string':b'',"
+            "'server':('localhost',80),'client':('127.0.0.1',1)}\n"
+            "print(derive_callback_url(Request(scope),'meta'))")
+
+        def _run_in_backend(code, env=None):
+            cmd = ["docker", "exec"]
+            for k, v in (env or {}).items():
+                cmd += ["-e", f"{k}={v}"]
+            cmd += ["tracker_backend", "python", "-c", code]
+            return subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=20).stdout.strip()
+
+        fb = _run_in_backend(snippet, {"PUBLIC_BASE_URL": ""})
+        pb = _run_in_backend(snippet, {"PUBLIC_BASE_URL": "https://aaatracker.website"})
+        check("integrations: callback URL falls back to the request host",
+              fb == "http://localhost/backend/api/integrations/meta/callback", fb[:120])
+        check("integrations: PUBLIC_BASE_URL drives the callback URL when set",
+              pb == "https://aaatracker.website/backend/api/integrations/meta/callback",
+              pb[:140])
+
+        # -- encryption key absent -> refuse to store plaintext (in-process) --
+        refuse = _run_in_backend(
+            "import os; os.environ.pop('INTEGRATIONS_ENCRYPTION_KEY', None)\n"
+            "import app_pages.integrations as i\n"
+            "print(i.encryption_configured(), i.encrypt_token('plain'))")
+        check("integrations: with no encryption key, storing is refused (no plaintext)",
+              refuse.endswith("None") and refuse.startswith("False"), refuse[:80])
+
+        if not int_flow:
+            # Deployment has no Meta app env vars: assert the degradation only.
+            check("integrations: meta without env vars reports configured=false",
+                  meta.get("configured") is False
+                  and meta.get("connect_available") is False, str(meta.get("configured")))
+            r = s.get(f"{api}/integrations/meta/oauth/start", allow_redirects=False)
+            check("integrations: meta Connect without env vars degrades cleanly",
+                  r.status_code in (400, 302, 307) and r.status_code < 500,
+                  str(r.status_code))
+        else:
+            check("integrations: meta env vars are configured (flow enabled)",
+                  meta.get("configured") is True and meta.get("connect_available") is True,
+                  str(meta.get("configured")))
+
+            # -- oauth start: state issued + consent URL carries the params --
+            rs, st1, loc, redirect_uri = int_start()
+            int_texts.append(loc)
+            loc_q = {k: v[0] for k, v in _int_parse_qs(_int_urlparse(loc).query).items()}
+            check("integrations: start 302s to the provider consent URL",
+                  rs.status_code in (302, 307) and loc.startswith(int_base)
+                  and _int_urlparse(loc).path == "/v21.0/dialog/oauth",
+                  f"{rs.status_code} {loc[:100]}")
+            check("integrations: consent URL carries client_id + scope + response_type",
+                  bool(loc_q.get("client_id")) and loc_q.get("scope") == "ads_read,ads_management"
+                  and loc_q.get("response_type") == "code", str(loc_q)[:200])
+            check("integrations: consent URL carries the advertised redirect_uri + state",
+                  redirect_uri == _advertised_cb and bool(st1),
+                  f"{redirect_uri} vs {_advertised_cb} state={bool(st1)}")
+            check("integrations: start stored a single-use state row",
+                  pg_query(f"SELECT count(*) FROM oauth_states WHERE state = '{st1}'") == "1",
+                  pg_query(f"SELECT count(*) FROM oauth_states WHERE state = '{st1}'"))
+
+            # -- unknown / replayed / expired states rejected, nothing stored --
+            r = s.get(f"{api}/integrations/meta/oauth/callback?code=x&state=nope-"
+                      + str(int_pid), allow_redirects=False)
+            check("integrations: unknown state is rejected with a readable error",
+                  r.status_code in (302, 307) and "status=error" in (r.headers.get("location") or "")
+                  and "invalid" in _int_unquote(r.headers.get("location") or "").lower(),
+                  str(r.headers.get("location"))[:160])
+
+            r = int_callback(st1, code=f"badcode-{int_pid}")
+            loc_err = _int_unquote(r.headers.get("location") or "")
+            int_texts.append(loc_err)
+            check("integrations: a failed exchange is surfaced, not stored",
+                  r.status_code in (302, 307) and "status=error" in loc_err
+                  and "exchange" in loc_err.lower(), loc_err[:200])
+            r = int_callback(st1, code=f"badcode-{int_pid}")
+            check("integrations: replayed state is rejected (single-use)",
+                  r.status_code in (302, 307) and "status=error" in (r.headers.get("location") or ""),
+                  str(r.headers.get("location"))[:160])
+            check("integrations: replay stored no connection",
+                  int_meta().get("connected") is False, str(int_meta().get("connected")))
+
+            _, st2, _, _ = int_start()
+            pg_exec(f"UPDATE oauth_states SET created_at = now() - interval '11 minutes' "
+                    f"WHERE state = '{st2}'")
+            r = int_callback(st2, code="good")
+            check("integrations: expired state is rejected",
+                  r.status_code in (302, 307)
+                  and "expired" in _int_unquote(r.headers.get("location") or "").lower(),
+                  str(r.headers.get("location"))[:180])
+
+            # -- provider error=access_denied is readable and stores nothing --
+            _, st3, _, _ = int_start()
+            r = int_callback(st3, error="access_denied",
+                             extra=f"&error_description=The+user+denied+the+request-{int_pid}")
+            loc_deny = _int_unquote(r.headers.get("location") or "")
+            int_texts.append(loc_deny)
+            check("integrations: access_denied produces a readable error, no connection",
+                  r.status_code in (302, 307) and "status=error" in loc_deny
+                  and int_meta().get("connected") is False, loc_deny[:200])
+
+            # -- token-exchange 5xx retried (bounded) and surfaced cleanly --
+            _, st4, _, _ = int_start()
+            int_captured.clear()
+            r = int_callback(st4, code=f"retry500-{int_pid}")
+            loc_500 = _int_unquote(r.headers.get("location") or "")
+            exch = [c for c in int_captured
+                    if c["path_only"].endswith("/oauth/access_token")
+                    and c["params"].get("code") == f"retry500-{int_pid}"]
+            check("integrations: token-exchange 5xx is retried (bounded)",
+                  len(exch) >= 3, str(len(exch)))
+            check("integrations: token-exchange 5xx is surfaced cleanly",
+                  r.status_code in (302, 307) and "status=error" in loc_500
+                  and int_meta().get("connected") is False, loc_500[:200])
+
+            # -- happy path: exchange -> long-lived upgrade -> store -> assets --
+            _, st5, _, _ = int_start()
+            int_captured.clear()
+            r = int_callback(st5, code="goodcode")
+            loc_ok = _int_unquote(r.headers.get("location") or "")
+            check("integrations: callback 302s back to the Settings page (not JSON)",
+                  r.status_code in (302, 307) and loc_ok.startswith("/backend/settings")
+                  and "status=ok" in loc_ok, f"{r.status_code} {loc_ok[:120]}")
+            check("integrations: callback reports the connection + asset counts",
+                  "Connected" in loc_ok and "accounts=" in loc_ok, loc_ok[:200])
+
+            exch = next((c for c in int_captured
+                         if c["path_only"].endswith("/oauth/access_token")
+                         and c["params"].get("code") == "goodcode"), None)
+            check("integrations: code exchange uses the identical redirect_uri + env secret",
+                  bool(exch) and exch["params"].get("redirect_uri") == _advertised_cb
+                  and exch["params"].get("client_secret") == int_secret,
+                  str(exch and exch["params"])[:200])
+            upg = next((c for c in int_captured
+                        if c["path_only"].endswith("/oauth/access_token")
+                        and c["params"].get("grant_type") == "fb_exchange_token"), None)
+            check("integrations: short-lived token is upgraded to a long-lived one",
+                  bool(upg) and upg["params"].get("fb_exchange_token") == int_short,
+                  str(upg and upg["params"].get("grant_type")))
+            check("integrations: paging.next is followed verbatim",
+                  any(c["path_only"].endswith("/adaccounts2") for c in int_captured),
+                  str([c["path_only"] for c in int_captured])[:200])
+
+            r = s.get(f"{api}/integrations")
+            int_texts.append(r.text)
+            meta = (r.json().get("platforms") or {}).get("meta") or {}
+            conn = meta.get("connection") or {}
+            check("integrations: GET reports the connection as connected",
+                  meta.get("connected") is True and conn.get("has_token") is True
+                  and conn.get("readable") is True, str(meta.get("connected")))
+            check("integrations: long-lived token masked, not the short one",
+                  conn.get("access_token") and "\u2022" in conn.get("access_token", ""),
+                  str(conn.get("access_token"))[:40])
+            check("integrations: 'Connected as <label>' comes from the token owner",
+                  conn.get("account_label") == f"Int User {int_pid}", str(conn.get("account_label")))
+            check("integrations: scopes + expiry are surfaced",
+                  "ads_read" in (conn.get("scopes") or [])
+                  and bool(conn.get("expires_at")) and conn.get("expired") is False,
+                  str(conn)[:200])
+
+            r = s.get(f"{api}/integrations/meta/assets")
+            int_texts.append(r.text)
+            ja = r.json() if r.status_code == 200 else {}
+            acct_ids = {a.get("id") for a in (ja.get("ad_accounts") or [])}
+            check("integrations: assets return the mock's ad accounts (paging followed)",
+                  r.status_code == 200 and acct_ids == {f"act_a{int_pid}", f"act_b{int_pid}"},
+                  str(acct_ids))
+            check("integrations: assets return datasets + campaigns for the pickers",
+                  bool(ja.get("datasets")) and bool(ja.get("campaigns"))
+                  and ja.get("counts", {}).get("ad_accounts") == 2, str(ja.get("counts")))
+            acct_cap = next((c for c in int_captured
+                             if c["path_only"].endswith("/me/adaccounts")), None)
+            check("integrations: asset calls carry the stored long-lived token",
+                  bool(acct_cap) and acct_cap["params"].get("access_token") == int_long,
+                  str(acct_cap and acct_cap["params"].get("access_token"))[:40])
+
+            # -- token stored as ciphertext, not plaintext --
+            raw_stored = pg_query("SELECT access_token FROM integration_connections "
+                                  "WHERE platform = 'meta'")
+            check("integrations: stored access_token is ciphertext (not the plaintext)",
+                  bool(raw_stored) and raw_stored != int_long and int_long not in raw_stored
+                  and not raw_stored.startswith("short"), raw_stored[:60])
+
+            # -- the app secret + tokens never appear in a response body --
+            check("integrations: app secret never appears in a response body",
+                  not int_secret or all(int_secret not in t for t in int_texts),
+                  str([t[:60] for t in int_texts if int_secret and int_secret in t]))
+            check("integrations: tokens never appear in a response body",
+                  all(int_long not in t and int_short not in t for t in int_texts),
+                  str([t[:60] for t in int_texts if int_long in t or int_short in t]))
+
+            # -- settings export nulls the connection token --
+            r = s.get(f"{api}/settings/export")
+            exp_data = r.json().get("data") or {}
+            exp_conn = next((c for c in (exp_data.get("integration_connections") or [])
+                             if c.get("platform") == "meta"), {})
+            check("integrations: settings export nulls the connection access token",
+                  bool(exp_conn) and exp_conn.get("access_token") is None
+                  and exp_conn.get("account_label"), str(exp_conn)[:160])
+            check("integrations: settings export carries no integrations secret block",
+                  "client_secret" not in json.dumps(
+                      (exp_data.get("settings") or {}).get("integrations") or {}),
+                  "secret block present")
+
+            # -- disconnect clears + best-effort revokes --
+            r = s.delete(f"{api}/integrations/meta/connection")
+            jd = r.json() if r.status_code == 200 else {}
+            check("integrations: disconnect clears the stored connection",
+                  r.status_code == 200 and jd.get("cleared") is True, r.text[:160])
+            check("integrations: disconnect best-effort revokes at the provider",
+                  bool([c for c in int_captured if c["method"] == "DELETE"
+                        and c["path_only"].endswith("/me/permissions")]),
+                  str([c["method"] for c in int_captured])[:120])
+            check("integrations: disconnect leaves no stored token",
+                  int_meta().get("connected") is False
+                  and pg_query("SELECT count(*) FROM integration_connections "
+                               "WHERE platform = 'meta'") == "0",
+                  pg_query("SELECT count(*) FROM integration_connections WHERE platform = 'meta'"))
+
+        # -- decrypt failure degrades to "needs reconnect" (wrong key) --
+        marker = f"secret-unreadable-{int_pid}"
+        wrong = subprocess.run(
+            ["docker", "exec", "tracker_backend", "python", "-c",
+             "from cryptography.fernet import Fernet;"
+             "print(Fernet(Fernet.generate_key()).encrypt(b'" + marker + "').decode())"],
+            capture_output=True, text=True, timeout=20).stdout.strip()
+        if not int_flow:
+            pass  # no Meta connection on an unconfigured deployment
+        elif wrong:
+            pg_exec("INSERT INTO integration_connections (platform, access_token, "
+                    "token_type, scopes, account_label) VALUES ('meta', '" + wrong + "', "
+                    "'bearer', 'ads_read', 'Wrong Key') "
+                    "ON CONFLICT (platform) DO UPDATE SET access_token = EXCLUDED.access_token")
+            r = s.get(f"{api}/integrations")
+            int_texts.append(r.text)
+            conn = ((r.json().get("platforms") or {}).get("meta") or {}).get("connection") or {}
+            check("integrations: an unreadable token reports needs-reconnect (no 500)",
+                  r.status_code == 200 and conn.get("has_token") is True
+                  and conn.get("readable") is False
+                  and conn.get("reconnect_needed") is True, str(conn)[:180])
+            r = s.get(f"{api}/integrations/meta/assets")
+            int_texts.append(r.text)
+            check("integrations: assets degrade cleanly when the token can't be decrypted",
+                  r.status_code == 200 and r.json().get("connected") is False
+                  and r.json().get("needs_reconnect") is True
+                  and marker not in r.text, f"{r.status_code} {r.text[:160]}")
+            check("integrations: the unreadable ciphertext is never returned",
+                  marker not in r.text and wrong not in r.text, "ciphertext leaked")
+            s.delete(f"{api}/integrations/meta/connection")
+        else:
+            check("integrations: wrong-key ciphertext generated for the degrade test",
+                  False, "docker exec failed")
+
+        # -- served pages carry the new UI markers (no credential fields) --
+        rp = s.get(f"{BASE}/backend/settings")
+        check("integrations: Settings page serves the Integrations card",
+              rp.status_code == 200 and "integrations-card" in rp.text
+              and "connectIntegration" in rp.text
+              and "copyIntegrationCallback" in rp.text, f"{rp.status_code}")
+        check("integrations: Settings card has no client id/secret fields",
+              "integration-client-secret" not in rp.text
+              and "integration-client-id" not in rp.text, "credential field present")
+        check("integrations: Settings page has no unreplaced jinja tags",
+              "{%" not in rp.text, "unreplaced jinja tag")
+        rc = s.get(f"{BASE}/backend/campaigns")
+        check("integrations: campaign editor offers discovered platform campaigns",
+              rc.status_code == 200 and "platformCampaignOptions" in rc.text
+              and "loadPlatformAssets" in rc.text, f"{rc.status_code}")
+    finally:
+        restore = {"graph_base_url": "", "oauth_base_url": ""}
+        if isinstance(int_saved, dict):
+            restore.update(int_saved)
+        restore["graph_base_url"] = ""
+        restore["oauth_base_url"] = ""
+        s.post(f"{api}/settings/", json={"settings": {"integrations": restore}})
+        pg_exec("DELETE FROM integration_connections WHERE platform = 'meta'")
+        if int_srv is not None:
+            try:
+                int_srv.shutdown()
+                int_srv.server_close()
+            except Exception:
+                pass
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

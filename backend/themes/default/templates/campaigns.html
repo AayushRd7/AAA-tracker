@@ -142,13 +142,14 @@
                                                     </v-col>
 
                                                     <v-col cols="12">
-                                                        <v-text-field
+                                                        <v-combobox
                                                                 label="Ad-platform campaign ID"
                                                                 v-model="form.ad_platform_campaign_id"
+                                                                :items="platformCampaignOptions"
                                                                 outlined dense
-                                                                hint="Meta Ads campaign id — used by the Meta Ads cost sync to match spend to this campaign. Optional."
+                                                                hint="Meta Ads campaign id — used by the Meta Ads cost sync to match spend to this campaign. Optional. Connect Meta under Settings → Integrations to pick discovered campaigns."
                                                                 persistent-hint
-                                                        ></v-text-field>
+                                                        ></v-combobox>
                                                     </v-col>
 
                                                     <v-col cols="12">
@@ -2064,6 +2065,10 @@
                 platformAdsetsLoading: false,
                 platformControlBusy: false,
                 platformAdsetBusy: {},
+                // Discovered Meta assets (Settings → Integrations) for the pickers
+                platformCampaignOptions: [],
+                platformAccountOptions: [],
+                platformAssetsLoading: false,
                 currencies: ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'AED', 'AFN', 'ALL', 'AMD', 'ANG', 'AOA', 'ARS', 'AWG', 'AZN',
                     'BAM', 'BBD', 'BDT', 'BGN', 'BHD', 'BIF', 'BMD', 'BND', 'BOB', 'BRL',
                     'BSD', 'BTN', 'BWP', 'BYN', 'BZD', 'CDF', 'CHF', 'CLP', 'CNY',
@@ -3118,6 +3123,28 @@
                     this.loadDomains(),
                     this.loadSources()
                 ]);
+                this.loadPlatformAssets();
+            },
+            // Discovered Meta campaigns feed the Ad-platform campaign ID picker.
+            // Populated only when a Meta connection exists; the field stays a
+            // free-text entry otherwise (no endpoint is invented here).
+            loadPlatformAssets() {
+                this.platformAssetsLoading = true;
+                fetch('/backend/api/integrations/meta/assets', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => {
+                        if (!data) { return; }
+                        this.platformCampaignOptions = (data.campaigns || []).map(c => ({
+                            text: (c.name || c.id) + (c.ad_account_id ? ' — ' + c.ad_account_id : ''),
+                            value: String(c.id)
+                        }));
+                        this.platformAccountOptions = (data.ad_accounts || []).map(a => ({
+                            text: (a.name || a.id),
+                            value: String(a.id).replace(/^act_/, '')
+                        }));
+                    })
+                    .catch(() => { /* no connection / offline — keep manual entry */ })
+                    .finally(() => { this.platformAssetsLoading = false; });
             },
             moveFlowUp(index) {
                 if (index > 0) {
