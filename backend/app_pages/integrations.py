@@ -45,12 +45,12 @@ OTHER RULES
 
 Provider URLs (defaults; the base hosts are overridable for tests)
 ------------------------------------------------------------------
-* Consent:  https://www.facebook.com/v21.0/dialog/oauth
-* Exchange: https://graph.facebook.com/v21.0/oauth/access_token
-* Assets:   https://graph.facebook.com/v21.0/me/adaccounts
-            https://graph.facebook.com/v21.0/{ad_account_id}/adspixels
-            https://graph.facebook.com/v21.0/{ad_account_id}/campaigns
-* Revoke:   DELETE https://graph.facebook.com/v21.0/me/permissions
+* Consent:  https://www.facebook.com/{version}/dialog/oauth
+* Exchange: https://graph.facebook.com/{version}/oauth/access_token
+* Assets:   https://graph.facebook.com/{version}/me/adaccounts
+            https://graph.facebook.com/{version}/{ad_account_id}/adspixels
+            https://graph.facebook.com/{version}/{ad_account_id}/campaigns
+* Revoke:   DELETE https://graph.facebook.com/{version}/me/permissions
 
 Scope-creep note: business-owned pixel listing needs the ``business_management``
 scope; the Connect flow deliberately requests only ``ads_read,ads_management``,
@@ -72,6 +72,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db, SessionLocal
 from tenant_context import current_tenant
+from graph_version import DEFAULT_GRAPH_VERSION
 from models.settings import SettingsORM
 
 # Reuse the Meta Graph client primitives (timeout, bounded retries + backoff,
@@ -87,7 +88,7 @@ router = APIRouter()
 
 DEFAULT_GRAPH_BASE = "https://graph.facebook.com"
 DEFAULT_OAUTH_BASE = "https://www.facebook.com"
-DEFAULT_API_VERSION = "v21.0"
+DEFAULT_API_VERSION = DEFAULT_GRAPH_VERSION
 STATE_TTL_MINUTES = 10
 META_SCOPES = "ads_read,ads_management"
 ASSET_LIMIT = 100
@@ -232,6 +233,21 @@ def _oauth_base(cfg: dict) -> str:
 
 
 def _api_version(platform: str) -> str:
+    """The Graph version for this platform.
+
+    For Meta the cost-sync setting (``meta_ads.api_version``) wins when an operator set one, so
+    the OAuth flow, asset discovery and insights all speak the same version; otherwise the shared
+    default applies. Keeping two independent versions is how they drifted apart in the first
+    place.
+    """
+    if platform == "meta":
+        try:
+            from app_pages.meta_ads import load_settings as _meta_ads_settings
+            configured = str((_meta_ads_settings() or {}).get("api_version") or "").strip()
+            if configured:
+                return configured
+        except Exception:
+            pass
     return PLATFORMS.get(platform, {}).get("api_version", DEFAULT_API_VERSION)
 
 

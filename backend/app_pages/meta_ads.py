@@ -46,6 +46,7 @@ from sqlalchemy.orm import Session
 from db import get_db, SessionLocal
 from tenant_context import current_tenant
 from tenant_settings import for_each_tenant
+from graph_version import DEFAULT_GRAPH_VERSION
 from models.settings import SettingsORM
 from clickHouse import get_clickhouse_client
 
@@ -65,7 +66,7 @@ DEFAULTS = {
     "enabled": False,
     "ad_account_ids": [],
     "access_token": "",
-    "api_version": "v21.0",
+    "api_version": DEFAULT_GRAPH_VERSION,
     "dry_run": True,           # default ON — a fresh install never writes costs
     "cadence": "hourly",       # hourly | daily
     "backfill_days": 7,
@@ -129,7 +130,7 @@ def _normalise(cfg: dict) -> dict:
         ids = [ids]
     out["ad_account_ids"] = [str(i).strip() for i in (ids or []) if str(i).strip()]
     out["access_token"] = str(out.get("access_token") or "").strip()
-    out["api_version"] = str(out.get("api_version") or "v21.0").strip()
+    out["api_version"] = str(out.get("api_version") or DEFAULT_GRAPH_VERSION).strip()
     out["cadence"] = "daily" if str(out.get("cadence")).lower() == "daily" else "hourly"
     try:
         out["backfill_days"] = max(0, int(out.get("backfill_days", 7)))
