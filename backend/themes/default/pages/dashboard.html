@@ -49,6 +49,10 @@
             <logs-component></logs-component>
         </div>
 
+        <div v-show="$root.activeSection === 'scripts'">
+            <scripts-component></scripts-component>
+        </div>
+
         <div v-show="$root.activeSection === 'settings'">
             <settings-component></settings-component>
         </div>

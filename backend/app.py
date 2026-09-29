@@ -144,6 +144,57 @@ def _ensure_logs_tables(conn):
         conn.execute(text(ddl))
 
 
+def _ensure_wave18_tables(conn):
+    """Idempotent schema for saved library entities (filter presets, scripts,
+    funnel templates). The frontend tracking plane does not touch these tables,
+    so creating them here is sufficient — either service boot order works.
+    """
+    from sqlalchemy import text
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS filter_presets (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            scope VARCHAR(64) NOT NULL,
+            filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_by VARCHAR(255),
+            created_at TIMESTAMP NOT NULL DEFAULT now()
+        )"""))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS filter_presets_scope_idx "
+                      "ON filter_presets (scope)"))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS scripts (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            code TEXT NOT NULL DEFAULT '',
+            description TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT now()
+        )"""))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS funnel_templates (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            steps JSONB NOT NULL DEFAULT '[]'::jsonb,
+            created_at TIMESTAMP NOT NULL DEFAULT now()
+        )"""))
+
+
+# Registered as the app's startup hook. It was defined but never wired, so every
+# backend-side migration below (user security columns, archived flags, ownership, monitor
+# state, auto rules, domain groups, CAPI records, log trails, tooling tables) silently
+# never ran — the tracking plane's own ensure_schema was covering for it. That is the
+# "column does not exist" failure mode seen on a fresh server install.
+def _mig(conn, sql):
+    """Run one startup migration statement. A failure is reported and skipped so it can
+    never abort the migrations that follow it (the previous shape wrapped the whole list
+    in one try/except, so the first error silently skipped everything after it)."""
+    from sqlalchemy import text
+    try:
+        conn.execute(text(sql))
+    except Exception as e:
+        print("startup migration skipped:", e)
+
+
+@app.on_event("startup")
 async def startup():
     # Lightweight schema migration for installs created before a column existed.
     # Idempotent — safe to run on every boot.
@@ -151,25 +202,25 @@ async def startup():
     from db import engine
     try:
         with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb"))
+            _mig(conn, "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb")
             # G62/G63 — user security columns
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_backup JSONB"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB"))
+            _mig(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT")
+            _mig(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false")
+            _mig(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_backup JSONB")
+            _mig(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB")
             # G66 — soft-delete flags
-            conn.execute(text("ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false"))
-            conn.execute(text("ALTER TABLE offers ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false"))
+            _mig(conn, "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false")
+            _mig(conn, "ALTER TABLE offers ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false")
             # D1c — campaign ownership for the campaigns:'own' permission
-            conn.execute(text("ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS owner_id INTEGER"))
+            _mig(conn, "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS owner_id INTEGER")
             # G62 — one-shot TOTP token replay protection
-            conn.execute(text("""
+            _mig(conn, """
                 CREATE TABLE IF NOT EXISTS totp_token_used (
                     jti TEXT PRIMARY KEY,
                     at TIMESTAMP NOT NULL DEFAULT now()
-                )"""))
+                )""")
             # G69 — flow monitoring state
-            conn.execute(text("""
+            _mig(conn, """
                 CREATE TABLE IF NOT EXISTS monitor_state (
                     id BIGSERIAL PRIMARY KEY,
                     entity VARCHAR(32) NOT NULL DEFAULT 'offer',
@@ -179,10 +230,10 @@ async def startup():
                     status VARCHAR(16) NOT NULL DEFAULT 'unknown',
                     checked_at TIMESTAMP NOT NULL DEFAULT now(),
                     fail_count INTEGER NOT NULL DEFAULT 0
-                )"""))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS monitor_state_url_idx ON monitor_state (url)"))
+                )""")
+            _mig(conn, "CREATE INDEX IF NOT EXISTS monitor_state_url_idx ON monitor_state (url)")
             # G70 — auto rules
-            conn.execute(text("""
+            _mig(conn, """
                 CREATE TABLE IF NOT EXISTS auto_rules (
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(255) NOT NULL,
@@ -193,27 +244,27 @@ async def startup():
                     action VARCHAR(64) NOT NULL DEFAULT 'alert_telegram',
                     last_run TIMESTAMP,
                     last_result JSONB
-                )"""))
+                )""")
             # D2 — domain groups with per-user access grants
-            conn.execute(text("""
+            _mig(conn, """
                 CREATE TABLE IF NOT EXISTS domain_groups (
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(255) UNIQUE NOT NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT now(),
                     updated_at TIMESTAMP NOT NULL DEFAULT now()
-                )"""))
-            conn.execute(text("""
+                )""")
+            _mig(conn, """
                 CREATE TABLE IF NOT EXISTS domain_group_domains (
                     group_id INTEGER NOT NULL REFERENCES domain_groups(id) ON DELETE CASCADE,
                     domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
                     PRIMARY KEY (group_id, domain_id)
-                )"""))
-            conn.execute(text("""
+                )""")
+            _mig(conn, """
                 CREATE TABLE IF NOT EXISTS domain_group_users (
                     group_id INTEGER NOT NULL REFERENCES domain_groups(id) ON DELETE CASCADE,
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     PRIMARY KEY (group_id, user_id)
-                )"""))
+                )""")
             # CAPI integration records: pixels, channel/offer bindings and
             # per-channel toggles. The tracking plane (frontend/app.py) creates
             # the same tables on its own startup so either service can boot first.
@@ -221,6 +272,8 @@ async def startup():
             # Logs area audit trails (postback_logs, click_forward_logs,
             # cost_update_logs) + meta_capi_log extension.
             _ensure_logs_tables(conn)
+            # Saved library entities: filter presets, scripts, funnel templates.
+            _ensure_wave18_tables(conn)
             conn.commit()
     except Exception as e:
         print("startup migration:", e)
@@ -308,7 +361,7 @@ ALLOWED_PAGES = {"auth", "dashboard", "editor"}
 # serves the shell pre-focused on that section (deep-linkable, back-button friendly).
 NAV_SECTIONS = {"dashboard", "campaigns", "landings", "affiliates", "offers",
                 "sources", "reports", "domains", "settings", "users", "documentation",
-                "fraud", "optimizer", "conversion-tracking", "logs"}
+                "fraud", "optimizer", "conversion-tracking", "logs", "scripts"}
 # auth.PERMISSION_SECTIONS and auth.ADMIN_ONLY_SECTIONS (see how
 # "conversion-tracking" is registered there). backend/auth.py is owned by
 # another change right now, so until that lands the section gate below treats
@@ -410,6 +463,19 @@ app.include_router(costs_router, prefix="/api/costs", tags=["Costs"],
 from app_pages.logs import router as logs_router
 app.include_router(logs_router, prefix="/api/logs", tags=["Logs"],
                    dependencies=[Depends(require_section_write("logs"))])
+# Saved filter presets — reachable from the Logs and Reports views, so the gate
+# is the always-readable dashboard section rather than a single owning section.
+from app_pages.filter_presets import router as filter_presets_router
+app.include_router(filter_presets_router, prefix="/api/filter-presets", tags=["Filter presets"],
+                   dependencies=[Depends(require_section_write("dashboard"))])
+# Script library — same admin plane as the Logs section.
+from app_pages.scripts import router as scripts_router
+app.include_router(scripts_router, prefix="/api/scripts", tags=["Scripts"],
+                   dependencies=[Depends(require_section_write("scripts"))])
+# Funnel templates — owned by the campaign editor.
+from app_pages.funnel_templates import router as funnel_templates_router
+app.include_router(funnel_templates_router, prefix="/api/funnel-templates", tags=["Funnel templates"],
+                   dependencies=[Depends(require_section_write("campaigns"))])
 
 
 # G52: minimal public view for shared reports — shell-less, token in the query

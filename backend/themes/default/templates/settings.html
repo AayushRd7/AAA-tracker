@@ -69,6 +69,42 @@
                     </v-card>
                 </v-col>
             </v-row>
+            <v-row class="mb-2">
+                <v-col cols="12">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-lifebuoy</v-icon>
+                            Global fallback URL
+                        </v-card-title>
+                        <v-card-text>
+                            <div class="caption grey--text mb-2">Where visitors are sent when no flow is eligible and the campaign has no fallback URL of its own. Leave empty to show a 404 page. Click macros are substituted at redirect time.</div>
+                            <v-text-field
+                                    label="Fallback URL"
+                                    v-model="settings.fallback_url"
+                                    outlined
+                                    dense
+                                    placeholder="https://example.com/offer?click_id={click_id}"
+                                    hint="Global default — a campaign's own fallback URL always wins"
+                                    persistent-hint
+                            ></v-text-field>
+                            <v-btn color="primary" elevation="0" class="mt-2" @click="saveSettings(false)">
+                                <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save
+                            </v-btn>
+                            <div class="mt-4">Click to insert a token:</div>
+                            <v-chip-group column>
+                                <v-chip
+                                        v-for="tok in fallbackTokens"
+                                        :key="tok"
+                                        class="ma-1"
+                                        small
+                                        outlined
+                                        @click="insertFallbackToken(tok)"
+                                >{{"{"}}{{ tok }}{{"}"}}</v-chip>
+                            </v-chip-group>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+            </v-row>
             <v-row>
                 <v-col cols="12" md="6">
                     <v-card class="pa-4">
@@ -1241,6 +1277,7 @@
                     domain: '',
                     currency: 'USD',
                     timezone: 'UTC',
+                    fallback_url: '',
                     autoUpdateReports: true,
                     apiToken: 'a1b2c3d4e5f6',
                     enableLogging: false,
@@ -1467,6 +1504,21 @@
               },
               capiIsMeta() {
                 return (this.capiForm.platform || 'meta') === 'meta';
+              },
+              // Same macro set the campaign editor's token palette offers —
+              // substituted in the global fallback URL at redirect time.
+              fallbackTokens() {
+                return [
+                    'click_id', 'campaign_name', 'campaign_id', 'campaign_alias',
+                    'sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5',
+                    'sub_id_6', 'sub_id_7', 'sub_id_8', 'sub_id_9', 'sub_id_10',
+                    'country', 'city', 'region', 'os', 'os_version', 'browser',
+                    'browser_version', 'device_type', 'device_model', 'language',
+                    'source', 'traffic_source_name', 'referrer', 'keyword', 'ip',
+                    'isp', 'is_bot', 'is_using_proxy', 'visitor_id', 'external_id',
+                    'ad_campaign_id', 'utm_source', 'utm_medium', 'utm_campaign',
+                    'utm_creative', '_md5', 'payout', 'status',
+                ];
               }
         },
         methods: {
@@ -1474,6 +1526,9 @@
                 navigator.clipboard.writeText(text).then(() => {
                     this.$root.$emit("show-message", {type: "success", text: "Copied to clipboard"});
                 });
+            },
+            insertFallbackToken(token) {
+                this.settings.fallback_url = (this.settings.fallback_url || '') + '{' + token + '}';
             },
             async clearData() {
                 if (!confirm("Are you sure you want to delete all tracking data?")) return;

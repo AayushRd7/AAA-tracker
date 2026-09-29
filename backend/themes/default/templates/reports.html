@@ -172,6 +172,23 @@
                 <v-btn small outlined color="error" :disabled="!savedReportId" @click="deleteSavedReport">
                     <v-icon small>mdi-trash-can-outline</v-icon>
                 </v-btn>
+                <v-select
+                        v-model="selectedReportPreset"
+                        :items="reportPresets"
+                        item-text="name"
+                        item-value="id"
+                        label="Filter presets"
+                        outlined dense hide-details clearable
+                        class="saved-select"
+                        @change="applyReportPreset"
+                ></v-select>
+                <v-btn small outlined class="mr-1" @click="saveReportPreset" title="Save current filters as preset">
+                    <v-icon small>mdi-content-save-outline</v-icon>
+                </v-btn>
+                <v-btn small outlined color="error" class="mr-1" :disabled="!selectedReportPreset"
+                       @click="deleteReportPreset" title="Delete preset">
+                    <v-icon small>mdi-delete</v-icon>
+                </v-btn>
                 <v-spacer></v-spacer>
                 <v-btn
                         v-if="$root.roleLabel === 'admin'"
@@ -896,6 +913,8 @@
                 metricError: '',
                 savedReports: [],
                 savedReportId: null,
+                reportPresets: [],
+                selectedReportPreset: null,
                 saveDialog: false,
                 saveName: '',
                 saveLoading: false,
@@ -1143,6 +1162,7 @@
             this.loadClickLog();
             this.loadCustomStatuses();
             this.loadSavedReports();
+            this.loadReportPresets();
             if (this.$root.roleLabel === 'admin') this.loadOffers();
             this.$root.$on('load-reports', () => { this.loadCampaigns(); this.loadReports(); this.loadClickLog(); });
         },
@@ -1238,6 +1258,67 @@
             openSaveDialog() {
                 this.saveName = '';
                 this.saveDialog = true;
+            },
+            // --- saved filter presets (scope: reports) ---
+            loadReportPresets() {
+                fetch('/backend/api/filter-presets/?scope=reports', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {presets: []})
+                    .then(data => { this.reportPresets = data.presets || []; })
+                    .catch(() => { this.reportPresets = []; });
+            },
+            reportFilterConfig() {
+                return {
+                    dateRange: this.dateRange,
+                    selectedCampaigns: this.selectedCampaigns,
+                    dateBasis: this.dateBasis,
+                    dimensions: this.dimensions,
+                    selectedColumns: this.selectedColumns,
+                    sortBy: this.sortBy,
+                    sortDir: this.sortDir,
+                };
+            },
+            applyReportPreset(id) {
+                if (!id) return;
+                const preset = this.reportPresets.find(p => p.id === id);
+                if (!preset) return;
+                const f = preset.filters || {};
+                if (Array.isArray(f.dateRange)) this.dateRange = f.dateRange;
+                if (Array.isArray(f.selectedCampaigns)) this.selectedCampaigns = f.selectedCampaigns;
+                if (f.dateBasis) this.dateBasis = f.dateBasis;
+                if (Array.isArray(f.dimensions) && f.dimensions.length) this.dimensions = f.dimensions;
+                if (Array.isArray(f.selectedColumns) && f.selectedColumns.length) this.selectedColumns = f.selectedColumns;
+                if (f.sortBy) this.sortBy = f.sortBy;
+                if (f.sortDir) this.sortDir = f.sortDir;
+                this.runReport();
+            },
+            saveReportPreset() {
+                const name = (window.prompt('Preset name') || '').trim();
+                if (!name) return;
+                fetch('/backend/api/filter-presets/', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: name, scope: 'reports', filters: this.reportFilterConfig()}),
+                })
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(data => {
+                        this.reportPresets.push(data.preset);
+                        this.selectedReportPreset = data.preset.id;
+                        this.$root.$emit('show-message', {type: 'success', text: 'Preset saved'});
+                    })
+                    .catch(err => this.$root.$emit('show-message', {type: 'error', text: 'Preset save failed: ' + sanitizeToastMessage(err.message)}));
+            },
+            deleteReportPreset() {
+                if (!this.selectedReportPreset) return;
+                fetch('/backend/api/filter-presets/' + this.selectedReportPreset,
+                      {method: 'DELETE', credentials: 'include'})
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(() => {
+                        this.reportPresets = this.reportPresets.filter(p => p.id !== this.selectedReportPreset);
+                        this.selectedReportPreset = null;
+                        this.$root.$emit('show-message', {type: 'success', text: 'Preset deleted'});
+                    })
+                    .catch(err => this.$root.$emit('show-message', {type: 'error', text: 'Preset delete failed: ' + sanitizeToastMessage(err.message)}));
             },
             // --- retroactive cost update (admin only, /api/costs/update) ---
             openCostDialog() {

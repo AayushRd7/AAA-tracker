@@ -6704,6 +6704,156 @@ print("ESCAPED-OK")
           pg_exec_out(f"SELECT count(*) FROM postback_logs WHERE click_id LIKE '{lg_base}%'").strip() == "0",
           pg_exec_out(f"SELECT count(*) FROM postback_logs WHERE click_id LIKE '{lg_base}%'"))
 
+    # ===== Wave 18: sidebar grouping, saved presets, scripts, funnel
+    # templates and the global fallback URL =====
+    print("== Wave 18: IA + tools ==")
+    w18 = os.getpid()
+
+    # -- sidebar still renders every section (served-HTML check) --
+    r = s.get(f"{BASE}/backend/dashboard")
+    w18_nav_keys = ["dashboard", "campaigns", "landings", "affiliates", "offers",
+                    "sources", "reports", "conversion-tracking", "logs", "domains",
+                    "fraud", "optimizer", "settings", "users", "documentation", "scripts"]
+    w18_html = r.text if r.status_code == 200 else ""
+    w18_missing = [k for k in w18_nav_keys if f"key: '{k}'" not in w18_html]
+    check("w18: sidebar renders every nav section",
+          r.status_code == 200 and not w18_missing, str(w18_missing))
+    check("w18: sidebar groups are present",
+          "group: 'Performance'" in w18_html and "group: 'Tools'" in w18_html
+          and "group: 'Account'" in w18_html,
+          "group markers missing")
+
+    # -- filter presets: CRUD + scope isolation --
+    w18_p1 = s.post(f"{api}/filter-presets/", json={
+        "name": f"w18-preset-logs-{w18}", "scope": "logs-postbacks",
+        "filters": {"result": "accepted", "status": "sale"}})
+    check("w18: create preset (logs)", w18_p1.status_code == 200, w18_p1.text[:150])
+    w18_p1_id = w18_p1.json().get("preset", {}).get("id")
+    w18_p2 = s.post(f"{api}/filter-presets/", json={
+        "name": f"w18-preset-reports-{w18}", "scope": "reports",
+        "filters": {"dimensions": ["country"]}})
+    check("w18: create preset (reports)", w18_p2.status_code == 200, w18_p2.text[:150])
+    w18_p2_id = w18_p2.json().get("preset", {}).get("id")
+
+    w18_logs = s.get(f"{api}/filter-presets/", params={"scope": "logs-postbacks"}).json()
+    w18_logs_ids = {p["id"] for p in w18_logs.get("presets", [])}
+    check("w18: presets scoped — logs view sees only its own",
+          w18_p1_id in w18_logs_ids and w18_p2_id not in w18_logs_ids,
+          str(w18_logs)[:200])
+    w18_reps = s.get(f"{api}/filter-presets/", params={"scope": "reports"}).json()
+    w18_reps_ids = {p["id"] for p in w18_reps.get("presets", [])}
+    check("w18: presets scoped — reports view sees only its own",
+          w18_p2_id in w18_reps_ids and w18_p1_id not in w18_reps_ids,
+          str(w18_reps)[:200])
+
+    r = s.put(f"{api}/filter-presets/{w18_p1_id}",
+              json={"name": f"w18-preset-logs-{w18}-renamed", "filters": {"result": "duplicate"}})
+    check("w18: update preset",
+          r.status_code == 200 and r.json()["preset"]["name"].endswith("-renamed")
+          and r.json()["preset"]["filters"].get("result") == "duplicate", r.text[:200])
+
+    for pid_, label in ((w18_p1_id, "logs"), (w18_p2_id, "reports")):
+        r = s.delete(f"{api}/filter-presets/{pid_}")
+        check(f"w18: delete preset ({label})", r.status_code == 200, r.text[:120])
+
+    # -- script library: CRUD + list --
+    w18_code = f"<script>/* w18-{w18} */</script>"
+    r = s.post(f"{api}/scripts/", json={
+        "title": f"w18-script-{w18}", "description": "smoke", "code": w18_code})
+    check("w18: create script", r.status_code == 200, r.text[:150])
+    w18_script_id = r.json().get("script", {}).get("id")
+    r = s.get(f"{api}/scripts/")
+    check("w18: script appears in list",
+          r.status_code == 200 and any(x["id"] == w18_script_id for x in r.json().get("scripts", [])),
+          r.text[:200])
+    r = s.put(f"{api}/scripts/{w18_script_id}", json={"code": w18_code + "//v2"})
+    check("w18: update script",
+          r.status_code == 200 and r.json()["script"]["code"].endswith("//v2"), r.text[:200])
+    r = s.delete(f"{api}/scripts/{w18_script_id}")
+    check("w18: delete script", r.status_code == 200, r.text[:120])
+
+    # -- funnel templates: save/apply round-trip --
+    w18_steps = [
+        {"name": "Step One", "landing": 1, "offers": [2, 3], "schema": "landing_offer"},
+        {"name": "Step Two", "landing": None, "offers": [4], "schema": "landing_offer"},
+    ]
+    r = s.post(f"{api}/funnel-templates/", json={
+        "name": f"w18-funnel-{w18}", "steps": w18_steps})
+    check("w18: save funnel template", r.status_code == 200, r.text[:150])
+    w18_tpl_id = r.json().get("template", {}).get("id")
+    check("w18: template stores the steps verbatim",
+          r.json()["template"]["steps"] == w18_steps, r.text[:250])
+
+    r = s.get(f"{api}/funnel-templates/")
+    w18_tpl = next((t for t in r.json().get("templates", []) if t["id"] == w18_tpl_id), None)
+    check("w18: template listed with its steps", w18_tpl is not None
+          and w18_tpl["steps"] == w18_steps, str(r.json())[:200])
+
+    # Apply: a new campaign payload carries the template's steps verbatim.
+    w18_funnel_alias = f"w18-funnel-camp-{w18}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"w18 funnel camp {w18}", "alias": w18_funnel_alias,
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "config": {"flows": [], "postbacks": [], "hide_referrer": False, "fallback_url": "",
+                   "funnel": {"enabled": True, "steps": w18_tpl["steps"]}}})
+    check("w18: apply template to a new campaign", r.status_code == 200, r.text[:200])
+    w18_funnel_cid = r.json().get("id")
+    r = s.get(f"{api}/campaigns/")
+    w18_saved = next((c for c in r.json() if c["id"] == w18_funnel_cid), None)
+    check("w18: applied steps round-trip through the campaign",
+          w18_saved is not None and w18_saved["config"]["funnel"]["steps"] == w18_steps,
+          str(w18_saved)[:300])
+    s.delete(f"{api}/campaigns/{w18_funnel_cid}")
+    s.delete(f"{api}/funnel-templates/{w18_tpl_id}")
+
+    # -- global fallback URL (with macro substitution) --
+    w18_prev_settings = s.get(f"{api}/settings/").json().get("settings", {})
+    w18_prev_fallback = w18_prev_settings.get("fallback_url", "")
+    r = s.post(f"{api}/settings/", json={"settings": {
+        "fallback_url": "https://example.com/w18-global-{click_id}?c={campaign_name}&s={sub_id_1}&m={_md5}"}})
+    check("w18: global fallback saved", r.status_code == 200, r.text[:120])
+    settle_settings_cache()
+
+    w18_alias = f"w18-global-fb-{w18}"
+    w18_name = f"w18 global campaign {w18}"
+    w18_cfg = {"flows": [{"type": "default", "position": 1, "enabled": True,
+                          "schema": "redirect", "redirect_url": "https://example.com/w18-a",
+                          "weight": 100,
+                          "filters": [{"parameter": "country", "condition": "equals", "value": "ZZ"}]}],
+               "postbacks": [], "fallback_url": "", "hide_referrer": False}
+    r = s.post(f"{api}/campaigns/", json={
+        "name": w18_name, "alias": w18_alias, "type": "campaign", "status": "active",
+        "redirect_mode": "position", "config": w18_cfg})
+    check("w18: no-fallback campaign created", r.status_code == 200, r.text[:150])
+    w18_cid = r.json().get("id")
+
+    r = requests.get(f"{BASE}/{w18_alias}",
+                     params={"click_id": f"w18clk{w18}", "sub_id_1": f"w18sub{w18}"},
+                     verify=not INSECURE, allow_redirects=False)
+    w18_loc = r.headers.get("location") or ""
+    w18_md5 = __import__("hashlib").md5(f"w18clk{w18}".encode()).hexdigest()
+    check("w18: no-fallback campaign hits the global fallback",
+          "example.com/w18-global-w18clk" in w18_loc, f"{r.status_code} -> {w18_loc}")
+    check("w18: global fallback macros substituted",
+          f"s=w18sub{w18}" in w18_loc and f"m={w18_md5}" in w18_loc
+          and "c=w18%20global%20campaign" in w18_loc, w18_loc)
+
+    # A campaign-level fallback still wins over the global one.
+    w18_cfg["fallback_url"] = "https://example.com/w18-own-{click_id}"
+    r = s.put(f"{api}/campaigns/{w18_cid}", json={
+        "name": w18_name, "alias": w18_alias, "type": "campaign", "status": "active",
+        "redirect_mode": "position", "config": w18_cfg})
+    r = requests.get(f"{BASE}/{w18_alias}", params={"click_id": f"w18own{w18}"},
+                     verify=not INSECURE, allow_redirects=False)
+    check("w18: campaign-level fallback wins over global",
+          f"example.com/w18-own-w18own{w18}" in (r.headers.get("location") or ""),
+          f"{r.status_code} -> {r.headers.get('location', '')}")
+
+    s.delete(f"{api}/campaigns/{w18_cid}")
+    r = s.post(f"{api}/settings/", json={"settings": {"fallback_url": w18_prev_fallback}})
+    check("w18: global fallback restored", r.status_code == 200, r.text[:120])
+    settle_settings_cache()
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

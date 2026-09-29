@@ -725,6 +725,18 @@ body::-webkit-scrollbar-thumb:hover {
   letter-spacing: 0.1px;
 }
 
+.side-nav-group {
+  height: auto;
+  min-height: 0;
+  padding: var(--space-2) var(--space-4) 2px;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, var(--text-secondary));
+  opacity: 0.75;
+}
+
 .side-nav-item:hover {
   background: var(--accent-soft);
   color: var(--accent-hover);
@@ -834,6 +846,22 @@ body::-webkit-scrollbar-thumb:hover {
 
 .topnav-scroll::-webkit-scrollbar {
   display: none;
+}
+
+.topnav-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, var(--text-secondary));
+  opacity: 0.55;
+  padding: 0 3px;
+  white-space: nowrap;
 }
 
 .topnav-btn {

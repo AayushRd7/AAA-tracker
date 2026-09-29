@@ -47,6 +47,22 @@
                 <v-btn color="primary" elevation="0" :loading="loading" @click="reload">
                     <v-icon small class="mr-1">mdi-magnify</v-icon>Search
                 </v-btn>
+                <v-select
+                        :items="presets"
+                        v-model="selectedPreset"
+                        label="Preset"
+                        item-text="name"
+                        item-value="id"
+                        outlined dense hide-details clearable
+                        class="log-filter-sm ml-2"
+                        @change="applyPreset"
+                ></v-select>
+                <v-btn text small color="primary" class="ml-1" @click="savePreset">
+                    <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save filters
+                </v-btn>
+                <v-btn text small color="error" :disabled="!selectedPreset" @click="deletePreset">
+                    <v-icon small>mdi-delete</v-icon>
+                </v-btn>
             </div>
         </v-card>
 
@@ -99,6 +115,8 @@
                 pageSize: 50,
                 dateFrom: '',
                 dateTo: '',
+                presets: [],
+                selectedPreset: null,
                 tabs: [
                     {key: 'clicks', title: 'Clicks'},
                     {key: 'conversions', title: 'Conversions'},
@@ -226,18 +244,74 @@
             isClickLog() {
                 return this.activeTab === 'clicks';
             },
+            presetScope() {
+                return 'logs-' + this.activeTab;
+            },
         },
         mounted() {
             this.load();
+            this.loadPresets();
             this.$root.$on('load-logs', this.load);
+            this.$root.$on('load-logs', this.loadPresets);
         },
         beforeDestroy() {
             this.$root.$off('load-logs', this.load);
+            this.$root.$off('load-logs', this.loadPresets);
         },
         methods: {
             onTabChange() {
                 this.page = 1;
+                this.selectedPreset = null;
+                this.loadPresets();
                 this.load();
+            },
+            loadPresets() {
+                fetch('/backend/api/filter-presets/?scope=' + encodeURIComponent(this.presetScope),
+                      {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {presets: []})
+                    .then(data => { this.presets = data.presets || []; })
+                    .catch(() => { this.presets = []; });
+            },
+            applyPreset(id) {
+                if (!id) return;
+                const preset = this.presets.find(p => p.id === id);
+                if (!preset) return;
+                const filters = Object.assign({}, preset.filters || {});
+                const keys = Object.keys(this.filterState[this.activeTab] || {});
+                const next = {};
+                keys.forEach(k => { next[k] = filters[k] !== undefined ? filters[k] : ''; });
+                this.filterState[this.activeTab] = next;
+                this.reload();
+            },
+            savePreset() {
+                const name = (window.prompt('Preset name') || '').trim();
+                if (!name) return;
+                const filters = this.baseParams();
+                fetch('/backend/api/filter-presets/', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: name, scope: this.presetScope, filters: filters}),
+                })
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(data => {
+                        this.presets.push(data.preset);
+                        this.selectedPreset = data.preset.id;
+                        this.$root.$emit('show-message', {type: 'success', text: 'Preset saved'});
+                    })
+                    .catch(err => this.$root.$emit('show-message', {type: 'error', text: 'Preset save failed: ' + sanitizeToastMessage(err.message)}));
+            },
+            deletePreset() {
+                if (!this.selectedPreset) return;
+                fetch('/backend/api/filter-presets/' + this.selectedPreset,
+                      {method: 'DELETE', credentials: 'include'})
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(() => {
+                        this.presets = this.presets.filter(p => p.id !== this.selectedPreset);
+                        this.selectedPreset = null;
+                        this.$root.$emit('show-message', {type: 'success', text: 'Preset deleted'});
+                    })
+                    .catch(err => this.$root.$emit('show-message', {type: 'error', text: 'Preset delete failed: ' + sanitizeToastMessage(err.message)}));
             },
             reload() {
                 this.page = 1;

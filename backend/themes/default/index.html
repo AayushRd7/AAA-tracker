@@ -256,6 +256,7 @@
         {% include "templates/optimizer.html" %}
         {% include "templates/conversion-tracking.html" %}
         {% include "templates/logs.html" %}
+        {% include "templates/scripts.html" %}
     {% endif %}
 {% endif %}
 
@@ -277,18 +278,22 @@
                 <div class="side-nav-brand-name">AAA TRACKER</div>
             </div>
             <v-list nav dense class="side-nav-list py-2">
-                <v-list-item
-                        v-for="item in visibleNavItems"
-                        :key="item.key"
-                        link
-                        :input-value="activeSection === item.key"
-                        active-class="side-nav-item--active"
-                        class="side-nav-item"
-                        @click="navigate(item)"
-                >
-                    <v-list-item-icon class="mr-3"><v-icon dense>{{ item.icon }}</v-icon></v-list-item-icon>
-                    <v-list-item-title class="side-nav-label">{{ item.title }}</v-list-item-title>
-                </v-list-item>
+                <template v-for="group in navGroups">
+                    <v-subheader v-if="group.name" :key="'group-' + group.name"
+                                 class="side-nav-group">{{ group.name }}</v-subheader>
+                    <v-list-item
+                            v-for="item in group.items"
+                            :key="item.key"
+                            link
+                            :input-value="activeSection === item.key"
+                            active-class="side-nav-item--active"
+                            class="side-nav-item"
+                            @click="navigate(item)"
+                    >
+                        <v-list-item-icon class="mr-3"><v-icon dense>{{ item.icon }}</v-icon></v-list-item-icon>
+                        <v-list-item-title class="side-nav-label">{{ item.title }}</v-list-item-title>
+                    </v-list-item>
+                </template>
             </v-list>
             <template v-slot:append>
                 <div class="side-nav-foot">
@@ -374,17 +379,21 @@
             </v-menu>
             <template v-slot:extension>
                 <div class="topnav d-none d-lg-flex">
-                    <button
-                            v-for="item in visibleNavItems"
-                            :key="item.key"
-                            type="button"
-                            class="topnav-btn"
-                            :class="{'topnav-btn--active': activeSection === item.key}"
-                            @click="navigate(item)"
-                    >
-                        <v-icon dense>{{ item.icon }}</v-icon>
-                        <span>{{ item.title }}</span>
-                    </button>
+                    <template v-for="group in navGroups">
+                        <span v-if="group.name" :key="'tnav-' + group.name"
+                              class="topnav-group" :title="group.name">{{ group.name }}</span>
+                        <button
+                                v-for="item in group.items"
+                                :key="item.key"
+                                type="button"
+                                class="topnav-btn"
+                                :class="{'topnav-btn--active': activeSection === item.key}"
+                                @click="navigate(item)"
+                        >
+                            <v-icon dense>{{ item.icon }}</v-icon>
+                            <span>{{ item.title }}</span>
+                        </button>
+                    </template>
                 </div>
             </template>
         </v-app-bar>
@@ -545,22 +554,26 @@
                 userPerms: {{ (permissions if permissions else {"sections": {}, "write": True}) | tojson }},
                 dashboardShell: {{ 'true' if page == 'dashboard' and is_authenticated_user_type else 'false' }},
                 roleLabel: '{{ is_authenticated_user_type if is_authenticated_user_type else "" }}',
+                // `group` is presentation only — it drives the sidebar's small
+                // uppercase section headers. Section keys, permissions, routing
+                // and mounts are unchanged; an item without a group renders flat.
                 navItems: [
-                    {key: 'dashboard', title: 'Dashboard', icon: 'mdi-view-dashboard-outline'},
-                    {key: 'campaigns', title: 'Campaigns', icon: 'mdi-sitemap'},
-                    {key: 'landings', title: 'Landing Pages', icon: 'mdi-lan'},
-                    {key: 'affiliates', title: 'Affiliate Networks', icon: 'mdi-cash-multiple'},
-                    {key: 'offers', title: 'Offers', icon: 'mdi-tag-outline'},
-                    {key: 'sources', title: 'Traffic Sources', icon: 'mdi-database-outline'},
-                    {key: 'reports', title: 'Reports', icon: 'mdi-chart-line'},
-                    {key: 'conversion-tracking', title: 'Conversion tracking', icon: 'mdi-link-variant', admin: true},
-                    {key: 'logs', title: 'Logs', icon: 'mdi-clipboard-text-clock-outline', admin: true},
-                    {key: 'domains', title: 'Domains', icon: 'mdi-domain', admin: true},
-                    {key: 'fraud', title: 'Fraud', icon: 'mdi-shield-alert-outline', admin: true},
-                    {key: 'optimizer', title: 'Optimizer', icon: 'mdi-auto-fix', admin: true},
-                    {key: 'settings', title: 'Settings', icon: 'mdi-cog-outline', admin: true},
-                    {key: 'users', title: 'Users', icon: 'mdi-account-group', admin: true},
-                    {key: 'documentation', title: 'Documentation', icon: 'mdi-book-open-variant'},
+                    {key: 'dashboard', title: 'Dashboard', icon: 'mdi-view-dashboard-outline', group: 'Performance'},
+                    {key: 'reports', title: 'Reports', icon: 'mdi-chart-line', group: 'Performance'},
+                    {key: 'optimizer', title: 'Optimizer', icon: 'mdi-auto-fix', admin: true, group: 'Performance'},
+                    {key: 'campaigns', title: 'Campaigns', icon: 'mdi-sitemap', group: 'Entities'},
+                    {key: 'landings', title: 'Landing Pages', icon: 'mdi-lan', group: 'Entities'},
+                    {key: 'offers', title: 'Offers', icon: 'mdi-tag-outline', group: 'Entities'},
+                    {key: 'affiliates', title: 'Affiliate Networks', icon: 'mdi-cash-multiple', group: 'Entities'},
+                    {key: 'sources', title: 'Traffic Sources', icon: 'mdi-database-outline', group: 'Entities'},
+                    {key: 'domains', title: 'Domains', icon: 'mdi-domain', admin: true, group: 'Tools'},
+                    {key: 'conversion-tracking', title: 'Conversion tracking', icon: 'mdi-link-variant', admin: true, group: 'Tools'},
+                    {key: 'scripts', title: 'Scripts', icon: 'mdi-code-braces', admin: true, group: 'Tools'},
+                    {key: 'fraud', title: 'Fraud', icon: 'mdi-shield-alert-outline', admin: true, group: 'Protection'},
+                    {key: 'logs', title: 'Logs', icon: 'mdi-clipboard-text-clock-outline', admin: true, group: 'Logs'},
+                    {key: 'settings', title: 'Settings', icon: 'mdi-cog-outline', admin: true, group: 'Account'},
+                    {key: 'users', title: 'Users', icon: 'mdi-account-group', admin: true, group: 'Account'},
+                    {key: 'documentation', title: 'Documentation', icon: 'mdi-book-open-variant', group: 'Account'},
                 ],
             };
         },
@@ -569,6 +582,22 @@
                 const isAdmin = this.roleLabel === 'admin';
                 return this.navItems.filter(i =>
                     (!i.admin || isAdmin) && (isAdmin || this.userPerms.sections[i.key] !== false));
+            },
+            // Sidebar grouping: consecutive visible items that share a `group`
+            // become one block with a small uppercase header. Items without a
+            // group are emitted as a header-less block and render as before.
+            navGroups() {
+                const groups = [];
+                this.visibleNavItems.forEach(item => {
+                    const name = item.group || null;
+                    let last = groups.length ? groups[groups.length - 1] : null;
+                    if (!last || last.name !== name) {
+                        last = {name: name, items: []};
+                        groups.push(last);
+                    }
+                    last.items.push(item);
+                });
+                return groups;
             },
             searchGroups() {
                 const order = ['campaigns', 'offers', 'landings', 'domains', 'sources', 'affiliates', 'conversions'];
@@ -587,6 +616,7 @@
                     reports: 'Reports',
                     'conversion-tracking': 'Conversion tracking',
                     logs: 'Logs',
+                    scripts: 'Scripts',
                     domains: 'Domains',
                     fraud: 'Fraud & Cloaking',
                     optimizer: 'Auto Optimizer',

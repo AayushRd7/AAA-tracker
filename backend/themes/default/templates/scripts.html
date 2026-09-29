@@ -1,0 +1,185 @@
+{% raw %}
+<script type="text/x-template" id="scripts-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap">
+            <div>
+                <div class="page-title">Scripts</div>
+                <div class="page-subtitle">Store and copy the tracking scripts, pixels and custom JS snippets you paste into landers</div>
+            </div>
+            <v-btn color="primary" elevation="0" @click="openCreate">
+                <v-icon small class="mr-1">mdi-plus</v-icon>New script
+            </v-btn>
+        </div>
+
+        <v-card>
+            <v-data-table
+                    :headers="headers"
+                    :items="scripts"
+                    dense
+                    :loading="loading"
+                    :items-per-page="25"
+            >
+                <template v-slot:item.code="{ item }">
+                    <code class="script-preview">{{ preview(item.code) }}</code>
+                </template>
+                <template v-slot:item.actions="{ item }">
+                    <v-btn icon small @click="copyScript(item)" title="Copy code">
+                        <v-icon small>mdi-content-copy</v-icon>
+                    </v-btn>
+                    <v-btn icon small @click="openEdit(item)" title="Edit">
+                        <v-icon small>mdi-pencil</v-icon>
+                    </v-btn>
+                    <v-btn icon small color="red" @click="removeScript(item)" title="Delete">
+                        <v-icon small>mdi-delete</v-icon>
+                    </v-btn>
+                </template>
+                <template v-slot:no-data>
+                    <div class="empty-state">
+                        <v-icon>mdi-code-braces</v-icon>
+                        <div class="mt-2">No scripts saved yet</div>
+                        <v-btn small text color="primary" class="mt-2" @click="openCreate">Add the first one</v-btn>
+                    </div>
+                </template>
+            </v-data-table>
+        </v-card>
+
+        <v-dialog v-model="dialog" max-width="720px" persistent>
+            <v-card>
+                <v-card-title class="text-h6">{{ form.id ? 'Edit script' : 'New script' }}</v-card-title>
+                <v-card-text>
+                    <v-text-field label="Title" v-model="form.title" outlined dense required></v-text-field>
+                    <v-text-field label="Description" v-model="form.description" outlined dense
+                                  hint="What this snippet is for, and where it goes" persistent-hint></v-text-field>
+                    <v-textarea label="Code" v-model="form.code" outlined dense auto-grow
+                                rows="8" class="mt-4" spellcheck="false"></v-textarea>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="dialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="saving" @click="save">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+        <confirm-dialog-component ref="confirm" />
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('scripts-component', {
+        template: '#scripts-template',
+        data() {
+            return {
+                loading: false,
+                saving: false,
+                dialog: false,
+                scripts: [],
+                form: {id: null, title: '', description: '', code: ''},
+                headers: [
+                    {text: 'Title', value: 'title'},
+                    {text: 'Description', value: 'description'},
+                    {text: 'Code', value: 'code', sortable: false},
+                    {text: '', value: 'actions', sortable: false, align: 'end'},
+                ],
+            };
+        },
+        mounted() {
+            this.load();
+            this.$root.$on('load-scripts', this.load);
+        },
+        beforeDestroy() {
+            this.$root.$off('load-scripts', this.load);
+        },
+        methods: {
+            load() {
+                this.loading = true;
+                fetch('/backend/api/scripts/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(data => {
+                        this.scripts = data.scripts || [];
+                        this.loading = false;
+                    })
+                    .catch(err => {
+                        this.loading = false;
+                        this.$root.$emit('show-message', {type: 'error', text: 'Scripts failed: ' + sanitizeToastMessage(err.message)});
+                    });
+            },
+            preview(code) {
+                const s = String(code || '').replace(/\s+/g, ' ').trim();
+                return s.length > 90 ? s.slice(0, 90) + '…' : s;
+            },
+            openCreate() {
+                this.form = {id: null, title: '', description: '', code: ''};
+                this.dialog = true;
+            },
+            openEdit(item) {
+                this.form = {id: item.id, title: item.title, description: item.description || '', code: item.code || ''};
+                this.dialog = true;
+            },
+            save() {
+                if (!String(this.form.title || '').trim()) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'A title is required'});
+                    return;
+                }
+                this.saving = true;
+                const isEdit = !!this.form.id;
+                fetch(isEdit ? '/backend/api/scripts/' + this.form.id : '/backend/api/scripts/', {
+                    method: isEdit ? 'PUT' : 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({title: this.form.title, description: this.form.description, code: this.form.code}),
+                })
+                    .then(async r => {
+                        const data = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+                        this.saving = false;
+                        this.dialog = false;
+                        this.$root.$emit('show-message', {type: 'success', text: isEdit ? 'Script updated' : 'Script saved'});
+                        this.load();
+                    })
+                    .catch(err => {
+                        this.saving = false;
+                        this.$root.$emit('show-message', {type: 'error', text: 'Save failed: ' + sanitizeToastMessage(err.message)});
+                    });
+            },
+            removeScript(item) {
+                this.$refs.confirm.open('Delete script', 'Delete "' + item.title + '"?', 'Delete').then(ok => {
+                    if (!ok) return;
+                    fetch('/backend/api/scripts/' + item.id, {method: 'DELETE', credentials: 'include'})
+                        .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                        .then(() => {
+                            this.$root.$emit('show-message', {type: 'success', text: 'Script deleted'});
+                            this.load();
+                        })
+                        .catch(err => this.$root.$emit('show-message', {type: 'error', text: 'Delete failed: ' + sanitizeToastMessage(err.message)}));
+                });
+            },
+            copyScript(item) {
+                const code = item.code || '';
+                const done = () => this.$root.$emit('show-message', {type: 'success', text: 'Copied to clipboard'});
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(code).then(done).catch(() => this.fallbackCopy(code, done));
+                } else {
+                    this.fallbackCopy(code, done);
+                }
+            },
+            fallbackCopy(text, done) {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); done(); } catch (e) {}
+                document.body.removeChild(ta);
+            },
+        },
+    });
+</script>
+
+<style>
+    .script-preview {
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+</style>
+{% endraw %}

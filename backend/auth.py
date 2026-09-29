@@ -419,9 +419,9 @@ def require_api_auth(request: Request, authorization: Optional[str] = Header(Non
 # sections were already admin-only in the UI; the API now enforces the same.
 PERMISSION_SECTIONS = ["dashboard", "campaigns", "landings", "affiliates", "offers",
                        "sources", "reports", "domains", "settings", "users", "documentation",
-                       "fraud", "optimizer", "conversion-tracking", "logs"]
+                       "fraud", "optimizer", "conversion-tracking", "logs", "scripts"]
 ADMIN_ONLY_SECTIONS = {"users", "settings", "domains", "fraud", "optimizer",
-                       "conversion-tracking", "logs"}
+                       "conversion-tracking", "logs", "scripts"}
 
 
 def resolve_permissions(user) -> dict:

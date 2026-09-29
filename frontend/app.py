@@ -302,6 +302,39 @@ async def ensure_schema():
                     updated_rows INTEGER
                 )
             """)
+            # Saved library entities (filter presets, scripts, funnel templates)
+            # belong to the admin plane, but the backend service's startup
+            # migration handler is not invoked in this codebase — create them
+            # here so whichever service boots first brings them into existence.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS filter_presets (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    scope VARCHAR(64) NOT NULL,
+                    filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_by VARCHAR(255),
+                    created_at TIMESTAMP NOT NULL DEFAULT now()
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS filter_presets_scope_idx "
+                               "ON filter_presets (scope)")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS scripts (
+                    id SERIAL PRIMARY KEY,
+                    title VARCHAR(255) NOT NULL,
+                    code TEXT NOT NULL DEFAULT '',
+                    description TEXT,
+                    created_at TIMESTAMP NOT NULL DEFAULT now()
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS funnel_templates (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    steps JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    created_at TIMESTAMP NOT NULL DEFAULT now()
+                )
+            """)
             # Extend the CAPI delivery trail for the Logs area.
             for _ddl in (
                 "ALTER TABLE meta_capi_log ADD COLUMN IF NOT EXISTS platform VARCHAR(32)",
@@ -3816,9 +3849,20 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
     if chosen is not None:
         flow_indexes[campaign["id"]] = chosen_index
 
-    # Nothing matched → campaign fallback URL if set, else 404
+    # Nothing matched → the campaign's own fallback URL if set, else the global
+    # settings.fallback_url, else 404. Both take click macros ({click_id},
+    # {sub_id_1..10}, {campaign_name}, {country}, {os}, {browser}, {source},
+    # {_md5}, …) via the shared substitution helper.
     if chosen is None:
         fallback_url = (config.get("fallback_url") or "").strip()
+        global_fallback = (_settings_block("fallback_url", "") or "").strip()
+        if fallback_url:
+            if "{" in fallback_url:
+                fallback_url = fill_postback_template(
+                    fallback_url, _click_macro_map(campaign, meta_data))
+        elif global_fallback:
+            fallback_url = fill_postback_template(
+                global_fallback, _click_macro_map(campaign, meta_data))
         if fallback_url:
             if config.get("hide_referrer"):
                 response = meta_refresh_redirect(fallback_url, request)
@@ -4316,6 +4360,24 @@ def fill_postback_template(url: str, mapping: dict) -> str:
             return str(mapping[token])
         return match.group(0)
     return re.sub(r"\{([^{}]*)\}", _sub, url)
+
+
+def _click_macro_map(campaign, meta_data: dict) -> dict:
+    """Token map for {placeholder} substitution in fallback URLs.
+
+    meta_data already carries click_id, sub_id_1..10, country, os, browser,
+    source and the other request-derived fields; campaign_name and _md5 are
+    derived here. None values resolve to '' so a missing token never renders as
+    the literal "None"; unknown tokens stay literal (fill_postback_template).
+    """
+    tokens = {k: str(v) for k, v in dict(meta_data or {}).items() if v is not None}
+    try:
+        name = campaign.get("name") if hasattr(campaign, "get") else campaign["name"]
+    except Exception:
+        name = ""
+    tokens["campaign_name"] = str(name or "")
+    tokens["_md5"] = hashlib.md5(str(tokens.get("click_id") or "").encode()).hexdigest()
+    return tokens
 
 
 def _to_unix_seconds(value) -> str:
