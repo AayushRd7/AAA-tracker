@@ -10279,6 +10279,154 @@ print("ESCAPED-OK")
     check("slice6b: /api/health unauthenticated 401",
           r.status_code == 401, str(r.status_code))
 
+    # ===== Settings save safety =====
+    # The Settings page used to POST the whole document it held in memory, so a
+    # save before (or without) a successful load wrote the page's defaults over
+    # the real configuration — on the live box that reset currency and emptied
+    # meta_ads.ad_account_ids. It now (a) gates Save on a successful load,
+    # (b) sends only the sections the operator changed, and (c) echoes a
+    # settings_rev the server verifies, refusing any write without it.
+    print("== Settings save safety ==")
+    rp = s.get(f"{BASE}/backend/settings")
+    check("settings page: ships the load gate + rev echo",
+          rp.status_code == 200 and all(m in rp.text for m in (
+              "settingsLoaded", "_base_rev", "changedSettingsPayload",
+              "Could not load settings")),
+          "settings page marker missing")
+    check("settings page: no unreplaced jinja tags",
+          "{%" not in rp.text, "unreplaced jinja tag")
+
+    r = s.get(f"{api}/settings/")
+    check("settings: document + rev returned",
+          r.status_code == 200 and isinstance(r.json().get("settings"), dict)
+          and bool(r.json().get("settings_rev")),
+          r.text[:160])
+    orig_doc = r.json().get("settings") or {}
+
+    # Seed a realistic configured workspace, derived from what is already stored
+    # so the block ends where it started.
+    seed_currency = "INR" if orig_doc.get("currency") != "INR" else "EUR"
+    seed_accounts = ["act_%d" % (9000000 + (os.getpid() % 9999)),
+                     "act_%d" % (9100000 + (os.getpid() % 9999))]
+    rev = s.get(f"{api}/settings/").json().get("settings_rev")
+    r = s.post(f"{api}/settings/", json={"settings": {
+        "currency": seed_currency,
+        "meta_ads": {"enabled": True, "ad_account_ids": seed_accounts,
+                     "dry_run": True}}, "_base_rev": rev})
+    check("settings: guarded seed save ok", r.status_code == 200, r.text[:160])
+
+    doc = s.get(f"{api}/settings/").json().get("settings") or {}
+    check("settings: seed round-trips currency",
+          doc.get("currency") == seed_currency, str(doc.get("currency")))
+    check("settings: seed round-trips meta_ads.ad_account_ids",
+          (doc.get("meta_ads") or {}).get("ad_account_ids") == seed_accounts,
+          str((doc.get("meta_ads") or {}).get("ad_account_ids")))
+
+    # 1. A partial save that omits the blocks the page manages drops nothing.
+    rev = s.get(f"{api}/settings/").json().get("settings_rev")
+    r = s.post(f"{api}/settings/", json={
+        "settings": {"fallback_url": "https://example.com/smoke-settings"},
+        "_base_rev": rev})
+    check("settings: partial save accepted", r.status_code == 200, r.text[:160])
+    check("settings: partial save returns the new rev",
+          bool(r.json().get("settings_rev")), r.text[:120])
+    doc = s.get(f"{api}/settings/").json().get("settings") or {}
+    check("settings: omitted currency survives a partial save",
+          doc.get("currency") == seed_currency, str(doc.get("currency")))
+    check("settings: omitted meta_ads.ad_account_ids survive a partial save",
+          (doc.get("meta_ads") or {}).get("ad_account_ids") == seed_accounts,
+          str((doc.get("meta_ads") or {}).get("ad_account_ids")))
+    check("settings: the partial save wrote only its own block",
+          doc.get("fallback_url") == "https://example.com/smoke-settings",
+          str(doc.get("fallback_url")))
+
+    # 2. Publishing one block changes only that block.
+    rev = s.get(f"{api}/settings/").json().get("settings_rev")
+    before = s.get(f"{api}/settings/").json().get("settings") or {}
+    r = s.post(f"{api}/settings/", json={
+        "settings": {"postback_security": {"enabled": True,
+                                           "secret_key": "smoke-secret",
+                                           "allowed_ips": ""}},
+        "_base_rev": rev})
+    check("settings: single-block save accepted", r.status_code == 200, r.text[:160])
+    after = s.get(f"{api}/settings/").json().get("settings") or {}
+    check("settings: single-block save changed its block",
+          (after.get("postback_security") or {}).get("enabled") is True,
+          str(after.get("postback_security")))
+    check("settings: single-block save left currency alone",
+          after.get("currency") == before.get("currency"),
+          str(after.get("currency")))
+    check("settings: single-block save left meta_ads alone",
+          (after.get("meta_ads") or {}).get("ad_account_ids")
+          == (before.get("meta_ads") or {}).get("ad_account_ids"))
+
+    # 3. The dangerous body — the page's own defaults with the explicit
+    #    "never loaded" marker — is refused and writes nothing.
+    before = s.get(f"{api}/settings/").json().get("settings") or {}
+    r = s.post(f"{api}/settings/", json={
+        "settings": {"currency": "USD", "timezone": "UTC",
+                     "meta_ads": {"enabled": False, "ad_account_ids": [],
+                                  "access_token": "", "api_version": "v21.0",
+                                  "dry_run": True, "cadence": "hourly",
+                                  "backfill_days": 7, "graph_base_url": "",
+                                  "match_preference": "auto"}},
+        "_base_rev": None})
+    check("settings: not-loaded defaults payload refused (409)",
+          r.status_code == 409, f"{r.status_code} {r.text[:120]}")
+    after = s.get(f"{api}/settings/").json().get("settings") or {}
+    check("settings: not-loaded payload wrote nothing (currency intact)",
+          after.get("currency") == before.get("currency"),
+          str(after.get("currency")))
+    check("settings: not-loaded payload wrote nothing (meta_ads intact)",
+          (after.get("meta_ads") or {}).get("ad_account_ids")
+          == (before.get("meta_ads") or {}).get("ad_account_ids"))
+
+    # 3b. A stale rev (the document changed since the page loaded) is refused too.
+    before = s.get(f"{api}/settings/").json().get("settings") or {}
+    r = s.post(f"{api}/settings/", json={
+        "settings": {"currency": "USD"}, "_base_rev": "0000000000000000"})
+    check("settings: stale-rev payload refused (409)",
+          r.status_code == 409, f"{r.status_code} {r.text[:120]}")
+    check("settings: stale-rev payload wrote nothing",
+          (s.get(f"{api}/settings/").json().get("settings") or {}).get("currency")
+          == before.get("currency"))
+
+    # 3c. Refusals are audit-logged like the endpoint's neighbours.
+    r = s.get(f"{api}/audit/", params={"action": "save_rejected", "page": 1,
+                                       "page_size": 5})
+    check("settings: refusals are audit-logged",
+          r.status_code == 200
+          and any(e.get("action") == "save_rejected"
+                  for e in (r.json().get("entries") or [])),
+          r.text[:160])
+
+    # 4. The other pages that save their own block (no rev) keep working.
+    r = s.post(f"{api}/settings/", json={
+        "settings": {"bot_rules": {"enabled": True, "rules": []}}})
+    check("settings: legacy partial-block save (other pages) still works",
+          r.status_code == 200, r.text[:160])
+    doc = s.get(f"{api}/settings/").json().get("settings") or {}
+    check("settings: legacy save did not disturb currency",
+          doc.get("currency") == seed_currency, str(doc.get("currency")))
+    check("settings: legacy save did not disturb meta_ads.ad_account_ids",
+          (doc.get("meta_ads") or {}).get("ad_account_ids") == seed_accounts)
+
+    # Restore the workspace exactly as found: original values back, anything we
+    # introduced removed (a null deletes the key server-side).
+    final_doc = s.get(f"{api}/settings/").json().get("settings") or {}
+    restore = dict(orig_doc)
+    for k in final_doc:
+        if k not in orig_doc:
+            restore[k] = None
+    rev = s.get(f"{api}/settings/").json().get("settings_rev")
+    r = s.post(f"{api}/settings/", json={"settings": restore, "_base_rev": rev})
+    check("settings: workspace restored after the safety tests",
+          r.status_code == 200, r.text[:160])
+    restored = s.get(f"{api}/settings/").json().get("settings") or {}
+    check("settings: restore brought currency back",
+          restored.get("currency") == orig_doc.get("currency"),
+          f"{restored.get('currency')} != {orig_doc.get('currency')}")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

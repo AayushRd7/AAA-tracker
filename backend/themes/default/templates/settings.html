@@ -28,12 +28,30 @@
                 <v-btn
                         color="primary"
                         elevation="0"
+                        :disabled="!settingsLoaded"
+                        :loading="savingSettings"
                         @click="saveSettings(false)"
                 >
                     <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save settings
                 </v-btn>
             </div>
         </div>
+        <v-alert
+                v-if="!settingsLoaded"
+                :type="settingsLoadError ? 'error' : 'info'"
+                dense
+                text
+                class="mb-3"
+        >
+            <span v-if="settingsLoadError">
+                Save is disabled — {{ settingsLoadError }} Saving now would overwrite
+                the stored configuration with this page's defaults, so it is blocked
+                until the settings load succeeds.
+            </span>
+            <span v-else>Loading settings — Save is disabled until they load.</span>
+            <v-btn v-if="settingsLoadError" text small color="primary" class="ml-2"
+                   @click="loadSettings">Reload</v-btn>
+        </v-alert>
         <v-container fluid class="px-0 settings-grid">
 
             <v-row class="mb-2">
@@ -87,7 +105,9 @@
                                     hint="Global default — a campaign's own fallback URL always wins"
                                     persistent-hint
                             ></v-text-field>
-                            <v-btn color="primary" elevation="0" class="mt-2" @click="saveSettings(false)">
+                            <v-btn color="primary" elevation="0" class="mt-2"
+                                   :disabled="!settingsLoaded" :loading="savingSettings"
+                                   @click="saveSettings(false)">
                                 <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save
                             </v-btn>
                             <div class="mt-4">Click to insert a token:</div>
@@ -1133,6 +1153,16 @@
                         default_columns: {},
                     },
                 },
+                // Settings-page load gate: Save stays disabled until a load
+                // succeeds, and each save publishes only what changed since the
+                // loaded document (see changedSettingsPayload). settingsRev is
+                // the server's content hash the save must echo back.
+                settingsLoaded: false,
+                settingsLoadError: '',
+                savingSettings: false,
+                settingsRev: null,
+                settingsSnapshot: null,
+                subIdMappingSnapshot: null,
                 dividerOptions: [
                     {text: 'Comma — 1,234.50', value: 'comma'},
                     {text: 'Space — 1 234.50', value: 'space'},
@@ -1312,11 +1342,22 @@
                     });
             },
             loadSettings() {
-                fetch("/backend/api/settings/", {
+                // Reset the gate on every (re)load: Save is unavailable until
+                // this succeeds, and the snapshot the save diffs against is
+                // rebuilt from what actually loaded.
+                this.settingsLoaded = false;
+                this.settingsLoadError = '';
+                this.settingsSnapshot = null;
+                let loadedRev = null;
+                return fetch("/backend/api/settings/", {
                     credentials: "include"
                 })
-                    .then((r) => r.json())
+                    .then((r) => {
+                        if (!r.ok) throw new Error("HTTP " + r.status);
+                        return r.json();
+                    })
                     .then((data) => {
+                        loadedRev = (data && data.settings_rev) || null;
                         // merge so freshly saved keys never lose their defaults
                         const tgDefaults = {
                             enabled: false,
@@ -1383,21 +1424,101 @@
                             this.settings.workspace.default_columns = {};
                         }
                         if (data.subIdMapping) this.subIdMapping = data.subIdMapping;
+                        // loadMonitorStatus writes settings.monitoring from the
+                        // server, so snapshot only after it settles.
+                        return this.loadMonitorStatus();
+                    })
+                    .then(() => {
+                        this.settingsRev = loadedRev;
+                        this.settingsSnapshot = JSON.parse(JSON.stringify(this.settings));
+                        this.subIdMappingSnapshot = JSON.parse(JSON.stringify(this.subIdMapping));
+                        this.settingsLoaded = true;
+                    })
+                    .catch((err) => {
+                        this.settingsLoaded = false;
+                        this.settingsSnapshot = null;
+                        this.settingsLoadError =
+                            "Could not load settings (" + sanitizeToastMessage(err.message) + ").";
+                        this.$root.$emit("show-message", {type: "error", text: this.settingsLoadError});
                     });
             },
+            // Structural comparison used to build the minimal save payload.
+            deepEqual(a, b) {
+                if (a === b) return true;
+                if (a === null || b === null || typeof a !== typeof b) return false;
+                const aArr = Array.isArray(a), bArr = Array.isArray(b);
+                if (aArr || bArr) {
+                    if (!aArr || !bArr || a.length !== b.length) return false;
+                    for (let i = 0; i < a.length; i++) {
+                        if (!this.deepEqual(a[i], b[i])) return false;
+                    }
+                    return true;
+                }
+                if (typeof a === 'object') {
+                    const ka = Object.keys(a), kb = Object.keys(b);
+                    if (ka.length !== kb.length) return false;
+                    for (const k of ka) {
+                        if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+                        if (!this.deepEqual(a[k], b[k])) return false;
+                    }
+                    return true;
+                }
+                return false;
+            },
+            // Only the top-level sections the operator changed since the load.
+            // Unchanged blocks (currency, meta_ads, bot_rules, meta_capi, …) are
+            // omitted entirely, so a save can never drop or clobber them.
+            changedSettingsPayload() {
+                const out = {};
+                const snap = this.settingsSnapshot || {};
+                for (const key of Object.keys(this.settings)) {
+                    if (!Object.prototype.hasOwnProperty.call(snap, key)
+                        || !this.deepEqual(this.settings[key], snap[key])) {
+                        out[key] = this.settings[key];
+                    }
+                }
+                return out;
+            },
+            subIdMappingChanged() {
+                return !this.deepEqual(this.subIdMapping,
+                                       this.subIdMappingSnapshot || []);
+            },
             saveSettings(silent) {
+                if (!this.settingsLoaded) {
+                    // No load, no save: this is what stops a page that never
+                    // loaded (or failed to) from publishing its defaults.
+                    if (!this.settingsLoadError) {
+                        this.settingsLoadError =
+                            "Settings are not loaded — save is blocked to protect the stored configuration.";
+                    }
+                    this.$root.$emit("show-message",
+                        {type: "error", text: this.settingsLoadError});
+                    return Promise.reject(new Error(this.settingsLoadError));
+                }
                 const payload = {
-                    settings: this.settings,
-                    subIdMapping: this.subIdMapping
+                    settings: this.changedSettingsPayload(),
+                    // The server refuses a write whose rev does not match the
+                    // document this page loaded.
+                    _base_rev: this.settingsRev
                 };
+                // A sub-ID mapping save is a whole-block write, so only send it
+                // when the operator edited it.
+                if (this.subIdMappingChanged()) payload.subIdMapping = this.subIdMapping;
+                this.savingSettings = true;
                 return fetch("/backend/api/settings/", {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
                     credentials: "include",
                     body: JSON.stringify(payload)
                 })
-                    .then((r) => r.json())
+                    .then((r) => r.json().catch(() => ({})).then((data) => {
+                        if (!r.ok) throw new Error(data.detail || ("HTTP " + r.status));
+                        return data;
+                    }))
                     .then((data) => {
+                        if (data.settings_rev) this.settingsRev = data.settings_rev;
+                        this.settingsSnapshot = JSON.parse(JSON.stringify(this.settings));
+                        this.subIdMappingSnapshot = JSON.parse(JSON.stringify(this.subIdMapping));
                         if (this.$loadWorkspace) this.$loadWorkspace();
                         if (!silent) {
                             this.$root.$emit("show-message", {type: "success", text: "Settings saved"});
@@ -1407,7 +1528,8 @@
                     .catch((err) => {
                         this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                         throw err;
-                    });
+                    })
+                    .finally(() => { this.savingSettings = false; });
             },
             async exportSettingsBackup() {
                 try {
@@ -1610,7 +1732,7 @@
             // --- G69 monitoring ---
             loadMonitorStatus() {
                 this.monitorLoading = true;
-                fetch('/backend/api/monitor/status', {credentials: 'include'})
+                return fetch('/backend/api/monitor/status', {credentials: 'include'})
                     .then(r => r.ok ? r.json() : {items: []})
                     .then(data => {
                         this.monitorItems = data.items || [];

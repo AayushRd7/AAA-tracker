@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+import hashlib
 import json
 import re
 import secrets
@@ -163,17 +164,58 @@ def _merge_settings(existing, incoming):
     return out
 
 
+_VOLATILE_SETTINGS_KEYS = ("insights_last",)
+
+
+def _settings_rev(raw) -> str:
+    """Content hash of the operator-managed settings document.
+
+    It is the token the Settings page echoes back: the client can only save the
+    document it actually loaded, and a page that never loaded has none (its
+    in-memory defaults must never overwrite the real configuration).
+
+    Blocks written on a background schedule (``insights_last``) are excluded, so
+    a loop refreshing them does not invalidate an open page's token. The hash is
+    over sorted keys, so a re-serialisation that changes only key order (e.g.
+    another page's read-modify-write) does not either.
+    """
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            pass
+    if isinstance(raw, dict):
+        raw = {k: v for k, v in raw.items() if k not in _VOLATILE_SETTINGS_KEYS}
+    if isinstance(raw, (dict, list)):
+        raw = json.dumps(raw, sort_keys=True)
+    return hashlib.sha256(str(raw or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _current_settings_rev(db: Session) -> str:
+    row = db.query(SettingsORM).filter_by(name="settings").first()
+    return _settings_rev(row.value if row else "")
+
+
+# Sentinel distinguishing "the client sent no _base_rev" (a legacy/partial-block
+# save from another page — allowed) from "_base_rev is null" (the client says it
+# never loaded — refused).
+_MISSING = object()
+
+
 @router.get("/")
 def get_settings(request: Request, db: Session = Depends(get_db)):
     from auth import get_caller
     _, is_admin = get_caller(request)
     rows = db.query(SettingsORM).all()
     out = {}
+    raw_settings = ""
     for row in rows:
         try:
             value = json.loads(row.value)
         except Exception:
             value = row.value
+        if row.name == "settings":
+            raw_settings = row.value or ""
         # Secret-looking values (tokens, keys, passwords) are masked for
         # non-admins; an admin still sees the real value to configure it.
         out[row.name] = value if is_admin else _mask_secrets(value)
@@ -183,12 +225,40 @@ def get_settings(request: Request, db: Session = Depends(get_db)):
     if isinstance(doc, dict) and isinstance(doc.get("copilot"), dict) \
             and doc["copilot"].get("api_key"):
         doc["copilot"]["api_key"] = _SECRET_MASK
+    # Optimistic-concurrency token for the Settings page, hashed from the raw
+    # stored value (never the masked view). Additive, so nothing that reads the
+    # response today is affected.
+    out["settings_rev"] = _settings_rev(raw_settings)
     return out
 
 @router.post("/")
 def save_settings(payload: dict, request: Request, db: Session = Depends(get_db)):
     from audit_logger import audit_event
     from auth import get_caller
+    caller, _ = get_caller(request)
+    ip = request.client.host if request.client else ""
+    # `_base_rev` is a control field, never a settings row. Present = the caller
+    # opted into the rev protocol (the Settings page). Null = it never loaded;
+    # mismatched = another writer changed the document since it loaded. Either
+    # way the write is refused before anything is touched.
+    base_rev = payload.pop("_base_rev", _MISSING)
+    if base_rev is not _MISSING:
+        current_rev = _current_settings_rev(db)
+        if not base_rev:
+            audit_event(caller or "api_token", "save_rejected", "settings",
+                        "settings", {"reason": "not_loaded"}, ip)
+            raise HTTPException(
+                status_code=409,
+                detail="Settings were not loaded on this page — refusing to "
+                       "save, so the stored configuration cannot be overwritten "
+                       "by defaults. Reload the page and try again.")
+        if str(base_rev) != current_rev:
+            audit_event(caller or "api_token", "save_rejected", "settings",
+                        "settings", {"reason": "stale_rev"}, ip)
+            raise HTTPException(
+                status_code=409,
+                detail="Settings changed since this page loaded — reload the "
+                       "page before saving.")
     # Merge top-level keys server-side under a row lock: two rapid saves of
     # different keys must not clobber each other (read-modify-write race).
     for key, val in payload.items():
@@ -210,11 +280,9 @@ def save_settings(payload: dict, request: Request, db: Session = Depends(get_db)
         else:
             db.add(SettingsORM(name=key, value=val_str))
     db.commit()
-    caller, _ = get_caller(request)
     audit_event(caller or "api_token", "save", "settings", ", ".join(payload.keys())[:64],
-                {"keys": list(payload.keys())},
-                request.client.host if request.client else "")
-    return {"status": "ok"}
+                {"keys": list(payload.keys())}, ip)
+    return {"status": "ok", "settings_rev": _current_settings_rev(db)}
 
 
 # --- Saved report builder configs (G47), stored under the 'saved_reports' key ---
