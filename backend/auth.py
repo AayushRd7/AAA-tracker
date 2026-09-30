@@ -641,10 +641,12 @@ def require_api_auth(request: Request, authorization: Optional[str] = Header(Non
 PERMISSION_SECTIONS = ["dashboard", "campaigns", "landings", "affiliates", "offers",
                        "sources", "reports", "domains", "settings", "users", "documentation",
                        "fraud", "optimizer", "conversion-tracking", "logs", "scripts",
-                       "integrations", "capi-integrations", "bot-rules", "rules"]
+                       "integrations", "capi-integrations", "bot-rules", "rules",
+                       "filter-presets", "fallback"]
 ADMIN_ONLY_SECTIONS = {"users", "settings", "domains", "fraud", "optimizer",
                        "conversion-tracking", "logs", "scripts",
-                       "integrations", "capi-integrations", "bot-rules", "rules"}
+                       "integrations", "capi-integrations", "bot-rules", "rules",
+                       "fallback"}
 
 # Role -> default permission map. This is the documented matrix:
 #   owner  — everything in the tenant, including ownership transfer.

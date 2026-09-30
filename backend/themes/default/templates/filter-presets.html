@@ -1,0 +1,278 @@
+{% raw %}
+<script type="text/x-template" id="filter-presets-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap">
+            <div>
+                <div class="page-title">Filter presets</div>
+                <div class="page-subtitle">Manage the saved filter sets that Reports and the Logs tabs reuse</div>
+            </div>
+            <v-btn color="primary" elevation="0" @click="openCreate">
+                <v-icon small class="mr-1">mdi-plus</v-icon>New preset
+            </v-btn>
+        </div>
+
+        <v-row>
+            <v-col cols="12">
+                <v-card class="pa-4" id="filter-presets-card">
+                    <v-card-title class="d-flex align-center flex-wrap">
+                        <v-icon color="primary" class="mr-2">mdi-filter-variant</v-icon>
+                        Saved filter presets
+                        <v-spacer></v-spacer>
+                        <v-select
+                                v-model="scopeFilter"
+                                :items="scopeFilterOptions"
+                                item-text="text"
+                                item-value="value"
+                                dense
+                                outlined
+                                hide-details
+                                class="filter-presets-scope-select"
+                        ></v-select>
+                    </v-card-title>
+                    <v-card-text>
+                        <div class="caption grey--text mb-3">
+                            A preset stores one view's filter state under a scope. Reports and each
+                            Logs tab list only the presets that match their own scope; saving a preset
+                            still happens inline where you use it, and it shows up here for editing.
+                        </div>
+                        <v-data-table
+                                :headers="presetHeaders"
+                                :items="filteredPresets"
+                                dense
+                                :loading="presetsLoading"
+                                :items-per-page="10"
+                        >
+                            <template v-slot:item.scope="{ item }">
+                                <v-chip x-small outlined class="preset-scope-chip">{{ scopeLabel(item.scope) }}</v-chip>
+                            </template>
+                            <template v-slot:item.filters="{ item }">
+                                <div v-if="filterKeys(item).length" class="caption">
+                                    filters on: {{ filterKeys(item).join(', ') }}
+                                </div>
+                                <span v-else class="grey--text caption">no filters stored</span>
+                            </template>
+                            <template v-slot:item.columns="{ item }">
+                                <div v-if="itemColumns(item).length" class="caption">
+                                    {{ itemColumns(item).join(', ') }}
+                                </div>
+                                <span v-else class="grey--text caption">—</span>
+                            </template>
+                            <template v-slot:item.created="{ item }">
+                                <div class="caption">{{ item.created_by || '—' }}</div>
+                                <div class="caption grey--text">{{ formatDate(item.created_at) }}</div>
+                            </template>
+                            <template v-slot:item.actions="{ item }">
+                                <v-btn icon small color="primary" @click="openEdit(item)">
+                                    <v-icon small>mdi-pencil-outline</v-icon>
+                                </v-btn>
+                                <v-btn icon small color="red" @click="deletePreset(item)">
+                                    <v-icon small>mdi-trash-can-outline</v-icon>
+                                </v-btn>
+                            </template>
+                            <template v-slot:no-data>
+                                <div class="empty-state">
+                                    <v-icon>mdi-filter-variant</v-icon>
+                                    <div class="mt-2">No presets in this scope yet. Save one from Reports or a Logs tab, or create one here.</div>
+                                </div>
+                            </template>
+                        </v-data-table>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <v-dialog v-model="presetDialog" persistent max-width="640px">
+            <v-card>
+                <v-card-title class="text-h6">
+                    {{ presetForm.id ? 'Edit preset' : 'New preset' }}
+                </v-card-title>
+                <v-card-text>
+                    <v-text-field
+                            label="Name"
+                            v-model="presetForm.name"
+                            outlined
+                            dense
+                    ></v-text-field>
+                    <v-select
+                            label="Scope"
+                            v-model="presetForm.scope"
+                            :items="scopeOptions"
+                            item-text="text"
+                            item-value="value"
+                            outlined
+                            dense
+                            hint="A preset is only offered to the view whose scope it belongs to."
+                            persistent-hint
+                    ></v-select>
+                    <v-textarea
+                            label="Filters (JSON)"
+                            v-model="presetForm.filtersText"
+                            outlined
+                            rows="6"
+                            class="mt-3"
+                            :error-messages="presetForm.error"
+                            hint="The view's filter state, stored as-is. Editing this JSON changes exactly what the preset restores."
+                            persistent-hint
+                    ></v-textarea>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="presetDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="presetSaving" @click="savePreset">
+                        {{ presetForm.id ? 'Save changes' : 'Create preset' }}
+                    </v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('filter-presets-component', {
+        template: '#filter-presets-template',
+        data() {
+            return {
+                presets: [],
+                presetsLoading: false,
+                scopeFilter: '',
+                presetDialog: false,
+                presetSaving: false,
+                presetForm: {id: null, name: '', scope: 'reports', filtersText: '{}', error: ''},
+                // Scopes the app actually writes today: Reports and the two Logs
+                // tabs. The API accepts any scope string, so an existing record
+                // with a different scope is kept and displayed as-is.
+                scopeOptions: [
+                    {text: 'Reports', value: 'reports'},
+                    {text: 'Click log', value: 'logs-clicks'},
+                    {text: 'Postback log', value: 'logs-postbacks'},
+                ],
+                presetHeaders: [
+                    {text: 'Name', value: 'name'},
+                    {text: 'Scope', value: 'scope', sortable: false},
+                    {text: 'Filters', value: 'filters', sortable: false},
+                    {text: 'Columns', value: 'columns', sortable: false},
+                    {text: 'Created', value: 'created', sortable: false},
+                    {text: 'Actions', value: 'actions', sortable: false},
+                ],
+            };
+        },
+        computed: {
+            scopeFilterOptions() {
+                return [{text: 'All scopes', value: ''}].concat(this.scopeOptions);
+            },
+            filteredPresets() {
+                if (!this.scopeFilter) return this.presets;
+                return this.presets.filter(p => p.scope === this.scopeFilter);
+            },
+        },
+        mounted() {
+            this.loadPresets();
+            this.$root.$on('load-filter-presets', this.loadPresets);
+        },
+        beforeDestroy() {
+            this.$root.$off('load-filter-presets', this.loadPresets);
+        },
+        methods: {
+            loadPresets() {
+                this.presetsLoading = true;
+                fetch('/backend/api/filter-presets/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {presets: []})
+                    .then(data => { this.presets = data.presets || []; })
+                    .catch(() => { this.presets = []; })
+                    .finally(() => { this.presetsLoading = false; });
+            },
+            scopeLabel(scope) {
+                const found = this.scopeOptions.find(s => s.value === scope);
+                return found ? found.text : (scope || '—');
+            },
+            filterKeys(item) {
+                return Object.keys((item && item.filters) || {});
+            },
+            itemColumns(item) {
+                const cols = ((item && item.filters) || {}).selectedColumns;
+                return Array.isArray(cols) ? cols : [];
+            },
+            formatDate(iso) {
+                if (!iso) return '';
+                const d = new Date(iso);
+                return isNaN(d.getTime()) ? iso : d.toLocaleString();
+            },
+            openCreate() {
+                this.presetForm = {id: null, name: '', scope: this.scopeFilter || 'reports',
+                                   filtersText: '{}', error: ''};
+                this.presetDialog = true;
+            },
+            openEdit(item) {
+                this.presetForm = {
+                    id: item.id,
+                    name: item.name || '',
+                    scope: item.scope || 'reports',
+                    filtersText: JSON.stringify(item.filters || {}, null, 2),
+                    error: '',
+                };
+                this.presetDialog = true;
+            },
+            savePreset() {
+                this.presetForm.error = '';
+                const name = (this.presetForm.name || '').trim();
+                if (!name) { this.presetForm.error = 'Name is required'; return; }
+                if (!this.presetForm.scope) { this.presetForm.error = 'Scope is required'; return; }
+                let filters;
+                try {
+                    filters = JSON.parse(this.presetForm.filtersText || '{}');
+                } catch (e) {
+                    this.presetForm.error = 'Filters must be valid JSON';
+                    return;
+                }
+                if (filters === null || typeof filters !== 'object' || Array.isArray(filters)) {
+                    this.presetForm.error = 'Filters must be a JSON object';
+                    return;
+                }
+                const body = {name: name, scope: this.presetForm.scope, filters: filters};
+                const isEdit = !!this.presetForm.id;
+                const url = isEdit
+                    ? '/backend/api/filter-presets/' + this.presetForm.id
+                    : '/backend/api/filter-presets/';
+                this.presetSaving = true;
+                return fetch(url, {
+                    method: isEdit ? 'PUT' : 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify(body),
+                })
+                    .then(r => r.json().then(data => ({ok: r.ok, status: r.status, data: data})))
+                    .then(res => {
+                        if (!res.ok) throw new Error(res.data.detail || 'HTTP ' + res.status);
+                        this.presetDialog = false;
+                        this.$root.$emit('show-message',
+                            {type: 'success', text: isEdit ? 'Preset saved' : 'Preset created'});
+                        this.loadPresets();
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Preset save failed: ' + sanitizeToastMessage(err.message)}))
+                    .finally(() => { this.presetSaving = false; });
+            },
+            deletePreset(item) {
+                if (!confirm(`Delete preset "${item.name}"?`)) return;
+                fetch('/backend/api/filter-presets/' + item.id, {method: 'DELETE', credentials: 'include'})
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(() => {
+                        this.$root.$emit('show-message', {type: 'success', text: 'Preset deleted'});
+                        this.loadPresets();
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Preset delete failed: ' + sanitizeToastMessage(err.message)}));
+            },
+        },
+    });
+</script>
+
+<style>
+    .filter-presets-scope-select {
+        max-width: 220px;
+    }
+    .preset-scope-chip {
+        text-transform: none;
+    }
+</style>
+{% endraw %}

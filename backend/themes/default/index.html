@@ -345,6 +345,7 @@
     {% include "templates/offers.html" %}
     {% include "templates/reports.html" %}
     {% include "templates/sources.html" %}
+    {% include "templates/filter-presets.html" %}
     {% if is_authenticated_user_type == 'admin' %}
         {% include "templates/users.html" %}
         {% include "templates/settings.html" %}
@@ -358,6 +359,7 @@
         {% include "templates/scripts.html" %}
         {% include "templates/bot-rules.html" %}
         {% include "templates/rules.html" %}
+        {% include "templates/fallback.html" %}
     {% endif %}
 {% endif %}
 
@@ -708,6 +710,8 @@
                     {key: 'scripts', title: 'Scripts', icon: 'mdi-code-braces', admin: true, group: 'Tools'},
                     {key: 'bot-rules', title: 'Bot rules', icon: 'mdi-robot-outline', admin: true, group: 'Tools'},
                     {key: 'rules', title: 'Automatic rules', icon: 'mdi-tune-variant', admin: true, group: 'Tools'},
+                    {key: 'filter-presets', title: 'Filter presets', icon: 'mdi-filter-variant', group: 'Tools'},
+                    {key: 'fallback', title: 'Fallback', icon: 'mdi-directions-fork', admin: true, group: 'Tools'},
                     {key: 'fraud', title: 'Fraud', icon: 'mdi-shield-alert-outline', admin: true, group: 'Protection'},
                     {key: 'logs', title: 'Logs', icon: 'mdi-clipboard-text-clock-outline', admin: true, group: 'Logs'},
                     {key: 'settings', title: 'Settings', icon: 'mdi-cog-outline', admin: true, group: 'Account'},
@@ -766,6 +770,8 @@
                     scripts: 'Scripts',
                     'bot-rules': 'Bot rules',
                     rules: 'Automatic rules',
+                    'filter-presets': 'Filter presets',
+                    fallback: 'Fallback',
                     domains: 'Domains',
                     fraud: 'Fraud & Cloaking',
                     optimizer: 'Auto Optimizer',

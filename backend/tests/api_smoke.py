@@ -7002,6 +7002,48 @@ print("ESCAPED-OK")
         check(f"slice3a: /backend/{s3_pg} has no unreplaced jinja tags",
               "{%" not in rp.text, "unreplaced jinja tag")
 
+    # ===== Slice 3b: filter presets + fallback pages =====
+    print("== Slice 3b: filter presets + fallback pages ==")
+    for s3b_pg, s3b_markers in (
+            ("filter-presets", ("filter-presets-card", "openCreate", "Saved filter presets")),
+            ("fallback", ("fallback-campaigns-card", "fallback-domains-card", "saveFallback"))):
+        rp = s.get(f"{BASE}/backend/{s3b_pg}")
+        check(f"slice3b: /backend/{s3b_pg} serves 200",
+              rp.status_code == 200, f"{rp.status_code}")
+        check(f"slice3b: /backend/{s3b_pg} carries its page markers",
+              all(m in rp.text for m in s3b_markers),
+              f"missing marker on /backend/{s3b_pg}")
+        check(f"slice3b: /backend/{s3b_pg} has no unreplaced jinja tags",
+              "{%" not in rp.text, "unreplaced jinja tag")
+
+    # Filter presets: the management page drives the existing endpoints, so
+    # exercise create -> list -> update -> delete against exactly those.
+    s3b_pid = os.getpid()
+    s3b_preset_name = f"smoke-preset-{s3b_pid}"
+    r = s.post(f"{api}/filter-presets/", json={
+        "name": s3b_preset_name, "scope": "logs-clicks",
+        "filters": {"campaign_id": "42", "date_from": "2026-01-01"}})
+    check("slice3b: preset created",
+          r.status_code == 200 and r.json().get("preset", {}).get("id"), r.text[:150])
+    s3b_preset_id = r.json().get("preset", {}).get("id")
+    r = s.get(f"{api}/filter-presets/", params={"scope": "logs-clicks"})
+    check("slice3b: preset listed under its scope",
+          r.status_code == 200
+          and any(p.get("id") == s3b_preset_id for p in r.json().get("presets", [])),
+          r.text[:150])
+    r = s.put(f"{api}/filter-presets/{s3b_preset_id}", json={"name": s3b_preset_name + "-edited"})
+    check("slice3b: preset updated",
+          r.status_code == 200
+          and r.json().get("preset", {}).get("name") == s3b_preset_name + "-edited", r.text[:150])
+    if s3b_preset_id:
+        r = s.delete(f"{api}/filter-presets/{s3b_preset_id}")
+        check("slice3b: preset deleted", r.status_code == 200, r.text[:120])
+    r = s.get(f"{api}/filter-presets/", params={"scope": "logs-clicks"})
+    check("slice3b: no smoke preset left",
+          all(p.get("name") not in (s3b_preset_name, s3b_preset_name + "-edited")
+              for p in r.json().get("presets", [])),
+          r.text[:150])
+
     # ===== Wave 19B: report templates, IP report, conversion reconciliation =====
     print("== Wave 19B: IP report + approval lifecycle + conversions log ==")
     w19b = os.getpid()

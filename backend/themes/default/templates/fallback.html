@@ -1,0 +1,263 @@
+{% raw %}
+<script type="text/x-template" id="fallback-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap">
+            <div>
+                <div class="page-title">Fallback</div>
+                <div class="page-subtitle">Where a visitor is sent when no flow matches — campaign fallback URLs and domain 404 handling</div>
+            </div>
+            <v-btn outlined color="primary" @click="loadAll">
+                <v-icon small class="mr-1">mdi-refresh</v-icon>Refresh
+            </v-btn>
+        </div>
+
+        <v-row>
+            <v-col cols="12">
+                <v-card class="pa-4 mb-4" id="fallback-global-card">
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-lifebuoy</v-icon>
+                        Global default
+                    </v-card-title>
+                    <v-card-text class="d-flex align-center flex-wrap">
+                        <div class="caption grey--text mr-3">
+                            Used only when a campaign has no fallback URL of its own. Any click macros in it are filled at redirect time.
+                        </div>
+                        <div class="flex-grow-1">
+                            <code v-if="globalFallback">{{ globalFallback }}</code>
+                            <span v-else class="grey--text">not set — unmatched traffic gets a 404 page</span>
+                        </div>
+                        <v-btn small text color="primary" class="ml-2" @click="go('settings')">
+                            Edit in Settings
+                        </v-btn>
+                    </v-card-text>
+                </v-card>
+
+                <v-card class="pa-4 mb-4" id="fallback-campaigns-card">
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-sitemap</v-icon>
+                        Campaign fallback URLs
+                        <v-spacer></v-spacer>
+                        <v-switch
+                                v-model="showAllCampaigns"
+                                label="Show campaigns without a fallback"
+                                dense
+                                inset
+                                hide-details
+                                class="mt-0"
+                        ></v-switch>
+                    </v-card-title>
+                    <v-card-text>
+                        <div class="caption grey--text mb-3">
+                            A campaign's own fallback URL is tried before the global default when no
+                            flow is eligible. Leave it empty to fall through to the global default (or a
+                            404 page if that is empty too).
+                        </div>
+                        <v-data-table
+                                :headers="campaignHeaders"
+                                :items="campaignsForList"
+                                dense
+                                :loading="loading"
+                                :items-per-page="10"
+                        >
+                            <template v-slot:item.name="{ item }">
+                                <div>{{ item.name }}</div>
+                                <div class="caption grey--text">{{ item.alias }}</div>
+                            </template>
+                            <template v-slot:item.fallback_url="{ item }">
+                                <code v-if="campaignFallback(item)">{{ campaignFallback(item) }}</code>
+                                <span v-else class="grey--text caption">none — falls through to the global default</span>
+                            </template>
+                            <template v-slot:item.actions="{ item }">
+                                <v-btn small text color="primary" @click="openEdit(item)">Edit</v-btn>
+                                <v-btn small text @click="go('campaigns')">Open editor</v-btn>
+                            </template>
+                            <template v-slot:no-data>
+                                <div class="empty-state">
+                                    <v-icon>mdi-sitemap</v-icon>
+                                    <div class="mt-2">No campaigns have their own fallback URL. Turn on the switch above to see every campaign.</div>
+                                </div>
+                            </template>
+                        </v-data-table>
+                    </v-card-text>
+                </v-card>
+
+                <v-card class="pa-4" id="fallback-domains-card">
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-domain</v-icon>
+                        Domain 404 handling
+                        <v-spacer></v-spacer>
+                        <v-btn small text color="primary" @click="go('domains')">Manage domains</v-btn>
+                    </v-card-title>
+                    <v-card-text>
+                        <div class="caption grey--text mb-3">
+                            When a request to a managed domain matches no campaign, a domain set to
+                            "handle" serves its default campaign's page instead of the parked-domain
+                            404. Domains set to "error" return the 404 page.
+                        </div>
+                        <v-data-table
+                                :headers="domainHeaders"
+                                :items="domains"
+                                dense
+                                :loading="loading"
+                                :items-per-page="10"
+                        >
+                            <template v-slot:item.handle_404="{ item }">
+                                <span class="status-chip"
+                                      :class="item.handle_404 === 'handle' ? 'status-chip--success' : 'status-chip--neutral'">
+                                    {{ item.handle_404 === 'handle' ? 'handle' : 'error' }}
+                                </span>
+                            </template>
+                            <template v-slot:item.default_campaign_id="{ item }">
+                                <span v-if="item.handle_404 !== 'handle'" class="grey--text caption">—</span>
+                                <span v-else>{{ campaignName(item.default_campaign_id) }}</span>
+                            </template>
+                            <template v-slot:no-data>
+                                <div class="empty-state">
+                                    <v-icon>mdi-domain</v-icon>
+                                    <div class="mt-2">No managed domains.</div>
+                                </div>
+                            </template>
+                        </v-data-table>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <v-dialog v-model="editDialog" persistent max-width="560px">
+            <v-card>
+                <v-card-title class="text-h6">Fallback URL — {{ editItem ? editItem.name : '' }}</v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-2">
+                        Only this campaign's <code>fallback_url</code> is changed. The rest of its
+                        configuration is re-read and saved back untouched.
+                    </div>
+                    <v-text-field
+                            label="Fallback URL"
+                            v-model="editUrl"
+                            outlined
+                            dense
+                            placeholder="https://example.com/offer?click_id={click_id}"
+                            hint="Saved click macros are substituted at redirect time. Clear it to fall through to the global default."
+                            persistent-hint
+                    ></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="editDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="editSaving" @click="saveFallback">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('fallback-component', {
+        template: '#fallback-template',
+        data() {
+            return {
+                campaigns: [],
+                domains: [],
+                globalFallback: '',
+                loading: false,
+                showAllCampaigns: false,
+                editDialog: false,
+                editItem: null,
+                editUrl: '',
+                editSaving: false,
+                campaignHeaders: [
+                    {text: 'Campaign', value: 'name'},
+                    {text: 'Fallback URL', value: 'fallback_url', sortable: false},
+                    {text: 'Actions', value: 'actions', sortable: false},
+                ],
+                domainHeaders: [
+                    {text: 'Domain', value: 'domain'},
+                    {text: 'On 404', value: 'handle_404', sortable: false},
+                    {text: 'Sends to', value: 'default_campaign_id', sortable: false},
+                    {text: 'Group', value: 'group_name'},
+                ],
+            };
+        },
+        computed: {
+            campaignsForList() {
+                if (this.showAllCampaigns) return this.campaigns;
+                return this.campaigns.filter(c => this.campaignFallback(c));
+            },
+        },
+        mounted() {
+            this.loadAll();
+            this.$root.$on('load-fallback', this.loadAll);
+        },
+        beforeDestroy() {
+            this.$root.$off('load-fallback', this.loadAll);
+        },
+        methods: {
+            loadAll() {
+                this.loading = true;
+                fetch('/backend/api/campaigns/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : [])
+                    .then(data => { this.campaigns = Array.isArray(data) ? data : []; })
+                    .catch(() => { this.campaigns = []; });
+                fetch('/backend/api/domains/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : [])
+                    .then(data => { this.domains = Array.isArray(data) ? data : []; })
+                    .catch(() => { this.domains = []; });
+                fetch('/backend/api/settings/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {})
+                    .then(data => { this.globalFallback = ((data.settings || {}).fallback_url || '').trim(); })
+                    .catch(() => { this.globalFallback = ''; })
+                    .finally(() => { this.loading = false; });
+            },
+            campaignFallback(item) {
+                return ((item && item.config) || {}).fallback_url || '';
+            },
+            campaignName(id) {
+                if (!id) return '—';
+                const c = this.campaigns.find(x => x.id === id);
+                return c ? c.name : ('campaign #' + id);
+            },
+            go(section) {
+                // Same deep link the sidebar uses: /backend/<section>.
+                window.location.href = '/backend/' + section;
+            },
+            openEdit(item) {
+                this.editItem = item;
+                this.editUrl = this.campaignFallback(item);
+                this.editDialog = true;
+            },
+            saveFallback() {
+                const item = this.editItem;
+                if (!item) return;
+                this.editSaving = true;
+                // Re-read the campaign right before writing so the PUT carries the
+                // current config. The campaign PUT replaces `config` wholesale, so
+                // sending back a stale copy would clobber edits made elsewhere.
+                fetch('/backend/api/campaigns/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(list => {
+                        const fresh = (list || []).find(c => c.id === item.id);
+                        if (!fresh) throw new Error('Campaign not found');
+                        const config = Object.assign({}, fresh.config || {});
+                        config.fallback_url = (this.editUrl || '').trim();
+                        return fetch('/backend/api/campaigns/' + item.id, {
+                            method: 'PUT',
+                            headers: {'Content-Type': 'application/json'},
+                            credentials: 'include',
+                            body: JSON.stringify({name: fresh.name, alias: fresh.alias, config: config}),
+                        });
+                    })
+                    .then(r => r.json().then(data => ({ok: r.ok, status: r.status, data: data})))
+                    .then(res => {
+                        if (!res.ok) throw new Error(res.data.detail || 'HTTP ' + res.status);
+                        this.editDialog = false;
+                        this.$root.$emit('show-message', {type: 'success', text: 'Fallback URL saved'});
+                        this.loadAll();
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Save failed: ' + sanitizeToastMessage(err.message)}))
+                    .finally(() => { this.editSaving = false; });
+            },
+        },
+    });
+</script>
+{% endraw %}
