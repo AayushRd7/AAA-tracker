@@ -673,9 +673,12 @@ ALLOWED_PAGES = {"auth", "dashboard", "editor"}
 # serves the shell pre-focused on that section (deep-linkable, back-button friendly).
 NAV_SECTIONS = {"dashboard", "campaigns", "landings", "affiliates", "offers",
                 "sources", "reports", "domains", "settings", "users", "documentation",
-                "fraud", "optimizer", "conversion-tracking", "logs", "scripts",
+                "fraud", "optimizer", "conversion-tracking", "scripts",
                 "integrations", "capi-integrations", "bot-rules", "rules",
                 "filter-presets", "fallback", "funnels",
+                "logs-clicks", "logs-conversions", "logs-postbacks",
+                "logs-click-forwarding", "logs-internal-postbacks", "logs-costs",
+                "health-center",
                 "acquisition", "creative-analytics", "copilot"}
 # auth.PERMISSION_SECTIONS and auth.ADMIN_ONLY_SECTIONS (see how
 # "conversion-tracking" is registered there). backend/auth.py is owned by
@@ -772,6 +775,12 @@ app.include_router(search_router, prefix="/api/search", tags=["Search"],
 from app_pages.status import router as status_router
 app.include_router(status_router, prefix="/api/status", tags=["Status"],
                    dependencies=[Depends(require_section("settings"))])
+# Health centre — a richer, self-contained read for the in-app health page
+# (row counts, loop heartbeats incl. insights, uptime, recent send failures).
+# Admin-only, same plane as status.
+from app_pages.health import router as health_router
+app.include_router(health_router, prefix="/api/health", tags=["Health"],
+                   dependencies=[Depends(require_section("settings"))])
 # Retroactive cost update — same admin plane as monitoring/rules/fraud.
 from app_pages.costs import router as costs_router
 app.include_router(costs_router, prefix="/api/costs", tags=["Costs"],
@@ -856,6 +865,9 @@ async def serve_page(request: Request, page: Optional[str] = None):
     # Legacy slug: the docs page moved from /backend/about to /backend/documentation
     if page == "about":
         return RedirectResponse(url="/backend/documentation", status_code=307)
+    # The single Logs area became six routes; the old slug lands on the first.
+    if page == "logs":
+        return RedirectResponse(url="/backend/logs-clicks", status_code=307)
     section = None
     perms = None
     if page in NAV_SECTIONS:
@@ -865,10 +877,12 @@ async def serve_page(request: Request, page: Optional[str] = None):
             # G63: deep links to sections the user cannot read fall back to dashboard
             from auth import get_session_username
             perms = get_user_permissions(get_session_username(request))
-            # A NAV section absent from the permission map (the logs section,
-            # pending its auth.PERMISSION_SECTIONS entry) is admin-only.
-            allowed = perms["sections"].get(page, False) or (
-                page not in perms["sections"] and user_type == "admin")
+            # The six Logs routes share the single "logs" capability, so an
+            # owner/admin override on it governs all of them. A section absent
+            # from the permission map (health-centre) is admin-only.
+            perm_key = "logs" if page.startswith("logs-") else page
+            allowed = perms["sections"].get(perm_key, False) or (
+                perm_key not in perms["sections"] and user_type == "admin")
             if not allowed:
                 page = "dashboard"
             else:

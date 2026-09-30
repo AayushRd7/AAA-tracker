@@ -6735,7 +6735,7 @@ print("ESCAPED-OK")
     # -- sidebar still renders every section (served-HTML check) --
     r = s.get(f"{BASE}/backend/dashboard")
     w18_nav_keys = ["dashboard", "campaigns", "landings", "affiliates", "offers",
-                    "sources", "reports", "conversion-tracking", "logs", "domains",
+                    "sources", "reports", "conversion-tracking", "logs-clicks", "domains",
                     "fraud", "optimizer", "settings", "users", "documentation", "scripts"]
     w18_html = r.text if r.status_code == 200 else ""
     w18_missing = [k for k in w18_nav_keys if f"key: '{k}'" not in w18_html]
@@ -10208,6 +10208,76 @@ print("ESCAPED-OK")
             s5b_srv.server_close()
         except Exception:
             pass
+
+    # ===== Slice 6a: the six Logs routes =====
+    # The single Logs area is now six sidebar routes, each pinning the one
+    # shared component to a fixed log via its section prop. Every template is
+    # included on every authenticated page, so assertions are pinned to each
+    # page's own URL and its own section key.
+    print("== Slice 6a: Logs split into six routes ==")
+    s6_logs = (
+        ("logs-clicks", "clicks"),
+        ("logs-conversions", "conversions"),
+        ("logs-postbacks", "postbacks"),
+        ("logs-click-forwarding", "click-forwarding"),
+        ("logs-internal-postbacks", "api-postbacks"),
+        ("logs-costs", "cost-updates"),
+    )
+    for s6_pg, s6_tab in s6_logs:
+        rp = s.get(f"{BASE}/backend/{s6_pg}")
+        check(f"slice6a: /backend/{s6_pg} serves 200",
+              rp.status_code == 200, f"{rp.status_code}")
+        check(f"slice6a: /backend/{s6_pg} carries its own section + component markers",
+              f"'{s6_pg}'" in rp.text and "logs-component" in rp.text,
+              f"missing marker on /backend/{s6_pg}")
+        check(f"slice6a: /backend/{s6_pg} has no unreplaced jinja tags",
+              "{%" not in rp.text, "unreplaced jinja tag")
+    # The old slug must not be a dead entry — it lands on the first log.
+    r = s.get(f"{BASE}/backend/logs", allow_redirects=False)
+    check("slice6a: /backend/logs redirects to the first log",
+          r.status_code in (301, 302, 307)
+          and r.headers.get("location", "").endswith("/backend/logs-clicks"),
+          f"{r.status_code} {r.headers.get('location', '')}")
+    # The six routes read the same audit endpoints the single page did; prove
+    # the shared read path is intact for each tab's own source.
+    for s6_src in ("postbacks", "click-forwarding", "api-postbacks", "cost-updates"):
+        r = s.get(f"{api}/logs/{s6_src}", params={"offset": 0, "limit": 1})
+        check(f"slice6a: logs source /api/logs/{s6_src} still serves",
+              r.status_code == 200 and "items" in r.json(), r.text[:150])
+
+    # ===== Slice 6b: in-app health centre =====
+    print("== Slice 6b: health centre ==")
+    rp = s.get(f"{BASE}/backend/health-center")
+    check("slice6b: /backend/health-center serves 200",
+          rp.status_code == 200, f"{rp.status_code}")
+    check("slice6b: health page carries its page markers",
+          all(m in rp.text for m in ("health-verdict-card", "healthVerdict",
+                                     "Background loops", "Largest tables")),
+          "missing health page marker")
+    check("slice6b: health page has no unreplaced jinja tags",
+          "{%" not in rp.text, "unreplaced jinja tag")
+
+    r = s.get(f"{api}/health")
+    hb = r.json() if r.status_code == 200 else {}
+    check("slice6b: /api/health serves the admin report",
+          r.status_code == 200, r.text[:160])
+    check("slice6b: both databases reported reachable",
+          (hb.get("databases") or {}).get("postgres", {}).get("ok") is True
+          and (hb.get("databases") or {}).get("clickhouse", {}).get("ok") is True,
+          r.text[:200])
+    check("slice6b: loop keys present (incl. insights)",
+          set((hb.get("loops") or {}).keys()) == {"monitor", "rules", "optimizer",
+                                                  "insights", "meta_ads"},
+          str((hb.get("loops") or {}).keys()))
+    check("slice6b: verdict is a derived string",
+          hb.get("verdict") in ("ok", "attention"), str(hb.get("verdict")))
+    check("slice6b: counts section present",
+          all(k in (hb.get("counts") or {})
+              for k in ("clicks", "conversions", "campaigns", "users")),
+          r.text[:200])
+    r = requests.get(f"{api}/health", verify=not INSECURE)
+    check("slice6b: /api/health unauthenticated 401",
+          r.status_code == 401, str(r.status_code))
 
     print("== Cleanup ==")
     if conv_id:

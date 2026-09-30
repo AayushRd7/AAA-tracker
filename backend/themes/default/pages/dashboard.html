@@ -61,8 +61,17 @@
             <conversion-tracking-component></conversion-tracking-component>
         </div>
 
-        <div v-show="$root.activeSection === 'logs'">
-            <logs-component></logs-component>
+        <div v-show="$root.activeSection === 'logs-clicks'
+                     || $root.activeSection === 'logs-conversions'
+                     || $root.activeSection === 'logs-postbacks'
+                     || $root.activeSection === 'logs-click-forwarding'
+                     || $root.activeSection === 'logs-internal-postbacks'
+                     || $root.activeSection === 'logs-costs'">
+            <logs-component :section="$root.activeSection"></logs-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'health-center'">
+            <health-component></health-component>
         </div>
 
         <div v-show="$root.activeSection === 'scripts'">

@@ -3,8 +3,8 @@
     <v-container fluid>
         <div class="d-flex align-center justify-space-between mb-4 flex-wrap">
             <div>
-                <div class="page-title">Logs</div>
-                <div class="page-subtitle">Audit trail for clicks, conversions, postbacks, forwarding decisions and cost updates</div>
+                <div class="page-title">{{ pageTitleText }}</div>
+                <div class="page-subtitle">{{ pageSubtitle }}</div>
             </div>
             <div class="d-flex align-center flex-wrap">
                 <v-text-field
@@ -28,10 +28,6 @@
                 </v-btn>
             </div>
         </div>
-
-        <v-tabs v-model="activeTab" background-color="transparent" grow class="mb-3" @change="onTabChange">
-            <v-tab v-for="t in tabs" :key="t.key" :href="'#' + t.key">{{ t.title }}</v-tab>
-        </v-tabs>
 
         <v-card class="pa-4 mb-4">
             <div class="filter-bar align-center">
@@ -159,9 +155,15 @@
 <script type="application/javascript">
     Vue.component('logs-component', {
         template: '#logs-template',
+        props: {
+            // Which log this page is pinned to. The six Logs sidebar entries
+            // each render this one component with a fixed section, so the
+            // query/filter/export code is shared, never duplicated.
+            section: {type: String, default: 'logs-clicks'},
+        },
         data() {
             return {
-                activeTab: 'clicks',
+                activeTab: this.tabForSection(this.section),
                 loading: false,
                 items: [],
                 total: 0,
@@ -175,12 +177,18 @@
                 selectedColumnsByTab: {},
                 columnTemplates: [],
                 tabs: [
-                    {key: 'clicks', title: 'Clicks'},
-                    {key: 'conversions', title: 'Conversions'},
-                    {key: 'postbacks', title: 'S2S postbacks'},
-                    {key: 'api-postbacks', title: 'API postbacks'},
-                    {key: 'click-forwarding', title: 'Click forwarding'},
-                    {key: 'cost-updates', title: 'Cost updates'},
+                    {key: 'clicks', title: 'Clicks',
+                     subtitle: 'Every click the tracker received, with country, device and status'},
+                    {key: 'conversions', title: 'Conversions',
+                     subtitle: 'Inbound conversion records and their payout and revenue'},
+                    {key: 'postbacks', title: 'S2S postbacks',
+                     subtitle: 'Inbound server-to-server postbacks, including rejections'},
+                    {key: 'api-postbacks', title: 'Internal postbacks',
+                     subtitle: 'Outbound delivery attempts this tracker sent'},
+                    {key: 'click-forwarding', title: 'Click forwarding',
+                     subtitle: 'Every redirect decision a click went through'},
+                    {key: 'cost-updates', title: 'Cost updates',
+                     subtitle: 'Retroactive cost changes applied from Reports'},
                 ],
                 filterState: {
                     clicks: {country: '', device_type: '', os: '', status: '', search: ''},
@@ -292,6 +300,15 @@
             };
         },
         computed: {
+            currentTab() {
+                return this.tabs.find(t => t.key === this.activeTab) || this.tabs[0];
+            },
+            pageTitleText() {
+                return this.currentTab.title + ' log';
+            },
+            pageSubtitle() {
+                return this.currentTab.subtitle;
+            },
             currentFilters() {
                 return this.filterDefs[this.activeTab] || [];
             },
@@ -312,6 +329,17 @@
                 return 'logs-' + this.activeTab;
             },
         },
+        watch: {
+            // The sidebar switches between the six Logs routes without
+            // remounting (v-show), so a section change must retarget the tab.
+            section(value) {
+                if (!value || value.indexOf('logs') !== 0) return;
+                const tab = this.tabForSection(value);
+                if (tab === this.activeTab) return;
+                this.activeTab = tab;
+                this.onTabChange();
+            },
+        },
         mounted() {
             this.load();
             this.loadPresets();
@@ -324,6 +352,17 @@
             this.$root.$off('load-logs', this.loadPresets);
         },
         methods: {
+            tabForSection(section) {
+                const map = {
+                    'logs-clicks': 'clicks',
+                    'logs-conversions': 'conversions',
+                    'logs-postbacks': 'postbacks',
+                    'logs-click-forwarding': 'click-forwarding',
+                    'logs-internal-postbacks': 'api-postbacks',
+                    'logs-costs': 'cost-updates',
+                };
+                return map[section] || 'clicks';
+            },
             onTabChange() {
                 this.page = 1;
                 this.selectedPreset = null;

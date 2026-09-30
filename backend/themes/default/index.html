@@ -364,6 +364,7 @@
         {% include "templates/rules.html" %}
         {% include "templates/fallback.html" %}
         {% include "templates/copilot.html" %}
+        {% include "templates/health.html" %}
     {% endif %}
 {% endif %}
 
@@ -720,8 +721,14 @@
                     {key: 'rules', title: 'Automatic rules', icon: 'mdi-tune-variant', admin: true, group: 'Tools'},
                     {key: 'filter-presets', title: 'Filter presets', icon: 'mdi-filter-variant', group: 'Tools'},
                     {key: 'fallback', title: 'Fallback', icon: 'mdi-directions-fork', admin: true, group: 'Tools'},
+                    {key: 'health-center', title: 'Health centre', icon: 'mdi-heart-pulse', admin: true, group: 'Tools'},
                     {key: 'fraud', title: 'Fraud', icon: 'mdi-shield-alert-outline', admin: true, group: 'Protection'},
-                    {key: 'logs', title: 'Logs', icon: 'mdi-clipboard-text-clock-outline', admin: true, group: 'Logs'},
+                    {key: 'logs-clicks', title: 'Clicks', icon: 'mdi-cursor-default-click-outline', admin: true, group: 'Logs'},
+                    {key: 'logs-conversions', title: 'Conversions', icon: 'mdi-cash-check', admin: true, group: 'Logs'},
+                    {key: 'logs-postbacks', title: 'S2S postbacks', icon: 'mdi-swap-horizontal', admin: true, group: 'Logs'},
+                    {key: 'logs-click-forwarding', title: 'Click forwarding', icon: 'mdi-call-split', admin: true, group: 'Logs'},
+                    {key: 'logs-internal-postbacks', title: 'Internal postbacks', icon: 'mdi-send-check-outline', admin: true, group: 'Logs'},
+                    {key: 'logs-costs', title: 'Cost updates', icon: 'mdi-currency-usd', admin: true, group: 'Logs'},
                     {key: 'settings', title: 'Settings', icon: 'mdi-cog-outline', admin: true, group: 'Account'},
                     {key: 'users', title: 'Users', icon: 'mdi-account-group', admin: true, group: 'Account'},
                     {key: 'documentation', title: 'Documentation', icon: 'mdi-book-open-variant', group: 'Account'},
@@ -778,6 +785,13 @@
                     copilot: 'Copilot',
                     'conversion-tracking': 'Conversion tracking',
                     logs: 'Logs',
+                    'logs-clicks': 'Clicks log',
+                    'logs-conversions': 'Conversions log',
+                    'logs-postbacks': 'S2S postbacks log',
+                    'logs-click-forwarding': 'Click forwarding log',
+                    'logs-internal-postbacks': 'Internal postbacks log',
+                    'logs-costs': 'Cost updates log',
+                    'health-center': 'Health centre',
                     scripts: 'Scripts',
                     'bot-rules': 'Bot rules',
                     rules: 'Automatic rules',
