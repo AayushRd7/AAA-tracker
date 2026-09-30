@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from models.settings import SettingsORM
+from app_pages.settings import _settings_rev
 
 router = APIRouter()
 
@@ -27,11 +28,17 @@ WORKSPACE_DEFAULTS = {
 @router.get("/")
 def get_workspace(db: Session = Depends(get_db)):
     row = db.query(SettingsORM).filter_by(name="settings").first()
+    raw = (row.value or "") if row else ""
     cfg = {}
-    if row and row.value:
+    if raw:
         try:
-            cfg = json.loads(row.value) or {}
+            cfg = json.loads(raw) or {}
         except Exception:
             cfg = {}
     workspace = cfg.get("workspace") if isinstance(cfg.get("workspace"), dict) else {}
-    return {"workspace": {**WORKSPACE_DEFAULTS, **(workspace or {})}}
+    # Same optimistic-concurrency token the Settings page uses, hashed from the
+    # same raw stored value so the two endpoints agree: the pages that write the
+    # workspace block back (Logs / Reports default columns) echo it, so a page
+    # whose workspace never loaded cannot overwrite the stored one.
+    return {"workspace": {**WORKSPACE_DEFAULTS, **(workspace or {})},
+            "settings_rev": _settings_rev(raw)}

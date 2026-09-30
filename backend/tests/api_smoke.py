@@ -10411,6 +10411,92 @@ print("ESCAPED-OK")
     check("settings: legacy save did not disturb meta_ads.ad_account_ids",
           (doc.get("meta_ads") or {}).get("ad_account_ids") == seed_accounts)
 
+    # 5. Conversion tracking page: the same class of write path. It POSTs a
+    #    near-full document (postback_domain / domain / custom_statuses) built
+    #    from page defaults, so a load that failed must not be able to publish
+    #    them. The page now gates Save on a successful load and echoes the rev.
+    rp = s.get(f"{BASE}/backend/conversion-tracking")
+    check("conversion-tracking page: ships the load gate + rev echo",
+          rp.status_code == 200 and all(m in rp.text for m in (
+              "settingsLoaded", "_base_rev", "changedSections",
+              "Could not load settings")),
+          "conversion-tracking marker missing")
+
+    # The other single-block settings writers are guarded the same way: a page
+    # whose settings load failed must not publish its block defaults.
+    _guarded_pages = (
+        ("bot-rules", ("botRulesLoaded", "_base_rev")),
+        ("capi-integrations", ("capiSettingsLoaded", "_base_rev")),
+        ("campaigns", ("postbackRulesLoaded", "_base_rev")),
+    )
+    check("other settings pages: ship the load gate + rev echo",
+          all(
+              (lambda pg, ms: pg.status_code == 200
+               and all(m in pg.text for m in ms))(
+                  s.get(f"{BASE}/backend/{route}"), markers)
+              for route, markers in _guarded_pages),
+          "a guarded settings page is missing its markers")
+
+    # The workspace block's writers (Logs / Reports default columns) echo the
+    # rev the workspace endpoint now returns alongside the block.
+    r = s.get(f"{api}/workspace/")
+    check("workspace: block + rev returned",
+          r.status_code == 200 and isinstance(r.json().get("workspace"), dict)
+          and bool(r.json().get("settings_rev")),
+          r.text[:160])
+
+    # 5a. The dangerous body — page defaults with the explicit "never loaded"
+    #     marker — is refused and leaves all three blocks untouched.
+    before = s.get(f"{api}/settings/").json().get("settings") or {}
+    r = s.post(f"{api}/settings/", json={
+        "settings": {"postback_domain": "", "domain": "",
+                     "custom_statuses": []},
+        "_base_rev": None})
+    check("conversion-tracking: not-loaded defaults refused (409)",
+          r.status_code == 409, f"{r.status_code} {r.text[:120]}")
+    after = s.get(f"{api}/settings/").json().get("settings") or {}
+    check("conversion-tracking: refusal left domain untouched",
+          after.get("domain") == before.get("domain"), str(after.get("domain")))
+    check("conversion-tracking: refusal left postback_domain untouched",
+          after.get("postback_domain") == before.get("postback_domain"),
+          str(after.get("postback_domain")))
+    check("conversion-tracking: refusal left custom_statuses untouched",
+          after.get("custom_statuses") == before.get("custom_statuses"),
+          str(after.get("custom_statuses")))
+
+    # 5b. A payload carrying the current rev and one changed block changes only
+    #     that block — the sections the page sends stay scoped to what changed.
+    rev = s.get(f"{api}/settings/").json().get("settings_rev")
+    seeded_statuses = [{"name": "smoke_status", "color": "#90a4ae",
+                        "mode": "new", "role": "primary"}]
+    r = s.post(f"{api}/settings/", json={
+        "settings": {"postback_domain": "smoke.example.com",
+                     "custom_statuses": seeded_statuses},
+        "_base_rev": rev})
+    check("conversion-tracking: guarded save accepted", r.status_code == 200,
+          r.text[:160])
+    after = s.get(f"{api}/settings/").json().get("settings") or {}
+    check("conversion-tracking: guarded save wrote its block",
+          after.get("postback_domain") == "smoke.example.com",
+          str(after.get("postback_domain")))
+    check("conversion-tracking: guarded save left currency alone",
+          after.get("currency") == seed_currency, str(after.get("currency")))
+    check("conversion-tracking: guarded save left meta_ads alone",
+          (after.get("meta_ads") or {}).get("ad_account_ids") == seed_accounts)
+
+    # 5c. A stale rev (the document changed since the page loaded) is refused
+    #     and writes nothing.
+    before = s.get(f"{api}/settings/").json().get("settings") or {}
+    r = s.post(f"{api}/settings/", json={
+        "settings": {"postback_domain": "stale.example.com"},
+        "_base_rev": "0000000000000000"})
+    check("conversion-tracking: stale rev refused (409)",
+          r.status_code == 409, f"{r.status_code} {r.text[:120]}")
+    after = s.get(f"{api}/settings/").json().get("settings") or {}
+    check("conversion-tracking: stale rev wrote nothing",
+          after.get("postback_domain") == before.get("postback_domain"),
+          str(after.get("postback_domain")))
+
     # Restore the workspace exactly as found: original values back, anything we
     # introduced removed (a null deletes the key server-side).
     final_doc = s.get(f"{api}/settings/").json().get("settings") or {}

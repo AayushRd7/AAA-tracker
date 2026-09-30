@@ -10,6 +10,7 @@
                 <v-btn
                         color="primary"
                         elevation="0"
+                        :disabled="!settingsLoaded"
                         :loading="saving"
                         @click="saveAll"
                 >
@@ -17,6 +18,23 @@
                 </v-btn>
             </div>
         </div>
+
+        <v-alert
+                v-if="!settingsLoaded"
+                :type="settingsLoadError ? 'error' : 'info'"
+                dense
+                text
+                class="mb-3"
+        >
+            <span v-if="settingsLoadError">
+                Save is disabled — {{ settingsLoadError }} Saving now would overwrite
+                the stored configuration with this page's defaults, so it is blocked
+                until the settings load succeeds.
+            </span>
+            <span v-else>Loading settings — Save is disabled until they load.</span>
+            <v-btn v-if="settingsLoadError" text small color="primary" class="ml-2"
+                   @click="load">Reload</v-btn>
+        </v-alert>
 
         <v-row dense>
             <!-- ===== 1. Postback domain ===== -->
@@ -314,6 +332,14 @@
                 loading: false,
                 saving: false,
                 settings: {postback_domain: '', domain: '', custom_statuses: []},
+                // Load gate: Save stays disabled until a settings load succeeds,
+                // and each save publishes only what changed since the loaded
+                // document (see changedSections). settingsRev is the server's
+                // content hash that every save must echo back.
+                settingsLoaded: false,
+                settingsLoadError: '',
+                settingsRev: null,
+                settingsSnapshot: null,
                 domains: [],
                 domainChoice: '',
                 customDomain: '',
@@ -418,10 +444,21 @@
         },
         methods: {
             load() {
+                // Reset the gate on every (re)load: Save is unavailable until
+                // this succeeds, and the snapshot the save diffs against is
+                // rebuilt from what actually loaded.
                 this.loading = true;
+                this.settingsLoaded = false;
+                this.settingsLoadError = '';
+                this.settingsSnapshot = null;
+                let loadedRev = null;
                 fetch('/backend/api/settings/', {credentials: 'include'})
-                    .then(r => r.json())
+                    .then(r => {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
                     .then(data => {
+                        loadedRev = (data && data.settings_rev) || null;
                         const s = (data && data.settings) || {};
                         this.settings = Object.assign({}, this.settings, s);
                         if (!Array.isArray(this.settings.custom_statuses)) {
@@ -436,10 +473,17 @@
                                 role: cs.role || 'primary',
                             }));
                         this.domainChoice = this.trackerDomain;
+                        this.settingsRev = loadedRev;
+                        this.settingsSnapshot = JSON.parse(JSON.stringify(this.settings));
+                        this.settingsLoaded = true;
                     })
                     .catch(err => {
+                        this.settingsLoaded = false;
+                        this.settingsSnapshot = null;
+                        this.settingsLoadError =
+                            'Could not load settings (' + sanitizeToastMessage(err.message) + ').';
                         this.$root.$emit('show-message', {type: 'error',
-                            text: 'Could not load settings: ' + sanitizeToastMessage(err.message)});
+                            text: this.settingsLoadError});
                     })
                     .finally(() => { this.loading = false; });
                 fetch('/backend/api/domains/', {credentials: 'include'})
@@ -447,10 +491,34 @@
                     .then(data => { this.domains = Array.isArray(data) ? data : []; })
                     .catch(() => { this.domains = []; });
             },
-            saveAll() {
-                this.saving = true;
-                const settings = Object.assign({}, this.settings, {
+            // Structural comparison used to build the minimal save payload.
+            deepEqual(a, b) {
+                if (a === b) return true;
+                if (a === null || b === null || typeof a !== typeof b) return false;
+                const aArr = Array.isArray(a), bArr = Array.isArray(b);
+                if (aArr || bArr) {
+                    if (!aArr || !bArr || a.length !== b.length) return false;
+                    for (let i = 0; i < a.length; i++) {
+                        if (!this.deepEqual(a[i], b[i])) return false;
+                    }
+                    return true;
+                }
+                if (typeof a === 'object') {
+                    const ka = Object.keys(a), kb = Object.keys(b);
+                    if (ka.length !== kb.length) return false;
+                    for (const k of ka) {
+                        if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+                        if (!this.deepEqual(a[k], b[k])) return false;
+                    }
+                    return true;
+                }
+                return false;
+            },
+            // The three blocks this page owns, exactly as they would be saved.
+            buildSections() {
+                return {
                     postback_domain: this.effectiveDomain,
+                    domain: this.settings.domain,
                     custom_statuses: this.customStatuses
                         .filter(cs => this.slugifyStatus(cs.name))
                         .map(cs => ({
@@ -459,19 +527,56 @@
                             mode: cs.mode || 'new',
                             role: cs.role || 'primary',
                         })),
-                });
-                fetch('/backend/api/settings/', {
+                };
+            },
+            // Only the sections the operator changed since the successful load,
+            // so a save can never clobber a block this page does not manage.
+            changedSections() {
+                const out = {};
+                const snap = this.settingsSnapshot || {};
+                const current = this.buildSections();
+                for (const key of ['postback_domain', 'domain', 'custom_statuses']) {
+                    if (!this.deepEqual(current[key], snap[key])) {
+                        out[key] = current[key];
+                    }
+                }
+                return out;
+            },
+            saveAll() {
+                if (!this.settingsLoaded) {
+                    // No load, no save: this stops a page whose load failed (or
+                    // never ran) from publishing its defaults over real values.
+                    if (!this.settingsLoadError) {
+                        this.settingsLoadError =
+                            'Settings are not loaded — save is blocked to protect the stored configuration.';
+                    }
+                    this.$root.$emit('show-message',
+                        {type: 'error', text: this.settingsLoadError});
+                    return Promise.reject(new Error(this.settingsLoadError));
+                }
+                this.saving = true;
+                const sections = this.buildSections();
+                const payload = {
+                    settings: this.changedSections(),
+                    // The server refuses a write whose rev does not match the
+                    // document this page loaded.
+                    _base_rev: this.settingsRev,
+                };
+                return fetch('/backend/api/settings/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     credentials: 'include',
-                    body: JSON.stringify({settings: settings}),
+                    body: JSON.stringify(payload),
                 })
-                    .then(r => {
-                        if (!r.ok) throw new Error('HTTP ' + r.status);
-                        return r.json();
-                    })
-                    .then(() => {
-                        this.settings.postback_domain = settings.postback_domain;
+                    .then(r => r.json().catch(() => ({})).then(data => {
+                        if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+                        return data;
+                    }))
+                    .then(data => {
+                        if (data.settings_rev) this.settingsRev = data.settings_rev;
+                        this.settings.postback_domain = sections.postback_domain;
+                        this.settings.custom_statuses = sections.custom_statuses;
+                        this.settingsSnapshot = JSON.parse(JSON.stringify(this.settings));
                         this.$root.$emit('show-message', {type: 'success', text: 'Conversion tracking saved'});
                     })
                     .catch(err => {

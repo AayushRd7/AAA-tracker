@@ -6,10 +6,28 @@
                 <div class="page-title">CAPI integrations</div>
                 <div class="page-subtitle">Server-side conversion pixels, one record per platform dataset</div>
             </div>
-            <v-btn color="primary" elevation="0" @click="saveCapiSettings(false)">
+            <v-btn color="primary" elevation="0" :disabled="!capiSettingsLoaded"
+                   @click="saveCapiSettings(false)">
                 <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save settings
             </v-btn>
         </div>
+
+        <v-alert
+                v-if="!capiSettingsLoaded"
+                :type="capiSettingsLoadError ? 'error' : 'info'"
+                dense
+                text
+                class="mb-3"
+        >
+            <span v-if="capiSettingsLoadError">
+                Save is disabled — {{ capiSettingsLoadError }} Saving now would overwrite
+                the stored configuration with this page's defaults, so it is blocked
+                until the settings load succeeds.
+            </span>
+            <span v-else>Loading settings — Save is disabled until they load.</span>
+            <v-btn v-if="capiSettingsLoadError" text small color="primary" class="ml-2"
+                   @click="loadCapiSettings">Reload</v-btn>
+        </v-alert>
 
         <v-row>
             <v-col cols="12">
@@ -339,6 +357,12 @@
                 capiPixels: [],
                 capiDialog: false,
                 capiSaving: false,
+                // Load gate: Save stays disabled until a settings load succeeds,
+                // and every save echoes the rev the server handed out.
+                capiSettingsLoaded: false,
+                capiSettingsLoadError: '',
+                capiSettingsRev: null,
+                capiSettingsSnapshot: null,
                 showPixelToken: false,
                 showMetaToken: false,
                 metaTesting: false,
@@ -401,9 +425,19 @@
         },
         methods: {
             loadCapiSettings() {
-                fetch("/backend/api/settings/", {credentials: "include"})
-                    .then((r) => r.json())
+                // Reset the gate on every (re)load: Save is unavailable until
+                // this succeeds, so a failed load cannot publish the defaults.
+                this.capiSettingsLoaded = false;
+                this.capiSettingsLoadError = '';
+                this.capiSettingsSnapshot = null;
+                let loadedRev = null;
+                return fetch("/backend/api/settings/", {credentials: "include"})
+                    .then((r) => {
+                        if (!r.ok) throw new Error("HTTP " + r.status);
+                        return r.json();
+                    })
                     .then((data) => {
+                        loadedRev = (data && data.settings_rev) || null;
                         const s = (data && data.settings) || {};
                         const mcDefaults = {
                             enabled: false, dataset_id: '', access_token: '',
@@ -420,20 +454,49 @@
                         }
                         this.settings.custom_statuses =
                             Array.isArray(s.custom_statuses) ? s.custom_statuses : [];
+                        this.capiSettingsRev = loadedRev;
+                        this.capiSettingsSnapshot = JSON.parse(JSON.stringify(this.settings.meta_capi));
+                        this.capiSettingsLoaded = true;
+                    })
+                    .catch((err) => {
+                        this.capiSettingsLoaded = false;
+                        this.capiSettingsSnapshot = null;
+                        this.capiSettingsLoadError =
+                            "Could not load settings (" + sanitizeToastMessage(err.message) + ").";
+                        this.$root.$emit("show-message", {type: "error", text: this.capiSettingsLoadError});
                     });
             },
             saveCapiSettings(silent) {
+                if (!this.capiSettingsLoaded) {
+                    // No load, no save: this stops a page whose load failed from
+                    // publishing its meta_capi defaults over the real block.
+                    if (!this.capiSettingsLoadError) {
+                        this.capiSettingsLoadError =
+                            "Settings are not loaded — save is blocked to protect the stored configuration.";
+                    }
+                    this.$root.$emit("show-message", {type: "error", text: this.capiSettingsLoadError});
+                    return Promise.reject(new Error(this.capiSettingsLoadError));
+                }
                 // Only the meta_capi section is written here; the server merges it
-                // into the stored settings document.
-                const payload = {settings: {meta_capi: this.settings.meta_capi}};
+                // into the stored settings document. The rev pins the write to
+                // the document this page loaded.
+                const payload = {
+                    settings: {meta_capi: this.settings.meta_capi},
+                    _base_rev: this.capiSettingsRev,
+                };
                 return fetch("/backend/api/settings/", {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
                     credentials: "include",
                     body: JSON.stringify(payload)
                 })
-                    .then((r) => r.json())
+                    .then((r) => r.json().catch(() => ({})).then((data) => {
+                        if (!r.ok) throw new Error(data.detail || ("HTTP " + r.status));
+                        return data;
+                    }))
                     .then((data) => {
+                        if (data.settings_rev) this.capiSettingsRev = data.settings_rev;
+                        this.capiSettingsSnapshot = JSON.parse(JSON.stringify(this.settings.meta_capi));
                         if (!silent) {
                             this.$root.$emit("show-message", {type: "success", text: "Settings saved"});
                         }

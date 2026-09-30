@@ -123,6 +123,11 @@
         default_columns: {},
     });
 
+    // Optimistic-concurrency token for the workspace block: the pages that
+    // write it back (Logs / Reports default columns) echo it so a save without
+    // a successful load is refused instead of clobbering the stored document.
+    Vue.prototype.$workspaceRev = null;
+
     Vue.prototype.$loadWorkspace = function() {
         return fetch('/backend/api/workspace/', {credentials: 'include'})
             .then(r => r.ok ? r.json() : null)
@@ -130,6 +135,7 @@
                 if (d && d.workspace && typeof d.workspace === 'object') {
                     Object.assign(Vue.prototype.$workspace, d.workspace);
                 }
+                Vue.prototype.$workspaceRev = (d && d.settings_rev) || null;
             })
             .catch(() => {});
     };

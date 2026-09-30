@@ -709,10 +709,14 @@
                                         <v-icon small class="mr-1">mdi-plus</v-icon>Add rule
                                     </v-btn>
                                     <v-btn small color="primary" elevation="0" class="ml-2"
+                                           :disabled="!postbackRulesLoaded"
                                            :loading="postbackRulesSaving"
                                            @click="savePostbackRules">
                                         Save global rules
                                     </v-btn>
+                                    <span v-if="!postbackRulesLoaded" class="caption red--text ml-2">
+                                        {{ postbackRulesLoadError || 'Loading settings — saving is disabled until they load.' }}
+                                    </span>
                                 </div>
 
                                 <v-divider class="my-4"></v-divider>
@@ -2286,6 +2290,11 @@
                 // this campaign's.
                 postbackRules: [],
                 postbackRulesSaving: false,
+                // Load gate for the global postback rules block: Save is disabled
+                // until the settings document loads, and every save echoes its rev.
+                postbackRulesLoaded: false,
+                postbackRulesLoadError: '',
+                postbackRulesRev: null,
                 postbackRuleFields:
                     ['status', 'payout', 'click_id', 'sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5',
                      'sub_id_6', 'sub_id_7', 'sub_id_8', 'sub_id_9', 'sub_id_10', 'external_id', 'transaction_id'],
@@ -2643,7 +2652,11 @@
                 return this.simPalette[parseInt(idx, 10) % this.simPalette.length];
             },
             loadSettings() { // todo: make it global
-                fetch("/backend/api/settings/", {
+                // Reset the postback-rules gate: Save is disabled until the
+                // settings document loads, so a failed load cannot publish [].
+                this.postbackRulesLoaded = false;
+                this.postbackRulesLoadError = '';
+                return fetch("/backend/api/settings/", {
                     credentials: "include"
                 })
                     .then(window.fetchJsonFromResponse)
@@ -2668,6 +2681,14 @@
                                     r.action || {})
                             }));
                         }
+                        this.postbackRulesRev = (data && data.settings_rev) || null;
+                        this.postbackRulesLoaded = true;
+                    })
+                    .catch((err) => {
+                        this.postbackRulesLoaded = false;
+                        this.postbackRulesRev = null;
+                        this.postbackRulesLoadError =
+                            'Could not load settings (' + sanitizeToastMessage(err.message) + ').';
                     });
             },
             // ---- Meta ad-platform controls (campaign + ad sets) ----
@@ -4041,15 +4062,33 @@
                 });
             },
             savePostbackRules() {
+                if (!this.postbackRulesLoaded) {
+                    // No load, no save: this stops a page whose load failed from
+                    // publishing an empty postback_rules block over the real one.
+                    if (!this.postbackRulesLoadError) {
+                        this.postbackRulesLoadError =
+                            'Settings are not loaded — save is blocked to protect the stored configuration.';
+                    }
+                    this.$root.$emit('show-message',
+                        {type: 'error', text: this.postbackRulesLoadError});
+                    return Promise.reject(new Error(this.postbackRulesLoadError));
+                }
                 this.postbackRulesSaving = true;
-                fetch('/backend/api/settings/', {
+                return fetch('/backend/api/settings/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     credentials: 'include',
-                    body: JSON.stringify({settings: {postback_rules: this.postbackRules}})
+                    body: JSON.stringify({
+                        settings: {postback_rules: this.postbackRules},
+                        _base_rev: this.postbackRulesRev,
+                    })
                 })
-                    .then(r => r.json())
-                    .then(() => {
+                    .then(r => r.json().catch(() => ({})).then(data => {
+                        if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+                        return data;
+                    }))
+                    .then(data => {
+                        if (data.settings_rev) this.postbackRulesRev = data.settings_rev;
                         this.$root.$emit('show-message', {
                             type: 'success',
                             text: 'Global postback rules saved (may take up to 30s to apply)'

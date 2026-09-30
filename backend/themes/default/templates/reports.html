@@ -1995,9 +1995,13 @@
                     method: 'POST',
                     credentials: 'include',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({settings: {workspace: ws}}),
+                    body: JSON.stringify({settings: {workspace: ws},
+                                          _base_rev: this.$workspaceRev}),
                 })
-                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(r => r.json().catch(() => ({})).then(data => {
+                        if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+                        return data;
+                    }))
                     .then(() => {
                         if (this.$loadWorkspace) this.$loadWorkspace();
                         this.$root.$emit('show-message', {type: 'success', text: 'Default columns saved'});
