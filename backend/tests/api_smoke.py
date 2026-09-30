@@ -9974,6 +9974,241 @@ print("ESCAPED-OK")
         if maa_uid:
             s.delete(f"{api}/users/{maa_uid}")
 
+    # ===== Slice 5b: Copilot page + grounded AI endpoints =====
+    # The provider base URL points at a local mock receiver (the same pattern the
+    # CAPI / Meta cost-sync blocks use), so no real model call is ever made. The
+    # key is a settings override here; in production it comes from the
+    # OPENROUTER_API_KEY environment variable and is never returned to anyone.
+    print("== Slice 5b: Copilot page ==")
+    for s5b_pg, s5b_markers in (
+            ("copilot", ("copilot-card", "summariseAccount", "askQuestion")),):
+        rp = s.get(f"{BASE}/backend/{s5b_pg}")
+        check(f"slice5b: /backend/{s5b_pg} serves 200",
+              rp.status_code == 200, f"{rp.status_code}")
+        check(f"slice5b: /backend/{s5b_pg} carries its page markers",
+              all(m in rp.text for m in s5b_markers),
+              f"missing marker on /backend/{s5b_pg}")
+        check(f"slice5b: /backend/{s5b_pg} has no unreplaced jinja tags",
+              "{%" not in rp.text, "unreplaced jinja tag")
+
+    import http.server as _s5b_httpserver
+    import socketserver as _s5b_socketserver
+    import threading as _s5b_threading
+
+    s5b_pid = os.getpid()
+    s5b_port = 22000 + (s5b_pid % 700)
+    s5b_captured = []
+    _s5b_socketserver.TCPServer.allow_reuse_address = True
+
+    class _S5bReceiver(_s5b_httpserver.BaseHTTPRequestHandler):
+        def _handle(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length).decode("utf-8", "ignore") if length else ""
+            try:
+                body = json.loads(raw) if raw else {}
+            except Exception:
+                body = {}
+            s5b_captured.append({"path": self.path,
+                                 "headers": {k.lower(): v for k, v in self.headers.items()},
+                                 "body": body})
+            if "fail" in str(body.get("model") or ""):
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(b"provider blew up")
+                return
+            payload = json.dumps({"choices": [{"message": {
+                "content": "Stub read: clicks and conversions are the story here."}}]})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(payload.encode())
+
+        do_GET = _handle
+        do_POST = _handle
+
+        def log_message(self, *args):
+            pass
+
+    s5b_srv = _s5b_socketserver.TCPServer(("0.0.0.0", s5b_port), _S5bReceiver)
+    s5b_srv.daemon_threads = True
+    _s5b_threading.Thread(target=s5b_srv.serve_forever, daemon=True).start()
+    s5b_base = f"http://host.docker.internal:{s5b_port}"
+
+    s5b_probe = ""
+    try:
+        s5b_probe = subprocess.run(
+            ["docker", "exec", "tracker_backend", "python", "-c",
+             "import urllib.request;"
+             "print(urllib.request.urlopen('" + s5b_base + "/ready', timeout=3).read()[:60].decode())"],
+            capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        pass
+    check("slice5b: copilot mock receiver reachable from the backend container",
+          "choices" in s5b_probe, s5b_probe[:80])
+
+    s5b_key = f"s5b-key-{s5b_pid}"
+    s5b_saved = ((s.get(f"{api}/settings/").json().get("settings") or {}).get("copilot"))
+
+    def s5b_cfg(**over):
+        cfg = {"enabled": True, "model": "stub/model", "max_tokens": 123,
+               "base_url": s5b_base, "api_key": s5b_key}
+        cfg.update(over)
+        return s.post(f"{api}/settings/", json={"settings": {"copilot": cfg}})
+
+    s5b_cid = None
+    s5b_uid = None
+    try:
+        # -- fixtures: a campaign plus clicks carrying visitor / sub-id / IP data
+        s5b_alias = f"smoke-copilot-{s5b_pid}"
+        r = s.post(f"{api}/campaigns/", json={
+            "name": s5b_alias, "alias": s5b_alias, "type": "campaign", "status": "active",
+            "redirect_mode": "position",
+            "config": {"flows": [], "postbacks": [], "hide_referrer": False}})
+        s5b_cid = r.json().get("id")
+        check("slice5b: seed campaign created", bool(s5b_cid), r.text[:150])
+
+        s5b_visitor = f"s5bvisitor{s5b_pid}"
+        s5b_sub = f"s5bsub{s5b_pid}"
+        s5b_ip = "203.0.113.9"
+        if s5b_cid:
+            ch_query(
+                "INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, "
+                "sub_id_1, ip, cost, revenue, profit) "
+                f"SELECT now(), {s5b_cid}, true, 'sale', '{s5b_visitor}-' || toString(number), "
+                f"'{s5b_sub}', '{s5b_ip}', 1.0, 5.0, 4.0 FROM numbers(3)")
+
+        r = s5b_cfg()
+        check("slice5b: copilot settings saved", r.status_code == 200, r.text[:120])
+
+        s5b_today = str(datetime.now(timezone.utc).date())
+        s5b_window = {"date_from": s5b_today, "date_to": s5b_today}
+
+        # -- status reflects the configured model
+        r = s.get(f"{api}/copilot/status")
+        check("slice5b: status reports configured with the saved model",
+              r.status_code == 200 and r.json().get("configured") is True
+              and r.json().get("model") == "stub/model", r.text[:200])
+
+        # -- one-click summary: request shape + grounded snapshot
+        r = s.post(f"{api}/copilot/summary", json=s5b_window)
+        body = r.json() if r.status_code == 200 else {}
+        check("slice5b: summary returns 200 with text",
+              r.status_code == 200 and bool(body.get("summary"))
+              and body.get("configured") is True, r.text[:200])
+        check("slice5b: summary key never appears in the response",
+              s5b_key not in r.text, r.text[:150])
+
+        req = s5b_captured[-1] if s5b_captured else {}
+        req_body = req.get("body") or {}
+        msgs = req_body.get("messages") or []
+        check("slice5b: provider request carries the model",
+              req_body.get("model") == "stub/model", str(req_body.get("model"))[:80])
+        check("slice5b: provider request carries the token cap",
+              req_body.get("max_tokens") == 123, str(req_body.get("max_tokens")))
+        check("slice5b: provider request is a system+user message pair",
+              len(msgs) == 2 and msgs[0].get("role") == "system"
+              and msgs[1].get("role") == "user", str([m.get("role") for m in msgs]))
+        check("slice5b: provider request carries the key as a bearer header",
+              req.get("headers", {}).get("authorization") == f"Bearer {s5b_key}",
+              str(req.get("headers", {}).get("authorization"))[:40])
+
+        snap = body.get("snapshot") or {}
+        tiles = snap.get("totals") or {}
+        check("slice5b: snapshot totals are the seeded aggregates",
+              tiles.get("clicks", 0) >= 3 and float(tiles.get("revenue") or 0) >= 15.0,
+              str(tiles)[:200])
+        check("slice5b: snapshot rows carry only aggregate fields",
+              all(set(c) == {"campaign", "visits", "clicks", "conversions",
+                             "cost", "revenue", "profit", "roas"}
+                  for c in (snap.get("top_campaigns") or [])),
+              str(snap.get("top_campaigns"))[:200])
+        # Only aggregates leave the box: none of the seeded visitor / sub-id / IP
+        # values, and no raw identifier field names, appear in the response.
+        check("slice5b: only aggregate metrics are sent — no visitor/sub-id/IP",
+              s5b_visitor not in r.text and s5b_sub not in r.text
+              and s5b_ip not in r.text and "visitor_id" not in r.text
+              and "click_id" not in r.text and "@" not in r.text, r.text[:200])
+
+        # -- question box: the snapshot is attached and the question is passed through
+        r = s.post(f"{api}/copilot/ask", json=dict(
+            question="Which campaign lost money in this window?",
+            **s5b_window))
+        body = r.json() if r.status_code == 200 else {}
+        check("slice5b: ask returns 200 with an answer",
+              r.status_code == 200 and bool(body.get("answer")), r.text[:200])
+        check("slice5b: ask key never appears in the response",
+              s5b_key not in r.text, r.text[:150])
+        ask_msg = ((s5b_captured[-1].get("body") or {}).get("messages") or [{}])[-1].get("content") or ""
+        check("slice5b: ask attaches the snapshot and the operator question",
+              "Account snapshot for" in ask_msg
+              and "Which campaign lost money in this window?" in ask_msg, ask_msg[:200])
+        r = s.post(f"{api}/copilot/ask", json=dict(question="   ", **s5b_window))
+        check("slice5b: an empty question is refused (400)", r.status_code == 400,
+              str(r.status_code))
+
+        # -- provider failure degrades to a readable message, never a 500
+        s5b_cfg(model="fail/stub")
+        r = s.post(f"{api}/copilot/summary", json=s5b_window)
+        body = r.json() if r.status_code == 200 else {}
+        check("slice5b: provider failure returns 200 with a readable error",
+              r.status_code == 200 and bool(body.get("error"))
+              and "provider" in str(body.get("error")).lower(), r.text[:200])
+        check("slice5b: provider failure leaks no key", s5b_key not in r.text, r.text[:150])
+
+        # -- switched off degrades cleanly too
+        s5b_cfg(enabled=False)
+        r = s.get(f"{api}/copilot/status")
+        check("slice5b: status reports not configured when disabled",
+              r.status_code == 200 and r.json().get("configured") is False, r.text[:150])
+        r = s.post(f"{api}/copilot/summary", json=s5b_window)
+        check("slice5b: disabled summary degrades without a traceback",
+              r.status_code == 200 and r.json().get("configured") is False
+              and bool(r.json().get("message")), r.text[:200])
+
+        # -- the key is never returned, even to the admin settings reader
+        s5b_cfg(enabled=True)
+        r = s.get(f"{api}/settings/")
+        masked = ((r.json().get("settings") or {}).get("copilot") or {}).get("api_key")
+        check("slice5b: the settings reader never gets the key back",
+              s5b_key not in r.text and masked != s5b_key, str(masked)[:40])
+        check("slice5b: the settings reader sees a mask instead",
+              bool(masked) and "\u2022" in str(masked), str(masked)[:40])
+
+        # -- an unauthorised caller (no settings write) is refused
+        s5b_user = f"smoke-copilot-user-{s5b_pid}"
+        r = s.post(f"{api}/users/", json={
+            "username": s5b_user, "password": "smokepass1",
+            "permissions": {"sections": {"settings": True}, "write": False}})
+        s5b_uid = (r.json() or {}).get("id")
+        check("slice5b: restricted settings-reader created", r.status_code == 200, r.text[:150])
+        s5b_sess = requests.Session()
+        s5b_sess.verify = not INSECURE
+        s5b_sess.post(f"{api}/login", json={"username": s5b_user, "password": "smokepass1"})
+        r = s5b_sess.post(f"{api}/copilot/summary", json=s5b_window)
+        check("slice5b: unauthorised caller is refused (403)", r.status_code == 403,
+              str(r.status_code))
+        r = s5b_sess.post(f"{api}/copilot/ask", json=dict(question="hi", **s5b_window))
+        check("slice5b: unauthorised ask is refused (403)", r.status_code == 403,
+              str(r.status_code))
+    finally:
+        # restore the copilot block, drop the seeded rows/campaign and the helper user
+        s.post(f"{api}/settings/", json={"settings": {"copilot": None}})
+        if s5b_saved is not None:
+            s.post(f"{api}/settings/", json={"settings": {"copilot": s5b_saved}})
+        if s5b_cid:
+            try:
+                ch_query(f"ALTER TABLE clicks_data DELETE WHERE campaign_id = {s5b_cid}")
+            except Exception:
+                pass
+            s.delete(f"{api}/campaigns/{s5b_cid}")
+        if s5b_uid:
+            s.delete(f"{api}/users/{s5b_uid}")
+        try:
+            s5b_srv.shutdown()
+            s5b_srv.server_close()
+        except Exception:
+            pass
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

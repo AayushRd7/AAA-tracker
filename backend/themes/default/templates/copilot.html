@@ -1,0 +1,295 @@
+{% raw %}
+<script type="text/x-template" id="copilot-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap">
+            <div>
+                <div class="page-title">Copilot</div>
+                <div class="page-subtitle">A plain-language read on this account's own numbers</div>
+            </div>
+            <v-chip v-if="status && status.configured" small outlined color="primary">
+                <v-icon small left>mdi-robot-outline</v-icon>{{ status.model }}
+            </v-chip>
+        </div>
+
+        <v-alert v-if="status && !status.configured" type="info" dense outlined class="mb-4"
+                 id="copilot-not-configured">
+            <strong>Copilot is not available here.</strong>
+            {{ status.message || 'Copilot is not configured for this deployment.' }}
+            Ask an administrator to set the provider key for this workspace.
+        </v-alert>
+
+        <v-card class="pa-4 mb-4" id="copilot-filters-card">
+            <div class="filter-bar align-center">
+                <v-menu v-model="dateMenu" :close-on-content-click="false" transition="scale-transition" offset-y min-width="auto">
+                    <template v-slot:activator="{ on, attrs }">
+                        <v-text-field
+                                v-model="dateRangeText"
+                                label="Window"
+                                prepend-icon="mdi-calendar"
+                                readonly
+                                v-bind="attrs"
+                                v-on="on"
+                                outlined
+                                dense
+                                hide-details
+                                class="range-field"
+                        ></v-text-field>
+                    </template>
+                    <v-date-picker v-model="dateRange" range @input="dateMenu = false"></v-date-picker>
+                </v-menu>
+                <v-chip v-for="preset in datePresets" :key="preset.label"
+                        small label outlined
+                        :color="activePreset === preset.label ? 'primary' : 'grey'"
+                        :class="activePreset === preset.label ? 'primary--text' : 'grey--text text--darken-2'"
+                        class="mr-1"
+                        @click="applyPreset(preset)">
+                    {{ preset.label }}
+                </v-chip>
+            </div>
+            <div class="caption grey--text mt-3">
+                Copilot reads only aggregate metrics for the window you pick — totals and the leading
+                campaigns. No visitor, click or contact data is ever sent.
+            </div>
+        </v-card>
+
+        <v-card class="pa-4 mb-4" id="copilot-card">
+            <v-card-title class="d-flex align-center flex-wrap px-0">
+                <v-icon color="primary" class="mr-2">mdi-text-box-search-outline</v-icon>
+                Account summary
+                <v-spacer></v-spacer>
+                <v-btn color="primary" elevation="0" :loading="summaryLoading"
+                       :disabled="!canRun" @click="summariseAccount">
+                    <v-icon small class="mr-1">mdi-play</v-icon>Summarise my account
+                </v-btn>
+            </v-card-title>
+            <v-card-text class="px-0">
+                <div v-if="summaryLoading" class="caption grey--text">
+                    Reading the account's numbers…
+                </div>
+                <v-alert v-else-if="summaryError" type="warning" dense outlined id="copilot-summary-error">
+                    {{ summaryError }}
+                </v-alert>
+                <div v-else-if="summary" class="copilot-answer" id="copilot-summary-text">
+                    <div v-for="(para, i) in summaryParagraphs(summary)" :key="i">{{ para }}</div>
+                </div>
+                <div v-else class="empty-state">
+                    <v-icon>mdi-robot-outline</v-icon>
+                    <div class="mt-2">
+                        Run a summary to get a short read on what stands out and what moved in this window.
+                    </div>
+                </div>
+
+                <div v-if="snapshotTotals" class="mt-3">
+                    <div class="caption grey--text mb-1">What Copilot saw</div>
+                    <v-chip v-for="t in snapshotTiles" :key="t.label" small outlined class="mr-1 mb-1">
+                        <span class="grey--text">{{ t.label }}</span>&nbsp;<strong>{{ t.value }}</strong>
+                    </v-chip>
+                </div>
+            </v-card-text>
+        </v-card>
+
+        <v-card class="pa-4" id="copilot-chat-card">
+            <v-card-title class="d-flex align-center px-0">
+                <v-icon color="primary" class="mr-2">mdi-comment-question-outline</v-icon>
+                Ask about this account
+            </v-card-title>
+            <v-card-text class="px-0">
+                <v-textarea
+                        v-model="question"
+                        label="Your question"
+                        placeholder="e.g. Which campaigns lost money this week, and by how much?"
+                        outlined
+                        dense
+                        rows="2"
+                        hide-details
+                        :disabled="!canRun"
+                        @keydown.ctrl.enter="askQuestion"
+                ></v-textarea>
+                <div class="d-flex align-center mt-3">
+                    <v-btn color="primary" elevation="0" :loading="askLoading"
+                           :disabled="!canRun || !question.trim()" @click="askQuestion">
+                        <v-icon small class="mr-1">mdi-send</v-icon>Ask
+                    </v-btn>
+                    <div class="caption grey--text ml-3">
+                        Answers use the same snapshot and are not saved — they vanish when you leave the page.
+                    </div>
+                </div>
+
+                <v-alert v-if="askError" type="warning" dense outlined class="mt-3" id="copilot-ask-error">
+                    {{ askError }}
+                </v-alert>
+
+                <div v-if="history.length" class="mt-4">
+                    <div v-for="(item, i) in history" :key="i" class="copilot-exchange mb-3">
+                        <div class="copilot-question">
+                            <v-icon small color="primary" class="mr-1">mdi-account-outline</v-icon>{{ item.question }}
+                        </div>
+                        <div class="copilot-answer mt-1">
+                            <div v-for="(para, j) in summaryParagraphs(item.answer)" :key="j">{{ para }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div v-else class="empty-state mt-3">
+                    <v-icon>mdi-comment-question-outline</v-icon>
+                    <div class="mt-2">No questions yet this session.</div>
+                </div>
+            </v-card-text>
+        </v-card>
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('copilot-component', {
+        template: '#copilot-template',
+        data() {
+            return {
+                status: null,
+                summary: '',
+                summaryLoading: false,
+                summaryError: '',
+                snapshotTotals: null,
+                windowInfo: null,
+                question: '',
+                askLoading: false,
+                askError: '',
+                history: [],
+                dateMenu: false,
+                activePreset: 'Last 7 days',
+                datePresets: [
+                    { label: 'Today', days: 0 },
+                    { label: 'Yesterday', days: 1 },
+                    { label: 'Last 7 days', days: 6 },
+                    { label: 'Last 30 days', days: 29 },
+                ],
+                dateRange: [
+                    new Date(new Date().setDate(new Date().getDate() - 6)).toISOString().split('T')[0],
+                    new Date().toISOString().split('T')[0]
+                ],
+            };
+        },
+        computed: {
+            dateRangeText() {
+                return this.dateRange.join(' ~ ');
+            },
+            canRun() {
+                return !!(this.status && this.status.configured);
+            },
+            snapshotTiles() {
+                const t = this.snapshotTotals || {};
+                return [
+                    { label: 'Visits', value: this.$fmtNum(Number(t.visits || 0)) },
+                    { label: 'Clicks', value: this.$fmtNum(Number(t.clicks || 0)) },
+                    { label: 'Conversions', value: this.$fmtNum(Number(t.conversions || 0)) },
+                    { label: 'Cost', value: '$' + this.$fmtNum(Number(t.cost || 0)) },
+                    { label: 'Revenue', value: '$' + this.$fmtNum(Number(t.revenue || 0)) },
+                    { label: 'Profit', value: '$' + this.$fmtNum(Number(t.profit || 0)) },
+                    { label: 'ROAS', value: t.roas == null ? '—' : Number(t.roas).toFixed(2) + 'x' },
+                ];
+            },
+        },
+        mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
+            this.loadStatus();
+            this.$root.$on('load-copilot', this.loadStatus);
+        },
+        beforeDestroy() {
+            this.$root.$off('load-copilot', this.loadStatus);
+        },
+        methods: {
+            loadStatus() {
+                fetch('/backend/api/copilot/status', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(data => { this.status = data; })
+                    .catch(() => { this.status = {configured: false, message: 'Copilot is not configured for this deployment.'}; });
+            },
+            windowPayload() {
+                return {date_from: this.dateRange[0], date_to: this.dateRange[1]};
+            },
+            applyPreset(preset) {
+                this.activePreset = preset.label;
+                const to = new Date();
+                let from = new Date();
+                if (preset.label === 'Yesterday') {
+                    from = new Date(to);
+                    from.setDate(from.getDate() - 1);
+                    to.setDate(to.getDate() - 1);
+                } else if (preset.days > 0) {
+                    from.setDate(from.getDate() - preset.days);
+                }
+                this.dateRange = [from.toISOString().split('T')[0], to.toISOString().split('T')[0]];
+            },
+            summaryParagraphs(text) {
+                return String(text || '').split(/\n+/).map(s => s.trim()).filter(Boolean);
+            },
+            post(url, body) {
+                return fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify(body),
+                }).then(r => r.json().then(data => ({ok: r.ok, status: r.status, data: data})));
+            },
+            summariseAccount() {
+                this.summaryLoading = true;
+                this.summaryError = '';
+                return this.post('/backend/api/copilot/summary', this.windowPayload())
+                    .then(res => {
+                        if (res.data && res.data.configured === false) {
+                            this.status = {configured: false, message: res.data.message};
+                            this.summaryError = res.data.message;
+                            return;
+                        }
+                        if (!res.ok) throw new Error((res.data && res.data.detail) || 'HTTP ' + res.status);
+                        if (res.data.error) { this.summaryError = res.data.error; return; }
+                        this.summary = res.data.summary || '';
+                        this.windowInfo = res.data.window || null;
+                        this.snapshotTotals = (res.data.snapshot && res.data.snapshot.totals) || null;
+                    })
+                    .catch(err => {
+                        this.summaryError = 'Could not run the summary: ' + sanitizeToastMessage(err.message);
+                    })
+                    .finally(() => { this.summaryLoading = false; });
+            },
+            askQuestion() {
+                const q = this.question.trim();
+                if (!q || !this.canRun) return;
+                this.askLoading = true;
+                this.askError = '';
+                return this.post('/backend/api/copilot/ask', Object.assign({question: q}, this.windowPayload()))
+                    .then(res => {
+                        if (res.data && res.data.configured === false) {
+                            this.status = {configured: false, message: res.data.message};
+                            this.askError = res.data.message;
+                            return;
+                        }
+                        if (!res.ok) throw new Error((res.data && res.data.detail) || 'HTTP ' + res.status);
+                        if (res.data.error) { this.askError = res.data.error; return; }
+                        this.history.push({question: q, answer: res.data.answer || ''});
+                        this.question = '';
+                    })
+                    .catch(err => {
+                        this.askError = 'Could not get an answer: ' + sanitizeToastMessage(err.message);
+                    })
+                    .finally(() => { this.askLoading = false; });
+            },
+        },
+    });
+</script>
+
+<style>
+    .copilot-answer {
+        white-space: pre-line;
+        line-height: 1.55;
+    }
+    .copilot-answer > div + div {
+        margin-top: 0.4rem;
+    }
+    .copilot-exchange {
+        border-left: 3px solid rgba(0, 0, 0, 0.08);
+        padding-left: 0.75rem;
+    }
+    .copilot-question {
+        font-weight: 600;
+    }
+</style>
+{% endraw %}

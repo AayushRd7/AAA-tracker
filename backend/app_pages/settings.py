@@ -177,6 +177,12 @@ def get_settings(request: Request, db: Session = Depends(get_db)):
         # Secret-looking values (tokens, keys, passwords) are masked for
         # non-admins; an admin still sees the real value to configure it.
         out[row.name] = value if is_admin else _mask_secrets(value)
+    # The Copilot provider key is stricter: it is masked for *every* reader so
+    # no endpoint can ever hand it back (the environment is its normal source).
+    doc = out.get("settings")
+    if isinstance(doc, dict) and isinstance(doc.get("copilot"), dict) \
+            and doc["copilot"].get("api_key"):
+        doc["copilot"]["api_key"] = _SECRET_MASK
     return out
 
 @router.post("/")

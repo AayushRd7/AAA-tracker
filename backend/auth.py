@@ -643,11 +643,11 @@ PERMISSION_SECTIONS = ["dashboard", "campaigns", "landings", "affiliates", "offe
                        "fraud", "optimizer", "conversion-tracking", "logs", "scripts",
                        "integrations", "capi-integrations", "bot-rules", "rules",
                        "filter-presets", "fallback", "funnels",
-                       "acquisition", "creative-analytics"]
+                       "acquisition", "creative-analytics", "copilot"]
 ADMIN_ONLY_SECTIONS = {"users", "settings", "domains", "fraud", "optimizer",
                        "conversion-tracking", "logs", "scripts",
                        "integrations", "capi-integrations", "bot-rules", "rules",
-                       "fallback"}
+                       "fallback", "copilot"}
 
 # Role -> default permission map. This is the documented matrix:
 #   owner  — everything in the tenant, including ownership transfer.

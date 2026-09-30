@@ -117,6 +117,10 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
+      # Copilot provider key + optional overrides (see app_pages/copilot.py).
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-}
+      COPILOT_MODEL: ${COPILOT_MODEL:-}
     volumes:
       - ./backend:/app
       - ./certbot-var:/var/www/certbot

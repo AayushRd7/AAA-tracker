@@ -81,6 +81,10 @@
             <fallback-component></fallback-component>
         </div>
 
+        <div v-show="$root.activeSection === 'copilot'">
+            <copilot-component></copilot-component>
+        </div>
+
         <div v-show="$root.activeSection === 'settings'">
             <settings-component></settings-component>
         </div>

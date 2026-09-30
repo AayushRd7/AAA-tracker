@@ -676,7 +676,7 @@ NAV_SECTIONS = {"dashboard", "campaigns", "landings", "affiliates", "offers",
                 "fraud", "optimizer", "conversion-tracking", "logs", "scripts",
                 "integrations", "capi-integrations", "bot-rules", "rules",
                 "filter-presets", "fallback", "funnels",
-                "acquisition", "creative-analytics"}
+                "acquisition", "creative-analytics", "copilot"}
 # auth.PERMISSION_SECTIONS and auth.ADMIN_ONLY_SECTIONS (see how
 # "conversion-tracking" is registered there). backend/auth.py is owned by
 # another change right now, so until that lands the section gate below treats
@@ -802,6 +802,11 @@ app.include_router(scripts_router, prefix="/api/scripts", tags=["Scripts"],
 from app_pages.funnel_templates import router as funnel_templates_router
 app.include_router(funnel_templates_router, prefix="/api/funnel-templates", tags=["Funnel templates"],
                    dependencies=[Depends(require_section_write("campaigns"))])
+# Copilot: an AI read on the account's own aggregates. Every call costs money,
+# so the whole surface sits behind the admin settings-write gate.
+from app_pages.copilot import router as copilot_router
+app.include_router(copilot_router, prefix="/api/copilot", tags=["Copilot"],
+                   dependencies=[Depends(require_section_write("settings"))])
 # Wave 19A: workspace display settings (number formatting / row colouring /
 # default columns) — read by every data-table page, so gated by the
 # always-readable dashboard section rather than the admin settings section.

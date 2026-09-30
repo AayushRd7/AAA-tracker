@@ -363,6 +363,7 @@
         {% include "templates/bot-rules.html" %}
         {% include "templates/rules.html" %}
         {% include "templates/fallback.html" %}
+        {% include "templates/copilot.html" %}
     {% endif %}
 {% endif %}
 
@@ -702,6 +703,7 @@
                     {key: 'reports', title: 'Reports', icon: 'mdi-chart-line', group: 'Performance'},
                     {key: 'acquisition', title: 'Acquisition', icon: 'mdi-source-branch', group: 'Performance'},
                     {key: 'creative-analytics', title: 'Creative analytics', icon: 'mdi-palette-outline', group: 'Performance'},
+                    {key: 'copilot', title: 'Copilot', icon: 'mdi-robot-outline', admin: true, group: 'Performance'},
                     {key: 'optimizer', title: 'Optimizer', icon: 'mdi-auto-fix', admin: true, group: 'Performance', feature: 'optimizer'},
                     {key: 'campaigns', title: 'Campaigns', icon: 'mdi-sitemap', group: 'Manage'},
                     {key: 'sources', title: 'Sources', icon: 'mdi-database-outline', group: 'Manage'},
@@ -773,6 +775,7 @@
                     reports: 'Reports',
                     acquisition: 'Acquisition',
                     'creative-analytics': 'Creative analytics',
+                    copilot: 'Copilot',
                     'conversion-tracking': 'Conversion tracking',
                     logs: 'Logs',
                     scripts: 'Scripts',
