@@ -673,7 +673,8 @@ ALLOWED_PAGES = {"auth", "dashboard", "editor"}
 # serves the shell pre-focused on that section (deep-linkable, back-button friendly).
 NAV_SECTIONS = {"dashboard", "campaigns", "landings", "affiliates", "offers",
                 "sources", "reports", "domains", "settings", "users", "documentation",
-                "fraud", "optimizer", "conversion-tracking", "logs", "scripts"}
+                "fraud", "optimizer", "conversion-tracking", "logs", "scripts",
+                "integrations", "capi-integrations"}
 # auth.PERMISSION_SECTIONS and auth.ADMIN_ONLY_SECTIONS (see how
 # "conversion-tracking" is registered there). backend/auth.py is owned by
 # another change right now, so until that lands the section gate below treats

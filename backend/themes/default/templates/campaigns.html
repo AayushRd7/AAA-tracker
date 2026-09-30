@@ -175,7 +175,7 @@
                                                 v-model="form.ad_platform_campaign_id"
                                                 :items="platformCampaignOptions"
                                                 outlined dense
-                                                hint="Meta Ads campaign id — used by the Meta Ads cost sync to match spend to this campaign. Optional. Connect Meta under Settings → Integrations to pick discovered campaigns."
+                                                hint="Meta Ads campaign id — used by the Meta Ads cost sync to match spend to this campaign. Optional. Connect Meta on the Integrations page to pick discovered campaigns."
                                                 persistent-hint
                                         ></v-combobox>
                                     </v-col>
@@ -2100,7 +2100,7 @@
                 platformAdsetsLoading: false,
                 platformControlBusy: false,
                 platformAdsetBusy: {},
-                // Discovered Meta assets (Settings → Integrations) for the pickers
+                // Discovered Meta assets (Integrations page) for the pickers
                 platformCampaignOptions: [],
                 platformAccountOptions: [],
                 platformAssetsLoading: false,

@@ -6229,6 +6229,15 @@ print("ESCAPED-OK")
           any("\u2022" in (p.get("access_token") or "")
               for p in (r.json().get("pixels") or [])), r.text[:150])
 
+    # -- the CAPI page serves the pixel card + dialog markers --
+    rp = s.get(f"{BASE}/backend/capi-integrations")
+    check("capi-pixels: CAPI integrations page serves the pixel card",
+          rp.status_code == 200 and "capiPixels" in rp.text
+          and "openPixelDialog" in rp.text and "Add new pixel" in rp.text,
+          f"{rp.status_code}")
+    check("capi-pixels: CAPI integrations page has no unreplaced jinja tags",
+          "{%" not in rp.text, "unreplaced jinja tag")
+
     # -- delete --
     r = s.delete(f"{api}/settings/capi-pixels/{pxc['id']}")
     check("capi-pixels: delete removes the record", r.status_code == 200, r.text[:150])
@@ -8014,8 +8023,8 @@ print("ESCAPED-OK")
             int_captured.clear()
             r = int_callback(st5, code="goodcode")
             loc_ok = _int_unquote(r.headers.get("location") or "")
-            check("integrations: callback 302s back to the Settings page (not JSON)",
-                  r.status_code in (302, 307) and loc_ok.startswith("/backend/settings")
+            check("integrations: callback 302s back to the Integrations page (not JSON)",
+                  r.status_code in (302, 307) and loc_ok.startswith("/backend/integrations")
                   and "status=ok" in loc_ok, f"{r.status_code} {loc_ok[:120]}")
             check("integrations: callback reports the connection + asset counts",
                   "Connected" in loc_ok and "accounts=" in loc_ok, loc_ok[:200])
@@ -8147,9 +8156,9 @@ print("ESCAPED-OK")
             check("integrations: wrong-key ciphertext generated for the degrade test",
                   False, "docker exec failed")
 
-        # -- served pages carry the new UI markers (no credential fields) --
-        rp = s.get(f"{BASE}/backend/settings")
-        check("integrations: Settings page serves the Integrations card",
+        # -- served pages carry the markers (no credential fields) --
+        rp = s.get(f"{BASE}/backend/integrations")
+        check("integrations: Integrations page serves the Integrations card",
               rp.status_code == 200 and "integrations-card" in rp.text
               and "connectIntegration" in rp.text
               and "Ad accounts for cost sync" in rp.text, f"{rp.status_code}")
@@ -8160,10 +8169,10 @@ print("ESCAPED-OK")
               and "integration-callback" not in rp.text, "callback UI still present")
         check("integrations: the card does not name deployment env vars",
               "env_vars" not in rp.text, "env var list still rendered")
-        check("integrations: Settings card has no client id/secret fields",
+        check("integrations: Integrations page has no client id/secret fields",
               "integration-client-secret" not in rp.text
               and "integration-client-id" not in rp.text, "credential field present")
-        check("integrations: Settings page has no unreplaced jinja tags",
+        check("integrations: Integrations page has no unreplaced jinja tags",
               "{%" not in rp.text, "unreplaced jinja tag")
         rc = s.get(f"{BASE}/backend/campaigns")
         check("integrations: campaign editor offers discovered platform campaigns",

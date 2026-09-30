@@ -1,0 +1,581 @@
+{% raw %}
+<script type="text/x-template" id="capi-integrations-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap">
+            <div>
+                <div class="page-title">CAPI integrations</div>
+                <div class="page-subtitle">Server-side conversion pixels, one record per platform dataset</div>
+            </div>
+            <v-btn color="primary" elevation="0" @click="saveCapiSettings(false)">
+                <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save settings
+            </v-btn>
+        </div>
+
+        <v-row>
+            <v-col cols="12">
+                <v-card class="pa-4">
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-facebook</v-icon>
+                        CAPI integrations
+                        <v-spacer></v-spacer>
+                        <v-btn small color="primary" elevation="0" @click="openPixelDialog()">
+                            <v-icon small class="mr-1">mdi-plus</v-icon>Add new pixel
+                        </v-btn>
+                    </v-card-title>
+                    <v-card-text>
+                        <div class="caption grey--text mb-2">
+                            Pixels are first-class records. Bind a pixel to a traffic channel or an
+                            offer/website; conversions are sent server-side so ad clicks are matched by
+                            fbc/fbp, IP and (optionally) hashed email/phone. Runs off the redirect and
+                            postback path.
+                        </div>
+                        <v-switch
+                                v-model="settings.meta_capi.enabled"
+                                label="Send conversions to Meta"
+                                inset
+                                dense
+                                hide-details
+                        ></v-switch>
+                        <v-switch
+                                v-model="settings.meta_capi.dry_run"
+                                label="Dry-run (build + log the payload, send nothing)"
+                                inset
+                                dense
+                                hide-details
+                                :disabled="!settings.meta_capi.enabled"
+                        ></v-switch>
+                        <v-switch
+                                v-model="settings.meta_capi.include_customer_match"
+                                label="Include hashed email/phone when the postback provides them"
+                                inset
+                                dense
+                                hide-details
+                                :disabled="!settings.meta_capi.enabled"
+                        ></v-switch>
+
+                        <v-simple-table dense class="mt-3">
+                            <thead>
+                                <tr>
+                                    <th class="text-left">Title</th>
+                                    <th class="text-left">Pixel / Dataset ID</th>
+                                    <th class="text-left">Platform</th>
+                                    <th class="text-left">Status</th>
+                                    <th class="text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="p in capiPixels" :key="p.id">
+                                    <td>{{ p.title }}</td>
+                                    <td>{{ p.pixel_id }}</td>
+                                    <td>{{ capiPlatformLabel(p.platform) }}</td>
+                                    <td>
+                                        <v-chip x-small :color="p.status === 'active' ? 'green' : 'grey'" dark>
+                                            {{ p.status }}
+                                        </v-chip>
+                                    </td>
+                                    <td class="text-right">
+                                        <v-btn icon x-small @click="openPixelDialog(p)">
+                                            <v-icon x-small>mdi-pencil-outline</v-icon>
+                                        </v-btn>
+                                        <v-btn icon x-small @click="deletePixel(p)">
+                                            <v-icon x-small>mdi-delete-outline</v-icon>
+                                        </v-btn>
+                                    </td>
+                                </tr>
+                                <tr v-if="!capiPixels.length">
+                                    <td colspan="5" class="grey--text">
+                                        No pixels yet — use “Add new pixel”, then bind it to a channel
+                                        (Sources) or an offer.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </v-simple-table>
+
+                        <v-row dense class="mt-3">
+                            <v-col cols="12" md="6">
+                                <v-text-field
+                                        label="Fallback Dataset / Pixel ID"
+                                        v-model="settings.meta_capi.dataset_id"
+                                        :disabled="!settings.meta_capi.enabled"
+                                        outlined dense
+                                        hint="Used only when no pixel record is bound"
+                                        persistent-hint
+                                ></v-text-field>
+                            </v-col>
+                            <v-col cols="12" md="6">
+                                <v-text-field
+                                        label="Fallback access token"
+                                        v-model="settings.meta_capi.access_token"
+                                        :disabled="!settings.meta_capi.enabled"
+                                        :append-icon="showMetaToken ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                                        :type="showMetaToken ? 'text' : 'password'"
+                                        @click:append="showMetaToken = !showMetaToken"
+                                        outlined dense
+                                        hint="Used only when no pixel record is bound. Stored as a secret."
+                                        persistent-hint
+                                ></v-text-field>
+                            </v-col>
+                            <v-col cols="12" md="4">
+                                <v-text-field
+                                        label="Test event code"
+                                        v-model="settings.meta_capi.test_event_code"
+                                        :disabled="!settings.meta_capi.enabled"
+                                        outlined dense
+                                        hint="Optional — routes events to the Test Events tab"
+                                        persistent-hint
+                                ></v-text-field>
+                            </v-col>
+                            <v-col cols="12" md="4">
+                                <v-select
+                                        label="Default currency"
+                                        :items="currencies"
+                                        v-model="settings.meta_capi.default_currency"
+                                        :disabled="!settings.meta_capi.enabled"
+                                        outlined dense
+                                ></v-select>
+                            </v-col>
+                            <v-col cols="12" md="4">
+                                <v-text-field
+                                        label="API version"
+                                        v-model="settings.meta_capi.api_version"
+                                        :disabled="!settings.meta_capi.enabled"
+                                        outlined dense
+                                        hint="e.g. v21.0"
+                                        persistent-hint
+                                ></v-text-field>
+                            </v-col>
+                        </v-row>
+
+                        <div class="caption grey--text mt-2 mb-1">Send these conversion statuses</div>
+                        <v-row dense no-gutters>
+                            <v-col v-for="s in metaStatusList" :key="s" cols="6" sm="3">
+                                <v-checkbox
+                                        v-model="settings.meta_capi.send_statuses"
+                                        :value="s"
+                                        :label="s"
+                                        dense
+                                        hide-details
+                                        class="mt-0"
+                                ></v-checkbox>
+                            </v-col>
+                        </v-row>
+
+                        <v-text-field
+                                label="Graph base URL (test only)"
+                                v-model="settings.meta_capi.graph_base_url"
+                                outlined dense class="mt-3"
+                                hint="Leave empty for https://graph.facebook.com. Point at a mock receiver when testing."
+                                persistent-hint
+                        ></v-text-field>
+
+                        <div class="d-flex align-center mt-3">
+                            <v-btn small outlined color="primary" :loading="metaTesting" @click="testMetaCapi">
+                                <v-icon small class="mr-1">mdi-send-outline</v-icon>Send test event
+                            </v-btn>
+                            <div class="caption grey--text ml-2">Saves settings first, then sends one synthetic event</div>
+                        </div>
+                        <pre v-if="metaTestResult" class="caption meta-test-result mt-2">{{ metaTestResult }}</pre>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <v-dialog v-model="capiDialog" max-width="780" scrollable>
+            <v-card>
+                <v-card-title>
+                    {{ capiForm.id ? 'Edit pixel' : 'Add pixel' }}
+                </v-card-title>
+                <v-card-text>
+                    <v-alert type="info" text dense class="mb-4">
+                        <div class="font-weight-medium mb-1">Configure a pixel in ONE place</div>
+                        Bind it at the <strong>traffic-channel</strong> level to send only conversions
+                        attributed to that channel, or at the <strong>offer / website</strong> level to
+                        send all of that offer's conversions, from any channel. Configuring both
+                        duplicates events — the sender resolves the channel binding first and, when a
+                        pixel is bound at both levels, still sends it only once.
+                    </v-alert>
+
+                    <v-alert v-if="!capiIsMeta" type="warning" text dense class="mb-4">
+                        Sending to {{ capiPlatformLabel(capiForm.platform) }} is not implemented yet —
+                        the record is stored and bindable, but events are not sent until that sender
+                        ships (Meta is fully wired today).
+                    </v-alert>
+
+                    <v-row dense>
+                        <v-col cols="12" md="6">
+                            <v-text-field label="Title" v-model="capiForm.title" outlined dense></v-text-field>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                            <v-select label="Platform" :items="capiPlatforms"
+                                      v-model="capiForm.platform" outlined dense
+                                      hint="Only Meta sends events today; the others are selectable for later."
+                                      persistent-hint></v-select>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                            <v-text-field :label="capiFieldLabels.id" v-model="capiForm.pixel_id"
+                                          outlined dense></v-text-field>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                            <v-text-field :label="capiFieldLabels.token" v-model="capiForm.access_token"
+                                          :append-icon="showPixelToken ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                                          :type="showPixelToken ? 'text' : 'password'"
+                                          @click:append="showPixelToken = !showPixelToken"
+                                          outlined dense></v-text-field>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                            <v-combobox label="Default event name" :items="metaEventSuggestions"
+                                        v-model="capiForm.default_event_name" outlined dense
+                                        hint="Used for every conversion this pixel receives unless a custom
+                                              conversion match overrides it."
+                                        persistent-hint></v-combobox>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                            <v-text-field label="Event URL" v-model="capiForm.event_url" outlined dense
+                                          hint="Optional event_source_url sent with the event."
+                                          persistent-hint></v-text-field>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                            <v-select label="Action source" :items="capiActionSources"
+                                      v-model="capiForm.action_source" outlined dense></v-select>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                            <v-text-field label="Data Quality API Token" v-model="capiForm.data_quality_token"
+                                          outlined dense
+                                          hint="Optional. Stored as a secret."
+                                          persistent-hint></v-text-field>
+                        </v-col>
+                        <v-col cols="12" md="6">
+                            <v-select label="Status" :items="['active', 'inactive']"
+                                      v-model="capiForm.status" outlined dense></v-select>
+                        </v-col>
+                    </v-row>
+
+                    <v-switch v-model="capiForm.custom_matching" inset dense hide-details
+                              label="Custom conversion matching"
+                              class="mt-1"></v-switch>
+                    <div class="caption grey--text mb-2">
+                        Map a conversion type to a specific Meta event name. Anything not listed uses
+                        the default event name above.
+                    </div>
+                    <template v-if="capiForm.custom_matching">
+                        <div v-for="(row, idx) in capiForm.conversion_matching" :key="'cm'+idx"
+                             class="d-flex align-center bot-rule-row mb-1">
+                            <v-select :items="metaStatusList" v-model="row.conversion_type"
+                                      label="Conversion type" outlined dense hide-details
+                                      class="bot-rule-type"></v-select>
+                            <v-icon small class="mx-2">mdi-arrow-right</v-icon>
+                            <v-combobox :items="metaEventSuggestions" v-model="row.event_name"
+                                        label="Event name" outlined dense hide-details
+                                        class="bot-rule-grow"></v-combobox>
+                            <v-btn icon small class="ml-2"
+                                   @click="capiForm.conversion_matching.splice(idx, 1)">
+                                <v-icon small>mdi-close</v-icon>
+                            </v-btn>
+                        </div>
+                        <v-btn x-small text color="primary"
+                               @click="capiForm.conversion_matching.push({conversion_type: '', event_name: ''})">
+                            <v-icon x-small class="mr-1">mdi-plus</v-icon>Add more
+                        </v-btn>
+                    </template>
+
+                    <div class="d-flex align-center mt-4 mb-1">
+                        <v-btn x-small text color="primary"
+                               @click="capiForm.payout_customisations.push({conversion_type: '', value: '', currency: ''})">
+                            <v-icon x-small class="mr-1">mdi-plus</v-icon>Add payout customisation
+                        </v-btn>
+                        <div class="caption grey--text ml-2">
+                            Default: the conversion payout is sent as <code>value</code> with the
+                            conversion currency.
+                        </div>
+                    </div>
+                    <div v-for="(row, idx) in capiForm.payout_customisations" :key="'pc'+idx"
+                         class="d-flex align-center bot-rule-row mb-1">
+                        <v-select :items="metaStatusList" v-model="row.conversion_type"
+                                  label="Conversion type" outlined dense hide-details
+                                  class="bot-rule-type"></v-select>
+                        <v-text-field v-model="row.value" label="Value" type="number" step="0.01"
+                                      outlined dense hide-details class="bot-rule-grow ml-2"></v-text-field>
+                        <v-text-field v-model="row.currency" label="Currency" outlined dense
+                                      hide-details class="bot-rule-grow ml-2"
+                                      style="max-width: 110px"></v-text-field>
+                        <v-btn icon small class="ml-2"
+                               @click="capiForm.payout_customisations.splice(idx, 1)">
+                            <v-icon small>mdi-close</v-icon>
+                        </v-btn>
+                    </div>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="capiDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" :loading="capiSaving" @click="savePixel">Save pixel</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('capi-integrations-component', {
+        template: '#capi-integrations-template',
+        data() {
+            return {
+                settings: {
+                    meta_capi: {
+                        enabled: false,
+                        dataset_id: '',
+                        access_token: '',
+                        test_event_code: '',
+                        default_currency: 'USD',
+                        api_version: 'v21.0',
+                        graph_base_url: '',
+                        dry_run: true,
+                        status_events: {sale: 'Purchase', lead: 'Lead', upsale: 'Subscribe'},
+                        send_statuses: ['lead', 'sale', 'upsale'],
+                        include_customer_match: true,
+                        pixel_overrides: {},
+                    },
+                    custom_statuses: [],
+                },
+                capiPixels: [],
+                capiDialog: false,
+                capiSaving: false,
+                showPixelToken: false,
+                showMetaToken: false,
+                metaTesting: false,
+                metaTestResult: '',
+                capiForm: {conversion_matching: [], payout_customisations: []},
+                capiPlatforms: [
+                    {text: 'Meta', value: 'meta'},
+                    {text: 'Snapchat', value: 'snapchat'},
+                    {text: 'TikTok', value: 'tiktok'},
+                    {text: 'Google', value: 'google'},
+                    {text: 'Pinterest', value: 'pinterest'},
+                    {text: 'AppLovin', value: 'applovin'},
+                    {text: 'OpenAI Ads', value: 'openai'},
+                ],
+                capiPlatformFieldLabels: {
+                    meta: {id: 'Pixel / Dataset ID', token: 'API key / Access token'},
+                    snapchat: {id: 'Pixel ID', token: 'Conversions API token'},
+                    tiktok: {id: 'Pixel Code', token: 'Access token'},
+                    google: {id: 'Pixel / Dataset ID', token: 'API key / Access token'},
+                    pinterest: {id: 'Ad Account ID', token: 'Conversions API token'},
+                    applovin: {id: 'Account / SDK key', token: 'S2S token'},
+                    openai: {id: 'Account', token: 'API token'},
+                },
+                capiActionSources: [
+                    {text: 'Store tracking URL', value: 'website'},
+                    {text: 'App', value: 'app'},
+                    {text: 'Offline', value: 'offline'},
+                    {text: 'Chat', value: 'chat'},
+                    {text: 'Other', value: 'other'},
+                ],
+                metaEventSuggestions: ['Lead', 'Purchase', 'Subscribe', 'AddToCart',
+                                       'InitiateCheckout', 'CompleteRegistration',
+                                       'ViewContent', 'Contact'],
+                currencies: ['USD', 'EUR', 'GBP', 'JPY'],
+                telegramStatusList: ['lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'],
+            };
+        },
+        mounted() {
+            this.loadCapiSettings();
+            this.loadCapiPixels();
+            this.$root.$on('load-capi-integrations', this.loadCapiSettings);
+        },
+        beforeDestroy() {
+            this.$root.$off('load-capi-integrations', this.loadCapiSettings);
+        },
+        computed: {
+            metaStatusList() {
+                const custom = (this.settings.custom_statuses || [])
+                    .map(s => (typeof s === 'string' ? s : (s && s.name) || ''))
+                    .filter(Boolean);
+                return Array.from(new Set([...this.telegramStatusList, ...custom]));
+            },
+            capiFieldLabels() {
+                return this.capiPlatformFieldLabels[this.capiForm.platform]
+                    || this.capiPlatformFieldLabels.meta;
+            },
+            capiIsMeta() {
+                return (this.capiForm.platform || 'meta') === 'meta';
+            },
+        },
+        methods: {
+            loadCapiSettings() {
+                fetch("/backend/api/settings/", {credentials: "include"})
+                    .then((r) => r.json())
+                    .then((data) => {
+                        const s = (data && data.settings) || {};
+                        const mcDefaults = {
+                            enabled: false, dataset_id: '', access_token: '',
+                            test_event_code: '', default_currency: 'USD',
+                            api_version: 'v21.0', graph_base_url: '', dry_run: true,
+                            status_events: {sale: 'Purchase', lead: 'Lead', upsale: 'Subscribe'},
+                            send_statuses: ['lead', 'sale', 'upsale'],
+                            include_customer_match: true, pixel_overrides: {},
+                        };
+                        this.settings.meta_capi = Object.assign(
+                            {}, mcDefaults, s.meta_capi || {});
+                        if (!Array.isArray(this.settings.meta_capi.send_statuses)) {
+                            this.settings.meta_capi.send_statuses = mcDefaults.send_statuses.slice();
+                        }
+                        this.settings.custom_statuses =
+                            Array.isArray(s.custom_statuses) ? s.custom_statuses : [];
+                    });
+            },
+            saveCapiSettings(silent) {
+                // Only the meta_capi section is written here; the server merges it
+                // into the stored settings document.
+                const payload = {settings: {meta_capi: this.settings.meta_capi}};
+                return fetch("/backend/api/settings/", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    credentials: "include",
+                    body: JSON.stringify(payload)
+                })
+                    .then((r) => r.json())
+                    .then((data) => {
+                        if (!silent) {
+                            this.$root.$emit("show-message", {type: "success", text: "Settings saved"});
+                        }
+                        return data;
+                    })
+                    .catch((err) => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                        throw err;
+                    });
+            },
+            capiPlatformLabel(value) {
+                const p = this.capiPlatforms.find(x => x.value === value);
+                return p ? p.text : (value || '');
+            },
+            async loadCapiPixels() {
+                try {
+                    const res = await fetch("/backend/api/settings/capi-pixels",
+                                            {credentials: "include"});
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    this.capiPixels = data.pixels || [];
+                } catch (e) {
+                    /* non-fatal: the list stays as-is */
+                }
+            },
+            openPixelDialog(pixel) {
+                if (pixel) {
+                    this.capiForm = Object.assign({}, pixel, {
+                        conversion_matching: (pixel.conversion_matching || []).map(r => Object.assign({}, r)),
+                        payout_customisations: (pixel.payout_customisations || []).map(r => Object.assign({}, r)),
+                    });
+                } else {
+                    this.capiForm = {
+                        title: '', platform: 'meta', pixel_id: '', access_token: '',
+                        default_event_name: 'Purchase', event_url: '',
+                        action_source: 'website', data_quality_token: '',
+                        custom_matching: false, status: 'active',
+                        conversion_matching: [], payout_customisations: [],
+                    };
+                }
+                this.showPixelToken = false;
+                this.capiDialog = true;
+            },
+            async savePixel() {
+                const f = this.capiForm;
+                if (!(f.title || '').trim()) {
+                    this.$root.$emit("show-message", {type: "error", text: "Title is required"});
+                    return;
+                }
+                if (!(f.pixel_id || '').trim()) {
+                    this.$root.$emit("show-message", {type: "error",
+                        text: "Pixel / Dataset ID is required"});
+                    return;
+                }
+                const body = {
+                    title: f.title, platform: f.platform, pixel_id: f.pixel_id,
+                    access_token: f.access_token,
+                    default_event_name: f.default_event_name,
+                    event_url: f.event_url, action_source: f.action_source,
+                    data_quality_token: f.data_quality_token,
+                    custom_matching: !!f.custom_matching, status: f.status,
+                    conversion_matching: (f.conversion_matching || [])
+                        .filter(r => (r.conversion_type || '').trim()),
+                    payout_customisations: (f.payout_customisations || [])
+                        .filter(r => (r.conversion_type || '').trim()),
+                };
+                this.capiSaving = true;
+                try {
+                    const url = f.id ? `/backend/api/settings/capi-pixels/${f.id}`
+                                     : "/backend/api/settings/capi-pixels";
+                    const res = await fetch(url, {
+                        method: f.id ? "PUT" : "POST",
+                        credentials: "include",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify(body)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        this.$root.$emit("show-message", {type: "error",
+                            text: sanitizeToastMessage(data.detail || "Could not save the pixel")});
+                        return;
+                    }
+                    this.capiDialog = false;
+                    await this.loadCapiPixels();
+                    this.$root.$emit("show-message", {type: "success", text: "Pixel saved"});
+                } finally {
+                    this.capiSaving = false;
+                }
+            },
+            async deletePixel(pixel) {
+                if (!window.confirm(`Delete pixel “${pixel.title}”? Its channel/offer bindings are removed too.`)) return;
+                const res = await fetch(`/backend/api/settings/capi-pixels/${pixel.id}`,
+                                        {method: "DELETE", credentials: "include"});
+                if (res.ok) {
+                    await this.loadCapiPixels();
+                    this.$root.$emit("show-message", {type: "success", text: "Pixel deleted"});
+                }
+            },
+            async testMetaCapi() {
+                this.metaTesting = true;
+                this.metaTestResult = '';
+                try {
+                    await this.saveCapiSettings(true);
+                    const res = await fetch("/meta-capi/test", {
+                        method: "POST",
+                        credentials: "include"
+                    });
+                    const data = await res.json();
+                    this.metaTestResult = JSON.stringify(data, null, 2);
+                    if (res.ok && data.status === "ok") {
+                        this.$root.$emit("show-message", {type: "success",
+                            text: "Test event accepted by Meta"});
+                    } else if (res.ok && data.status === "dry_run") {
+                        this.$root.$emit("show-message", {type: "warning",
+                            text: "Dry-run — payload built, nothing sent (see result)"});
+                    } else if (res.ok && data.status === "disabled") {
+                        this.$root.$emit("show-message", {type: "warning",
+                            text: "Meta CAPI is disabled"});
+                    } else {
+                        this.$root.$emit("show-message", {type: "error",
+                            text: sanitizeToastMessage(data.detail || "Test event failed")});
+                    }
+                } catch (e) {
+                    this.$root.$emit("show-message", {type: "error",
+                        text: "Test event failed: " + sanitizeToastMessage(e.message)});
+                } finally {
+                    this.metaTesting = false;
+                }
+            },
+        },
+    });
+</script>
+
+<style>
+    .meta-test-result {
+        max-height: 240px;
+        overflow: auto;
+        background: rgba(0, 0, 0, 0.04);
+        padding: 8px;
+        border-radius: 4px;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+</style>
+{% endraw %}

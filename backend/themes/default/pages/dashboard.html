@@ -57,6 +57,14 @@
             <settings-component></settings-component>
         </div>
 
+        <div v-show="$root.activeSection === 'integrations'">
+            <integrations-component></integrations-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'capi-integrations'">
+            <capi-integrations-component></capi-integrations-component>
+        </div>
+
         <div v-show="$root.activeSection === 'users'">
             <users-component></users-component>
         </div>

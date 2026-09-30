@@ -753,14 +753,14 @@ def oauth_start(platform: str, request: Request, db: Session = Depends(get_db)):
 
 
 def _settings_redirect(platform: str, ok: bool, message: str = "", **extra):
-    """Redirect the browser back to the Settings page (never a raw JSON page)."""
+    """Redirect the browser back to the Integrations page (never a raw JSON page)."""
     query = {"integration": platform, "status": "ok" if ok else "error"}
     if message:
         query["message"] = message[:300]
     for key, value in extra.items():
         if value is not None:
             query[key] = str(value)
-    return RedirectResponse(url=f"/backend/settings?{urlencode(query)}",
+    return RedirectResponse(url=f"/backend/integrations?{urlencode(query)}",
                             status_code=302)
 
 
@@ -777,7 +777,7 @@ async def oauth_callback(platform: str, request: Request, code: str = None,
                          error_description: str = None,
                          db: Session = Depends(get_db)):
     """Validate the state, exchange the code server-side, store the encrypted
-    token, run asset discovery, then redirect back to the Settings page."""
+    token, run asset discovery, then redirect back to the Integrations page."""
     from audit_logger import audit_event
     from auth import get_session_username
     platform = _platform_or_404(platform)
