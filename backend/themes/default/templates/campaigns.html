@@ -84,856 +84,889 @@
             <v-card class="pa-4 dialog-xl campaign-editor">
                 <div class="campaign-editor-head">
                     <h3>{{ isEdit ? 'Edit campaign' : 'New campaign' }}</h3>
-                    <v-select label="Type" v-model="form.type" :items="types"
-                              outlined
-                              dense
-                              class="campaign-editor-type"></v-select>
                 </div>
-                <div class="campaign-editor-body">
-                    <v-tabs vertical v-model="tab" class="campaign-editor-tabs">
-                        <v-tab><v-icon small>mdi-tune</v-icon>General</v-tab>
-                        <v-tab><v-icon small>mdi-cash-multiple</v-icon>Cost</v-tab>
-                        <v-tab><v-icon small>mdi-crosshairs-gps</v-icon>Tracking</v-tab>
-                        <v-tab><v-icon small>mdi-form-textbox</v-icon>Parameters</v-tab>
-                        <v-tab><v-icon small>mdi-webhook</v-icon>S2S postbacks</v-tab>
-                        <v-tab><v-icon small>mdi-sitemap</v-icon>Flows</v-tab>
-                        <v-tab><v-icon small>mdi-shield-outline</v-icon>Shield</v-tab>
-                        <v-tab><v-icon small>mdi-stairs</v-icon>Funnel</v-tab>
-                        <v-tab><v-icon small>mdi-note-outline</v-icon>Notes</v-tab>
-                        <v-tab><v-icon small>mdi-bullhorn-outline</v-icon>Ad platform</v-tab>
-                    </v-tabs>
 
-                    <v-tabs-items v-model="tab" class="campaign-editor-panes">
-                                    <!-- GENERAL -->
-                                    <v-tab-item>
-                                        <div class="campaign-editor-pane">
-                                            <v-row dense>
-                                                <v-col cols="12">
-                                                    <v-text-field label="Name" v-model="form.name" outlined
-                                                                  dense></v-text-field>
-                                                </v-col>
-                                            </v-row>
-                                            <v-row dense>
+                <v-stepper v-model="wizardStep" flat class="campaign-stepper">
+                    <v-stepper-header class="campaign-stepper-header">
+                        <v-stepper-step step="1" :complete="wizardStep > 1"
+                                        :rules="[() => step1Valid]">
+                            Settings
+                        </v-stepper-step>
+                        <v-divider></v-divider>
+                        <v-stepper-step step="2" :complete="wizardStep > 2">
+                            Targeting &amp; rules
+                        </v-stepper-step>
+                        <v-divider></v-divider>
+                        <v-stepper-step step="3">
+                            Postbacks &amp; review
+                        </v-stepper-step>
+                    </v-stepper-header>
 
-                                                    <v-col cols="12" class="mt-2">
-                                                        <v-switch
-                                                                label="Status"
-                                                                v-model="form.status"
-                                                                :value="form.status === 'active'"
-                                                                :false-value="'paused'"
-                                                                :true-value="'active'"
-                                                                inset
-                                                                dense
-                                                        ></v-switch>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-select
-                                                                v-model="form.domain_id"
-                                                                :items="domains"
-                                                                item-text="domain"
-                                                                item-value="id"
-                                                                label="Domain"
-                                                                outlined
-                                                                dense></v-select>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-text-field label="Alias" v-model="form.alias" outlined
-                                                                      dense></v-text-field>
-                                                    </v-col>
+                    <v-stepper-items class="campaign-stepper-items">
+                        <!-- ══════════════ STEP 1 — SETTINGS ══════════════ -->
+                        <v-stepper-content step="1">
+                            <div class="campaign-editor-pane">
+                                <v-row dense>
+                                    <v-col cols="12" md="6">
+                                        <v-text-field label="Name" v-model="form.name" outlined dense></v-text-field>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-text-field label="Alias" v-model="form.alias" outlined dense></v-text-field>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-select label="Type" v-model="form.type" :items="types"
+                                                  outlined dense></v-select>
+                                    </v-col>
+                                    <v-col cols="12" md="6" class="d-flex align-center">
+                                        <v-switch
+                                                label="Status"
+                                                v-model="form.status"
+                                                :value="form.status === 'active'"
+                                                :false-value="'paused'"
+                                                :true-value="'active'"
+                                                inset
+                                                dense
+                                        ></v-switch>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-select label="Traffic source"
+                                                  v-model="form.traffic_source_id"
+                                                  :items="sources" item-text="name" item-value="id"
+                                                  outlined dense></v-select>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-select
+                                                v-model="form.domain_id"
+                                                :items="domains"
+                                                item-text="domain"
+                                                item-value="id"
+                                                label="Domain"
+                                                outlined
+                                                dense></v-select>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-select
+                                                v-model="form.flowScheme"
+                                                :items="[{text: 'Position (first match wins)', value: 'position'}, {text: 'Weight % (random split)', value: 'weight'}]"
+                                                label="Flow selection"
+                                                outlined
+                                                dense
+                                                hint="How the campaign picks between its flows — by position or by weight. The offer or lander a flow points to is set per flow on the next step."
+                                                persistent-hint></v-select>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-combobox
+                                                label="Tags"
+                                                v-model="form.tags"
+                                                :items="allTags"
+                                                multiple
+                                                chips
+                                                small-chips
+                                                deletable-chips
+                                                outlined
+                                                dense
+                                                hint="Type a tag and press Enter — e.g. vertical, geo, traffic type"
+                                                persistent-hint
+                                        ></v-combobox>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-combobox
+                                                label="Ad-platform campaign ID"
+                                                v-model="form.ad_platform_campaign_id"
+                                                :items="platformCampaignOptions"
+                                                outlined dense
+                                                hint="Meta Ads campaign id — used by the Meta Ads cost sync to match spend to this campaign. Optional. Connect Meta under Settings → Integrations to pick discovered campaigns."
+                                                persistent-hint
+                                        ></v-combobox>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-text-field
+                                                label="Uniqueness bind TTL (hours)"
+                                                v-model="form.bind_ttl_hours"
+                                                type="number"
+                                                outlined
+                                                dense
+                                        ></v-text-field>
+                                    </v-col>
+                                    <v-col cols="12" md="6" class="pt-0">
+                                        <v-switch
+                                                label="Visitor stickiness (bind visitors to their flow)"
+                                                v-model="form.stickiness"
+                                                inset
+                                                dense
+                                                hint="Returning visitors keep the flow/offer they were first assigned to — makes weight-based A/B splits stable. Stored in a signed 30-day aaa_bind cookie; editing the flow list invalidates bindings."
+                                                persistent-hint
+                                        ></v-switch>
+                                    </v-col>
+                                </v-row>
 
-                                                    <v-col cols="12">
-                                                        <v-combobox
-                                                                label="Ad-platform campaign ID"
-                                                                v-model="form.ad_platform_campaign_id"
-                                                                :items="platformCampaignOptions"
-                                                                outlined dense
-                                                                hint="Meta Ads campaign id — used by the Meta Ads cost sync to match spend to this campaign. Optional. Connect Meta under Settings → Integrations to pick discovered campaigns."
-                                                                persistent-hint
-                                                        ></v-combobox>
-                                                    </v-col>
+                                <v-divider class="my-3"></v-divider>
+                                <div class="subtitle-2 mb-2">Costs</div>
+                                <v-row dense>
+                                    <v-col cols="12" md="6">
+                                        <v-select label="Cost model" v-model="form.cost_model"
+                                                  :items="costModels"
+                                                  outlined dense></v-select>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-text-field label="Traffic loss (%)"
+                                                      v-model="form.traffic_loss_percent"
+                                                      type="number" outlined dense></v-text-field>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-text-field label="Cost"
+                                                      v-model="form.cost"
+                                                      type="number" outlined dense></v-text-field>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-autocomplete label="Cost currency"
+                                                        v-model="form.cost_currency"
+                                                        :items="currencies"
+                                                        outlined dense></v-autocomplete>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-switch label="Cost from cost parameter"
+                                                  v-model="form.cost_from_cost_parameter"
+                                                  inset
+                                                  dense></v-switch>
+                                    </v-col>
+                                </v-row>
+                            </div>
+                        </v-stepper-content>
 
-                                                    <v-col cols="12">
-                                                        <v-combobox
-                                                                label="Tags"
-                                                                v-model="form.tags"
-                                                                :items="allTags"
-                                                                multiple
-                                                                chips
-                                                                small-chips
-                                                                deletable-chips
-                                                                outlined
-                                                                dense
-                                                                hint="Type a tag and press Enter — e.g. vertical, geo, traffic type"
-                                                                persistent-hint
-                                                        ></v-combobox>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-select label="Traffic source"
-                                                                  v-model="form.traffic_source_id"
-                                                                  :items="sources" item-text="name" item-value="id"
-                                                                  outlined
-                                                                  dense></v-select>
-                                                    </v-col>
+                        <!-- ══════════════ STEP 2 — TARGETING & RULES ══════════════ -->
+                        <v-stepper-content step="2">
+                            <div class="campaign-editor-pane">
+                                <template v-if="form.type=='campaign'">
+                                    <h3 class="mb-2 mt-2">Flow configuration</h3>
 
-                                                    <v-col cols="12">
-                                                        <v-text-field
-                                                                label="Uniqueness bind TTL (hours)"
-                                                                v-model="form.bind_ttl_hours"
-                                                                type="number"
-                                                                outlined
-                                                                dense
-                                                        ></v-text-field>
+                                    <v-alert v-if="form.funnel && form.funnel.enabled" type="warning" dense outlined class="mb-3">
+                                        Funnel mode is active — these flows are inactive and ignored while the funnel is enabled.
+                                    </v-alert>
+
+                                    <v-row>
+                                        <v-col cols="12" md="5">
+                                            <v-select
+                                                    v-model="form.flowScheme"
+                                                    :items="[{text: 'Position (first match wins)', value: 'position'}, {text: 'Weight % (random split)', value: 'weight'}]"
+                                                    label="Distribution"
+                                                    outlined
+                                                    dense
+                                                    hint="Weight % splits visitors across flows by their weight — e.g. 70/30"
+                                                    persistent-hint></v-select>
+                                        </v-col>
+                                    </v-row>
+
+                                    <v-row dense v-for="(flow, index) in form.flows" :key="index" class="mb-2 mr-5">
+                                        <v-col cols="12">
+                                            <v-card
+                                                    :class="
+                                                    flow.type === 'forced'
+                                                        ? 'flow-card flow-card--forced'
+                                                        : flow.type === 'default'
+                                                        ? 'flow-card flow-card--default'
+                                                        : 'flow-card'"
+                                                    flat
+                                            >
+                                                <v-card-title class="d-flex justify-space-between align-center">
+                                                    <v-col cols="2">
+                                                        <v-btn icon small @click="moveFlowUp(index)"
+                                                               :disabled="index === 0">
+                                                            <v-icon>mdi-arrow-up</v-icon>
+                                                        </v-btn>
+                                                        <v-btn icon small @click="moveFlowDown(index)"
+                                                               :disabled="index === form.flows.length - 1">
+                                                            <v-icon>mdi-arrow-down</v-icon>
+                                                        </v-btn>
+                                                        <span class="status-chip ml-1" :class="flow.enabled ? 'status-chip--success' : 'status-chip--neutral'">{{ flow.enabled ? 'On' : 'Off' }}</span>
                                                     </v-col>
-
-                                                    <v-col cols="12">
-                                                        <v-switch
-                                                                label="Visitor stickiness (bind visitors to their flow)"
-                                                                v-model="form.stickiness"
-                                                                inset
-                                                                dense
-                                                                hint="Returning visitors keep the flow/offer they were first assigned to — makes weight-based A/B splits stable. Stored in a signed 30-day aaa_bind cookie; editing the flow list invalidates bindings."
-                                                                persistent-hint
-                                                        ></v-switch>
+                                                    <v-col cols="7">
+                                                        <strong>{{ flow.name }}</strong>
+                                                        <span class="ml-2 grey--text">({{ flow.type }})</span>
                                                     </v-col>
+                                                    <v-col cols="3" class="text-right">
+                                                        <v-btn text color="primary" @click="openFlowEdit(flow, index)">
+                                                            Edit
+                                                        </v-btn>
+                                                        <v-btn text color="red" @click="removeFlow(index)">Delete</v-btn>
+                                                    </v-col>
+                                                </v-card-title>
 
-                                                </v-row>
-                                        </div>
-                                    </v-tab-item>
+                                                <v-card-text>
+                                                    <div>
+                                                        <span class="mr-3">Position: <b>{{ flow.position }}</b></span>
+                                                        <span class="mr-3">Weight: <b>{{ flow.weight }}%</b></span>
+                                                        <span class="mr-3">Schema: <b>{{ flow.schema }}</b></span>
+                                                        <span>Status: <b>{{ flow.enabled ? 'On' : 'Off' }}</b></span>
+                                                    </div>
+                                                    <div>
+                                                      <span class="mr-3">
+                                                        Landing:
+                                                        <b>{{ landingMap[flow.landing] || '—' }}</b>
+                                                      </span>
+                                                      <span class="mr-3">
+                                                            Offer:
+                                                            <b>{{ offerMap[flow.offer] || '—' }}</b>
+                                                          </span>
+                                                    </div>
+                                                    <div>
+                                                      <span v-if="flowFiltersSummary(flow).length" class="d-block mt-2">
+                                                        Filters:
+                                                        <ul class="pl-4 mb-0">
+                                                          <li v-for="(line, i) in flowFiltersSummary(flow)" :key="i">{{ line }}</li>
+                                                        </ul>
+                                                      </span>
+                                                    </div>
+                                                    <div v-if="flow.schedule">
+                                                      <span class="mr-3">Schedule: <b>{{ flowScheduleSummary(flow.schedule) }}</b></span>
+                                                    </div>
+                                                    <div v-if="flow.caps && (flow.caps.per_hour || flow.caps.per_day || flow.caps.total)">
+                                                      <span class="mr-3">Caps: <b>{{ flowCapsSummary(flow.caps) }}</b></span>
+                                                    </div>
+                                                    <div v-if="flow.notes">
+                                                      <span class="mr-3">
+                                                        Notes:
+                                                        <b>{{ flow.notes || '—' }}</b>
+                                                      </span>
+                                                    </div>
+                                                </v-card-text>
+                                            </v-card>
+                                        </v-col>
+                                    </v-row>
 
-                                    <!-- COST -->
-                                    <v-tab-item>
-                                        <div class="campaign-editor-pane">
+                                    <v-btn small color="primary" @click="openFlowEdit()">Add flow</v-btn>
+                                    <div class="caption grey--text mt-2">
+                                        Each flow carries its own target (offer and/or lander), filters, schedule, caps and
+                                        weight. A flow set to “Default” is the fallback when nothing else matches.
+                                    </div>
+                                </template>
+
+                                <v-divider class="my-4"></v-divider>
+                                <h3 class="mb-2">Redirect &amp; tracking</h3>
+                                <v-row dense>
+                                    <v-col cols="12">
+                                        <v-text-field
+                                                label="Campaign URL"
+                                                :value="campaignUrl"
+                                                readonly
+                                                outlined
+                                                dense
+                                                append-icon="mdi-content-copy"
+                                                @click:append="copyCampaignUrl"></v-text-field>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-switch label="Send se_referrer"
+                                                  v-model="form.send_se_referrer"
+                                                  inset
+                                                  dense></v-switch>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-switch label="Use <title> as keyword"
+                                                  v-model="form.use_title_as_keyword"
+                                                  inset
+                                                  dense></v-switch>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-switch label="Send query params"
+                                                  v-model="form.send_query_params"
+                                                  inset
+                                                  dense></v-switch>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-switch label="Hide referrer (meta refresh)"
+                                                  v-model="form.hide_referrer"
+                                                  inset
+                                                  dense
+                                                  hint="Redirect visitors through an HTML meta refresh so target pages see no referrer"
+                                                  persistent-hint></v-switch>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-text-field
+                                                label="Fallback URL"
+                                                v-model="form.fallback_url"
+                                                outlined
+                                                dense
+                                                hint="Where to send visitors when no flow’s filters match. Leave empty to show a 404 page."
+                                                persistent-hint></v-text-field>
+                                    </v-col>
+                                </v-row>
+
+                                <v-divider class="my-4"></v-divider>
+                                <h3 class="mb-2">Funnel</h3>
+                                <v-row dense>
+                                    <v-col cols="12" class="mt-2">
+                                        <v-switch
+                                                label="Enable multi-step funnel"
+                                                v-model="form.funnel.enabled"
+                                                inset
+                                                dense
+                                                hint="Funnel mode replaces flows: visitors progress through the ordered steps, one step per campaign-URL visit. A step advances only when the visitor clicks through to the offer. The signed bind cookie stores the current step, so editing the funnel resets every visitor to step 0."
+                                                persistent-hint
+                                        ></v-switch>
+                                    </v-col>
+                                </v-row>
+                                <v-alert v-if="form.funnel.enabled" type="warning" dense outlined class="mb-3">
+                                    Funnel mode is active — the flows list is ignored for this campaign.
+                                    Visitors past the last step re-see the last step on repeat visits.
+                                </v-alert>
+                                <template v-if="form.funnel.enabled">
+                                    <v-row dense v-for="(step, index) in form.funnel.steps" :key="index" class="mb-2">
+                                        <v-col cols="12">
+                                            <v-card flat outlined class="pa-3">
+                                                <div class="d-flex justify-space-between align-center mb-2">
+                                                    <strong>Step {{ index + 1 }}</strong>
+                                                    <span>
+                                                        <v-btn icon small @click="moveFunnelStepUp(index)"
+                                                               :disabled="index === 0">
+                                                            <v-icon>mdi-arrow-up</v-icon>
+                                                        </v-btn>
+                                                        <v-btn icon small @click="moveFunnelStepDown(index)"
+                                                               :disabled="index === form.funnel.steps.length - 1">
+                                                            <v-icon>mdi-arrow-down</v-icon>
+                                                        </v-btn>
+                                                        <v-btn icon small color="red" @click="removeFunnelStep(index)">
+                                                            <v-icon>mdi-delete</v-icon>
+                                                        </v-btn>
+                                                    </span>
+                                                </div>
                                                 <v-row dense>
                                                     <v-col cols="12">
-                                                        <v-select label="Cost model" v-model="form.cost_model"
-                                                                  :items="costModels"
+                                                        <v-text-field label="Step name" v-model="step.name"
+                                                                      outlined dense></v-text-field>
+                                                    </v-col>
+                                                    <v-col cols="12">
+                                                        <v-select label="Landing" v-model="step.landing"
+                                                                  :items="landings" item-text="name" item-value="id"
                                                                   outlined dense></v-select>
                                                     </v-col>
                                                     <v-col cols="12">
-                                                        <v-text-field label="Traffic loss (%)"
-                                                                      v-model="form.traffic_loss_percent"
-                                                                      type="number" outlined dense></v-text-field>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-text-field label="Cost"
-                                                                      v-model="form.cost"
-                                                                      type="number" outlined dense></v-text-field>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-autocomplete label="Cost currency"
-                                                                        v-model="form.cost_currency"
-                                                                        :items="currencies"
-                                                                        outlined dense></v-autocomplete>
-                                                        <v-col cols="12">
-                                                            <v-switch label="Cost from cost parameter"
-                                                                      v-model="form.cost_from_cost_parameter"
-                                                                      inset
-                                                                      dense></v-switch>
-                                                        </v-col>
-                                                    </v-col>
-                                                </v-row>
-                                        </div>
-                                    </v-tab-item>
-
-                                    <!-- TRACKING -->
-                                    <v-tab-item>
-                                        <div class="campaign-editor-pane">
-                                                <v-row dense>
-                                                    <v-col cols="12">
-                                                        <v-text-field
-                                                                label="Campaign URL"
-                                                                :value="campaignUrl"
-                                                                readonly
-                                                                outlined
-                                                                dense
-                                                                append-icon="mdi-content-copy"
-                                                                @click:append="copyCampaignUrl"></v-text-field>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-switch label="Send se_referrer"
-                                                                  v-model="form.send_se_referrer"
-                                                                  inset
-                                                                  dense></v-switch>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-switch label="Use <title> as keyword"
-                                                                  v-model="form.use_title_as_keyword"
-                                                                  inset
-                                                                  dense></v-switch>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-switch label="Send query params"
-                                                                  v-model="form.send_query_params"
-                                                                  inset
-                                                                  dense></v-switch>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-switch label="Hide referrer (meta refresh)"
-                                                                  v-model="form.hide_referrer"
-                                                                  inset
-                                                                  dense
-                                                                  hint="Redirect visitors through an HTML meta refresh so target pages see no referrer"
-                                                                  persistent-hint></v-switch>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-text-field
-                                                                label="Fallback URL"
-                                                                v-model="form.fallback_url"
-                                                                outlined
-                                                                dense
-                                                                hint="Where to send visitors when no flow’s filters match. Leave empty to show a 404 page."
-                                                                persistent-hint></v-text-field>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-select
-                                                                label="Tracking script method"
-                                                                v-model="form.integration_method"
-                                                                :items="Object.entries(integrationMethods).map(([key, value]) => ({ key, value }))"
-                                                                item-text="value"
-                                                                item-value="key"
-                                                                outlined
-                                                                dense
-                                                        ></v-select>
-                                                    </v-col>
-                                                    <v-col cols="12" v-if="form.integration_method">
-                                                        <v-textarea
-                                                                label="Tracking script"
-                                                                readonly
-                                                                outlined
-                                                                dense
-                                                                v-model="trackingScript"
-                                                        >
-                                                        </v-textarea>
-                                                    </v-col>
-                                                    <v-col cols="12" class="direct-tracking-head">
-                                                        <div class="direct-tracking-title">Direct tracking (no-redirect)</div>
-                                                        <div class="direct-tracking-hint">
-                                                            First-party tracking without any redirect: the script records the
-                                                            visit, stores the click id in a cookie, and your offer links plus the
-                                                            conversion pixel reuse it — landing URLs stay clean. Put the script on
-                                                            the landing page, point offer links through
-                                                            <code>/c/{{ form.alias || 'ALIAS' }}/{offer}?click_id=...</code> (or
-                                                            <code>aaaTrack.clickThrough(url)</code>), and fire the pixel on the
-                                                            thank-you page.
-                                                        </div>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-textarea
-                                                                label="Direct tracking script"
-                                                                :value="directTrackingScript"
-                                                                readonly
-                                                                outlined
-                                                                dense
-                                                                append-icon="mdi-content-copy"
-                                                                @click:append="copyText(directTrackingScript)"
-                                                        ></v-textarea>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-textarea
-                                                                label="Conversion pixel (img — noscript / cross-domain safe)"
-                                                                :value="conversionPixelImg"
-                                                                readonly
-                                                                outlined
-                                                                dense
-                                                                append-icon="mdi-content-copy"
-                                                                @click:append="copyText(conversionPixelImg)"
-                                                        ></v-textarea>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-textarea
-                                                                label="Conversion pixel (fetch — from the tracked page)"
-                                                                :value="conversionPixelFetch"
-                                                                readonly
-                                                                outlined
-                                                                dense
-                                                                append-icon="mdi-content-copy"
-                                                                @click:append="copyText(conversionPixelFetch)"
-                                                        ></v-textarea>
-                                                    </v-col>
-                                                </v-row>
-                                        </div>
-                                    </v-tab-item>
-
-                                    <!-- PARAMETERS -->
-                                    <v-tab-item>
-                                        <div class="campaign-editor-pane">
-                                                <v-row class="mb-4">
-                                                    <v-col cols="12" class="text-right">
-                                                        <v-btn small color="primary" @click="addParameter">Add</v-btn>
-                                                    </v-col>
-                                                </v-row>
-
-                                                <v-row align="center" class="param-header">
-                                                    <v-col cols="3">
-                                                        Name
-                                                    </v-col>
-                                                    <v-col cols="3">
-                                                        Parameter in system
-                                                    </v-col>
-                                                    <v-col cols="5">
-                                                        Variable input (empty if same name)
-                                                    </v-col>
-                                                    <v-col cols="1">
-                                                    </v-col>
-                                                </v-row>
-                                                <v-row dense v-for="(mapping, index) in form.paramsIdMapping"
-                                                       :key="index" align="center">
-                                                    <v-col cols="3">
-                                                        <template v-if="!mapping.editable_name">
-                                                            {{ mapping.name }}
-                                                        </template>
-                                                        <template v-else>
-                                                            <v-text-field
-                                                                    :label="mapping.name"
-                                                                    v-model="mapping.name"
-                                                                    outlined
-                                                                    dense
-                                                            ></v-text-field>
-                                                        </template>
-                                                    </v-col>
-                                                    <v-col cols="3">
-                                                        <v-text-field
-                                                                :label="mapping.parameter"
-                                                                v-model="mapping.parameter"
-                                                                outlined
-                                                                dense
-                                                        ></v-text-field>
-                                                    </v-col>
-                                                    <v-col cols="5">
-                                                        <v-text-field
-                                                                label="Variable name"
-                                                                v-model="mapping.token"
-                                                                outlined
-                                                                dense
-                                                        ></v-text-field>
-                                                    </v-col>
-                                                    <v-col cols="1">
-                                                        <v-btn icon small color="red" @click="removeParameter(index)">
-                                                            <v-icon>mdi-delete</v-icon>
-                                                        </v-btn>
-                                                    </v-col>
-                                                </v-row>
-                                        </div>
-                                    </v-tab-item>
-
-
-                                    <!-- POSTBACKS -->
-                                    <v-tab-item>
-                                        <div class="campaign-editor-pane">
-                                                <!-- Existing postbacks -->
-                                                <v-row
-                                                        dense
-                                                        v-for="(pb, i) in form.postbacks"
-                                                        :key="'pb_' + i"
-                                                        class="mb-2"
-                                                >
-                                                    <v-col cols="12">
-                                                        <v-select
-                                                                v-model="pb.method"
-                                                                :items="['GET', 'POST']"
-                                                                label="Request method"
-                                                                dense
-                                                                outlined
-                                                                class="mt-3"></v-select>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-textarea v-model="pb.url" label="Postback URL" dense
-
-                                                                    rows="3"
-                                                                    outlined></v-textarea>
-                                                        <v-btn small text color="primary" @click="openPostbackEditor(i)">Edit
-                                                            postback URL
-                                                        </v-btn>
-                                                    </v-col>
-                                                    <v-col cols="10">
-                                                        <v-checkbox
-                                                                v-for="key in postbackStatusKeys"
-                                                                :key="key"
-                                                                v-model="pb.status[key]"
-                                                                :label="key.charAt(0).toUpperCase() + key.slice(1)"
-                                                                dense hide-details
-                                                                class="mr-2 d-inline-block"></v-checkbox>
-                                                    </v-col>
-                                                    <v-col cols="2" class="text-right">
-                                                        <v-btn icon @click="form.postbacks.splice(i, 1)">
-                                                            <v-icon color="red">mdi-delete</v-icon>
-                                                        </v-btn>
-                                                    </v-col>
-                                                </v-row>
-
-                                                <v-divider class="my-4"></v-divider>
-                                                <h3>Add new</h3>
-
-                                                <!-- Adding a new one -->
-                                                <v-row dense>
-                                                    <v-col cols="12">
-                                                        <v-select
-                                                                v-model="newPostback.method"
-                                                                :items="['GET', 'POST']"
-                                                                label="Request method"
-                                                                dense
-                                                                outlined
-                                                                class="mt-3"></v-select>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-textarea
-                                                                v-model="newPostback.url"
-                                                                label="New postback URL"
-                                                                rows="3"
-                                                                dense
-                                                                outlined></v-textarea>
-                                                        <v-btn small text color="primary" @click="openPostbackEditor()">Edit
-                                                            postback URL
-                                                        </v-btn>
-                                                    </v-col>
-                                                    <v-col cols="10">
-                                                        <v-checkbox
-                                                                v-for="key in postbackStatusKeys"
-                                                                :key="'new_' + key"
-                                                                v-model="newPostback.status[key]"
-                                                                :label="key.charAt(0).toUpperCase() + key.slice(1)"
-                                                                dense hide-details
-                                                                class="mr-2 d-inline-block"></v-checkbox>
-                                                    </v-col>
-                                                    <v-col cols="2" class="text-right">
-                                                        <v-btn color="primary" @click="addPostback"
-                                                               :disabled="!newPostback.url">
-                                                            Add
-                                                        </v-btn>
-                                                    </v-col>
-                                                </v-row>
-
-                                                <v-divider class="my-4"></v-divider>
-                                                <h3>Global postback rules</h3>
-                                                <div class="caption grey--text mb-2">
-                                                    These rules are <b>global</b> (they apply to every inbound
-                                                    postback, for every campaign). The first matching rule wins;
-                                                    "Reject" drops the postback without recording it. One condition
-                                                    per rule here — an empty field/value matches nothing.
-                                                </div>
-                                                <v-row dense v-for="(rule, ri) in postbackRules"
-                                                       :key="'pbr_' + ri" align="center" class="mb-1">
-                                                    <v-col cols="1">
-                                                        <v-checkbox v-model="rule.enabled" dense hide-details></v-checkbox>
-                                                    </v-col>
-                                                    <v-col cols="3">
-                                                        <v-text-field v-model="rule.name" label="Rule name" outlined dense
-                                                                      hide-details></v-text-field>
-                                                    </v-col>
-                                                    <v-col cols="3">
-                                                        <v-select v-model="rule.conditions[0].field"
-                                                                  :items="postbackRuleFields" label="Field"
-                                                                  outlined dense hide-details></v-select>
-                                                    </v-col>
-                                                    <v-col cols="2">
-                                                        <v-select v-model="rule.conditions[0].operator"
-                                                                  :items="postbackRuleOperators" label="Operator"
-                                                                  outlined dense hide-details></v-select>
-                                                    </v-col>
-                                                    <v-col cols="3">
-                                                        <v-text-field v-model="rule.conditions[0].value" label="Value"
-                                                                      outlined dense hide-details></v-text-field>
-                                                    </v-col>
-                                                    <v-col cols="12" class="pt-0">
-                                                        <v-row dense align="center">
-                                                            <v-col cols="4">
-                                                                <v-select v-model="rule.action.type"
-                                                                          :items="postbackRuleActions" item-text="text"
-                                                                          item-value="value" label="Action"
-                                                                          outlined dense hide-details></v-select>
-                                                            </v-col>
-                                                            <v-col cols="4"
-                                                                   v-if="rule.action.type === 'set_status'">
-                                                                <v-text-field v-model="rule.action.value"
-                                                                              label="New status" outlined dense
-                                                                              hide-details></v-text-field>
-                                                            </v-col>
-                                                            <v-col cols="4"
-                                                                   v-if="rule.action.type === 'set_payout'">
-                                                                <v-text-field v-model="rule.action.value"
-                                                                              label="Payout (absolute value)" type="number"
-                                                                              outlined dense hide-details></v-text-field>
-                                                            </v-col>
-                                                            <v-col cols="4"
-                                                                   v-if="rule.action.type === 'set_payout'">
-                                                                <v-select v-model="rule.action.mode"
-                                                                          :items="[{text: 'Absolute', value: 'absolute'}, {text: 'Multiplier', value: 'multiplier'}]"
-                                                                          label="Mode" outlined dense
-                                                                          hide-details></v-select>
-                                                            </v-col>
-                                                            <v-col cols="4" class="text-right">
-                                                                <v-btn icon small color="red"
-                                                                       @click="postbackRules.splice(ri, 1)">
-                                                                    <v-icon>mdi-delete</v-icon>
-                                                                </v-btn>
-                                                            </v-col>
-                                                        </v-row>
-                                                    </v-col>
-                                                </v-row>
-                                                <div class="d-flex align-center mt-2">
-                                                    <v-btn small text color="primary" @click="addPostbackRule">
-                                                        <v-icon small class="mr-1">mdi-plus</v-icon>Add rule
-                                                    </v-btn>
-                                                    <v-btn small color="primary" elevation="0" class="ml-2"
-                                                           :loading="postbackRulesSaving"
-                                                           @click="savePostbackRules">
-                                                        Save global rules
-                                                    </v-btn>
-                                                </div>
-                                        </div>
-                                    </v-tab-item>
-
-                                    <!-- FLOWS -->
-                                    <v-tab-item>
-                                        <div class="campaign-editor-pane" v-if="form.type=='campaign'">
-                                            <h3 class="mb-2 mt-2">Flow configuration</h3>
-
-                                            <v-alert v-if="form.funnel && form.funnel.enabled" type="warning" dense outlined class="mb-3">
-                                                Funnel mode is active — these flows are inactive and ignored while the funnel is enabled.
-                                            </v-alert>
-
-                                            <v-row>
-                                                <v-col cols="12" md="5">
-                                                    <v-select
-                                                            v-model="form.flowScheme"
-                                                            :items="[{text: 'Position (first match wins)', value: 'position'}, {text: 'Weight % (random split)', value: 'weight'}]"
-                                                            label="Distribution"
-                                                            outlined
-                                                            dense
-                                                            hint="Weight % splits visitors across flows by their weight — e.g. 70/30"
-                                                            persistent-hint></v-select>
-                                                </v-col>
-                                            </v-row>
-
-                                            <v-row dense v-for="(flow, index) in form.flows" :key="index" class="mb-2 mr-5">
-                                                <v-col cols="12">
-                                                    <v-card
-                                                            :class="
-                                                            flow.type === 'forced'
-                                                                ? 'flow-card flow-card--forced'
-                                                                : flow.type === 'default'
-                                                                ? 'flow-card flow-card--default'
-                                                                : 'flow-card'"
-                                                            flat
-                                                    >
-                                                        <v-card-title class="d-flex justify-space-between align-center">
-                                                            <v-col cols="2">
-                                                                <v-btn icon small @click="moveFlowUp(index)"
-                                                                       :disabled="index === 0">
-                                                                    <v-icon>mdi-arrow-up</v-icon>
-                                                                </v-btn>
-                                                                <v-btn icon small @click="moveFlowDown(index)"
-                                                                       :disabled="index === form.flows.length - 1">
-                                                                    <v-icon>mdi-arrow-down</v-icon>
-                                                                </v-btn>
-                                                                <span class="status-chip ml-1" :class="flow.enabled ? 'status-chip--success' : 'status-chip--neutral'">{{ flow.enabled ? 'On' : 'Off' }}</span>
-                                                            </v-col>
-                                                            <v-col cols="7">
-                                                                <strong>{{ flow.name }}</strong>
-                                                                <span class="ml-2 grey--text">({{ flow.type }})</span>
-                                                            </v-col>
-                                                            <v-col cols="3" class="text-right">
-                                                                <v-btn text color="primary" @click="openFlowEdit(flow, index)">
-                                                                    Edit
-                                                                </v-btn>
-                                                                <v-btn text color="red" @click="removeFlow(index)">Delete</v-btn>
-                                                            </v-col>
-                                                        </v-card-title>
-
-                                                        <v-card-text>
-                                                            <div>
-                                                                <span class="mr-3">Position: <b>{{ flow.position }}</b></span>
-                                                                <span class="mr-3">Weight: <b>{{ flow.weight }}%</b></span>
-                                                                <span class="mr-3">Schema: <b>{{ flow.schema }}</b></span>
-                                                                <span>Status: <b>{{ flow.enabled ? 'On' : 'Off' }}</b></span>
-                                                            </div>
-                                                            <div>
-                                                              <span class="mr-3">
-                                                                Landing:
-                                                                <b>{{ landingMap[flow.landing] || '—' }}</b>
-                                                              </span>
-                                                              <span class="mr-3">
-                                                                    Offer:
-                                                                    <b>{{ offerMap[flow.offer] || '—' }}</b>
-                                                                  </span>
-                                                            </div>
-                                                            <div>
-                                                              <span v-if="flowFiltersSummary(flow).length" class="d-block mt-2">
-                                                                Filters:
-                                                                <ul class="pl-4 mb-0">
-                                                                  <li v-for="(line, i) in flowFiltersSummary(flow)" :key="i">{{ line }}</li>
-                                                                </ul>
-                                                              </span>
-                                                            </div>
-                                                            <div v-if="flow.schedule">
-                                                              <span class="mr-3">Schedule: <b>{{ flowScheduleSummary(flow.schedule) }}</b></span>
-                                                            </div>
-                                                            <div v-if="flow.caps && (flow.caps.per_hour || flow.caps.per_day || flow.caps.total)">
-                                                              <span class="mr-3">Caps: <b>{{ flowCapsSummary(flow.caps) }}</b></span>
-                                                            </div>
-                                                            <div v-if="flow.notes">
-                                                              <span class="mr-3">
-                                                                Notes:
-                                                                <b>{{ flow.notes || '—' }}</b>
-                                                              </span>
-                                                            </div>
-                                                        </v-card-text>
-                                                    </v-card>
-                                                </v-col>
-                                            </v-row>
-
-                                            <v-btn small color="primary" @click="openFlowEdit()">Add flow</v-btn>
-                                        </div>
-                                    </v-tab-item>
-
-                                    <!-- SHIELD -->
-                                    <v-tab-item>
-                                        <div class="campaign-editor-pane">
-                                                <v-row dense>
-                                                    <v-col cols="12" class="mt-2">
-                                                        <v-switch
-                                                                label="Enable shield (cloaking)"
-                                                                v-model="form.shield.enabled"
-                                                                inset
-                                                                dense
-                                                                hint="Non-whitelisted visitors are checked against the global bot lists and bot rules before they reach your flows."
-                                                                persistent-hint
-                                                        ></v-switch>
+                                                        <v-select label="Offers" v-model="step.offers"
+                                                                  :items="offers" item-text="name" item-value="id"
+                                                                  multiple chips small-chips deletable-chips
+                                                                  outlined dense></v-select>
                                                     </v-col>
                                                     <v-col cols="12" md="6">
-                                                        <v-select
-                                                                label="Action for suspected bots"
-                                                                v-model="form.shield.action"
-                                                                :items="[
-                                                                    {text: 'Blank page (200, no content)', value: 'blank'},
-                                                                    {text: '404 Not Found', value: '404'},
-                                                                    {text: 'Track & mark as bot (watch mode)', value: 'allow'},
-                                                                ]"
-                                                                outlined
-                                                                dense
-                                                        ></v-select>
-                                                    </v-col>
-                                                    <v-col cols="12" md="6">
-                                                        <v-switch
-                                                                label="Honeypot"
-                                                                v-model="form.shield.honeypot"
-                                                                inset
-                                                                dense
-                                                                hint="Trap: suspected bots are served a decoy page and logged to honeypot hits instead of being sent away silently."
-                                                                persistent-hint
-                                                                class="mt-md-4"
-                                                        ></v-switch>
+                                                        <v-select label="Schema" v-model="step.schema"
+                                                                  :items="[{text: 'Landing → Offer', value: 'landing_offer'}, {text: 'Landing only', value: 'landing_only'}]"
+                                                                  outlined dense></v-select>
                                                     </v-col>
                                                 </v-row>
+                                            </v-card>
+                                        </v-col>
+                                    </v-row>
+                                    <v-btn small color="primary" @click="addFunnelStep">Add step</v-btn>
+                                </template>
+                                <v-divider class="my-4"></v-divider>
+                                <v-row dense align="center">
+                                    <v-col cols="12" md="4">
+                                        <v-btn small outlined color="primary" @click="saveFunnelTemplate">
+                                            <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save as template
+                                        </v-btn>
+                                    </v-col>
+                                    <v-col cols="12" md="5">
+                                        <v-select label="Apply template"
+                                                  :items="funnelTemplates"
+                                                  item-text="name" item-value="id"
+                                                  v-model="selectedFunnelTemplate"
+                                                  outlined dense hide-details clearable
+                                                  @change="applyFunnelTemplate"></v-select>
+                                    </v-col>
+                                </v-row>
 
-                                                <v-divider class="my-3"></v-divider>
-                                                <div class="subtitle-2 mb-2">Whitelists — matching visitors always pass through untouched</div>
-                                                <v-row dense>
-                                                    <v-col cols="12">
-                                                        <v-combobox
-                                                                v-model="form.shield.whitelists.ips"
-                                                                label="Whitelisted IPs (CIDR allowed)"
-                                                                :items="[]"
-                                                                multiple chips small-chips deletable-chips outlined dense
-                                                                hint="Type an IP or CIDR (10.0.0.0/8) and press Enter"
-                                                                persistent-hint
-                                                        ></v-combobox>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-combobox
-                                                                v-model="form.shield.whitelists.referers"
-                                                                label="Whitelisted referers (substrings)"
-                                                                :items="[]"
-                                                                multiple chips small-chips deletable-chips outlined dense
-                                                                hint="Type a substring, e.g. facebook.com — press Enter to add"
-                                                                persistent-hint
-                                                        ></v-combobox>
-                                                    </v-col>
-                                                    <v-col cols="12">
-                                                        <v-text-field
-                                                                label="Whitelisted User-Agent regex"
-                                                                v-model="form.shield.whitelists.ua_regex"
-                                                                :error-messages="shieldUaRegexError"
-                                                                outlined
-                                                                dense
-                                                                hint="Single regex pattern, e.g. bot|crawler|spider — empty = no UA restriction"
-                                                                persistent-hint
-                                                        ></v-text-field>
-                                                    </v-col>
-                                                </v-row>
-                                        </div>
-                                    </v-tab-item>
+                                <v-divider class="my-4"></v-divider>
+                                <h3 class="mb-2">Shield</h3>
+                                <v-row dense>
+                                    <v-col cols="12" class="mt-2">
+                                        <v-switch
+                                                label="Enable shield (cloaking)"
+                                                v-model="form.shield.enabled"
+                                                inset
+                                                dense
+                                                hint="Non-whitelisted visitors are checked against the global bot lists and bot rules before they reach your flows."
+                                                persistent-hint
+                                        ></v-switch>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-select
+                                                label="Action for suspected bots"
+                                                v-model="form.shield.action"
+                                                :items="[
+                                                    {text: 'Blank page (200, no content)', value: 'blank'},
+                                                    {text: '404 Not Found', value: '404'},
+                                                    {text: 'Track & mark as bot (watch mode)', value: 'allow'},
+                                                ]"
+                                                outlined
+                                                dense
+                                        ></v-select>
+                                    </v-col>
+                                    <v-col cols="12" md="6">
+                                        <v-switch
+                                                label="Honeypot"
+                                                v-model="form.shield.honeypot"
+                                                inset
+                                                dense
+                                                hint="Trap: suspected bots are served a decoy page and logged to honeypot hits instead of being sent away silently."
+                                                persistent-hint
+                                                class="mt-md-4"
+                                        ></v-switch>
+                                    </v-col>
+                                </v-row>
 
-                                    <!-- FUNNEL (G10) -->
-                                    <v-tab-item>
-                                        <div class="campaign-editor-pane">
-                                                <v-row dense>
-                                                    <v-col cols="12" class="mt-2">
-                                                        <v-switch
-                                                                label="Enable multi-step funnel"
-                                                                v-model="form.funnel.enabled"
-                                                                inset
-                                                                dense
-                                                                hint="Funnel mode replaces flows: visitors progress through the ordered steps, one step per campaign-URL visit. A step advances only when the visitor clicks through to the offer. The signed bind cookie stores the current step, so editing the funnel resets every visitor to step 0."
-                                                                persistent-hint
-                                                        ></v-switch>
-                                                    </v-col>
-                                                </v-row>
-                                                <v-alert v-if="form.funnel.enabled" type="warning" dense outlined class="mb-3">
-                                                    Funnel mode is active — the flows list is ignored for this campaign.
-                                                    Visitors past the last step re-see the last step on repeat visits.
-                                                </v-alert>
-                                                <template v-if="form.funnel.enabled">
-                                                    <v-row dense v-for="(step, index) in form.funnel.steps" :key="index" class="mb-2">
-                                                        <v-col cols="12">
-                                                            <v-card flat outlined class="pa-3">
-                                                                <div class="d-flex justify-space-between align-center mb-2">
-                                                                    <strong>Step {{ index + 1 }}</strong>
-                                                                    <span>
-                                                                        <v-btn icon small @click="moveFunnelStepUp(index)"
-                                                                               :disabled="index === 0">
-                                                                            <v-icon>mdi-arrow-up</v-icon>
-                                                                        </v-btn>
-                                                                        <v-btn icon small @click="moveFunnelStepDown(index)"
-                                                                               :disabled="index === form.funnel.steps.length - 1">
-                                                                            <v-icon>mdi-arrow-down</v-icon>
-                                                                        </v-btn>
-                                                                        <v-btn icon small color="red" @click="removeFunnelStep(index)">
-                                                                            <v-icon>mdi-delete</v-icon>
-                                                                        </v-btn>
-                                                                    </span>
-                                                                </div>
-                                                                <v-row dense>
-                                                                    <v-col cols="12">
-                                                                        <v-text-field label="Step name" v-model="step.name"
-                                                                                      outlined dense></v-text-field>
-                                                                    </v-col>
-                                                                    <v-col cols="12">
-                                                                        <v-select label="Landing" v-model="step.landing"
-                                                                                  :items="landings" item-text="name" item-value="id"
-                                                                                  outlined dense></v-select>
-                                                                    </v-col>
-                                                                    <v-col cols="12">
-                                                                        <v-select label="Offers" v-model="step.offers"
-                                                                                  :items="offers" item-text="name" item-value="id"
-                                                                                  multiple chips small-chips deletable-chips
-                                                                                  outlined dense></v-select>
-                                                                    </v-col>
-                                                                    <v-col cols="12" md="6">
-                                                                        <v-select label="Schema" v-model="step.schema"
-                                                                                  :items="[{text: 'Landing → Offer', value: 'landing_offer'}, {text: 'Landing only', value: 'landing_only'}]"
-                                                                                  outlined dense></v-select>
-                                                                    </v-col>
-                                                                </v-row>
-                                                            </v-card>
-                                                        </v-col>
-                                                    </v-row>
-                                                    <v-btn small color="primary" @click="addFunnelStep">Add step</v-btn>
-                                                </template>
-                                                <v-divider class="my-4"></v-divider>
-                                                <v-row dense align="center">
-                                                    <v-col cols="12" md="4">
-                                                        <v-btn small outlined color="primary" @click="saveFunnelTemplate">
-                                                            <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save as template
-                                                        </v-btn>
-                                                    </v-col>
-                                                    <v-col cols="12" md="5">
-                                                        <v-select label="Apply template"
-                                                                  :items="funnelTemplates"
-                                                                  item-text="name" item-value="id"
-                                                                  v-model="selectedFunnelTemplate"
-                                                                  outlined dense hide-details clearable
-                                                                  @change="applyFunnelTemplate"></v-select>
-                                                    </v-col>
-                                                </v-row>
-                                        </div>
-                                    </v-tab-item>
+                                <v-divider class="my-3"></v-divider>
+                                <div class="subtitle-2 mb-2">Whitelists — matching visitors always pass through untouched</div>
+                                <v-row dense>
+                                    <v-col cols="12">
+                                        <v-combobox
+                                                v-model="form.shield.whitelists.ips"
+                                                label="Whitelisted IPs (CIDR allowed)"
+                                                :items="[]"
+                                                multiple chips small-chips deletable-chips outlined dense
+                                                hint="Type an IP or CIDR (10.0.0.0/8) and press Enter"
+                                                persistent-hint
+                                        ></v-combobox>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-combobox
+                                                v-model="form.shield.whitelists.referers"
+                                                label="Whitelisted referers (substrings)"
+                                                :items="[]"
+                                                multiple chips small-chips deletable-chips outlined dense
+                                                hint="Type a substring, e.g. facebook.com — press Enter to add"
+                                                persistent-hint
+                                        ></v-combobox>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-text-field
+                                                label="Whitelisted User-Agent regex"
+                                                v-model="form.shield.whitelists.ua_regex"
+                                                :error-messages="shieldUaRegexError"
+                                                outlined
+                                                dense
+                                                hint="Single regex pattern, e.g. bot|crawler|spider — empty = no UA restriction"
+                                                persistent-hint
+                                        ></v-text-field>
+                                    </v-col>
+                                </v-row>
+                            </div>
+                        </v-stepper-content>
 
-                                    <!-- NOTES -->
-                                    <v-tab-item>
-                                        <div class="campaign-editor-pane">
-                                                <v-textarea v-model="form.notes" label="Internal notes" outlined dense
-                                                            rows="5"
-                                                            auto-grow></v-textarea>
-                                        </div>
-                                    </v-tab-item>
+                        <!-- ══════════════ STEP 3 — POSTBACKS & REVIEW ══════════════ -->
+                        <v-stepper-content step="3">
+                            <div class="campaign-editor-pane">
+                                <h3 class="mb-2 mt-2">Postbacks</h3>
+                                <!-- Existing postbacks -->
+                                <v-row
+                                        dense
+                                        v-for="(pb, i) in form.postbacks"
+                                        :key="'pb_' + i"
+                                        class="mb-2"
+                                >
+                                    <v-col cols="12">
+                                        <v-select
+                                                v-model="pb.method"
+                                                :items="['GET', 'POST']"
+                                                label="Request method"
+                                                dense
+                                                outlined
+                                                class="mt-3"></v-select>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-textarea v-model="pb.url" label="Postback URL" dense
 
-                                    <!-- AD PLATFORM (Meta campaign + ad-set controls) -->
-                                    <v-tab-item>
-                                        <div class="campaign-editor-pane" id="meta-ad-platform-section">
-                                            <div class="d-flex align-center mb-2">
-                                                <h4 class="text-subtitle-1 mb-0">Ad platform</h4>
-                                                <v-chip x-small class="ml-2" dark
-                                                        :color="platformCampaignStatus === 'PAUSED' ? 'orange darken-2' : (platformCampaignStatus === 'ACTIVE' ? 'green darken-1' : 'grey')">
-                                                    {{ platformCampaignStatus || 'unknown' }}
-                                                </v-chip>
-                                            </div>
-                                            <div class="caption grey--text mb-2">
-                                                Pause or resume the Meta campaign behind this tracker campaign.
-                                                Ad sets load on demand, not when the editor opens.
-                                            </div>
-                                            <v-alert v-if="metaAdsDryRun" dense type="warning" text
-                                                     class="mb-2" id="meta-ad-control-dryrun">
-                                                dry-run: this will log, not send — no live Meta change.
-                                            </v-alert>
+                                                    rows="3"
+                                                    outlined></v-textarea>
+                                        <v-btn small text color="primary" @click="openPostbackEditor(i)">Edit
+                                            postback URL
+                                        </v-btn>
+                                    </v-col>
+                                    <v-col cols="10">
+                                        <v-checkbox
+                                                v-for="key in postbackStatusKeys"
+                                                :key="key"
+                                                v-model="pb.status[key]"
+                                                :label="key.charAt(0).toUpperCase() + key.slice(1)"
+                                                dense hide-details
+                                                class="mr-2 d-inline-block"></v-checkbox>
+                                    </v-col>
+                                    <v-col cols="2" class="text-right">
+                                        <v-btn icon @click="form.postbacks.splice(i, 1)">
+                                            <v-icon color="red">mdi-delete</v-icon>
+                                        </v-btn>
+                                    </v-col>
+                                </v-row>
+
+                                <v-divider class="my-4"></v-divider>
+                                <h3>Add new</h3>
+
+                                <!-- Adding a new one -->
+                                <v-row dense>
+                                    <v-col cols="12">
+                                        <v-select
+                                                v-model="newPostback.method"
+                                                :items="['GET', 'POST']"
+                                                label="Request method"
+                                                dense
+                                                outlined
+                                                class="mt-3"></v-select>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-textarea
+                                                v-model="newPostback.url"
+                                                label="New postback URL"
+                                                rows="3"
+                                                dense
+                                                outlined></v-textarea>
+                                        <v-btn small text color="primary" @click="openPostbackEditor()">Edit
+                                            postback URL
+                                        </v-btn>
+                                    </v-col>
+                                    <v-col cols="10">
+                                        <v-checkbox
+                                                v-for="key in postbackStatusKeys"
+                                                :key="'new_' + key"
+                                                v-model="newPostback.status[key]"
+                                                :label="key.charAt(0).toUpperCase() + key.slice(1)"
+                                                dense hide-details
+                                                class="mr-2 d-inline-block"></v-checkbox>
+                                    </v-col>
+                                    <v-col cols="2" class="text-right">
+                                        <v-btn color="primary" @click="addPostback"
+                                               :disabled="!newPostback.url">
+                                            Add
+                                        </v-btn>
+                                    </v-col>
+                                </v-row>
+
+                                <v-divider class="my-4"></v-divider>
+                                <h3>Global postback rules</h3>
+                                <div class="caption grey--text mb-2">
+                                    These rules are <b>global</b> (they apply to every inbound
+                                    postback, for every campaign). The first matching rule wins;
+                                    "Reject" drops the postback without recording it. One condition
+                                    per rule here — an empty field/value matches nothing.
+                                </div>
+                                <v-row dense v-for="(rule, ri) in postbackRules"
+                                       :key="'pbr_' + ri" align="center" class="mb-1">
+                                    <v-col cols="1">
+                                        <v-checkbox v-model="rule.enabled" dense hide-details></v-checkbox>
+                                    </v-col>
+                                    <v-col cols="3">
+                                        <v-text-field v-model="rule.name" label="Rule name" outlined dense
+                                                      hide-details></v-text-field>
+                                    </v-col>
+                                    <v-col cols="3">
+                                        <v-select v-model="rule.conditions[0].field"
+                                                  :items="postbackRuleFields" label="Field"
+                                                  outlined dense hide-details></v-select>
+                                    </v-col>
+                                    <v-col cols="2">
+                                        <v-select v-model="rule.conditions[0].operator"
+                                                  :items="postbackRuleOperators" label="Operator"
+                                                  outlined dense hide-details></v-select>
+                                    </v-col>
+                                    <v-col cols="3">
+                                        <v-text-field v-model="rule.conditions[0].value" label="Value"
+                                                      outlined dense hide-details></v-text-field>
+                                    </v-col>
+                                    <v-col cols="12" class="pt-0">
+                                        <v-row dense align="center">
+                                            <v-col cols="4">
+                                                <v-select v-model="rule.action.type"
+                                                          :items="postbackRuleActions" item-text="text"
+                                                          item-value="value" label="Action"
+                                                          outlined dense hide-details></v-select>
+                                            </v-col>
+                                            <v-col cols="4"
+                                                   v-if="rule.action.type === 'set_status'">
+                                                <v-text-field v-model="rule.action.value"
+                                                              label="New status" outlined dense
+                                                              hide-details></v-text-field>
+                                            </v-col>
+                                            <v-col cols="4"
+                                                   v-if="rule.action.type === 'set_payout'">
+                                                <v-text-field v-model="rule.action.value"
+                                                              label="Payout (absolute value)" type="number"
+                                                              outlined dense hide-details></v-text-field>
+                                            </v-col>
+                                            <v-col cols="4"
+                                                   v-if="rule.action.type === 'set_payout'">
+                                                <v-select v-model="rule.action.mode"
+                                                          :items="[{text: 'Absolute', value: 'absolute'}, {text: 'Multiplier', value: 'multiplier'}]"
+                                                          label="Mode" outlined dense
+                                                          hide-details></v-select>
+                                            </v-col>
+                                            <v-col cols="4" class="text-right">
+                                                <v-btn icon small color="red"
+                                                       @click="postbackRules.splice(ri, 1)">
+                                                    <v-icon>mdi-delete</v-icon>
+                                                </v-btn>
+                                            </v-col>
+                                        </v-row>
+                                    </v-col>
+                                </v-row>
+                                <div class="d-flex align-center mt-2">
+                                    <v-btn small text color="primary" @click="addPostbackRule">
+                                        <v-icon small class="mr-1">mdi-plus</v-icon>Add rule
+                                    </v-btn>
+                                    <v-btn small color="primary" elevation="0" class="ml-2"
+                                           :loading="postbackRulesSaving"
+                                           @click="savePostbackRules">
+                                        Save global rules
+                                    </v-btn>
+                                </div>
+
+                                <v-divider class="my-4"></v-divider>
+                                <h3 class="mb-2">Parameters</h3>
+                                <v-row class="mb-4">
+                                    <v-col cols="12" class="text-right">
+                                        <v-btn small color="primary" @click="addParameter">Add</v-btn>
+                                    </v-col>
+                                </v-row>
+
+                                <v-row align="center" class="param-header">
+                                    <v-col cols="3">
+                                        Name
+                                    </v-col>
+                                    <v-col cols="3">
+                                        Parameter in system
+                                    </v-col>
+                                    <v-col cols="5">
+                                        Variable input (empty if same name)
+                                    </v-col>
+                                    <v-col cols="1">
+                                    </v-col>
+                                </v-row>
+                                <v-row dense v-for="(mapping, index) in form.paramsIdMapping"
+                                       :key="index" align="center">
+                                    <v-col cols="3">
+                                        <template v-if="!mapping.editable_name">
+                                            {{ mapping.name }}
+                                        </template>
+                                        <template v-else>
                                             <v-text-field
-                                                    label="Mapped platform campaign ID"
-                                                    :value="form.ad_platform_campaign_id || ''"
-                                                    readonly outlined dense
-                                                    hint="Set it on the General tab. Required for these controls."
-                                                    persistent-hint
+                                                    :label="mapping.name"
+                                                    v-model="mapping.name"
+                                                    outlined
+                                                    dense
                                             ></v-text-field>
-                                            <div class="d-flex align-center flex-wrap mb-3">
-                                                <v-btn small outlined color="primary"
-                                                       :disabled="!form.ad_platform_campaign_id || !form.id"
-                                                       :loading="platformAdsetsLoading"
-                                                       @click="loadPlatformAdsets">
-                                                    <v-icon small class="mr-1">mdi-refresh</v-icon>Load ad sets
-                                                </v-btn>
-                                                <v-btn small class="ml-2" color="orange darken-2"
-                                                       :disabled="!form.ad_platform_campaign_id || !form.id"
-                                                       :loading="platformControlBusy"
-                                                       @click="controlPlatformCampaign('PAUSED')">
-                                                    <v-icon small class="mr-1">mdi-pause</v-icon>Pause campaign
-                                                </v-btn>
-                                                <v-btn small class="ml-2" color="green darken-1"
-                                                       :disabled="!form.ad_platform_campaign_id || !form.id"
-                                                       :loading="platformControlBusy"
-                                                       @click="controlPlatformCampaign('ACTIVE')">
-                                                    <v-icon small class="mr-1">mdi-play</v-icon>Resume campaign
-                                                </v-btn>
-                                            </div>
-                                            <div v-if="platformAdsets.length" id="meta-ad-adsets-list">
-                                                <div v-for="ad in platformAdsets" :key="ad.id"
-                                                     class="d-flex align-center py-1">
-                                                    <v-icon small class="mr-2"
-                                                            :color="ad.paused ? 'orange darken-2' : 'green darken-1'">
-                                                        {{ ad.paused ? 'mdi-pause-circle-outline' : 'mdi-play-circle-outline' }}
-                                                    </v-icon>
-                                                    <div class="flex-grow-1">
-                                                        <div>{{ ad.name || ad.id }}</div>
-                                                        <div class="caption grey--text">{{ ad.id }} — {{ ad.status }}</div>
-                                                    </div>
-                                                    <v-btn x-small text
-                                                           :color="ad.paused ? 'green darken-1' : 'orange darken-2'"
-                                                           :loading="!!platformAdsetBusy[ad.id]"
-                                                           @click="controlPlatformAdset(ad)">
-                                                        {{ ad.paused ? 'Resume' : 'Pause' }}
-                                                    </v-btn>
-                                                </div>
-                                            </div>
-                                            <div v-else class="caption grey--text">
-                                                No ad sets loaded — click "Load ad sets".
-                                            </div>
+                                        </template>
+                                    </v-col>
+                                    <v-col cols="3">
+                                        <v-text-field
+                                                :label="mapping.parameter"
+                                                v-model="mapping.parameter"
+                                                outlined
+                                                dense
+                                        ></v-text-field>
+                                    </v-col>
+                                    <v-col cols="5">
+                                        <v-text-field
+                                                label="Variable name"
+                                                v-model="mapping.token"
+                                                outlined
+                                                dense
+                                        ></v-text-field>
+                                    </v-col>
+                                    <v-col cols="1">
+                                        <v-btn icon small color="red" @click="removeParameter(index)">
+                                            <v-icon>mdi-delete</v-icon>
+                                        </v-btn>
+                                    </v-col>
+                                </v-row>
+
+                                <v-divider class="my-4"></v-divider>
+                                <h3 class="mb-2">Tracking script &amp; pixels</h3>
+                                <v-row dense>
+                                    <v-col cols="12">
+                                        <v-select
+                                                label="Tracking script method"
+                                                v-model="form.integration_method"
+                                                :items="Object.entries(integrationMethods).map(([key, value]) => ({ key, value }))"
+                                                item-text="value"
+                                                item-value="key"
+                                                outlined
+                                                dense
+                                        ></v-select>
+                                    </v-col>
+                                    <v-col cols="12" v-if="form.integration_method">
+                                        <v-textarea
+                                                label="Tracking script"
+                                                readonly
+                                                outlined
+                                                dense
+                                                v-model="trackingScript"
+                                        >
+                                        </v-textarea>
+                                    </v-col>
+                                    <v-col cols="12" class="direct-tracking-head">
+                                        <div class="direct-tracking-title">Direct tracking (no-redirect)</div>
+                                        <div class="direct-tracking-hint">
+                                            First-party tracking without any redirect: the script records the
+                                            visit, stores the click id in a cookie, and your offer links plus the
+                                            conversion pixel reuse it — landing URLs stay clean. Put the script on
+                                            the landing page, point offer links through
+                                            <code>/c/{{ form.alias || 'ALIAS' }}/{offer}?click_id=...</code> (or
+                                            <code>aaaTrack.clickThrough(url)</code>), and fire the pixel on the
+                                            thank-you page.
                                         </div>
-                                    </v-tab-item>
-                    </v-tabs-items>
-                </div>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-textarea
+                                                label="Direct tracking script"
+                                                :value="directTrackingScript"
+                                                readonly
+                                                outlined
+                                                dense
+                                                append-icon="mdi-content-copy"
+                                                @click:append="copyText(directTrackingScript)"
+                                        ></v-textarea>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-textarea
+                                                label="Conversion pixel (img — noscript / cross-domain safe)"
+                                                :value="conversionPixelImg"
+                                                readonly
+                                                outlined
+                                                dense
+                                                append-icon="mdi-content-copy"
+                                                @click:append="copyText(conversionPixelImg)"
+                                        ></v-textarea>
+                                    </v-col>
+                                    <v-col cols="12">
+                                        <v-textarea
+                                                label="Conversion pixel (fetch — from the tracked page)"
+                                                :value="conversionPixelFetch"
+                                                readonly
+                                                outlined
+                                                dense
+                                                append-icon="mdi-content-copy"
+                                                @click:append="copyText(conversionPixelFetch)"
+                                        ></v-textarea>
+                                    </v-col>
+                                </v-row>
+
+                                <v-divider class="my-4"></v-divider>
+                                <h3 class="mb-2">Internal notes</h3>
+                                <v-textarea v-model="form.notes" label="Internal notes" outlined dense
+                                            rows="3"
+                                            auto-grow></v-textarea>
+
+                                <v-divider class="my-4"></v-divider>
+                                <h3 class="mb-2">Ad platform</h3>
+                                <div class="campaign-editor-pane-flat" id="meta-ad-platform-section">
+                                    <div class="d-flex align-center mb-2">
+                                        <h4 class="text-subtitle-1 mb-0">Ad platform</h4>
+                                        <v-chip x-small class="ml-2" dark
+                                                :color="platformCampaignStatus === 'PAUSED' ? 'orange darken-2' : (platformCampaignStatus === 'ACTIVE' ? 'green darken-1' : 'grey')">
+                                            {{ platformCampaignStatus || 'unknown' }}
+                                        </v-chip>
+                                    </div>
+                                    <div class="caption grey--text mb-2">
+                                        Pause or resume the Meta campaign behind this tracker campaign.
+                                        Ad sets load on demand, not when the editor opens.
+                                    </div>
+                                    <v-alert v-if="metaAdsDryRun" dense type="warning" text
+                                             class="mb-2" id="meta-ad-control-dryrun">
+                                        dry-run: this will log, not send — no live Meta change.
+                                    </v-alert>
+                                    <v-text-field
+                                            label="Mapped platform campaign ID"
+                                            :value="form.ad_platform_campaign_id || ''"
+                                            readonly outlined dense
+                                            hint="Set it on the Settings step. Required for these controls."
+                                            persistent-hint
+                                    ></v-text-field>
+                                    <div class="d-flex align-center flex-wrap mb-3">
+                                        <v-btn small outlined color="primary"
+                                               :disabled="!form.ad_platform_campaign_id || !form.id"
+                                               :loading="platformAdsetsLoading"
+                                               @click="loadPlatformAdsets">
+                                            <v-icon small class="mr-1">mdi-refresh</v-icon>Load ad sets
+                                        </v-btn>
+                                        <v-btn small class="ml-2" color="orange darken-2"
+                                               :disabled="!form.ad_platform_campaign_id || !form.id"
+                                               :loading="platformControlBusy"
+                                               @click="controlPlatformCampaign('PAUSED')">
+                                            <v-icon small class="mr-1">mdi-pause</v-icon>Pause campaign
+                                        </v-btn>
+                                        <v-btn small class="ml-2" color="green darken-1"
+                                               :disabled="!form.ad_platform_campaign_id || !form.id"
+                                               :loading="platformControlBusy"
+                                               @click="controlPlatformCampaign('ACTIVE')">
+                                            <v-icon small class="mr-1">mdi-play</v-icon>Resume campaign
+                                        </v-btn>
+                                    </div>
+                                    <div v-if="platformAdsets.length" id="meta-ad-adsets-list">
+                                        <div v-for="ad in platformAdsets" :key="ad.id"
+                                             class="d-flex align-center py-1">
+                                            <v-icon small class="mr-2"
+                                                    :color="ad.paused ? 'orange darken-2' : 'green darken-1'">
+                                                {{ ad.paused ? 'mdi-pause-circle-outline' : 'mdi-play-circle-outline' }}
+                                            </v-icon>
+                                            <div class="flex-grow-1">
+                                                <div>{{ ad.name || ad.id }}</div>
+                                                <div class="caption grey--text">{{ ad.id }} — {{ ad.status }}</div>
+                                            </div>
+                                            <v-btn x-small text
+                                                   :color="ad.paused ? 'green darken-1' : 'orange darken-2'"
+                                                   :loading="!!platformAdsetBusy[ad.id]"
+                                                   @click="controlPlatformAdset(ad)">
+                                                {{ ad.paused ? 'Resume' : 'Pause' }}
+                                            </v-btn>
+                                        </div>
+                                    </div>
+                                    <div v-else class="caption grey--text">
+                                        No ad sets loaded — click "Load ad sets".
+                                    </div>
+                                </div>
+
+                                <v-divider class="my-4"></v-divider>
+                                <h3 class="mb-2">Review</h3>
+                                <v-alert v-if="!step1Valid" type="error" text dense class="mb-3"
+                                         id="campaign-review-step1-error">
+                                    Settings step is incomplete — a name and an alias are required.
+                                </v-alert>
+                                <div class="review-grid" id="campaign-review">
+                                    <div class="review-row"><span class="review-key">Name</span><span class="review-val">{{ form.name || '—' }}</span></div>
+                                    <div class="review-row"><span class="review-key">Alias</span><span class="review-val">{{ form.alias || '—' }}</span></div>
+                                    <div class="review-row"><span class="review-key">Type</span><span class="review-val">{{ form.type }}</span></div>
+                                    <div class="review-row"><span class="review-key">Status</span><span class="review-val">{{ form.status }}</span></div>
+                                    <div class="review-row"><span class="review-key">Traffic source</span><span class="review-val">{{ sourceMap[form.traffic_source_id] || '—' }}</span></div>
+                                    <div class="review-row"><span class="review-key">Domain</span><span class="review-val">{{ domainsMap[form.domain_id] || '—' }}</span></div>
+                                    <div class="review-row"><span class="review-key">Flows</span><span class="review-val">{{ (form.flows || []).length }} ({{ form.flowScheme }})</span></div>
+                                    <div class="review-row"><span class="review-key">Funnel</span><span class="review-val">{{ form.funnel && form.funnel.enabled ? ((form.funnel.steps || []).length + ' steps') : 'off' }}</span></div>
+                                    <div class="review-row"><span class="review-key">Cost model</span><span class="review-val">{{ form.cost_model }}</span></div>
+                                    <div class="review-row"><span class="review-key">Postbacks</span><span class="review-val">{{ (form.postbacks || []).length }}</span></div>
+                                    <div class="review-row"><span class="review-key">Shield</span><span class="review-val">{{ form.shield && form.shield.enabled ? 'on' : 'off' }}</span></div>
+                                </div>
+                                <v-text-field
+                                        class="mt-3"
+                                        label="Tracking URL"
+                                        :value="campaignUrl"
+                                        readonly
+                                        outlined
+                                        dense
+                                        append-icon="mdi-content-copy"
+                                        @click:append="copyCampaignUrl"></v-text-field>
+                                <div class="caption grey--text">
+                                    Save to create the campaign, then point your traffic at this URL.
+                                </div>
+                            </div>
+                        </v-stepper-content>
+                    </v-stepper-items>
+                </v-stepper>
+
                 <v-card-actions class="campaign-editor-actions">
+                    <v-btn v-if="wizardStep > 1" text color="grey" @click="wizardBack">
+                        <v-icon small left>mdi-arrow-left</v-icon>Back
+                    </v-btn>
                     <v-spacer></v-spacer>
                     <v-btn text color="grey" @click="confirmCancel">Cancel</v-btn>
-                    <v-btn text color="primary" @click="update">Update</v-btn>
-                    <v-btn color="primary" elevation="0" @click="save">Save</v-btn>
+                    <v-btn v-if="isEdit && wizardStep === 3" text color="primary" @click="update">Update</v-btn>
+                    <v-btn v-if="wizardStep < 3" color="primary" elevation="0" @click="wizardNext">
+                        Next<v-icon small right>mdi-arrow-right</v-icon>
+                    </v-btn>
+                    <v-btn v-else color="primary" elevation="0" @click="save">Save</v-btn>
                 </v-card-actions>
             </v-card>
         </v-dialog>
@@ -2051,6 +2084,8 @@
                 filtersModel: {combinator: 'and', groups: []},
                 campaigns: [],
                 dialog: false,
+                // Campaign launch wizard: 1 Settings · 2 Targeting & rules · 3 Postbacks & review
+                wizardStep: 1,
                 isEdit: false,
                 groups: [],
                 sources: [],
@@ -2272,6 +2307,11 @@
             },
             selectionHasUnarchived() {
                 return this.selected.some(c => !this.isArchived(c));
+            },
+            // Step 1 must carry the minimum the API needs to create a campaign.
+            step1Valid() {
+                const f = this.form || {};
+                return !!(String(f.name || '').trim() && String(f.alias || '').trim());
             },
             dateRangeText() {
                 return this.date_range.join(' ~ ')
@@ -3484,12 +3524,30 @@
             },
             openCreate() {
                 this.preloadData();
+                this.wizardStep = 1;
                 this.dialog = true;
                 this.form.alias = this.generateAlias()
+            },
+            // Wizard navigation. Step 1 must be complete before advancing, and
+            // the header marks the step with an error when it is not.
+            wizardNext() {
+                if (this.wizardStep === 1 && !this.step1Valid) {
+                    this.wizardStep = 1;
+                    this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: 'Settings needs a campaign name and an alias before you can continue.'
+                    });
+                    return;
+                }
+                if (this.wizardStep < 3) this.wizardStep += 1;
+            },
+            wizardBack() {
+                if (this.wizardStep > 1) this.wizardStep -= 1;
             },
             async openEdit(item) {
                 await this.preloadData();
                 await this.loadCampaigns();
+                this.wizardStep = 1;
                 this.dialog = true;
                 this.isEdit = true;
 
@@ -4088,6 +4146,7 @@
                     funnel: {enabled: false, steps: []},
                     shield: this.defaultShield()
                 };
+                this.wizardStep = 1;
                 this.platformAdsets = [];
                 this.platformCampaignStatus = null;
                 this.platformAdsetBusy = {};
@@ -4228,6 +4287,58 @@
     @keyframes camp-fade-up {
         from { opacity: 0; transform: translateY(6px); }
         to { opacity: 1; transform: none; }
+    }
+    /* Campaign launch wizard: the stepper fills the flex card and scrolls its
+       own items, so the head and the footer actions stay pinned. */
+    .campaign-stepper {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        background: transparent;
+        box-shadow: none;
+    }
+    .campaign-stepper > .v-stepper__header {
+        flex: none;
+        box-shadow: none;
+        border-radius: 0;
+    }
+    .campaign-stepper-items {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+    }
+    .campaign-stepper .v-stepper__content {
+        padding: 0;
+    }
+    .campaign-stepper .v-stepper__wrapper {
+        height: auto;
+    }
+    .campaign-editor-pane-flat {
+        border: 1px solid var(--border-soft, #e3e8ef);
+        border-radius: var(--radius-md, 12px);
+        padding: 12px;
+    }
+    .review-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 6px 24px;
+    }
+    .review-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border-soft, #e3e8ef);
+        font-size: var(--fs-13, 13px);
+    }
+    .review-key {
+        color: var(--text-secondary, #667085);
+    }
+    .review-val {
+        font-weight: 600;
+        text-align: right;
+        word-break: break-word;
     }
     /* Perf row tints in dark mode (light hexes live in the global sheet) */
     [data-theme="dark"] .v-data-table tr.perf-win-1 > td { background: #16241c !important; }
