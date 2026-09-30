@@ -6985,6 +6985,23 @@ print("ESCAPED-OK")
           (w19_saved_ws or {}) == w19_ws_final if isinstance(w19_saved_ws, dict) else True,
           str(w19_ws_final)[:160])
 
+    # ===== Slice 3a: bot rules + automatic rules promoted out of Settings =====
+    # Every template is included on every authenticated page, so each check is
+    # pinned to the page's own URL + its marker strings. Visual absence of the
+    # editors from Settings is only verifiable in a browser, not here.
+    print("== Slice 3a: bot rules + automatic rules pages ==")
+    for s3_pg, s3_markers in (
+            ("bot-rules", ("botRuleTypes", "addBotRule", "Enable click-level bot filtering")),
+            ("rules", ("openRuleDialog", "ruleMetrics", "Automatic rules"))):
+        rp = s.get(f"{BASE}/backend/{s3_pg}")
+        check(f"slice3a: /backend/{s3_pg} serves 200",
+              rp.status_code == 200, f"{rp.status_code}")
+        check(f"slice3a: /backend/{s3_pg} carries its page markers",
+              all(m in rp.text for m in s3_markers),
+              f"missing marker on /backend/{s3_pg}")
+        check(f"slice3a: /backend/{s3_pg} has no unreplaced jinja tags",
+              "{%" not in rp.text, "unreplaced jinja tag")
+
     # ===== Wave 19B: report templates, IP report, conversion reconciliation =====
     print("== Wave 19B: IP report + approval lifecycle + conversions log ==")
     w19b = os.getpid()

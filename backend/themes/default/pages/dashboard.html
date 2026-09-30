@@ -53,6 +53,14 @@
             <scripts-component></scripts-component>
         </div>
 
+        <div v-show="$root.activeSection === 'bot-rules'">
+            <bot-rules-component></bot-rules-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'rules'">
+            <rules-component></rules-component>
+        </div>
+
         <div v-show="$root.activeSection === 'settings'">
             <settings-component></settings-component>
         </div>

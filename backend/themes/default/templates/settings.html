@@ -470,67 +470,6 @@
                     </v-card>
                 </v-col>
 
-                <v-col cols="12" md="6">
-                    <v-card class="pa-4">
-                        <v-card-title class="d-flex align-center">
-                            <v-icon color="primary" class="mr-2">mdi-robot-outline</v-icon>
-                            Bot &amp; filter rules
-                        </v-card-title>
-                        <v-card-text>
-                            <v-switch
-                                    v-model="settings.bot_rules.enabled"
-                                    label="Enable click-level bot filtering"
-                                    inset
-                                    dense
-                                    hide-details
-                            ></v-switch>
-
-                            <div v-for="(rule, i) in settings.bot_rules.rules" :key="i"
-                                 class="d-flex align-center bot-rule-row">
-                                <v-select
-                                        v-model="rule.type"
-                                        :items="botRuleTypes"
-                                        outlined
-                                        dense
-                                        hide-details
-                                        class="bot-rule-type"
-                                        @change="rule.value = ['empty_referer','duplicate_visitor'].includes(rule.type) ? '' : rule.value"
-                                ></v-select>
-                                <v-text-field
-                                        v-if="!['empty_referer','duplicate_visitor'].includes(rule.type)"
-                                        v-model="rule.value"
-                                        :label="rule.type === 'ua_regex' ? 'User-Agent regex' : (rule.type === 'ip_range' ? 'CIDR ranges' : 'IPs (comma-separated)')"
-                                        outlined
-                                        dense
-                                        hide-details
-                                ></v-text-field>
-                                <span v-else class="caption grey--text bot-rule-grow">no value needed</span>
-                                <v-select
-                                        v-model="rule.action"
-                                        :items="[{text: 'Block (404)', value: 'block'}, {text: 'Mark as bot', value: 'mark'}]"
-                                        outlined
-                                        dense
-                                        hide-details
-                                        class="bot-rule-action"
-                                ></v-select>
-                                <v-btn icon small @click="settings.bot_rules.rules.splice(i, 1)">
-                                    <v-icon small color="red">mdi-close</v-icon>
-                                </v-btn>
-                            </div>
-
-                            <div class="mt-2">
-                                <v-btn small text color="primary" @click="addBotRule">
-                                    <v-icon small class="mr-1">mdi-plus</v-icon>Add rule
-                                </v-btn>
-                            </div>
-
-                            <div class="caption grey--text mt-2">
-                                "Block" returns a 404 page without tracking the visit. "Mark as bot" keeps tracking but flags the click (is_bot) so you can filter it in reports.
-                            </div>
-                        </v-card-text>
-                    </v-card>
-                </v-col>
-
                 <!-- Custom conversion statuses block (G19) -->
                 <v-col cols="12" md="6">
                     <v-card class="pa-4">
@@ -656,70 +595,6 @@
                                     <div class="empty-state">
                                         <v-icon>mdi-heart-pulse</v-icon>
                                         <div class="mt-2">No checks yet — hit "Check now" to probe every flow destination</div>
-                                    </div>
-                                </template>
-                            </v-data-table>
-                        </v-card-text>
-                    </v-card>
-                </v-col>
-
-                <!-- G70: auto rules -->
-                <v-col cols="12">
-                    <v-card class="pa-4">
-                        <v-card-title class="d-flex align-center">
-                            <v-icon color="primary" class="mr-2">mdi-robot-outline</v-icon>
-                            Auto rules
-                            <v-spacer></v-spacer>
-                            <v-btn small outlined color="primary" @click="openRuleDialog">
-                                <v-icon small class="mr-1">mdi-plus</v-icon>Add rule
-                            </v-btn>
-                        </v-card-title>
-                        <v-card-text>
-                            <div class="caption grey--text mb-3">
-                                Every 15 minutes each enabled rule is evaluated against ClickHouse metrics for its
-                                lookback window. When ALL conditions match, the action runs: pause the campaign
-                                (note: the tracking plane still routes paused campaigns — pair it with a Telegram
-                                alert), or send a Telegram / email alert (once per continuous match).
-                            </div>
-                            <v-data-table
-                                    :headers="ruleHeaders"
-                                    :items="rules"
-                                    dense
-                                    :loading="rulesLoading"
-                                    :items-per-page="10"
-                            >
-                                <template v-slot:item.enabled="{ item }">
-                                    <v-switch :input-value="item.enabled" dense hide-details inset
-                                              @change="toggleRule(item)"></v-switch>
-                                </template>
-                                <template v-slot:item.conditions="{ item }">
-                                    <div v-for="(c, i) in item.conditions" :key="i" class="caption">
-                                        {{ c.metric }} {{ c.comparator }} {{ c.value }} · last {{ c.period_hours }}h
-                                    </div>
-                                </template>
-                                <template v-slot:item.last_result="{ item }">
-                                    <template v-if="item.last_result">
-                                        <span class="status-chip"
-                                              :class="item.last_result.matched ? 'status-chip--warning' : 'status-chip--success'">
-                                            {{ item.last_result.matched ? 'fired' : 'clear' }}
-                                        </span>
-                                        <div class="caption grey--text">
-                                            {{ (item.last_result.conditions || []).map(c => c.metric + ' ' + c.comparator + ' ' + c.value + ' → ' + (c.actual == null ? '—' : c.actual)).join('; ') }}
-                                        </div>
-                                    </template>
-                                    <span v-else class="grey--text caption">never run</span>
-                                </template>
-                                <template v-slot:item.actions="{ item }">
-                                    <v-btn small text color="primary" :loading="ruleRunning === item.id"
-                                           @click="runRuleNow(item)">Run now</v-btn>
-                                    <v-btn icon small color="red" @click="deleteRule(item)">
-                                        <v-icon small>mdi-trash-can-outline</v-icon>
-                                    </v-btn>
-                                </template>
-                                <template v-slot:no-data>
-                                    <div class="empty-state">
-                                        <v-icon>mdi-robot-outline</v-icon>
-                                        <div class="mt-2">No auto rules yet — e.g. "ROI &lt; -30% over 6h → pause campaign"</div>
                                     </div>
                                 </template>
                             </v-data-table>
@@ -1088,84 +963,6 @@
 
         </v-container>
 
-        <v-dialog v-model="ruleDialog" persistent max-width="520px">
-            <v-card>
-                <v-card-title class="text-h6">New auto rule</v-card-title>
-                <v-card-text>
-                    <v-text-field
-                            label="Rule name"
-                            v-model="ruleForm.name"
-                            outlined
-                            dense
-                    ></v-text-field>
-                    <v-select
-                            label="Campaign"
-                            v-model="ruleForm.campaign_id"
-                            :items="campaignOptions"
-                            item-text="name"
-                            item-value="id"
-                            outlined
-                            dense
-                            hint="Rules always evaluate one campaign's metrics (required for pause)."
-                            persistent-hint
-                    ></v-select>
-                    <v-row dense>
-                        <v-col cols="4">
-                            <v-select
-                                    label="Metric"
-                                    v-model="ruleForm.metric"
-                                    :items="ruleMetrics"
-                                    outlined
-                                    dense
-                            ></v-select>
-                        </v-col>
-                        <v-col cols="3">
-                            <v-text-field
-                                    label="Period (h)"
-                                    v-model.number="ruleForm.period_hours"
-                                    type="number"
-                                    min="1"
-                                    max="720"
-                                    outlined
-                                    dense
-                            ></v-text-field>
-                        </v-col>
-                        <v-col cols="2">
-                            <v-select
-                                    label="Cmp"
-                                    v-model="ruleForm.comparator"
-                                    :items="['<', '>', '<=', '>=', '==', '!=']"
-                                    outlined
-                                    dense
-                            ></v-select>
-                        </v-col>
-                        <v-col cols="3">
-                            <v-text-field
-                                    label="Value"
-                                    v-model.number="ruleForm.value"
-                                    type="number"
-                                    step="any"
-                                    outlined
-                                    dense
-                            ></v-text-field>
-                        </v-col>
-                    </v-row>
-                    <v-select
-                            label="Action"
-                            v-model="ruleForm.action"
-                            :items="ruleActions"
-                            outlined
-                            dense
-                    ></v-select>
-                </v-card-text>
-                <v-card-actions>
-                    <v-spacer></v-spacer>
-                    <v-btn text @click="ruleDialog = false">Cancel</v-btn>
-                    <v-btn color="primary" elevation="0" :loading="ruleSaving" @click="saveRule">Create rule</v-btn>
-                </v-card-actions>
-            </v-card>
-        </v-dialog>
-
         <confirm-dialog-component ref="confirm" />
     </v-container>
 </script>
@@ -1208,10 +1005,6 @@
                         enabled: false,
                         secret_key: '',
                         allowed_ips: '',
-                    },
-                    bot_rules: {
-                        enabled: false,
-                        rules: [],
                     },
                     data_retention: {
                         enabled: false,
@@ -1292,13 +1085,6 @@
                 currencies: ['USD', 'EUR', 'GBP', 'JPY'],
                 timezones: ['UTC', 'America/New_York', 'Europe/Berlin', 'Asia/Tokyo'],
                 telegramStatusList: ['lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'],
-                botRuleTypes: [
-                    {text: 'IP address', value: 'ip'},
-                    {text: 'IP range (CIDR)', value: 'ip_range'},
-                    {text: 'User-Agent regex', value: 'ua_regex'},
-                    {text: 'Empty referer', value: 'empty_referer'},
-                    {text: 'Duplicate visitor', value: 'duplicate_visitor'},
-                ],
                 tgTesting: false,
                 emailTesting: false,
                 showSmtpPassword: false,
@@ -1344,29 +1130,6 @@
                     {text: 'Checked', value: 'checked_at'},
                     {text: 'Fails', value: 'fail_count', align: 'end'},
                 ],
-                // G70 auto rules
-                rules: [],
-                rulesLoading: false,
-                ruleRunning: null,
-                ruleDialog: false,
-                ruleSaving: false,
-                ruleForm: {name: '', campaign_id: null, metric: 'roi', period_hours: 6,
-                           comparator: '<', value: -30, action: 'alert_telegram'},
-                ruleMetrics: ['roi', 'profit', 'cost', 'revenue', 'conversions', 'clicks'],
-                ruleActions: [
-                    {text: 'Pause campaign', value: 'pause_campaign'},
-                    {text: 'Alert via Telegram', value: 'alert_telegram'},
-                    {text: 'Alert via email', value: 'alert_email'},
-                ],
-                ruleHeaders: [
-                    {text: 'Name', value: 'name'},
-                    {text: 'Enabled', value: 'enabled', sortable: false},
-                    {text: 'Conditions', value: 'conditions', sortable: false},
-                    {text: 'Action', value: 'action'},
-                    {text: 'Last run', value: 'last_result', sortable: false},
-                    {text: 'Actions', value: 'actions', sortable: false},
-                ],
-                campaignOptions: [],
             };
         },
         mounted() {
@@ -1376,7 +1139,6 @@
             this.loadAudit(1);
             this.loadAuditFacets();
             this.loadMonitorStatus();
-            this.loadRules();
             this.$root.$on('load-settings', this.loadSettings);
         },
         watch: {
@@ -1497,9 +1259,6 @@
                             {}, erDefaults, this.settings.email_reports || {});
                         this.settings.postback_security = Object.assign(
                             {}, pbDefaults, this.settings.postback_security || {});
-                        this.settings.bot_rules = Object.assign(
-                            {}, {enabled: false, rules: []}, this.settings.bot_rules || {});
-                        if (!Array.isArray(this.settings.bot_rules.rules)) this.settings.bot_rules.rules = [];
                         this.settings.data_retention = Object.assign(
                             {}, {enabled: false, days: 180}, this.settings.data_retention || {});
                         this.settings.monitoring = Object.assign(
@@ -1755,10 +1514,6 @@
                 }
                 return 'status-chip--info';
             },
-            addBotRule() {
-                if (!Array.isArray(this.settings.bot_rules.rules)) this.settings.bot_rules.rules = [];
-                this.settings.bot_rules.rules.push({type: 'ip', value: '', action: 'block', enabled: true});
-            },
             addCustomStatus() {
                 if (!Array.isArray(this.settings.custom_statuses)) this.settings.custom_statuses = [];
                 this.settings.custom_statuses.push({name: ''});
@@ -1796,111 +1551,6 @@
                     this.monitorChecking = false;
                 }
             },
-            // --- G70 auto rules ---
-            loadRules() {
-                this.rulesLoading = true;
-                fetch('/backend/api/rules/', {credentials: 'include'})
-                    .then(r => r.ok ? r.json() : {rules: []})
-                    .then(data => {
-                        this.rules = data.rules || [];
-                    })
-                    .catch(() => {})
-                    .finally(() => {
-                        this.rulesLoading = false;
-                    });
-                fetch('/backend/api/campaigns/', {credentials: 'include'})
-                    .then(r => r.ok ? r.json() : [])
-                    .then(data => {
-                        this.campaignOptions = (data || []).map(c => ({id: c.id, name: c.name}));
-                    })
-                    .catch(() => {});
-            },
-            openRuleDialog() {
-                this.ruleForm = {name: '', campaign_id: null, metric: 'roi', period_hours: 6,
-                                 comparator: '<', value: -30, action: 'alert_telegram'};
-                this.ruleDialog = true;
-            },
-            async saveRule() {
-                if (!this.ruleForm.name.trim() || !this.ruleForm.campaign_id) {
-                    this.$root.$emit('show-message', {type: 'error',
-                        text: 'Rule name and campaign are required.'});
-                    return;
-                }
-                this.ruleSaving = true;
-                try {
-                    const res = await fetch('/backend/api/rules/', {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            name: this.ruleForm.name.trim(),
-                            enabled: true,
-                            campaign_id: this.ruleForm.campaign_id,
-                            conditions: [{metric: this.ruleForm.metric,
-                                          period_hours: this.ruleForm.period_hours,
-                                          comparator: this.ruleForm.comparator,
-                                          value: this.ruleForm.value}],
-                            action: this.ruleForm.action,
-                        })
-                    });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
-                    this.ruleDialog = false;
-                    this.$root.$emit('show-message', {type: 'success', text: 'Rule created'});
-                    this.loadRules();
-                } catch (err) {
-                    this.$root.$emit('show-message', {type: 'error',
-                        text: 'Rule save failed: ' + sanitizeToastMessage(err.message)});
-                } finally {
-                    this.ruleSaving = false;
-                }
-            },
-            async toggleRule(item) {
-                try {
-                    const res = await fetch(`/backend/api/rules/${item.id}`, {
-                        method: 'PATCH',
-                        credentials: 'include',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({enabled: !item.enabled})
-                    });
-                    if (!res.ok) throw new Error('HTTP ' + res.status);
-                    this.loadRules();
-                } catch (err) {
-                    this.$root.$emit('show-message', {type: 'error',
-                        text: 'Toggle failed: ' + sanitizeToastMessage(err.message)});
-                }
-            },
-            async runRuleNow(item) {
-                this.ruleRunning = item.id;
-                try {
-                    const res = await fetch(`/backend/api/rules/${item.id}/run`, {
-                        method: 'POST', credentials: 'include'});
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
-                    const conds = (data.conditions || []).map(c =>
-                        `${c.metric} ${c.comparator} ${c.value} → ${c.actual == null ? '—' : c.actual}`);
-                    this.$root.$emit('show-message', {
-                        type: data.would_fire ? 'warning' : 'success',
-                        text: `Run: ${conds.join('; ')}${data.would_fire ? ' — would fire' : ' — clear'}`});
-                } catch (err) {
-                    this.$root.$emit('show-message', {type: 'error',
-                        text: 'Run failed: ' + sanitizeToastMessage(err.message)});
-                } finally {
-                    this.ruleRunning = null;
-                }
-            },
-            async deleteRule(item) {
-                if (!confirm(`Delete rule "${item.name}"?`)) return;
-                try {
-                    const res = await fetch(`/backend/api/rules/${item.id}`, {
-                        method: 'DELETE', credentials: 'include'});
-                    if (!res.ok) throw new Error('HTTP ' + res.status);
-                    this.loadRules();
-                } catch (err) {
-                    this.$root.$emit('show-message', {type: 'error',
-                        text: 'Delete failed: ' + sanitizeToastMessage(err.message)});
-                }
-            },
             slugifyStatus(name) {
                 return String(name || '').trim().toLowerCase()
                     .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -1915,21 +1565,9 @@
 </script>
 
 <style>
-    .bot-rule-row {
-        gap: var(--space-2, 8px);
-    }
     .custom-status-row {
         gap: var(--space-2, 8px);
         margin-bottom: var(--space-2, 8px);
-    }
-    .bot-rule-type {
-        max-width: 170px;
-    }
-    .bot-rule-action {
-        max-width: 150px;
-    }
-    .bot-rule-grow {
-        flex: 1;
     }
     .row-color-rule {
         gap: var(--space-2, 8px);

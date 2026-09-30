@@ -356,6 +356,8 @@
         {% include "templates/conversion-tracking.html" %}
         {% include "templates/logs.html" %}
         {% include "templates/scripts.html" %}
+        {% include "templates/bot-rules.html" %}
+        {% include "templates/rules.html" %}
     {% endif %}
 {% endif %}
 
@@ -704,6 +706,8 @@
                     {key: 'domains', title: 'Domains', icon: 'mdi-domain', admin: true, group: 'Tools'},
                     {key: 'conversion-tracking', title: 'Conversion tracking', icon: 'mdi-link-variant', admin: true, group: 'Tools'},
                     {key: 'scripts', title: 'Scripts', icon: 'mdi-code-braces', admin: true, group: 'Tools'},
+                    {key: 'bot-rules', title: 'Bot rules', icon: 'mdi-robot-outline', admin: true, group: 'Tools'},
+                    {key: 'rules', title: 'Automatic rules', icon: 'mdi-tune-variant', admin: true, group: 'Tools'},
                     {key: 'fraud', title: 'Fraud', icon: 'mdi-shield-alert-outline', admin: true, group: 'Protection'},
                     {key: 'logs', title: 'Logs', icon: 'mdi-clipboard-text-clock-outline', admin: true, group: 'Logs'},
                     {key: 'settings', title: 'Settings', icon: 'mdi-cog-outline', admin: true, group: 'Account'},
@@ -760,6 +764,8 @@
                     'conversion-tracking': 'Conversion tracking',
                     logs: 'Logs',
                     scripts: 'Scripts',
+                    'bot-rules': 'Bot rules',
+                    rules: 'Automatic rules',
                     domains: 'Domains',
                     fraud: 'Fraud & Cloaking',
                     optimizer: 'Auto Optimizer',

@@ -846,21 +846,19 @@
                             <p>Optionally require a <b>secret key</b> (query param) and/or an <b>IP allowlist</b> for inbound <code>/pb</code> postbacks — denied postbacks return 403.</p>
                             <h3 class="doc-h3">Data retention</h3>
                             <p>Auto-delete tracking data older than a chosen number of days (daily prune).</p>
-                            <h3 class="doc-h3">Bot rules</h3>
-                            <p>Global click-level bot filtering: User-Agent regex, IP CIDR ranges or IP lists, each rule block (404) or mark (flag) with an enable switch.</p>
                             <h3 class="doc-h3">Custom statuses</h3>
                             <p>Define extra conversion statuses (name + color) that postbacks may then use alongside the six built-ins.</p>
                             <h3 class="doc-h3">Matching variables (Sub IDs)</h3>
                             <p>The variable-name mapping used when parsing incoming parameters — which token fills which SubID slot.</p>
                             <h3 class="doc-h3">Monitoring</h3>
                             <p>Flow health checks: enable to have the monitor probe flow URLs every 15 minutes and (optionally) <b>auto-disable flows after 3 consecutive failures</b>; includes a "Check now" button and status board.</p>
-                            <h3 class="doc-h3">Auto rules</h3>
-                            <p>Campaign automation rules (metric over a lookback window, comparison, value, action) — see Background jobs.</p>
                             <h3 class="doc-h3">Privacy</h3>
                             <p>IP anonymization at rest (zero the last IPv4 octet) and the <code>/optout</code> page behavior.</p>
                             <h3 class="doc-h3">Audit log</h3>
                             <p>Filterable audit-trail browser (user / action / entity filters).</p>
                             <p class="doc-note">Saved reports and email schedules are managed on the Reports page itself; the per-campaign optimizer lives on the Optimizer page.</p>
+                            <h3 class="doc-h3">Tools pages</h3>
+                            <p><b>Bot rules</b> (Tools → Bot rules): global click-level bot filtering — User-Agent regex, IP CIDR ranges or IP lists, each rule block (404) or mark (flag) with an enable switch. <b>Automatic rules</b> (Tools → Automatic rules): campaign automation rules (metric over a lookback window, comparison, value, action) — see Background jobs. Both moved out of Settings onto their own pages.</p>
                         </section>
 
                         <!-- 13 ── API REFERENCE ──────────────────────────── -->
