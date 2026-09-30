@@ -89,6 +89,27 @@ cd AAA-tracker
 make install
 ```
 
+### Running in production
+
+`make install` uses `docker-compose.yml`, which is the **development** file: it runs uvicorn with
+`--reload` (the app restarts whenever a file under the bind mount changes, which drops in-flight
+requests) and a single worker. For a live box, run the production overlay instead — it drops
+`--reload`, runs two workers and applies the memory caps:
+
+```bash
+docker compose --compatibility -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+**After every `git pull` restart the app** — with `--reload` gone, code changes are not picked up live:
+
+```bash
+make update          # pull + recreate, once the checkout is clean
+# or: docker compose --compatibility -f docker-compose.yml -f docker-compose.prod.yml up -d backend
+```
+
+A failed install never reports success: `install.py` exits non-zero, so `make` stops instead of
+claiming the database was initialised when it was not.
+
 ### Troubleshooting
 
 **`make: docker-compose: No such file or directory`** — you have the modern Compose plugin and no legacy
@@ -232,13 +253,34 @@ frontend/
 
 ## ⚙️ Environment Variables
 
-- Fully self configurable via docker-compose.yml.
-- Should be open ports 443 and 80 for nginx.
+Configuration lives in `.env` (created from `.env.example` by `make env`, then filled with generated
+secrets). `make install` derives `DOCKER_GID` from the host automatically. The keys that matter:
 
+| Key | Purpose |
+|---|---|
+| `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (the backend and the installer read it) |
+| `CLICKHOUSE_HOST/PORT/USER/PASSWORD/DB` | ClickHouse connection (clicks live here) |
+| `JWT_SECRET` | Session signing — generated on first install |
+| `PUBLIC_BASE_URL` | The public origin, used for the OAuth callback URL and outbound links |
+| `META_APP_ID` / `META_APP_SECRET` | Meta app credentials for the OAuth Connect flow (env, never the UI) |
+| `META_GRAPH_VERSION` | Graph API version (default `v26.0`); a per-workspace setting overrides it |
+| `INTEGRATIONS_ENCRYPTION_KEY` | Fernet key that encrypts stored platform tokens at rest |
+| `SNAPCHAT_*`, `TIKTOK_*`, `PINTEREST_*`, `GOOGLE_*`, `GOOGLE_ADS_DEVELOPER_TOKEN` | Client credentials for the other ad platforms (placeholders until their senders ship) |
+| `DOCKER_GID` | The host's docker group id — used only by the socket-proxy sidecar; `make env` fills it in |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` / `DB_POOL_TIMEOUT` / `DB_POOL_RECYCLE` | Backend Postgres pool (defaults 20 / 30 / 15s / 1800s). Size it for the worker count: `workers × (size + overflow)` must stay under Postgres' `max_connections` |
+
+Ports 80 and 443 must be reachable for nginx.
 
 ## ⚙ Testing:
 
-A live API smoke test suite exists at `backend/tests/api_smoke.py` — **421 checks** running against a running instance (dev or prod): auth + 2FA + permissions, campaign CRUD/clone/bulk/CSV, routing rules (filters/stickiness/caps/schedules), the tracking plane (direct JS tracking, pixel, impressions, Click API, simulation, GDPR), conversion economics (LTV, custom events, clickless, import), reporting depth, and security-regression checks. It cleans up all temporary data it creates. Exits non-zero on the first failure.
+A live API smoke test suite exists at `backend/tests/api_smoke.py` — **1,500+ checks** against a running
+instance (dev or prod): auth + 2FA + permissions, workspaces/tenancy (query isolation, roles, invitations,
+agency sub-workspace traversal), campaign CRUD/clone/bulk/CSV, routing rules
+(filters/stickiness/caps/schedules), the tracking plane (direct JS tracking, pixel, impressions, Click API,
+simulation, GDPR), conversion economics (LTV, custom events, clickless, import), reporting depth, the Logs
+area, CAPI pixel integrations (delivery verified against a mock receiver), the ad-platform OAuth Connect
+flow, Meta Ads cost sync (mock Graph), and security-regression checks. It cleans up all temporary data it
+creates and exits non-zero on the first failure.
 
 ```bash
 TEST_BASE_URL=https://localhost TEST_INSECURE=1 \
@@ -251,6 +293,17 @@ Environment variables:
 - `TEST_BASE_URL` — base URL of the running instance (default: `http://localhost`).
 - `TEST_INSECURE=1` — skip TLS certificate verification (needed for the self-signed local cert).
 - `TEST_USER` / `TEST_PASS` — login credentials (default: `tracker_admin` / `admin`).
+
+Two other checks sit next to it:
+
+- `python3 scripts/ci/fresh_install_e2e.py` — run after `make install` on **empty volumes**: proves the
+  install is usable (admin can log in, an authenticated call is not forbidden, an offer and a campaign can
+  be created, the alias redirect carries a click id, a tracked visit reaches ClickHouse, the databases hold
+  the seeded schema and the socket proxy is reachable).
+- `make check-ci` — parses the workflow files; a YAML typo there stops every CI run from even starting.
+
+CI (`.github/workflows/ci.yml`) runs a compile/guard job plus a **fresh-install job** that installs the
+whole stack from empty volumes on a clean runner, runs `make doctor` and then the end-to-end assertions.
 
 ## 🩹 Security & bug-fix log
 
@@ -265,6 +318,31 @@ Environment variables:
 - **XSS/CSV hardening** — report emails HTML-escape all values, CSV exports neutralize spreadsheet formula injection.
 - **Authorization** — `campaigns:'own'` enforced on every mutation (not just listing); archive/restore requires write; global search respects section permissions.
 - Ops: `/simulate` and the debug log are admin-gated and secret-redacted; GDPR opt-out honored on every tracking endpoint.
+
+2026-09-29/30 — tenancy, integrations and live-server fixes (each one is a commit; ROADMAP wave 22 has the
+long versions):
+
+- **Multi-tenancy** — tenant-scoped schema with query isolation (no cross-tenant reads), roles per
+  membership (owner/admin/editor/viewer) with workspace member management, per-workspace settings,
+  retention, bind secret and API token, single-use hashed invitations with a role ceiling, and agency
+  sub-workspace traversal (authority flows *down* the tree only).
+- **CI had never run at all** — the workflow file was invalid YAML (an unquoted `ok: ` inside a `run:`), so
+  every push failed in 0s with "workflow file issue" and no job ever reported. Fixed, plus `make check-ci`.
+- **Fresh installs were broken twice** — the admin was created with no workspace (login returned 200 and
+  then every call 403'd) and a `;` inside a SQL comment truncated the ClickHouse `CREATE TABLE`. Both
+  fixed, and CI now installs the stack from empty volumes on every push.
+- **A burst of dashboard traffic froze the whole API** — the dashboard's handlers ran blocking
+  SQLAlchemy/ClickHouse work on the event loop and the Postgres pool was undersized (5 + 10, 30s wait).
+  Fixed with a tunable pool and threadpool handlers; verified over 45 rounds of 48-request bursts.
+- **The OAuth callback the app advertises was not a route** — the provider's redirect landed on a 404, so
+  no platform connection could ever complete. Both paths answer now, and the suite asserts the advertised
+  URL is served.
+- **Token encryption was impossible in the built image** — `cryptography` was in `requirements.txt` but the
+  image predated it, and the failure blamed `INTEGRATIONS_ENCRYPTION_KEY` instead. Rebuilt.
+- **The Meta cost sync uses the connected account token** when the block carries none, so a second (System
+  User) token is not required to read spend.
+- **Socket proxy** — the host's docker group id is derived (`DOCKER_GID`) instead of hardcoded, so the
+  sidecar no longer restart-loops on a host whose group differs.
 
 ## 🧰 Contribution Guidelines
 

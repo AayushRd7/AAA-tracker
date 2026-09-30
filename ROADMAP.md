@@ -228,11 +228,50 @@ and its data is backfilled to it, so nothing changes for the existing deployment
 - [x] API tokens are workspace-scoped: a request resolves the presented token to its tenant and runs there
 - [ ] per-tenant CAPI/Meta connection setup surfaced in the UI
 
-### Phase 3 — onboarding, whitelabel, billing, sub-workspaces
-- [ ] self-serve signup + tenant onboarding (invite members, first campaign)
-- [ ] whitelabel: custom domain and branding per tenant
-- [ ] billing: plans, seats, usage metering, invoices
-- [ ] agency sub-workspace management (create/switch/inherit, roll-up reporting across children)
+### Phase 3 — onboarding, whitelabel, sub-workspaces (billing deferred)
+- [x] onboarding: invite members into a workspace (single-use, hashed, expiring, role ceiling) + a per-workspace setup checklist — shipped
+- [ ] self-serve signup + a first-campaign wizard on top of invites
+- [~] whitelabel: per-workspace product name, logo, accent colour, login message and host-resolved branding — implemented, awaiting verification
+- [x] agency sub-workspace management: create nested workspaces, switch a session into any descendant of a workspace you manage, authority flows down the tree only — shipped
+- [ ] roll-up reporting across child workspaces
+- [ ] **billing — deferred on purpose (2026-09-29):** plans, seats, usage metering and invoices stay out until the rest of phase 3 is in place, because the tiers, the limits and whether a payment provider (or manual invoicing) is used are product decisions that have not been made yet. The plan/seats/retention columns and seat enforcement from phase 2 are the foundation it will build on.
+
+## 🧰 Wave 22 — Production hardening from live-server incidents (2026-09-30)
+
+Every item here came from a real failure on a running box, with the evidence recorded in the commit.
+
+- **The app stopped answering after a burst of dashboard traffic** — `QueuePool limit of size 5 overflow
+  10 reached`. Each request holds its connection until its response finishes and the dashboard loads ~25
+  endpoints at once, so the pool starved and every later request queued behind the 30s wait. The pool is
+  now env-tunable (**20 + 30** by default, `pool_timeout=15s`, `pool_pre_ping`, `pool_recycle`), and the
+  dashboard handlers are plain `def` again so FastAPI runs their blocking SQLAlchemy/ClickHouse work in
+  the threadpool instead of on the event loop. Verified with 45 rounds of 48-request bursts: `idle in
+  transaction` stayed at 0–1, where it used to fill all 15 connections and hang the site.
+- **`uvicorn --reload` in production** — the dev compose file was serving a live box, so any file change
+  under the mount restarted the app mid-request. Production runs the `docker-compose.prod.yml` overlay
+  (no reload, two workers); the deploy procedure in the Readme says to restart after a `git pull`.
+- **A wedged worker can now explain itself** — `faulthandler` is registered on `SIGUSR1`, so
+  `docker exec tracker_backend kill -USR1 <worker>` writes every thread's stack to the container log.
+  This is what identified the pool stall; containers block `py-spy` by default.
+- **The socket-proxy sidecar hardcoded the host's docker group id (991)** — on any other host it
+  restarted forever with `connect: permission denied`, silently taking the certificate/reload path with
+  it. The id now comes from `DOCKER_GID`, derived by `make env` from the host, and the fresh-install CI
+  job asserts the proxy is running *and* reachable from the frontend.
+- **The OAuth callback the app advertises was not a route** — `derive_callback_url()` hands the provider
+  `…/integrations/<platform>/callback` while the handler lived at `…/oauth/callback`, so the provider's
+  redirect landed on a 404 and no connection could complete. Both paths answer now, and the smoke suite
+  checks that the advertised URL is served.
+- **The token-encryption package was missing from the built image** — `cryptography` was in
+  `requirements.txt` but the image predated it, so connecting a platform failed with a message blaming
+  `INTEGRATIONS_ENCRYPTION_KEY` (which was set). Rebuilding the image fixed it; the API reports
+  `encryption_configured` honestly.
+- **The Meta cost sync now uses the connected OAuth token** — connecting Meta already stores a token with
+  `ads_management`, so needing a second (System User) token pasted into the settings block was busywork.
+  The block's own token still wins; when empty, the connected workspace token is used (cost sync and the
+  campaign pause/resume controls). Verified: a dry-run sync read 8 real insight rows for a live account
+  with no writes.
+- **Workspace currency and spend** — the system currency is set per workspace (INR in production) before
+  cost sync is meaningful; campaign spend is allocated per campaign+day from the platform's own numbers.
 
 ## 🔜 Queued — will be completed later
 
