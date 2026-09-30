@@ -12,3 +12,6 @@ ssl/*.crt
 # Local compose overrides (e.g. a host-specific docker group id) stay on the box
 /docker-compose.override.yml
 .DS_Store
+
+# Redesign mapping (competitor-facing notes, never committed)
+/REDESIGN-PLAN.md
