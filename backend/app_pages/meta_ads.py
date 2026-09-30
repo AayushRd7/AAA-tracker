@@ -144,7 +144,12 @@ def connected_meta_token() -> str:
         db = SessionLocal()
         try:
             row = _connection_row(db, "meta")
-            stored = row["access_token"] if row is not None else None
+            if row is None:
+                return ""
+            # Rows from _connection_row are unpacked positionally elsewhere in the
+            # codebase (integrations._connection_view); access_token is the second
+            # column of that SELECT.
+            _platform, stored = row[0], row[1]
         finally:
             db.close()
         return decrypt_token(stored) or ""
