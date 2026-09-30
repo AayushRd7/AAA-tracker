@@ -344,6 +344,8 @@
     {% include "templates/affiliates.html" %}
     {% include "templates/offers.html" %}
     {% include "templates/reports.html" %}
+    {% include "templates/acquisition.html" %}
+    {% include "templates/creative-analytics.html" %}
     {% include "templates/sources.html" %}
     {% include "templates/filter-presets.html" %}
     {% include "templates/funnels.html" %}
@@ -698,6 +700,8 @@
                 navItems: [
                     {key: 'dashboard', title: 'Dashboard', icon: 'mdi-view-dashboard-outline', group: 'Performance'},
                     {key: 'reports', title: 'Reports', icon: 'mdi-chart-line', group: 'Performance'},
+                    {key: 'acquisition', title: 'Acquisition', icon: 'mdi-source-branch', group: 'Performance'},
+                    {key: 'creative-analytics', title: 'Creative analytics', icon: 'mdi-palette-outline', group: 'Performance'},
                     {key: 'optimizer', title: 'Optimizer', icon: 'mdi-auto-fix', admin: true, group: 'Performance', feature: 'optimizer'},
                     {key: 'campaigns', title: 'Campaigns', icon: 'mdi-sitemap', group: 'Manage'},
                     {key: 'sources', title: 'Sources', icon: 'mdi-database-outline', group: 'Manage'},
@@ -767,6 +771,8 @@
                     integrations: 'Integrations',
                     'capi-integrations': 'CAPI integrations',
                     reports: 'Reports',
+                    acquisition: 'Acquisition',
+                    'creative-analytics': 'Creative analytics',
                     'conversion-tracking': 'Conversion tracking',
                     logs: 'Logs',
                     scripts: 'Scripts',

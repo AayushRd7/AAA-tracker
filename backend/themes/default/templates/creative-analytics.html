@@ -1,0 +1,333 @@
+{% raw %}
+<script type="text/x-template" id="creative-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap">
+            <div>
+                <div class="page-title">Creative analytics</div>
+                <div class="page-subtitle">Which creatives convert — grouped by the creative fields this tracker stores</div>
+            </div>
+            <v-btn color="primary" elevation="0" :loading="loading" @click="runReport">
+                <v-icon small class="mr-1">mdi-play</v-icon>Run
+            </v-btn>
+        </div>
+
+        <v-card class="pa-4 mb-4" id="creative-filters-card">
+            <div class="filter-bar align-center">
+                <v-menu v-model="dateMenu" :close-on-content-click="false" transition="scale-transition" offset-y min-width="auto">
+                    <template v-slot:activator="{ on, attrs }">
+                        <v-text-field
+                                v-model="dateRangeText"
+                                label="Date range"
+                                prepend-icon="mdi-calendar"
+                                readonly
+                                v-bind="attrs"
+                                v-on="on"
+                                outlined
+                                dense
+                                hide-details
+                                class="range-field"
+                        ></v-text-field>
+                    </template>
+                    <v-date-picker v-model="dateRange" range @input="dateMenu = false"></v-date-picker>
+                </v-menu>
+                <v-select
+                        :items="creativeDimensions"
+                        v-model="dimension"
+                        label="Lens"
+                        item-text="label"
+                        item-value="key"
+                        outlined
+                        dense
+                        hide-details
+                        class="dimension-select"
+                ></v-select>
+                <v-select
+                        :items="campaigns"
+                        v-model="selectedCampaigns"
+                        label="Campaigns"
+                        item-text="name"
+                        item-value="id"
+                        outlined
+                        dense
+                        hide-details
+                        multiple
+                        chips
+                        small-chips
+                        class="campaigns-select"
+                ></v-select>
+                <v-btn-toggle v-model="dateBasis" dense class="basis-toggle" mandatory>
+                    <v-btn value="click_date" small>Click date</v-btn>
+                    <v-btn value="conversion_date" small>Conversion date</v-btn>
+                </v-btn-toggle>
+            </div>
+            <div class="mt-2">
+                <v-chip v-for="preset in datePresets" :key="preset.label"
+                        small label outlined
+                        :color="activePreset === preset.label ? 'primary' : 'grey'"
+                        :class="activePreset === preset.label ? 'primary--text' : 'grey--text text--darken-2'"
+                        class="mr-1"
+                        @click="applyPreset(preset)">
+                    {{ preset.label }}
+                </v-chip>
+            </div>
+            <div class="caption grey--text mt-1">
+                There is no separate creative record in this tracker: the creative lens is the
+                <code>utm_creative</code> value carried on each click, alongside the UTM campaign and
+                source and the landing it reached.
+            </div>
+        </v-card>
+
+        <v-row dense class="mb-2">
+            <v-col v-for="kpi in kpis" :key="kpi.label" cols="6" sm="4" md="3" lg="2">
+                <v-card class="pa-3 kpi-card" outlined>
+                    <div class="caption grey--text">{{ kpi.label }}</div>
+                    <div class="kpi-value" :class="kpi.className">{{ kpi.value }}</div>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <v-card id="creative-card">
+            <v-data-table
+                    :headers="headers"
+                    :items="rows"
+                    dense
+                    :loading="loading"
+                    :items-per-page="25"
+                    :footer-props="{ 'items-per-page-options': [15, 25, 50, 100] }"
+            >
+                <template v-slot:item.value="{ item }">
+                    <span class="dim-value">{{ displayValue(item.value) }}</span>
+                </template>
+                <template v-slot:item.visits="{ item }">
+                    <span>{{ $fmtNum(Number(item.visits || 0)) }}</span>
+                </template>
+                <template v-slot:item.clicks="{ item }">
+                    <span>{{ $fmtNum(Number(item.clicks || 0)) }}</span>
+                </template>
+                <template v-slot:item.conversions="{ item }">
+                    <span>{{ $fmtNum(Number(item.conversions || 0)) }}</span>
+                </template>
+                <template v-slot:item.cost="{ item }">
+                    <span>{{ formatMoney(item.cost) }}</span>
+                </template>
+                <template v-slot:item.revenue="{ item }">
+                    <span>{{ formatMoney(item.revenue) }}</span>
+                </template>
+                <template v-slot:item.profit="{ item }">
+                    <span :class="signClass(item.profit)">{{ formatMoney(item.profit) }}</span>
+                </template>
+                <template v-slot:item.roas="{ item }">
+                    <span :class="roasClass(item)">{{ formatRoas(item.revenue, item.cost) }}</span>
+                </template>
+                <template v-slot:item.roi="{ item }">
+                    <span :class="signClass(item.roi)">{{ formatPct(item.roi) }}</span>
+                </template>
+                <template v-slot:no-data>
+                    <div class="empty-state">
+                        <v-icon>mdi-palette-outline</v-icon>
+                        <div class="mt-2">No creative data in this range yet</div>
+                    </div>
+                </template>
+            </v-data-table>
+        </v-card>
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('creative-analytics-component', {
+        template: '#creative-template',
+        data() {
+            return {
+                loading: false,
+                dateMenu: false,
+                rows: [],
+                totals: {},
+                activePreset: 'Last 7 days',
+                datePresets: [
+                    { label: 'Today', days: 0 },
+                    { label: 'Yesterday', days: 1 },
+                    { label: 'Last 7 days', days: 6 },
+                    { label: 'Last 30 days', days: 29 },
+                ],
+                dateRange: [
+                    new Date(new Date().setDate(new Date().getDate() - 6)).toISOString().split('T')[0],
+                    new Date().toISOString().split('T')[0]
+                ],
+                dateBasis: 'click_date',
+                dimension: 'utm_creative',
+                // utm_creative is the only creative-shaped field the click row
+                // carries; the other lenses are the closest supporting ones.
+                creativeDimensions: [
+                    { key: 'utm_creative', label: 'Creative (utm_creative)' },
+                    { key: 'utm_campaign', label: 'UTM campaign' },
+                    { key: 'utm_source', label: 'UTM source' },
+                    { key: 'landing_id', label: 'Landing' },
+                ],
+                campaigns: [],
+                selectedCampaigns: [],
+                campaignsById: {},
+                landingsById: {},
+            };
+        },
+        computed: {
+            dateRangeText() {
+                return this.dateRange.join(' ~ ');
+            },
+            dimensionLabel() {
+                const found = this.creativeDimensions.find(d => d.key === this.dimension);
+                return found ? found.label : 'Creative';
+            },
+            headers() {
+                return [
+                    { text: this.dimensionLabel, value: 'value' },
+                    { text: 'Visits', value: 'visits', align: 'end' },
+                    { text: 'Clicks', value: 'clicks', align: 'end' },
+                    { text: 'Conversions', value: 'conversions', align: 'end' },
+                    { text: 'Cost', value: 'cost', align: 'end' },
+                    { text: 'Revenue', value: 'revenue', align: 'end' },
+                    { text: 'Profit', value: 'profit', align: 'end' },
+                    { text: 'ROAS', value: 'roas', align: 'end' },
+                    { text: 'ROI %', value: 'roi', align: 'end' },
+                ];
+            },
+            kpis() {
+                const t = this.totals || {};
+                return [
+                    { label: 'Visits', value: this.$fmtNum(Number(t.visits || 0)) },
+                    { label: 'Clicks', value: this.$fmtNum(Number(t.clicks || 0)) },
+                    { label: 'Conversions', value: this.$fmtNum(Number(t.conversions || 0)) },
+                    { label: 'Cost', value: this.formatMoney(t.cost) },
+                    { label: 'Revenue', value: this.formatMoney(t.revenue) },
+                    { label: 'Profit', value: this.formatMoney(t.profit), className: this.signClass(t.profit) },
+                    { label: 'ROAS', value: this.formatRoas(t.revenue, t.cost), className: this.roasClass(t) },
+                    { label: 'ROI %', value: this.formatPct(t.roi), className: this.signClass(t.roi) },
+                ];
+            },
+        },
+        mounted() {
+            this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
+            this.loadAssets();
+            this.runReport();
+            this.$root.$on('load-creative-analytics', () => { this.loadAssets(); this.runReport(); });
+        },
+        beforeDestroy() {
+            this.$root.$off('load-creative-analytics');
+        },
+        methods: {
+            loadAssets() {
+                fetch('/backend/api/campaigns/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : [])
+                    .then(data => {
+                        this.campaigns = Array.isArray(data) ? data : [];
+                        const byId = {};
+                        this.campaigns.forEach(c => { byId[String(c.id)] = c.name; });
+                        this.campaignsById = byId;
+                    })
+                    .catch(() => { this.campaigns = []; });
+                fetch('/landings', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : [])
+                    .then(data => {
+                        const byId = {};
+                        (Array.isArray(data) ? data : []).forEach(l => { byId[String(l.id)] = l.name; });
+                        this.landingsById = byId;
+                    })
+                    .catch(() => { this.landingsById = {}; });
+            },
+            applyPreset(preset) {
+                this.activePreset = preset.label;
+                const to = new Date();
+                let from = new Date();
+                if (preset.label === 'Yesterday') {
+                    from = new Date(to);
+                    from.setDate(from.getDate() - 1);
+                    to.setDate(to.getDate() - 1);
+                } else if (preset.days > 0) {
+                    from.setDate(from.getDate() - preset.days);
+                }
+                this.dateRange = [from.toISOString().split('T')[0], to.toISOString().split('T')[0]];
+                this.runReport();
+            },
+            runReport() {
+                this.loading = true;
+                const payload = {
+                    dimensions: [this.dimension],
+                    filters: {
+                        date_from: this.dateRange[0],
+                        date_to: this.dateRange[1],
+                        campaigns: this.selectedCampaigns,
+                    },
+                    date_basis: this.dateBasis,
+                    limit: 500,
+                };
+                fetch('/backend/api/dashboard/breakdown', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify(payload)
+                })
+                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(data => {
+                        this.rows = (data.rows || []).map(r => Object.assign({}, r, {
+                            roas: this.roasValue(r.revenue, r.cost),
+                        }));
+                        this.totals = data.totals || {};
+                        this.loading = false;
+                    })
+                    .catch(err => {
+                        this.loading = false;
+                        this.$root.$emit('show-message', {type: 'error', text: 'Creative report failed: ' + sanitizeToastMessage(err.message)});
+                    });
+            },
+            displayValue(raw) {
+                const v = String(raw == null ? '' : raw);
+                if (v === '' || v === '-1' || v === '(empty)') return '(none)';
+                if (this.dimension === 'landing_id') {
+                    return this.landingsById[String(v)] || ('Landing #' + v);
+                }
+                return v;
+            },
+            roasValue(revenue, cost) {
+                const c = parseFloat(cost) || 0;
+                const r = parseFloat(revenue) || 0;
+                return c > 0 ? r / c : null;
+            },
+            formatRoas(revenue, cost) {
+                const v = this.roasValue(revenue, cost);
+                return v == null ? '—' : v.toFixed(2) + 'x';
+            },
+            roasClass(item) {
+                const v = item && item.roas != null ? item.roas : this.roasValue(item && item.revenue, item && item.cost);
+                if (v == null || v === 1) return 'num-neutral';
+                return v > 1 ? 'num-pos' : 'num-neg';
+            },
+            signClass(v) {
+                const n = parseFloat(v);
+                if (isNaN(n) || n === 0) return 'num-neutral';
+                return n > 0 ? 'num-pos' : 'num-neg';
+            },
+            formatMoney(v) {
+                const n = parseFloat(v) || 0;
+                return '$' + this.$fmtNum(n);
+            },
+            formatPct(v) {
+                const n = parseFloat(v) || 0;
+                return this.$fmtNum(n) + '%';
+            },
+        },
+    });
+</script>
+
+<style>
+    .dimension-select {
+        max-width: 200px;
+    }
+    .kpi-card {
+        height: 100%;
+    }
+    .kpi-value {
+        font-size: 1.25rem;
+        font-weight: 600;
+        line-height: 1.4;
+    }
+</style>
+{% endraw %}

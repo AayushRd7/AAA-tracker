@@ -7093,6 +7093,80 @@ print("ESCAPED-OK")
               for t in r.json().get("templates", [])),
           r.text[:150])
 
+    # ===== Slice 5a: acquisition + creative analytics pages =====
+    # Both pages are a fixed lens on the existing report breakdown endpoint
+    # (POST /dashboard/breakdown) — no new reporting engine. Pinned to each
+    # page's own URL: every template is included on every authenticated page,
+    # so markers/absence elsewhere would prove nothing.
+    print("== Slice 5a: acquisition + creative analytics pages ==")
+    for s5_pg, s5_markers in (
+            ("acquisition", ("acquisition-card", "acquisitionDimensions",
+                             "Where the traffic came from")),
+            ("creative-analytics", ("creative-card", "creativeDimensions",
+                                    "utm_creative"))):
+        rp = s.get(f"{BASE}/backend/{s5_pg}")
+        check(f"slice5a: /backend/{s5_pg} serves 200",
+              rp.status_code == 200, f"{rp.status_code}")
+        check(f"slice5a: /backend/{s5_pg} carries its page markers",
+              all(m in rp.text for m in s5_markers),
+              f"missing marker on /backend/{s5_pg}")
+        check(f"slice5a: /backend/{s5_pg} has no unreplaced jinja tags",
+              "{%" not in rp.text, "unreplaced jinja tag")
+
+    # Seed clicks carrying the dimension values both lenses group by, then call
+    # the exact breakdown endpoint each page calls and assert the seeded row
+    # comes back. clicks_data.tenant_id defaults to 1, which is the tenant the
+    # admin session resolves to — the same assumption the other seed blocks make.
+    s5_pid = os.getpid()
+    s5_alias = f"smoke-acq-{s5_pid}"
+    r = s.post(f"{api}/campaigns/", json={
+        "name": s5_alias, "alias": s5_alias, "type": "campaign", "status": "active",
+        "redirect_mode": "position",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "redirect",
+                              "redirect_url": f"https://example.com/smoke-acq-{s5_pid}",
+                              "filters": []}],
+                   "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+    check("slice5a: seed campaign created",
+          r.status_code == 200 and "id" in r.json(), r.text[:150])
+    s5_cid = r.json().get("id")
+
+    s5_source = f"smokeacquire-{s5_pid}"
+    s5_creative = f"smokecreative-{s5_pid}"
+    ch_query(
+        "INSERT INTO clicks_data (received_at, campaign_id, click, status, visitor_id, "
+        "traffic_source_name, utm_source, utm_campaign, utm_creative, cost, revenue, profit) "
+        f"SELECT now(), {s5_cid}, true, 'sale', 'seed-s5-{s5_pid}-' || toString(number), "
+        f"'{s5_source}', 'facebook', 'smoke-acq-camp', '{s5_creative}', 1.0, 5.0, 4.0 "
+        "FROM numbers(3)")
+    s5_today = str(datetime.now(timezone.utc).date())
+    s5_filters = {"date_from": s5_today, "date_to": s5_today, "campaigns": [s5_cid]}
+
+    r = s.post(f"{api}/dashboard/breakdown",
+               json={"dimensions": ["traffic_source_name"], "filters": s5_filters})
+    rows = r.json().get("rows", []) if r.status_code == 200 else []
+    acq = next((x for x in rows if x.get("value") == s5_source), None)
+    check("slice5a: acquisition lens returns the seeded traffic source",
+          r.status_code == 200 and bool(acq)
+          and acq.get("clicks") == 3 and abs(float(acq.get("revenue") or 0) - 15.0) < 0.01,
+          r.text[:200])
+
+    r = s.post(f"{api}/dashboard/breakdown",
+               json={"dimensions": ["utm_creative"], "filters": s5_filters})
+    rows = r.json().get("rows", []) if r.status_code == 200 else []
+    cre = next((x for x in rows if x.get("value") == s5_creative), None)
+    check("slice5a: creative lens returns the seeded utm_creative",
+          r.status_code == 200 and bool(cre)
+          and cre.get("clicks") == 3 and abs(float(cre.get("revenue") or 0) - 15.0) < 0.01,
+          r.text[:200])
+
+    ch_query(f"ALTER TABLE clicks_data DELETE WHERE campaign_id = {s5_cid}")
+    leftover = ch_query(f"SELECT count() FROM clicks_data WHERE campaign_id = {s5_cid}")
+    check("slice5a: seeded CH rows removed", leftover == "0", leftover[:80])
+    if s5_cid:
+        r = s.delete(f"{api}/campaigns/{s5_cid}")
+        check("slice5a: seed campaign deleted", r.status_code == 200, r.text[:120])
+
     # ===== Wave 19B: report templates, IP report, conversion reconciliation =====
     print("== Wave 19B: IP report + approval lifecycle + conversions log ==")
     w19b = os.getpid()

@@ -642,7 +642,8 @@ PERMISSION_SECTIONS = ["dashboard", "campaigns", "landings", "affiliates", "offe
                        "sources", "reports", "domains", "settings", "users", "documentation",
                        "fraud", "optimizer", "conversion-tracking", "logs", "scripts",
                        "integrations", "capi-integrations", "bot-rules", "rules",
-                       "filter-presets", "fallback", "funnels"]
+                       "filter-presets", "fallback", "funnels",
+                       "acquisition", "creative-analytics"]
 ADMIN_ONLY_SECTIONS = {"users", "settings", "domains", "fraud", "optimizer",
                        "conversion-tracking", "logs", "scripts",
                        "integrations", "capi-integrations", "bot-rules", "rules",

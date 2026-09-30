@@ -28,6 +28,14 @@
             <reports-component></reports-component>
         </div>
 
+        <div v-show="$root.activeSection === 'acquisition'">
+            <acquisition-component></acquisition-component>
+        </div>
+
+        <div v-show="$root.activeSection === 'creative-analytics'">
+            <creative-analytics-component></creative-analytics-component>
+        </div>
+
         <div v-show="$root.activeSection === 'filter-presets'">
             <filter-presets-component></filter-presets-component>
         </div>
