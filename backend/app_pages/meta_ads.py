@@ -62,6 +62,7 @@ HTTP_TIMEOUT_SECONDS = 15
 MAX_HTTP_ATTEMPTS = 3          # 1 try + 2 retries on network / 5xx / 429
 MAX_PAGING_PAGES = 100         # safety cap when following paging.next verbatim
 MATCH_PREFERENCES = ("auto", "ad_platform_campaign_id", "name", "tracking_id")
+MAX_AD_ACCOUNT_IDS = 100      # safety cap on the chosen account list
 
 # Settings block defaults — the shape saved under the 'meta_ads' settings key.
 DEFAULTS = {
@@ -181,6 +182,62 @@ def _normalise(cfg: dict) -> dict:
 
 def _credentials_ready(cfg: dict) -> bool:
     return bool(cfg.get("access_token")) and bool(cfg.get("ad_account_ids"))
+
+
+def _normalise_ad_account_ids(values):
+    """(ids, bad_entry): numeric-only, deduped, order-preserving, capped at 100.
+
+    Accepts ``act_123`` and ``123`` alike — the stored value is always the
+    numeric part. Returns ``([], bad_entry)`` on the first entry that is not
+    numeric (so the caller can reject it by name), including an empty entry.
+    """
+    if not isinstance(values, list):
+        return [], values
+    out, seen = [], set()
+    for raw in values:
+        text = str(raw).strip() if raw is not None else ""
+        number = text[4:].strip() if text[:4].lower() == "act_" else text
+        if not number or not (number.isascii() and number.isdigit()):
+            return [], text
+        if number in seen:
+            continue
+        seen.add(number)
+        out.append(number)
+        if len(out) >= MAX_AD_ACCOUNT_IDS:
+            break
+    return out, None
+
+
+def _write_ad_account_ids(db: Session, ids: list) -> None:
+    """Set ``meta_ads.ad_account_ids`` in the settings document.
+
+    Reuses the one settings row (no second store): the existing ``meta_ads``
+    block is preserved except for the list itself, so the cost sync's other
+    settings (token, cadence, matching, …) are never disturbed.
+    """
+    row = db.execute(text(
+        "SELECT id, value FROM settings "
+        "WHERE name = 'settings' AND tenant_id = :tid FOR UPDATE"),
+        {"tid": current_tenant()}).fetchone()
+    doc = {}
+    if row and row[1]:
+        try:
+            parsed = json.loads(row[1])
+            if isinstance(parsed, dict):
+                doc = parsed
+        except Exception:
+            doc = {}
+    block = doc.get("meta_ads")
+    block = dict(block) if isinstance(block, dict) else {}
+    block["ad_account_ids"] = list(ids)
+    doc["meta_ads"] = block
+    val_str = json.dumps(doc)
+    if row:
+        db.execute(text("UPDATE settings SET value = :v WHERE id = :i"),
+                   {"v": val_str, "i": row[0]})
+    else:
+        db.add(SettingsORM(name="settings", value=val_str))
+    db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -770,6 +827,38 @@ def status(db: Session = Depends(get_db)):
         "last_control": _last_control_snapshot(),
     }
 
+
+class AdAccountsIn(BaseModel):
+    ad_account_ids: list = []
+
+
+@router.post("/accounts")
+def set_ad_accounts(payload: AdAccountsIn, request: Request,
+                    db: Session = Depends(get_db)):
+    """Replace this workspace's Meta ad account list (chosen under Integrations).
+
+    Body ``{"ad_account_ids": ["act_123", "456", …]}``. Each entry is trimmed, an
+    ``act_`` prefix is dropped and only the numeric part is stored; the list is
+    deduped (first occurrence wins), order-preserving and capped at 100. A
+    non-numeric entry is rejected 400 naming it. The result is written into the
+    settings document's ``meta_ads`` block as ``ad_account_ids`` — the block's
+    other keys are left untouched. The cost sync reads this same list, so the
+    Integrations card is the single place it is chosen (owner/admin only, via
+    the router's ``require_section_write("settings")`` dependency).
+    """
+    from audit_logger import audit_event
+    from auth import get_caller
+    ids, bad = _normalise_ad_account_ids(payload.ad_account_ids)
+    if bad is not None:
+        raise HTTPException(status_code=400, detail=(
+            f"'{bad}' is not a valid ad account id — use the numeric part of "
+            "act_… or digits only."))
+    _write_ad_account_ids(db, ids)
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "meta_ads_accounts", "meta_ads", "",
+                {"ad_account_ids": ids, "count": len(ids)},
+                request.client.host if request.client else "")
+    return {"ad_account_ids": ids, "count": len(ids)}
 
 
 # ---------------------------------------------------------------------------

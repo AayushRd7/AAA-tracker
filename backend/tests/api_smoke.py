@@ -8152,7 +8152,14 @@ print("ESCAPED-OK")
         check("integrations: Settings page serves the Integrations card",
               rp.status_code == 200 and "integrations-card" in rp.text
               and "connectIntegration" in rp.text
-              and "copyIntegrationCallback" in rp.text, f"{rp.status_code}")
+              and "Ad accounts for cost sync" in rp.text, f"{rp.status_code}")
+        # The callback URL and the deployment's env-var names are operator plumbing,
+        # not product surface: the card must not show either.
+        check("integrations: the callback URL is not exposed in the UI",
+              "copyIntegrationCallback" not in rp.text
+              and "integration-callback" not in rp.text, "callback UI still present")
+        check("integrations: the card does not name deployment env vars",
+              "env_vars" not in rp.text, "env var list still rendered")
         check("integrations: Settings card has no client id/secret fields",
               "integration-client-secret" not in rp.text
               and "integration-client-id" not in rp.text, "credential field present")
@@ -9687,6 +9694,94 @@ print("ESCAPED-OK")
         rr = requests.get(f"{BASE}/{_path}", verify=not INSECURE, allow_redirects=False)
         check(f"oauth: the advertised {_plat} callback URL is served (not 404)",
               rr.status_code not in (404, 405), f"{_adv} -> {rr.status_code}")
+
+    # ===== Meta ad accounts: chosen under Integrations, saved by the API =====
+    # The cost sync reads meta_ads.ad_account_ids from the settings document, and
+    # the Integrations card is the only UI that chooses them, so this endpoint is
+    # the single writer (besides a whole-settings save). Numeric ids only.
+    maa_pid = os.getpid()
+    maa_tag = f"maa-{maa_pid}"
+    maa_user = f"{maa_tag}-user"
+    maa_uid = None
+    maa_saved = ((s.get(f"{api}/settings/").json().get("settings") or {})
+                 .get("meta_ads"))
+    try:
+        # Seed a block with other keys so the "does not disturb them" check is real.
+        s.post(f"{api}/settings/", json={"settings": {"meta_ads": {
+            "enabled": True, "cadence": "daily", "match_preference": "name",
+            "backfill_days": 3, "ad_account_ids": []}}})
+
+        # -- normalisation: act_ prefix stripped, dedup, trim, order kept --
+        r = s.post(f"{api}/meta-ads/accounts", json={"ad_account_ids": [
+            f"act_{maa_pid}", str(maa_pid + 1), f"act_{maa_pid}",
+            f"  {maa_pid + 2}  "]})
+        maa_body = r.json() if r.status_code == 200 else {}
+        maa_expect = [str(maa_pid), str(maa_pid + 1), str(maa_pid + 2)]
+        check("meta-ads accounts: POST normalises (act_ stripped, deduped, trimmed, ordered)",
+              r.status_code == 200 and maa_body.get("ad_account_ids") == maa_expect
+              and maa_body.get("count") == 3, r.text[:200])
+        r = s.get(f"{api}/meta-ads/status")
+        check("meta-ads accounts: status reflects the saved list",
+              r.status_code == 200 and r.json().get("ad_account_ids") == maa_expect,
+              r.text[:200])
+        # persisted in the settings document — not merely echoed back
+        r = s.get(f"{api}/settings/")
+        maa_doc = ((r.json().get("settings") or {}).get("meta_ads") or {})
+        check("meta-ads accounts: the list is really persisted in the settings document",
+              maa_doc.get("ad_account_ids") == maa_expect, str(maa_doc)[:200])
+        check("meta-ads accounts: unrelated meta_ads keys survive the write",
+              maa_doc.get("enabled") is True and maa_doc.get("cadence") == "daily"
+              and maa_doc.get("match_preference") == "name"
+              and maa_doc.get("backfill_days") == 3, str(maa_doc)[:200])
+
+        # -- a later POST replaces the list (never appends) --
+        r = s.post(f"{api}/meta-ads/accounts", json={"ad_account_ids": [str(maa_pid + 9)]})
+        check("meta-ads accounts: a later POST replaces the saved list",
+              r.status_code == 200 and r.json().get("ad_account_ids") == [str(maa_pid + 9)],
+              r.text[:150])
+
+        # -- garbage is rejected 400 with the offending value named --
+        r = s.post(f"{api}/meta-ads/accounts",
+                   json={"ad_account_ids": [str(maa_pid), "not-a-number"]})
+        check("meta-ads accounts: a non-numeric id is rejected 400 naming it",
+              r.status_code == 400 and "not-a-number" in r.text, r.text[:200])
+        r = s.post(f"{api}/meta-ads/accounts", json={"ad_account_ids": [""]})
+        check("meta-ads accounts: an empty list entry is rejected 400",
+              r.status_code == 400, r.text[:200])
+        r = s.get(f"{api}/meta-ads/status")
+        check("meta-ads accounts: a rejected POST leaves the saved list untouched",
+              r.json().get("ad_account_ids") == [str(maa_pid + 9)], r.text[:150])
+
+        # -- the list is capped at 100 --
+        r = s.post(f"{api}/meta-ads/accounts",
+                   json={"ad_account_ids": [str(900000 + i) for i in range(150)]})
+        maa_capped = r.json().get("ad_account_ids") or [] if r.status_code == 200 else []
+        check("meta-ads accounts: the saved list is capped at 100",
+              r.status_code == 200 and len(maa_capped) == 100
+              and maa_capped[0] == "900000" and maa_capped[-1] == "900099",
+              f"{r.status_code} len={len(maa_capped)}")
+
+        # -- a settings-reader without write permission is refused --
+        r = s.post(f"{api}/users/", json={
+            "username": maa_user, "password": "smokepass1",
+            "permissions": {"sections": {"settings": True}, "write": False}})
+        maa_uid = (r.json() or {}).get("id")
+        check("meta-ads accounts: restricted settings-reader created",
+              r.status_code == 200, r.text[:150])
+        maa_sess = requests.Session()
+        maa_sess.verify = not INSECURE
+        maa_sess.post(f"{api}/login", json={"username": maa_user, "password": "smokepass1"})
+        r = maa_sess.post(f"{api}/meta-ads/accounts",
+                          json={"ad_account_ids": [str(maa_pid + 77)]})
+        check("meta-ads accounts: a viewer without write permission is refused (403)",
+              r.status_code == 403, str(r.status_code))
+    finally:
+        # restore the meta_ads block exactly as it was before this block
+        s.post(f"{api}/settings/", json={"settings": {"meta_ads": None}})
+        if maa_saved is not None:
+            s.post(f"{api}/settings/", json={"settings": {"meta_ads": maa_saved}})
+        if maa_uid:
+            s.delete(f"{api}/users/{maa_uid}")
 
     print("== Cleanup ==")
     if conv_id:
