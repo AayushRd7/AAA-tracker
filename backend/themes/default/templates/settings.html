@@ -1265,6 +1265,12 @@
                                 credentials come from this deployment's environment — they are
                                 never entered in the UI.
                             </div>
+                            <!-- A failed load used to leave the card looking empty with no
+                                 explanation; say why instead. -->
+                            <v-alert v-if="integrationsData && integrationsData.error"
+                                     type="warning" text dense class="mb-3">
+                                {{ integrationsData.error }}
+                            </v-alert>
                             <div v-for="row in integrationRows" :key="row.platform"
                                  class="integration-row py-3"
                                  :id="'integration-row-' + row.platform">
@@ -2301,7 +2307,12 @@
             // ---- Integrations (ad-platform OAuth Connect) ----
             loadIntegrations() {
                 fetch("/backend/api/integrations", {credentials: "include"})
-                    .then(r => r.json())
+                    .then(r => {
+                        // A 401/500 body parses as JSON ({detail: ...}) and used to leave
+                        // the card looking empty with no explanation — surface it instead.
+                        if (!r.ok) throw new Error("HTTP " + r.status);
+                        return r.json();
+                    })
                     .then(data => {
                         this.integrationsData = data;
                         const src = data.platforms || {};
@@ -2311,11 +2322,21 @@
                             'pinterest', 'google']
                             .filter(p => src[p])
                             .map(p => Object.assign({platform: p}, src[p]));
+                        if (!Object.keys(src).length) {
+                            this.integrationsData = {error:
+                                "The server returned no platform list — reload the page, " +
+                                "and if it stays empty the session may need a fresh login."};
+                        }
                         Object.keys(src).forEach(p => {
                             if (src[p].connected) this.loadIntegrationAssets(p);
                         });
                     })
-                    .catch(() => { /* card is advisory until it loads */ });
+                    .catch(err => {
+                        this.integrationRows = [];
+                        this.integrationsData = {error:
+                            "Could not load the platform list: " + (err && err.message) +
+                            ". The Connect buttons appear once it loads."};
+                    });
             },
             loadIntegrationAssets(platform) {
                 fetch("/backend/api/integrations/" + platform + "/assets",

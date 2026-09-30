@@ -9674,6 +9674,20 @@ print("ESCAPED-OK")
         check("p3: test users cleaned up",
               pg_scalar(f"SELECT count(*) FROM users WHERE username LIKE 'p3-%-{p3_pid}'") == "0")
 
+    # ===== OAuth: the redirect URI we advertise must be a real route =====
+    # derive_callback_url() is both what we send the provider and what the operator
+    # registers there, so a mismatch with the registered path sends the provider's
+    # redirect to a 404 and no connection can ever complete. Both sides build the
+    # URL from that one helper, so only an HTTP check can see the shape.
+    r = s.get(f"{api}/integrations")
+    for _plat in ("meta", "snapchat", "tiktok"):
+        _adv = ((((r.json() or {}).get("platforms") or {}).get(_plat)) or {}).get("callback_url") or ""
+        _path = _adv.split("//", 1)[-1]
+        _path = _path.split("/", 1)[-1] if "/" in _path else _path
+        rr = requests.get(f"{BASE}/{_path}", verify=not INSECURE, allow_redirects=False)
+        check(f"oauth: the advertised {_plat} callback URL is served (not 404)",
+              rr.status_code not in (404, 405), f"{_adv} -> {rr.status_code}")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")
