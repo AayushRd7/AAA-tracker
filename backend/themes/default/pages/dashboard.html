@@ -32,6 +32,10 @@
             <filter-presets-component></filter-presets-component>
         </div>
 
+        <div v-show="$root.activeSection === 'funnels'">
+            <funnels-component></funnels-component>
+        </div>
+
         {% if is_authenticated_user_type == 'admin' %}
         <div v-show="$root.activeSection === 'domains'">
             <domains-component></domains-component>

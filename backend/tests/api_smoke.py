@@ -7044,6 +7044,55 @@ print("ESCAPED-OK")
               for p in r.json().get("presets", [])),
           r.text[:150])
 
+    # ===== Slice 4: funnels page (funnel templates management) =====
+    # Pinned to the page's own URL: every template is included on every
+    # authenticated page, so absence/markers elsewhere prove nothing.
+    print("== Slice 4: funnels page ==")
+    for s4_pg, s4_markers in (
+            ("funnels", ("funnels-card", "openCreateTemplate", "Funnel templates")),):
+        rp = s.get(f"{BASE}/backend/{s4_pg}")
+        check(f"slice4: /backend/{s4_pg} serves 200",
+              rp.status_code == 200, f"{rp.status_code}")
+        check(f"slice4: /backend/{s4_pg} carries its page markers",
+              all(m in rp.text for m in s4_markers),
+              f"missing marker on /backend/{s4_pg}")
+        check(f"slice4: /backend/{s4_pg} has no unreplaced jinja tags",
+              "{%" not in rp.text, "unreplaced jinja tag")
+
+    # The funnels page drives the existing funnel-template endpoints; edit is
+    # backed by the PUT added alongside this page. Round-trip exactly those.
+    s4_pid = os.getpid()
+    s4_tpl_name = f"smoke-funnel-{s4_pid}"
+    s4_steps = [
+        {"name": "Hook", "landing": 1, "offers": [2], "schema": "landing_offer"},
+        {"name": "Upsell", "landing": None, "offers": [], "schema": "landing_only"},
+    ]
+    r = s.post(f"{api}/funnel-templates/", json={"name": s4_tpl_name, "steps": s4_steps})
+    check("slice4: funnel template created",
+          r.status_code == 200 and r.json().get("template", {}).get("id"), r.text[:150])
+    s4_tpl_id = r.json().get("template", {}).get("id")
+    r = s.get(f"{api}/funnel-templates/")
+    check("slice4: template listed with its steps",
+          r.status_code == 200 and any(
+              t.get("id") == s4_tpl_id and t.get("steps") == s4_steps
+              for t in r.json().get("templates", [])),
+          r.text[:200])
+    s4_updated = [{"name": "Hook v2", "landing": 1, "offers": [2, 3], "schema": "landing_offer"}]
+    r = s.put(f"{api}/funnel-templates/{s4_tpl_id}",
+              json={"name": s4_tpl_name + "-edited", "steps": s4_updated})
+    check("slice4: template updated",
+          r.status_code == 200
+          and r.json().get("template", {}).get("name") == s4_tpl_name + "-edited"
+          and r.json().get("template", {}).get("steps") == s4_updated, r.text[:200])
+    if s4_tpl_id:
+        r = s.delete(f"{api}/funnel-templates/{s4_tpl_id}")
+        check("slice4: template deleted", r.status_code == 200, r.text[:120])
+    r = s.get(f"{api}/funnel-templates/")
+    check("slice4: no smoke template left",
+          all(t.get("name") not in (s4_tpl_name, s4_tpl_name + "-edited")
+              for t in r.json().get("templates", [])),
+          r.text[:150])
+
     # ===== Wave 19B: report templates, IP report, conversion reconciliation =====
     print("== Wave 19B: IP report + approval lifecycle + conversions log ==")
     w19b = os.getpid()

@@ -346,6 +346,7 @@
     {% include "templates/reports.html" %}
     {% include "templates/sources.html" %}
     {% include "templates/filter-presets.html" %}
+    {% include "templates/funnels.html" %}
     {% if is_authenticated_user_type == 'admin' %}
         {% include "templates/users.html" %}
         {% include "templates/settings.html" %}
@@ -703,6 +704,7 @@
                     {key: 'offers', title: 'Offers', icon: 'mdi-tag-outline', group: 'Manage'},
                     {key: 'affiliates', title: 'Networks', icon: 'mdi-cash-multiple', group: 'Manage'},
                     {key: 'landings', title: 'Landers', icon: 'mdi-lan', group: 'Manage'},
+                    {key: 'funnels', title: 'Funnels', icon: 'mdi-sitemap-outline', group: 'Manage'},
                     {key: 'integrations', title: 'Integrations', icon: 'mdi-connection', admin: true, group: 'Manage'},
                     {key: 'capi-integrations', title: 'CAPI integrations', icon: 'mdi-facebook', admin: true, group: 'Manage'},
                     {key: 'domains', title: 'Domains', icon: 'mdi-domain', admin: true, group: 'Tools'},
@@ -772,6 +774,7 @@
                     rules: 'Automatic rules',
                     'filter-presets': 'Filter presets',
                     fallback: 'Fallback',
+                    funnels: 'Funnels',
                     domains: 'Domains',
                     fraud: 'Fraud & Cloaking',
                     optimizer: 'Auto Optimizer',

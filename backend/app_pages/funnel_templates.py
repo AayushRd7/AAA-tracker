@@ -71,6 +71,29 @@ def create_template(payload: FunnelTemplateIn, request: Request,
     return {"template": _template_public(_get_template(db, r[0]))}
 
 
+@router.put("/{template_id}")
+def update_template(template_id: int, payload: FunnelTemplateIn, request: Request,
+                    db: Session = Depends(get_db)):
+    from audit_logger import audit_event
+    from auth import get_caller
+    r = _get_template(db, template_id)
+    merged = _template_public(r)
+    name = str(payload.name if payload.name is not None else merged.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Template name is required")
+    steps = payload.steps if isinstance(payload.steps, list) else merged.get("steps") or []
+    db.execute(text("""
+        UPDATE funnel_templates SET name = :n, steps = CAST(:s AS JSONB)
+        WHERE id = :i AND tenant_id = :tid"""),
+        {"n": name, "s": json.dumps(steps), "i": template_id, "tid": current_tenant()})
+    db.commit()
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "funnel_templates", str(template_id),
+                {"name": name, "steps": len(steps)},
+                request.client.host if request.client else "")
+    return {"template": _template_public(_get_template(db, template_id))}
+
+
 @router.delete("/{template_id}")
 def delete_template(template_id: int, request: Request, db: Session = Depends(get_db)):
     from audit_logger import audit_event

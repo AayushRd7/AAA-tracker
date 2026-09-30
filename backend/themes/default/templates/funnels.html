@@ -1,0 +1,329 @@
+{% raw %}
+<script type="text/x-template" id="funnels-template">
+    <v-container fluid>
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap">
+            <div>
+                <div class="page-title">Funnels</div>
+                <div class="page-subtitle">Reusable funnel step lists the campaign editor can drop into a campaign</div>
+            </div>
+            <v-btn color="primary" elevation="0" @click="openCreateTemplate">
+                <v-icon small class="mr-1">mdi-plus</v-icon>New template
+            </v-btn>
+        </div>
+
+        <v-row>
+            <v-col cols="12">
+                <v-card class="pa-4" id="funnels-card">
+                    <v-card-title class="d-flex align-center flex-wrap">
+                        <v-icon color="primary" class="mr-2">mdi-sitemap-outline</v-icon>
+                        Funnel templates
+                        <v-spacer></v-spacer>
+                        <v-text-field
+                                v-model="search"
+                                label="Search by name"
+                                prepend-inner-icon="mdi-magnify"
+                                dense
+                                outlined
+                                hide-details
+                                clearable
+                                class="funnels-search"
+                        ></v-text-field>
+                    </v-card-title>
+                    <v-card-text>
+                        <div class="caption grey--text mb-3">
+                            A template stores an ordered list of funnel steps — each step's name, landing,
+                            offers and schema. Apply one from the campaign editor's funnel tab; editing a
+                            template here never changes campaigns that already copied it.
+                        </div>
+                        <v-data-table
+                                :headers="templateHeaders"
+                                :items="filteredTemplates"
+                                dense
+                                :loading="templatesLoading"
+                                :items-per-page="10"
+                        >
+                            <template v-slot:item.steps="{ item }">
+                                <v-chip x-small outlined class="funnel-step-chip">
+                                    {{ stepCount(item) }} {{ stepCount(item) === 1 ? 'step' : 'steps' }}
+                                </v-chip>
+                            </template>
+                            <template v-slot:item.summary="{ item }">
+                                <div v-if="stepNames(item).length" class="caption">{{ stepNames(item).join(' → ') }}</div>
+                                <span v-else class="grey--text caption">no steps stored</span>
+                            </template>
+                            <template v-slot:item.created="{ item }">
+                                <span class="caption grey--text">{{ formatDate(item.created_at) || '—' }}</span>
+                            </template>
+                            <template v-slot:item.actions="{ item }">
+                                <v-btn icon small color="primary" @click="openEditTemplate(item)">
+                                    <v-icon small>mdi-pencil-outline</v-icon>
+                                </v-btn>
+                                <v-btn icon small color="red" @click="deleteTemplate(item)">
+                                    <v-icon small>mdi-trash-can-outline</v-icon>
+                                </v-btn>
+                            </template>
+                            <template v-slot:no-data>
+                                <div class="empty-state">
+                                    <v-icon>mdi-sitemap-outline</v-icon>
+                                    <div class="mt-2">
+                                        No funnel templates yet. Create one here, or save the campaign editor's
+                                        funnel steps as a template while you build a campaign.
+                                    </div>
+                                </div>
+                            </template>
+                        </v-data-table>
+
+                        <div class="caption grey--text mt-3">
+                            Ready to use one? Open
+                            <a href="/backend/campaigns">Campaigns</a> and pick a template on the funnel step of
+                            the campaign wizard.
+                        </div>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+        </v-row>
+
+        <v-dialog v-model="templateDialog" persistent max-width="760px">
+            <v-card>
+                <v-card-title class="text-h6">
+                    {{ templateForm.id ? 'Edit funnel template' : 'New funnel template' }}
+                </v-card-title>
+                <v-card-text>
+                    <v-text-field
+                            label="Name"
+                            v-model="templateForm.name"
+                            outlined
+                            dense
+                            :error-messages="templateForm.error && !templateForm.name ? templateForm.error : ''"
+                    ></v-text-field>
+
+                    <div class="d-flex align-center justify-space-between mt-2 mb-1">
+                        <strong>Steps</strong>
+                        <v-btn small text color="primary" @click="addStep">
+                            <v-icon small class="mr-1">mdi-plus</v-icon>Add step
+                        </v-btn>
+                    </div>
+                    <div class="caption grey--text mb-2">
+                        Steps run top to bottom. A step advances when the visitor clicks through to an offer.
+                    </div>
+
+                    <v-card v-for="(step, index) in templateForm.steps" :key="index"
+                            flat outlined class="pa-3 mb-2">
+                        <div class="d-flex justify-space-between align-center mb-2">
+                            <strong>Step {{ index + 1 }}</strong>
+                            <span>
+                                <v-btn icon small @click="moveStep(index, -1)" :disabled="index === 0">
+                                    <v-icon>mdi-arrow-up</v-icon>
+                                </v-btn>
+                                <v-btn icon small @click="moveStep(index, 1)"
+                                       :disabled="index === templateForm.steps.length - 1">
+                                    <v-icon>mdi-arrow-down</v-icon>
+                                </v-btn>
+                                <v-btn icon small color="red" @click="templateForm.steps.splice(index, 1)">
+                                    <v-icon>mdi-delete</v-icon>
+                                </v-btn>
+                            </span>
+                        </div>
+                        <v-row dense>
+                            <v-col cols="12">
+                                <v-text-field label="Step name" v-model="step.name" outlined dense></v-text-field>
+                            </v-col>
+                            <v-col cols="12">
+                                <v-select label="Landing" v-model="step.landing"
+                                          :items="landings" item-text="name" item-value="id"
+                                          clearable outlined dense></v-select>
+                            </v-col>
+                            <v-col cols="12">
+                                <v-select label="Offers" v-model="step.offers"
+                                          :items="offers" item-text="name" item-value="id"
+                                          multiple chips small-chips deletable-chips
+                                          outlined dense></v-select>
+                            </v-col>
+                            <v-col cols="12" md="6">
+                                <v-select label="Schema" v-model="step.schema"
+                                          :items="schemaOptions"
+                                          outlined dense></v-select>
+                            </v-col>
+                        </v-row>
+                    </v-card>
+
+                    <v-alert v-if="templateForm.error && templateForm.name" type="error" dense outlined
+                             class="mt-2">{{ templateForm.error }}</v-alert>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="templateDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="templateSaving" @click="saveTemplate">
+                        {{ templateForm.id ? 'Save changes' : 'Create template' }}
+                    </v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+    </v-container>
+</script>
+
+<script type="application/javascript">
+    Vue.component('funnels-component', {
+        template: '#funnels-template',
+        data() {
+            return {
+                templates: [],
+                templatesLoading: false,
+                search: '',
+                landings: [],
+                offers: [],
+                templateDialog: false,
+                templateSaving: false,
+                templateForm: {id: null, name: '', steps: [], error: ''},
+                schemaOptions: [
+                    {text: 'Landing → Offer', value: 'landing_offer'},
+                    {text: 'Landing only', value: 'landing_only'},
+                ],
+                templateHeaders: [
+                    {text: 'Name', value: 'name'},
+                    {text: 'Steps', value: 'steps', sortable: false},
+                    {text: 'First steps', value: 'summary', sortable: false},
+                    {text: 'Created', value: 'created', sortable: false},
+                    {text: 'Actions', value: 'actions', sortable: false},
+                ],
+            };
+        },
+        computed: {
+            filteredTemplates() {
+                const q = (this.search || '').trim().toLowerCase();
+                if (!q) return this.templates;
+                return this.templates.filter(t => (t.name || '').toLowerCase().includes(q));
+            },
+        },
+        mounted() {
+            this.loadTemplates();
+            this.loadAssets();
+            this.$root.$on('load-funnels', this.loadTemplates);
+        },
+        beforeDestroy() {
+            this.$root.$off('load-funnels', this.loadTemplates);
+        },
+        methods: {
+            loadTemplates() {
+                this.templatesLoading = true;
+                fetch('/backend/api/funnel-templates/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {templates: []})
+                    .then(data => { this.templates = data.templates || []; })
+                    .catch(() => { this.templates = []; })
+                    .finally(() => { this.templatesLoading = false; });
+            },
+            loadAssets() {
+                fetch('/landings', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : [])
+                    .then(data => { this.landings = Array.isArray(data) ? data : []; })
+                    .catch(() => { this.landings = []; });
+                fetch('/backend/api/offers/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : [])
+                    .then(data => { this.offers = Array.isArray(data) ? data : []; })
+                    .catch(() => { this.offers = []; });
+            },
+            stepCount(item) {
+                return Array.isArray(item && item.steps) ? item.steps.length : 0;
+            },
+            stepNames(item) {
+                const steps = (item && item.steps) || [];
+                const names = steps.map(s => (s && s.name) || '').filter(Boolean);
+                if (names.length <= 3) return names;
+                return names.slice(0, 3).concat('+' + (names.length - 3) + ' more');
+            },
+            formatDate(iso) {
+                if (!iso) return '';
+                const d = new Date(iso);
+                return isNaN(d.getTime()) ? iso : d.toLocaleString();
+            },
+            openCreateTemplate() {
+                this.templateForm = {id: null, name: '', steps: [this.blankStep()], error: ''};
+                this.templateDialog = true;
+            },
+            openEditTemplate(item) {
+                const steps = ((item && item.steps) || []).map(s => ({
+                    name: (s && s.name) || '',
+                    landing: (s && s.landing) || null,
+                    offers: ((s && s.offers) || []).filter(Boolean),
+                    schema: ['landing_offer', 'landing_only'].includes(s && s.schema) ? s.schema : 'landing_offer',
+                }));
+                this.templateForm = {
+                    id: item.id,
+                    name: item.name || '',
+                    steps: steps.length ? steps : [this.blankStep()],
+                    error: '',
+                };
+                this.templateDialog = true;
+            },
+            blankStep() {
+                return {name: '', landing: null, offers: [], schema: 'landing_offer'};
+            },
+            addStep() {
+                this.templateForm.steps.push(this.blankStep());
+            },
+            moveStep(index, delta) {
+                const target = index + delta;
+                if (target < 0 || target >= this.templateForm.steps.length) return;
+                const steps = this.templateForm.steps;
+                const temp = steps[index];
+                steps.splice(index, 1);
+                steps.splice(target, 0, temp);
+            },
+            saveTemplate() {
+                this.templateForm.error = '';
+                const name = (this.templateForm.name || '').trim();
+                if (!name) { this.templateForm.error = 'Name is required'; return; }
+                const steps = (this.templateForm.steps || []).filter(
+                    s => s && (s.name || s.landing || (s.offers || []).length));
+                if (!steps.length) {
+                    this.templateForm.error = 'Add at least one step with a name, landing or offer';
+                    return;
+                }
+                const body = {name: name, steps: steps};
+                const isEdit = !!this.templateForm.id;
+                const url = isEdit
+                    ? '/backend/api/funnel-templates/' + this.templateForm.id
+                    : '/backend/api/funnel-templates/';
+                this.templateSaving = true;
+                return fetch(url, {
+                    method: isEdit ? 'PUT' : 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify(body),
+                })
+                    .then(r => r.json().then(data => ({ok: r.ok, status: r.status, data: data})))
+                    .then(res => {
+                        if (!res.ok) throw new Error(res.data.detail || 'HTTP ' + res.status);
+                        this.templateDialog = false;
+                        this.$root.$emit('show-message',
+                            {type: 'success', text: isEdit ? 'Template saved' : 'Template created'});
+                        this.loadTemplates();
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Template save failed: ' + sanitizeToastMessage(err.message)}))
+                    .finally(() => { this.templateSaving = false; });
+            },
+            deleteTemplate(item) {
+                if (!confirm(`Delete funnel template "${item.name}"?`)) return;
+                fetch('/backend/api/funnel-templates/' + item.id, {method: 'DELETE', credentials: 'include'})
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(() => {
+                        this.$root.$emit('show-message', {type: 'success', text: 'Template deleted'});
+                        this.loadTemplates();
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Template delete failed: ' + sanitizeToastMessage(err.message)}));
+            },
+        },
+    });
+</script>
+
+<style>
+    .funnels-search {
+        max-width: 260px;
+    }
+    .funnel-step-chip {
+        text-transform: none;
+    }
+</style>
+{% endraw %}
