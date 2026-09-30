@@ -103,7 +103,15 @@ def _record_run(result=None, error=object(), sync_at=None):
 # ---------------------------------------------------------------------------
 
 def load_settings() -> dict:
-    """Current meta_ads block merged over DEFAULTS (never raises)."""
+    """Current meta_ads block merged over DEFAULTS (never raises).
+
+    When the block carries no token, the token stored by the OAuth Connect flow
+    for this workspace is used instead: that flow requests ``ads_management``,
+    so a connected Meta account can drive the cost sync and the campaign controls
+    without an operator pasting a second (System User) token. An explicit token in
+    the block always wins. Only the internal callers see this — the settings
+    document, the status endpoint and the masked request views never carry it.
+    """
     cfg = dict(DEFAULTS)
     db = SessionLocal()
     try:
@@ -119,7 +127,29 @@ def load_settings() -> dict:
         pass
     finally:
         db.close()
-    return _normalise(cfg)
+    cfg = _normalise(cfg)
+    if not cfg.get("access_token"):
+        cfg["access_token"] = connected_meta_token()
+    return cfg
+
+
+def connected_meta_token() -> str:
+    """The Meta token the OAuth Connect flow stored for this workspace, or "".
+
+    Decryption failures (no key, wrong key) degrade to "" so callers report
+    "not configured" rather than sending a broken token to Graph.
+    """
+    try:
+        from app_pages.integrations import _connection_row, decrypt_token
+        db = SessionLocal()
+        try:
+            row = _connection_row(db, "meta")
+            stored = row["access_token"] if row is not None else None
+        finally:
+            db.close()
+        return decrypt_token(stored) or ""
+    except Exception:
+        return ""
 
 
 def _normalise(cfg: dict) -> dict:
