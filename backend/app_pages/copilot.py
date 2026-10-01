@@ -133,7 +133,17 @@ REFUSAL_REPLY = (
 )
 
 _GREETING_PATTERNS = (
-    r"(hi|hey|hello|yo|hiya|howdy|good (morning|afternoon|evening))[!.,\s]*",
+    r"(hi|hey|hello|yo|hiya|howdy|sup|morning|evening|good (morning|afternoon|evening))"
+    r"(?:\s+(there|again|everyone|all|copilot|team|folks|guys))*[!.,\s]*",
+)
+
+# Small talk that is not a data question but should still get a friendly line.
+_SMALL_TALK_PATTERNS = (
+    r"\bhow (are|r) (you|u)\b",
+    r"\bhow'?s it going\b",
+    r"\bthanks?( you)?\b",
+    r"\bthank you\b",
+    r"\bcheers\b",
 )
 
 _IDENTITY_PATTERNS = (
@@ -182,7 +192,12 @@ def _classify(question: str) -> str:
         return "refusal"
     if any(re.search(p, q) for p in _IDENTITY_PATTERNS):
         return "identity"
-    if any(re.fullmatch(p, q) for p in _GREETING_PATTERNS):
+    if any(re.search(p, q) for p in _SMALL_TALK_PATTERNS):
+        return "greeting"
+    # A bare salutation — the whole short message, not a question. "hi, what's my
+    # roas?" stays a data question (the model handles the greeting inline).
+    if ("?" not in q and len(q.split()) <= 5
+            and any(re.fullmatch(p, q) for p in _GREETING_PATTERNS)):
         return "greeting"
     return "data"
 

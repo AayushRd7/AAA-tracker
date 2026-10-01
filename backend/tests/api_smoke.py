@@ -10245,6 +10245,10 @@ print("ESCAPED-OK")
               _b.get("kind") == "greeting" and bool(_b.get("answer"))
               and "no data" not in str(_b.get("answer")).lower()
               and "zero activity" not in str(_b.get("answer")).lower(), str(_b)[:180])
+        check("slice5b: greeting variants are recognised",
+              all(_s5b_ask(q).get("kind") == "greeting"
+                  for q in ("hello there", "hey!", "good morning", "thanks!")),
+              "a greeting variant fell through to the model")
         _b = _s5b_ask("who are you?")
         check("slice5b: an identity question says what Copilot is and does",
               _b.get("kind") == "identity" and "AAA Tracker" in str(_b.get("answer")),
@@ -10265,6 +10269,12 @@ print("ESCAPED-OK")
             check("slice5b: guard-rail answers never reach the provider",
                   len(s5b_captured) == _rails_before,
                   f"{_rails_before} -> {len(s5b_captured)}")
+            # A greeting followed by a real question is NOT a greeting-only
+            # message: it must still reach the model (this is the first provider
+            # call after the count above, so it is asserted afterwards).
+            check("slice5b: a greeting plus a real question stays a data question",
+                  _s5b_ask("hi, which campaigns lost money this week?").get("kind") == "answer",
+                  "greeting+question was swallowed by the greeting rail")
         check("slice5b: the ask response does not carry the model id",
               "model" not in _b, str(_b)[:120])
 
