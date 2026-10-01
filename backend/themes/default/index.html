@@ -32,7 +32,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/terser@5.30.2/dist/bundle.min.js"></script>
 
-    <link href="/backend/backend/css/style.css?v=15" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=19" rel="stylesheet">
 
     <!-- Theme toggle helper: reads localStorage('theme'), exposes window.setTheme(t) -->
     <script>
@@ -379,42 +379,48 @@
     <v-app>
         {% if page == 'dashboard' and is_authenticated_user_type %}
         {% raw %}
-        <!-- Top header shell: brand row + horizontal section nav; drawer only on mobile -->
+        <!-- Navigation lives in the top bar on desktop (group dropdowns), so the
+             drawer is only the small-screen fallback. Groups collapse here too. -->
         <v-navigation-drawer
                 app
                 v-model="drawer"
                 temporary
-                :width="228"
+                :width="236"
                 class="side-nav d-lg-none"
         >
-            <div class="side-nav-brand">
-                <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo">
-                <div class="side-nav-brand-name">AAA TRACKER</div>
-            </div>
             <v-list nav dense class="side-nav-list py-2">
                 <template v-for="group in navGroups">
-                    <v-subheader v-if="group.name" :key="'group-' + group.name"
-                                 class="side-nav-group">{{ group.name }}</v-subheader>
-                    <v-list-item
-                            v-for="item in group.items"
-                            :key="item.key"
-                            link
-                            :input-value="activeSection === item.key"
-                            active-class="side-nav-item--active"
-                            class="side-nav-item"
-                            @click="navigate(item)"
-                    >
-                        <v-list-item-icon class="mr-3"><v-icon dense>{{ item.icon }}</v-icon></v-list-item-icon>
-                        <v-list-item-title class="side-nav-label">{{ item.title }}</v-list-item-title>
+                    <v-list-item v-if="group.name" :key="'gh-' + group.name"
+                                 class="side-nav-group-toggle"
+                                 :ripple="false"
+                                 :aria-expanded="isGroupOpen(group.name) ? 'true' : 'false'"
+                                 @click="toggleGroup(group.name)">
+                        <v-list-item-icon class="side-nav-group-icon">
+                            <v-icon small>{{ groupIcons[group.name] || 'mdi-dots-horizontal' }}</v-icon>
+                        </v-list-item-icon>
+                        <v-list-item-title class="side-nav-group-label">{{ group.name }}</v-list-item-title>
+                        <v-list-item-icon class="side-nav-chevron-wrap">
+                            <v-icon small class="side-nav-chevron"
+                                    :class="{'side-nav-chevron--open': isGroupOpen(group.name)}">mdi-chevron-down</v-icon>
+                        </v-list-item-icon>
                     </v-list-item>
+                    <template v-if="!group.name || isGroupOpen(group.name)">
+                        <v-list-item
+                                v-for="item in group.items"
+                                :key="item.key"
+                                link
+                                :input-value="activeSection === item.key"
+                                active-class="side-nav-item--active"
+                                class="side-nav-item"
+                                :class="{'side-nav-item--nested': !!group.name}"
+                                @click="navigate(item)"
+                        >
+                            <v-list-item-icon class="mr-3"><v-icon dense>{{ item.icon }}</v-icon></v-list-item-icon>
+                            <v-list-item-title class="side-nav-label">{{ item.title }}</v-list-item-title>
+                        </v-list-item>
+                    </template>
                 </template>
             </v-list>
-            <template v-slot:append>
-                <div class="side-nav-foot">
-                    <v-icon small class="mr-1" color="primary">mdi-shield-check</v-icon>
-                    <span class="side-nav-foot-text">AAA Tracker</span>
-                </div>
-            </template>
         </v-navigation-drawer>
 
         <v-app-bar app elevation="0" height="56" class="topbar">
@@ -424,6 +430,34 @@
             <div class="topbar-brand">
                 <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo">
                 <div class="topbar-brand-name">AAA TRACKER</div>
+            </div>
+            <!-- Section nav: one dropdown per group, so the header never needs a
+                 second row and no item is ever off-screen. -->
+            <div class="topnav-menus d-none d-lg-flex ml-4">
+                <v-menu v-for="group in navGroups" :key="'nav-' + (group.name || 'other')"
+                        offset-y left bottom nudge-bottom="4" :min-width="240">
+                    <template v-slot:activator="{ on, attrs }">
+                        <button type="button" class="navmenu-btn"
+                                :class="{'navmenu-btn--active': group.name && activeGroupName === group.name}"
+                                v-bind="attrs" v-on="on"
+                                :aria-label="(group.name || 'Menu') + ' menu'">
+                            <v-icon small>{{ groupIcons[group.name] || 'mdi-dots-horizontal' }}</v-icon>
+                            <span>{{ group.name || 'Menu' }}</span>
+                            <v-icon small>mdi-chevron-down</v-icon>
+                        </button>
+                    </template>
+                    <v-list dense class="navmenu-list">
+                        <v-list-item v-for="item in group.items" :key="item.key" link
+                                     :input-value="activeSection === item.key"
+                                     active-class="navmenu-item--active"
+                                     @click="navigate(item)">
+                            <v-list-item-icon class="mr-2">
+                                <v-icon small>{{ item.icon }}</v-icon>
+                            </v-list-item-icon>
+                            <v-list-item-title>{{ item.title }}</v-list-item-title>
+                        </v-list-item>
+                    </v-list>
+                </v-menu>
             </div>
             <v-spacer></v-spacer>
             <!-- G75 global search: debounced, grouped, jumps to the section -->
@@ -518,25 +552,6 @@
                     </v-list-item>
                 </v-list>
             </v-menu>
-            <template v-slot:extension>
-                <div class="topnav d-none d-lg-flex">
-                    <template v-for="group in navGroups">
-                        <span v-if="group.name" :key="'tnav-' + group.name"
-                              class="topnav-group" :title="group.name">{{ group.name }}</span>
-                        <button
-                                v-for="item in group.items"
-                                :key="item.key"
-                                type="button"
-                                class="topnav-btn"
-                                :class="{'topnav-btn--active': activeSection === item.key}"
-                                @click="navigate(item)"
-                        >
-                            <v-icon dense>{{ item.icon }}</v-icon>
-                            <span>{{ item.title }}</span>
-                        </button>
-                    </template>
-                </div>
-            </template>
         </v-app-bar>
         {% endraw %}
         {% endif %}
@@ -676,6 +691,19 @@
             return {
                 activeSection: '{{ initial_section }}',
                 drawer: null,
+                // Collapsible sidebar groups: an explicit user choice wins,
+                // otherwise the group holding the active section is open.
+                openGroups: {},
+                // One icon per nav group, so the top-bar menus (and the
+                // small-screen drawer headers) read at a glance.
+                groupIcons: {
+                    Performance: 'mdi-speedometer',
+                    Manage: 'mdi-view-grid-outline',
+                    Tools: 'mdi-wrench-outline',
+                    Protection: 'mdi-shield-outline',
+                    Logs: 'mdi-text-box-outline',
+                    Account: 'mdi-account-cog-outline',
+                },
                 passwordDialog: false,
                 pwSaving: false,
                 pwForm: {current: '', new1: '', new2: ''},
@@ -745,6 +773,12 @@
             currentTenantName() {
                 const t = this.tenants.find(x => x.tenant_id === this.currentTenantId);
                 return t ? t.name : 'Workspace';
+            },
+            // The group holding the current section — marks that top-bar menu and
+            // decides which drawer group is open by default.
+            activeGroupName() {
+                const item = this.visibleNavItems.find(i => i.key === this.activeSection);
+                return (item && item.group) || null;
             },
             visibleNavItems() {
                 const isAdmin = this.roleLabel === 'admin';
@@ -832,6 +866,12 @@
             // every page, not just the dashboard shell.
             this.$loadWorkspace();
             if (!this.dashboardShell) return;
+            // Restore the sidebar's expanded groups (the active section's group
+            // is the default when nothing is stored).
+            try {
+                const storedGroups = JSON.parse(localStorage.getItem('aaaNavOpenGroups') || '{}');
+                if (storedGroups && typeof storedGroups === 'object') this.openGroups = storedGroups;
+            } catch (e) { /* ignore a malformed value */ }
             this.loadTenants();
             // D1a: an expired/revoked session bounces any API fetch to the login page
             const origFetch = window.fetch;
@@ -1045,6 +1085,18 @@
                 if (!this.$vuetify.breakpoint.lgAndUp) {
                     this.drawer = false;
                 }
+            },
+            isGroupOpen(name) {
+                if (!name) return true;
+                if (name in this.openGroups) return this.openGroups[name];
+                return this.activeGroupName === name;
+            },
+            toggleGroup(name) {
+                const next = !this.isGroupOpen(name);
+                this.$set(this.openGroups, name, next);
+                try {
+                    localStorage.setItem('aaaNavOpenGroups', JSON.stringify(this.openGroups));
+                } catch (e) { /* private mode — the default (active group) still applies */ }
             },
             async changeMyPassword() {
                 if (!this.pwForm.current || this.pwForm.new1.length < 6 || this.pwForm.new1 !== this.pwForm.new2) {

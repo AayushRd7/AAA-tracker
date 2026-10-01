@@ -5751,6 +5751,14 @@ print("ESCAPED-OK")
             s.delete(f"{api}/sources/{_sr}")
 
     # ===== Meta Conversions API (CAPI): mock receiver end-to-end =====
+    # This section exercises the LEGACY single-global path, which the sender only
+    # takes while the pixel plane is empty (a bound pixel switches it to the
+    # per-pixel path and these sends are then skipped as unbound). A run that was
+    # killed mid-capapi-section leaves pixels behind, so clear the plane first —
+    # otherwise this whole section reports false failures.
+    pg_exec("DELETE FROM capi_pixel_bindings")
+    pg_exec("DELETE FROM capi_pixels")
+
     import time as _capi_time
     import threading as _capi_threading
     import http.server as _capi_httpserver
@@ -6749,6 +6757,26 @@ print("ESCAPED-OK")
           "group: 'Performance'" in w18_html and "group: 'Tools'" in w18_html
           and "group: 'Account'" in w18_html,
           "group markers missing")
+
+    # Header restructure: one navigation surface (a persistent, collapsible rail)
+    # and a slim bar — the horizontal strip of section buttons is gone.
+    check("w18: the header carries the section nav as group dropdowns, on one row",
+          all(m in w18_html for m in ("topnav-menus", "navmenu-btn", "navmenu-list",
+                                      "groupIcons", "activeGroupName"))
+          and "topnav-btn" not in w18_html,
+          "top-bar menu markers missing")
+    check("w18: each nav group menu has its own icon",
+          all(m in w18_html for m in ("mdi-speedometer", "mdi-view-grid-outline",
+                                      "mdi-wrench-outline", "mdi-shield-outline",
+                                      "mdi-text-box-outline", "mdi-account-cog-outline")),
+          "group icons missing")
+    check("w18: the small-screen drawer keeps collapsible groups",
+          all(m in w18_html for m in ("side-nav-group-toggle", "toggleGroup",
+                                      "isGroupOpen", "aaaNavOpenGroups")),
+          "collapsible-group markers missing")
+    check("w18: the stylesheet carries a version for cache-busting",
+          re.search(r"style\.css\?v=\d+", w18_html) is not None,
+          "styles are not versioned")
 
     # -- filter presets: CRUD + scope isolation --
     w18_p1 = s.post(f"{api}/filter-presets/", json={

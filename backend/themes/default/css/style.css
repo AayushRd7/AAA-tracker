@@ -739,16 +739,51 @@ body::-webkit-scrollbar-thumb:hover {
   letter-spacing: 0.1px;
 }
 
-.side-nav-group {
-  height: auto;
-  min-height: 0;
-  padding: var(--space-2) var(--space-4) 2px;
+.side-nav-group-toggle {
+  border-radius: var(--radius-sm);
+  margin: 2px var(--space-2) 0;
+  min-height: 32px;
+  padding-left: var(--space-3) !important;
+  color: var(--text-muted, var(--text-secondary));
+  transition: background var(--t-fast) ease, color var(--t-fast) ease;
+}
+
+/* Group rows keep their own tight icon/chevron spacing, so the label never
+   truncates inside the 236px drawer. */
+.side-nav-group-toggle .v-list-item__icon {
+  margin: 0 4px 0 0 !important;
+  min-width: 18px !important;
+}
+
+.side-nav-group-toggle .side-nav-chevron-wrap {
+  margin: 0 !important;
+  min-width: 16px !important;
+}
+
+.side-nav-group-label {
   font-size: var(--fs-11);
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-muted, var(--text-secondary));
-  opacity: 0.75;
+  opacity: 0.85;
+}
+
+.side-nav-group-toggle:hover {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.side-nav-chevron {
+  transition: transform var(--t-fast) ease;
+}
+
+.side-nav-chevron--open {
+  transform: rotate(180deg);
+}
+
+/* Items inside a collapsible group sit one step in from the group header. */
+.side-nav-item--nested {
+  padding-left: var(--space-3) !important;
 }
 
 .side-nav-item:hover {
@@ -779,20 +814,6 @@ body::-webkit-scrollbar-thumb:hover {
 .side-nav-item.side-nav-item--active .v-icon,
 .side-nav-item.v-list-item--active .v-icon {
   color: var(--accent) !important;
-}
-
-.side-nav-foot {
-  display: flex;
-  align-items: center;
-  padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--border-soft);
-  flex: none;
-}
-
-.side-nav-foot-text {
-  font-size: var(--fs-11);
-  color: var(--text-secondary);
-  letter-spacing: 0.2px;
 }
 
 /* Slim light top bar */
@@ -835,89 +856,68 @@ body::-webkit-scrollbar-thumb:hover {
   margin-left: 2px;
 }
 
-/* Second header row: horizontal section nav (extension slot, desktop only) */
-.topbar .v-toolbar__extension {
-  padding: 0 !important;
-  background: var(--surface);
-  border-top: 1px solid var(--border-soft);
-}
-
-.topnav {
-  display: flex;
-  align-items: stretch;
-  width: 100%;
-  height: 100%;
-}
-
-.topnav-scroll {
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding: 0 var(--space-3);
-}
-
-.topnav-scroll::-webkit-scrollbar {
-  display: none;
-}
-
-.topnav-group {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted, var(--text-secondary));
-  opacity: 0.55;
-  padding: 0 3px;
+/* Current section, shown at the left of the slim bar on desktop */
+.topbar-title {
+  font-size: var(--fs-15);
+  font-weight: 700;
+  letter-spacing: 0.1px;
+  color: var(--text-primary);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.topnav-btn {
-  display: inline-flex;
-  flex-direction: column;
+/* Section nav in the top bar: one dropdown per group. Keeps the header a single
+   row — every section is one click away, nothing crowds or wraps. */
+.topnav-menus {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 1px;
+  gap: 2px;
+  min-width: 0;
+}
+
+.navmenu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 36px;
   padding: 0 var(--space-3);
-  min-width: 62px;
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
   font: inherit;
-  cursor: pointer;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--text-secondary);
   white-space: nowrap;
+  cursor: pointer;
   transition: background var(--t-fast) ease, color var(--t-fast) ease;
 }
 
-.topnav-btn .v-icon {
-  font-size: 18px;
-  color: inherit;
-}
-
-.topnav-btn span {
-  font-size: var(--fs-11);
-  font-weight: 500;
-  letter-spacing: 0.1px;
-  line-height: 1.2;
-}
-
-.topnav-btn:hover {
+.navmenu-btn:hover {
   background: var(--accent-soft);
   color: var(--accent-hover);
 }
 
-/* Active: accent text + 2px accent underline (replaces the old left rail) */
-.topnav-btn.topnav-btn--active {
+/* The group holding the current section is marked, so orientation survives
+   without a page title. */
+.navmenu-btn--active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  font-weight: 700;
+  background: var(--accent-soft);
+}
+
+.navmenu-btn--active .v-icon {
+  color: var(--accent);
+}
+
+.navmenu-list {
+  min-width: 232px;
+}
+
+.v-list-item.navmenu-item--active {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
   font-weight: 600;
 }
 
