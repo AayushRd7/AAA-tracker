@@ -2342,6 +2342,78 @@ async def notify_telegram_conversion_async(click_id: str, status: str, payout: f
     await asyncio.to_thread(notify_telegram_conversion, click_id, status, payout, row)
 
 
+async def click_attribution_from_clickhouse(click_id: str) -> dict:
+    """Attribution for a click whose Postgres row is not there yet.
+
+    The click-out writes its `conversions_data` row from a background task, and
+    the redirect/landing flows never write one at all — so a postback that lands
+    before that write (or after a write that failed) has no row to attach to.
+    The ClickHouse click row is written inline at click-out and carries the
+    campaign, offer, landing, sub ids and currency, so the conversion can still
+    be recorded attributed instead of as a bare row that no offer cap or
+    campaign postback would ever see. Best-effort: {} on any failure.
+    """
+    cid = str(click_id or "").strip()
+    if not cid:
+        return {}
+    ch = None
+    try:
+        ch = acquire_ch()
+        res = await asyncio.to_thread(
+            ch.query,
+            "SELECT campaign_id, offer_id, landing_id, currency, flow_index, "
+            "       ad_campaign_id, traffic_source_name, visitor_id, tenant_id, "
+            "       sub_id_1, sub_id_2, sub_id_3, sub_id_4, sub_id_5, "
+            "       sub_id_6, sub_id_7, sub_id_8, sub_id_9, sub_id_10, "
+            "       utm_campaign, utm_creative, utm_source, fbc, fbp "
+            "FROM clicks_data WHERE click_id = %(cid)s "
+            "ORDER BY received_at DESC LIMIT 1",
+            parameters={"cid": cid})
+    except Exception as e:
+        log_track(f"postback attribution: ClickHouse lookup failed for {cid}: {e!r}")
+        return {}
+    finally:
+        if ch is not None:
+            release_ch(ch)
+    if not res.result_rows:
+        return {}
+
+    raw = dict(zip(res.column_names, res.result_rows[0]))
+
+    def _int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _str(value, limit):
+        if value in (None, ""):
+            return None
+        return str(value)[:limit]
+
+    attribution = {
+        "campaign_id": _int(raw.get("campaign_id")),
+        "offer_id": _int(raw.get("offer_id")),
+        # conversions_data.landing_id is an integer; a non-numeric landing slug
+        # (or none) is simply not carried over.
+        "landing_id": _int(raw.get("landing_id")),
+        "currency": _str(raw.get("currency"), 10),
+        "flow_index": _int(raw.get("flow_index")),
+        "ad_campaign_id": _str(raw.get("ad_campaign_id"), 100),
+        "traffic_source_name": _str(raw.get("traffic_source_name"), 100),
+        "visitor_id": _str(raw.get("visitor_id"), 50),
+        "tenant_id": _int(raw.get("tenant_id")),
+        "utm_campaign": _str(raw.get("utm_campaign"), 50),
+        "utm_creative": _str(raw.get("utm_creative"), 50),
+        "utm_source": _str(raw.get("utm_source"), 50),
+        "fbc": _str(raw.get("fbc"), 4096),
+        "fbp": _str(raw.get("fbp"), 4096),
+    }
+    for i in range(1, 11):
+        attribution[f"sub_id_{i}"] = _str(raw.get(f"sub_id_{i}"), 50)
+    return {k: v for k, v in attribution.items() if v is not None}
+
+
 async def sync_conversion_to_clickhouse(click_id: str):
     """Best-effort mirror of a conversions_data row onto the CH click row.
 
@@ -2421,6 +2493,16 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
     # resolved one, else whatever the click's own conversion row carries.
     # Raw SQL plane — every conversions_data write below stamps it explicitly.
     tenant_id_value = 1
+    # Attribution from the ClickHouse click row (written inline at click-out).
+    # Fetched at most once per call: it resolves the tenant here and, further
+    # down, carries the campaign/offer identity when no Postgres row exists.
+    _attr_cache = {}
+
+    async def ch_attribution() -> dict:
+        if click_id not in _attr_cache:
+            _attr_cache[click_id] = await click_attribution_from_clickhouse(click_id)
+        return _attr_cache[click_id]
+
     try:
         async with pg.acquire() as _tconn:
             if campaign_id is not None:
@@ -2437,19 +2519,9 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             # /{alias} redirect only writes ClickHouse). The click row carries
             # the tenant it was served for, so ask ClickHouse — otherwise the
             # conversion and its audit rows would land in tenant 1.
-            _ch = None
-            try:
-                _ch = acquire_ch()
-                _res = await asyncio.to_thread(
-                    _ch.query,
-                    "SELECT tenant_id FROM clicks_data WHERE click_id = %(cid)s "
-                    "ORDER BY received_at DESC LIMIT 1",
-                    parameters={"cid": click_id})
-                if _res.result_rows and _res.result_rows[0][0]:
-                    tenant_id_value = int(_res.result_rows[0][0])
-            finally:
-                if _ch is not None:
-                    release_ch(_ch)
+            _attr = await ch_attribution()
+            if _attr.get("tenant_id"):
+                tenant_id_value = int(_attr["tenant_id"])
     except Exception:
         tenant_id_value = tenant_id_value or 1
 
@@ -2508,30 +2580,58 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             "last_postback_at = NOW() WHERE id = $1", row["id"])
         return True
 
-    async def insert_row(conn, click_id_value: str) -> None:
-        cols = ["click_id", "status", "payout", "revenue", "profit", "postback_count",
-                "last_postback_at", "events", "tenant_id"]
-        vals = ["$1", "$2", "$3", "$3", "$3", "1", "NOW()", "$4::jsonb", "$5"]
-        args = [click_id_value, status, payout_value, json.dumps([event]),
-                int(tenant_id_value or 1)]
-        idx = 6
+    async def insert_row(conn, click_id_value: str, attribution: dict = None) -> None:
+        """INSERT a fresh conversions_data row for this click.
+
+        `attribution` carries the campaign/offer/sub-id identity recovered from
+        the ClickHouse click row when no Postgres row exists yet (see
+        click_attribution_from_clickhouse); the postback's own extra fields
+        override it — fresh network values beat the click's.
+        """
+        entries = [
+            ("click_id", "$1", click_id_value),
+            ("status", "$2", status),
+            ("payout", "$3", payout_value),
+            ("revenue", "$4", payout_value),
+            ("profit", "$5", payout_value),
+            ("tenant_id", "$6", int(tenant_id_value or 1)),
+            ("postback_count", "1", None),
+            ("last_postback_at", "NOW()", None),
+        ]
+        present = {c for c, _, _ in entries}
+        optional = []
+        idx = 7
+
+        def add(column, value):
+            nonlocal idx
+            if value is None or column in present:
+                return
+            present.add(column)
+            optional.append((column, f"${idx}", value))
+            idx += 1
+
         # Meta CAPI identifiers from the conversion request (a direct-tracking
         # click may have no PG row until now).
         _fbc, _fbp = meta_click_identifiers(request, None)
-        for _k, _v in (("fbc", _fbc), ("fbp", _fbp)):
-            if _v:
-                cols.append(_k)
-                vals.append(f"${idx}")
-                args.append(_v)
-                idx += 1
+        add("fbc", _fbc)
+        add("fbp", _fbp)
+        for k, v in (attribution or {}).items():
+            add(k, v)
+        # The postback's own fields win over the recovered click values.
+        overrides = {}
         for k, v in extra_fields.items():
-            cols.append(k)
-            vals.append(f"${idx}")
-            args.append(v)
-            idx += 1
+            if k in present:
+                overrides[k] = v
+            else:
+                add(k, v)
+        entries.extend(optional)
+        # events is jsonb — carried as the final positional value.
+        entries.append(("events", f"${idx}::jsonb", json.dumps([event])))
+
+        args = [overrides.get(c, v) for c, ph, v in entries if ph.startswith("$")]
         await conn.execute(
-            f"INSERT INTO conversions_data ({', '.join(cols)}) VALUES ({', '.join(vals)})",
-            *args)
+            f"INSERT INTO conversions_data ({', '.join(c for c, _, _ in entries)}) "
+            f"VALUES ({', '.join(ph for _, ph, _ in entries)})", *args)
 
     async def insert_new_conversion(conn, target_click_id: str) -> bool:
         """Mode 'new': write an ADDITIONAL conversion row instead of updating.
@@ -2740,14 +2840,27 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
         row = await conn.fetchrow(JOINED_CLICK_QUERY, click_id)
 
         if not row:
-            # Clicks from direct/redirect/landing flows never pass through /c,
-            # so no conversions_data row exists for them — create one
-            await insert_row(conn, click_id)
+            # No Postgres row for this click yet: the click-out writes it from a
+            # background task, and the redirect/landing flows never write one.
+            # The ClickHouse click row is written inline at click-out, so recover
+            # the attribution from it — otherwise the conversion lands as a bare
+            # row that no offer cap or campaign postback would ever see.
+            attribution = await ch_attribution()
+            await insert_row(conn, click_id, attribution)
+            # The insert already carries this conversion (status/payout), so no
+            # write_conversion here — just the side effects the normal path runs.
+            enriched = await conn.fetchrow(JOINED_CLICK_QUERY, click_id)
+            if enriched:
+                background_tasks.add_task(
+                    notify_telegram_conversion_async, click_id, status,
+                    payout_value, dict(enriched))
+                await fanout(conn, enriched, click_id)
             schedule_ch_sync(click_id)
-            schedule_meta_capi(click_id, None)
+            schedule_meta_capi(click_id, enriched)
             return {"status": "ok", "click_id": click_id,
                     "updated_status": status, "duplicate": False,
-                    "tenant_id": tenant_id_value}
+                    "tenant_id": tenant_id_value,
+                    "attributed": bool(attribution.get("campaign_id"))}
 
         is_duplicate = await write_conversion(conn, row)
 

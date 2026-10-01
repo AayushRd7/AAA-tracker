@@ -10513,6 +10513,69 @@ print("ESCAPED-OK")
           restored.get("currency") == orig_doc.get("currency"),
           f"{restored.get('currency')} != {orig_doc.get('currency')}")
 
+    # Fix #2: a postback must be attributed even when the click-out's own
+    # Postgres row is not committed yet. The click-out writes that row from a
+    # background task while the redirect returns immediately — and the
+    # redirect/landing flows never write one at all — so a fast network S2S
+    # finds no row and used to create a bare, unattributed conversion that never
+    # counted against the offer's daily cap and never reached the campaign's
+    # postbacks. The inline ClickHouse click row carries the attribution, so the
+    # conversion must be recorded from it instead.
+    import time as _time
+    att_pid = os.getpid()
+    att_alias = f"smoke-attr-{att_pid}"
+    r = s.post(f"{api}/offers/", json={
+        "name": f"Smoke Attr Offer {att_pid}",
+        "url": f"https://example.com/smoke-attr-{att_pid}", "payout": 4,
+        "daily_conversions_cap": 1})
+    att_oid = r.json().get("id") if r.status_code == 200 else None
+    check("attr: offer created", att_oid is not None, r.text[:150])
+    att_cid = None
+    if att_oid:
+        r = s.post(f"{api}/campaigns/", json={
+            "name": att_alias, "alias": att_alias, "type": "campaign",
+            "status": "active", "redirect_mode": "position",
+            "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                                  "schema": "direct", "offer": att_oid, "filters": []}],
+                       "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+        att_cid = r.json().get("id") if r.status_code == 200 else None
+    check("attr: campaign created", att_cid is not None, r.text[:150])
+    if att_oid and att_cid:
+        r = requests.get(f"{BASE}/c/{att_alias}/{att_oid}", verify=not INSECURE,
+                         allow_redirects=False)
+        m = re.search(r"[?&]click_id=([^&]+)", r.headers.get("location") or "")
+        att_click = m.group(1) if m else None
+        check("attr: click-out carries click_id", bool(att_click),
+              (r.headers.get("location") or "")[:120])
+        if att_click:
+            # Let the click-out's background Postgres write land, then remove it:
+            # this is the exact state a fast postback sees (and every
+            # redirect/landing click is in) — the ClickHouse click row exists,
+            # the Postgres row does not.
+            _time.sleep(1.5)
+            pg_exec_out(f"DELETE FROM conversions_data WHERE click_id = '{att_click}'")
+            r = requests.get(f"{BASE}/pb?clickid={att_click}&status=sale&payout=4",
+                             verify=not INSECURE)
+            check("attr: postback accepted with no click-out row present",
+                  r.status_code == 200, f"{r.status_code} {r.text[:120]}")
+            got = pg_exec_out(
+                f"SELECT campaign_id, offer_id, status FROM conversions_data "
+                f"WHERE click_id = '{att_click}' ORDER BY id DESC LIMIT 1").strip()
+            parts = got.split("|") if got else []
+            check("attr: conversion attributed to the clicked campaign and offer",
+                  len(parts) == 3 and parts[0] == str(att_cid)
+                  and parts[1] == str(att_oid),
+                  f"row={got!r} cid={att_cid} oid={att_oid}")
+            # The cap counts conversions_data.offer_id, so the raced conversion
+            # must consume it — the next click-out for that offer is refused.
+            r = requests.get(f"{BASE}/c/{att_alias}/{att_oid}", verify=not INSECURE,
+                             allow_redirects=False)
+            check("attr: raced conversion counted against the offer daily cap",
+                  r.status_code == 404, str(r.status_code))
+        s.delete(f"{api}/campaigns/{att_cid}")
+    if att_oid:
+        s.delete(f"{api}/offers/{att_oid}")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")
