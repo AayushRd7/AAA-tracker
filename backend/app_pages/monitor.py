@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from db import get_db, SessionLocal
 from tenant_context import current_tenant
 from tenant_settings import for_each_tenant, tenant_feature
+from env_config import telegram_bot_token
 from models.settings import SettingsORM
 
 router = APIRouter()
@@ -70,14 +71,17 @@ def monitoring_settings() -> dict:
 
 
 def send_telegram_alert(message: str) -> bool:
-    """Fire-and-forget Telegram notification via the saved bot (sync helper —
-    call through asyncio.to_thread from async code)."""
+    """Fire-and-forget Telegram notification via the deployment's bot (sync
+    helper — call through asyncio.to_thread from async code).
+
+    The bot token comes from the environment; the chat the alert goes to is the
+    workspace's own saved setting."""
     try:
         cfg = _load_main_settings()
         tg = cfg.get("telegram") or {}
         if not tg.get("enabled"):
             return False
-        token = (tg.get("bot_token") or "").strip()
+        token = telegram_bot_token()
         chat_id = (tg.get("chat_id") or "").strip()
         if not token or not chat_id:
             return False

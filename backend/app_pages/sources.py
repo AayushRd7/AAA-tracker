@@ -20,7 +20,7 @@ def _param(name, parameter, token="", editable_name=False):
     return {"name": name, "parameter": parameter, "token": token, "editable_name": editable_name}
 
 
-# Built-in traffic source presets, shipped out of the box (RedTrack-style
+# Built-in traffic source presets, shipped out of the box (a ready-made
 # traffic channels catalog). Each carries the real pass-through macros the ad
 # network uses so the tracker can pick up campaign/site/keyword data out of
 # the box, plus its API integration capabilities ("cost" = cost update,

@@ -15,6 +15,7 @@ from models.capi_pixels import (
     CapiPixelORM, CapiPixelBindingORM, CapiChannelSettingORM,
 )
 from email_reports import send_daily_report, send_scheduled_report, schedule_due
+from env_config import email_configured, telegram_bot_token, telegram_bot_url
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -68,13 +69,20 @@ def telegram_test(db: Session = Depends(get_db)):
         except Exception:
             cfg = {}
     tg = cfg.get("telegram") or {}
-    token = (tg.get("bot_token") or "").strip()
+    # The bot belongs to the deployment (TELEGRAM_BOT_TOKEN); the chat is the
+    # workspace's saved setting.
+    token = telegram_bot_token(tg.get("bot_token") or "")
     chat_id = (tg.get("chat_id") or "").strip()
 
-    if not token or not chat_id:
-        raise HTTPException(status_code=400, detail="Bot Token and Chat ID are required — fill them in and save settings first")
+    if not token:
+        raise HTTPException(status_code=400,
+                            detail="Telegram is not configured for this deployment")
+    if not chat_id:
+        raise HTTPException(status_code=400,
+                            detail="Add the Chat ID and save settings first — the "
+                                   "tracker sends to the chat you choose")
     if not re.match(r"^\d+:[A-Za-z0-9_-]{30,}$", token):
-        raise HTTPException(status_code=400, detail="Token format looks wrong — it should look like 123456789:AAExampleTokenFormat (from @BotFather)")
+        raise HTTPException(status_code=400, detail="The deployment's bot token looks wrong")
 
     try:
         resp = httpx.post(
@@ -88,7 +96,8 @@ def telegram_test(db: Session = Depends(get_db)):
             return {"status": "ok", "message": "Test message sent — check your Telegram"}
         detail = data.get("description", "Telegram API error")
         if "chat not found" in detail.lower():
-            detail += " — check the Chat ID: message your bot once, then copy chat.id from api.telegram.org/bot<TOKEN>/getUpdates"
+            detail += (" — check the Chat ID: open the bot, press Start and send it a "
+                       "message, then copy chat.id from api.telegram.org/bot<TOKEN>/getUpdates")
         raise HTTPException(status_code=400, detail=detail)
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Could not reach Telegram: {e}")
@@ -107,10 +116,9 @@ def email_test(request: Request, db: Session = Depends(get_db)):
     email_cfg = cfg.get("email_reports") or {}
     if not (email_cfg.get("recipients") or "").strip():
         raise HTTPException(status_code=400, detail="Recipients is required — fill it in and save settings first")
-    has_api_key = (email_cfg.get("api_key") or "").strip()
-    has_smtp = all((email_cfg.get(f) or "").strip() for f in ("smtp_host", "smtp_login", "smtp_password"))
-    if not has_api_key and not has_smtp:
-        raise HTTPException(status_code=400, detail="Either Brevo API Key or SMTP Host/Login/Password is required — fill it in and save settings first")
+    if not email_configured(email_cfg):
+        raise HTTPException(status_code=400,
+                            detail="Email delivery is not configured for this deployment")
     ok, detail = send_daily_report(request.state.ch, email_cfg)
     if not ok:
         raise HTTPException(status_code=500, detail=detail)
@@ -208,6 +216,21 @@ _MISSING = object()
 # API for deployments that cannot set environment variables.
 _COPILOT_DEPLOYMENT_ONLY = ("base_url", "model")
 
+# Settings keys owned by the deployment rather than by a workspace: the email
+# relay credentials, the Telegram bot token, and the ad-platform Graph endpoint.
+# They are read from the environment (see ``env_config``) and are never asked
+# for in the product UI. A tenant-facing reader never sees them, and a save that
+# omits or blanks one keeps whatever the deployment already stored — so a page
+# that no longer renders the field cannot wipe it.
+_DEPLOYMENT_ONLY = {
+    "telegram": ("bot_token",),
+    "email_reports": ("smtp_host", "smtp_port", "smtp_login", "smtp_password", "api_key"),
+    "meta_ads": ("access_token", "api_version", "graph_base_url"),
+    # The Conversions API's Graph endpoint is test-only plumbing, not a tenant
+    # choice; the fallback dataset/token above stay the tenant's own.
+    "meta_capi": ("api_version", "graph_base_url"),
+}
+
 
 def _strip_copilot_deployment_keys(doc):
     """Drop the deployment-only copilot keys from a settings document (in place)."""
@@ -217,6 +240,55 @@ def _strip_copilot_deployment_keys(doc):
     return doc
 
 
+def _strip_deployment_keys(doc):
+    """Drop every deployment-owned key from a settings document (in place)."""
+    _strip_copilot_deployment_keys(doc)
+    if isinstance(doc, dict):
+        for section, keys in _DEPLOYMENT_ONLY.items():
+            block = doc.get(section)
+            if isinstance(block, dict):
+                for key in keys:
+                    block.pop(key, None)
+    return doc
+
+
+def _keep_deployment_keys(stored: dict, merged: dict) -> dict:
+    """Preserve deployment-owned keys a tenant-facing save left absent or blank.
+
+    The Settings page no longer renders these fields, so it submits no value (or
+    an empty string) for them. Without this the section merge would drop or
+    blank them, wiping the fallback a pre-environment installation needs."""
+    if not isinstance(stored, dict) or not isinstance(merged, dict):
+        return merged
+    for section, keys in _DEPLOYMENT_ONLY.items():
+        live = stored.get(section)
+        incoming = merged.get(section)
+        if not isinstance(live, dict) or not isinstance(incoming, dict):
+            continue
+        for key in keys:
+            if key in live and not str(incoming.get(key) or "").strip():
+                incoming[key] = live[key]
+    return merged
+
+
+def deployment_status(doc: dict) -> dict:
+    """What the deployment has configured, for the Settings page's status lines.
+
+    Reports readiness only — never a credential, host or endpoint. ``doc`` is the
+    stored (unstripped) settings document so a pre-environment installation's
+    saved credentials still count as configured."""
+    doc = doc if isinstance(doc, dict) else {}
+    email_block = doc.get("email_reports")
+    tg_block = doc.get("telegram")
+    email_block = email_block if isinstance(email_block, dict) else {}
+    tg_block = tg_block if isinstance(tg_block, dict) else {}
+    return {
+        "email_configured": email_configured(email_block),
+        "telegram_bot_configured": bool(telegram_bot_token(tg_block.get("bot_token") or "")),
+        "telegram_bot_url": telegram_bot_url(),
+    }
+
+
 @router.get("/")
 def get_settings(request: Request, db: Session = Depends(get_db)):
     from auth import get_caller
@@ -224,6 +296,7 @@ def get_settings(request: Request, db: Session = Depends(get_db)):
     rows = db.query(SettingsORM).all()
     out = {}
     raw_settings = ""
+    stored_doc = {}
     for row in rows:
         try:
             value = json.loads(row.value)
@@ -231,6 +304,7 @@ def get_settings(request: Request, db: Session = Depends(get_db)):
             value = row.value
         if row.name == "settings":
             raw_settings = row.value or ""
+            stored_doc = value if isinstance(value, dict) else {}
         # Secret-looking values (tokens, keys, passwords) are masked for
         # non-admins; an admin still sees the real value to configure it.
         out[row.name] = value if is_admin else _mask_secrets(value)
@@ -240,7 +314,11 @@ def get_settings(request: Request, db: Session = Depends(get_db)):
     if isinstance(doc, dict) and isinstance(doc.get("copilot"), dict) \
             and doc["copilot"].get("api_key"):
         doc["copilot"]["api_key"] = _SECRET_MASK
-    _strip_copilot_deployment_keys(doc)
+    # Deployment-owned keys are dropped for every reader: the UI never shows
+    # them, so nothing should be able to read them back either.
+    _strip_deployment_keys(doc)
+    # Readiness is computed from the stored document, before the strip.
+    out["deployment"] = deployment_status(stored_doc)
     # Optimistic-concurrency token for the Settings page, hashed from the raw
     # stored value (never the masked view). Additive, so nothing that reads the
     # response today is affected.
@@ -296,7 +374,7 @@ def save_settings(payload: dict, request: Request, db: Session = Depends(get_db)
             except Exception:
                 existing = None
             if isinstance(existing, dict) and isinstance(val, dict):
-                existing = _merge_settings(existing, val)
+                existing = _keep_deployment_keys(existing, _merge_settings(existing, val))
                 val_str = json.dumps(existing)
             db.execute(text("UPDATE settings SET value = :v WHERE id = :i"),
                        {"v": val_str, "i": row[0]})
@@ -752,8 +830,9 @@ def export_settings(db: Session = Depends(get_db)):
     except Exception:
         pass
     doc = {"exported_at": int(time.time()), "data": _sanitize_for_export(data)}
-    # The export is a tenant-facing document too: no upstream model or endpoint.
-    _strip_copilot_deployment_keys((doc["data"] or {}).get("settings"))
+    # The export is a tenant-facing document: no upstream model or endpoint, and
+    # no deployment-owned relay / bot / Graph credentials.
+    _strip_deployment_keys((doc["data"] or {}).get("settings"))
     return JSONResponse(
         content=doc,
         headers={"Content-Disposition": 'attachment; filename="settings-backup.json"'})
@@ -790,6 +869,11 @@ async def import_settings(request: Request, db: Session = Depends(get_db)):
             except Exception:
                 current = None
         merged = _restore_secrets(value, current)
+        if name == "settings":
+            # The export strips deployment-owned keys, so a restore must not read
+            # their absence as "delete" — keep whatever the deployment stored.
+            merged = _keep_deployment_keys(
+                current if isinstance(current, dict) else {}, merged)
         val_str = json.dumps(merged)
         if row:
             row.value = val_str

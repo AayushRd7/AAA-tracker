@@ -49,6 +49,7 @@ from db import get_db, SessionLocal
 from tenant_context import current_tenant
 from tenant_settings import for_each_tenant
 from graph_version import DEFAULT_GRAPH_VERSION
+from env_config import meta_graph_base_url, meta_graph_version
 from models.settings import SettingsORM
 from clickHouse import get_clickhouse_client
 
@@ -129,6 +130,11 @@ def load_settings() -> dict:
     finally:
         db.close()
     cfg = _normalise(cfg)
+    # The Graph host and API version belong to the deployment: an environment
+    # override wins over anything stored, so an operator updates every
+    # workspace at once and tenants are never asked about Graph internals.
+    cfg["api_version"] = meta_graph_version(cfg["api_version"]) or DEFAULT_GRAPH_VERSION
+    cfg["graph_base_url"] = meta_graph_base_url(cfg["graph_base_url"])
     if not cfg.get("access_token"):
         cfg["access_token"] = connected_meta_token()
     return cfg
@@ -802,7 +808,9 @@ async def sync_now(request: Request):
 
 @router.get("/status")
 def status(db: Session = Depends(get_db)):
-    """Enabled/dry-run/cadence/api-version + last run state, matched/unmatched."""
+    """Enabled/dry-run/cadence + last run state, matched/unmatched.
+
+    The Graph endpoint and token are deployment-owned and are not reported."""
     cfg = load_settings()
     tid = current_tenant()
     last_result = _last_results.get(tid)
@@ -816,7 +824,6 @@ def status(db: Session = Depends(get_db)):
         "ad_account_ids": cfg["ad_account_ids"],
         "match_preference": cfg["match_preference"],
         "backfill_days": cfg["backfill_days"],
-        "graph_base_url": cfg["graph_base_url"] or DEFAULT_GRAPH_BASE,
         "running": _running,
         "last_sync_at": last_sync_at.isoformat() if last_sync_at else None,
         "last_result": last_result,

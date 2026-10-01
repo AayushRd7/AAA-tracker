@@ -67,15 +67,15 @@ async def create_nginx(request: Request, domain_id: int):
         await _mark_ssl_status(pg, domain_id, "error")
         raise HTTPException(
             status_code=400,
-            detail=f"{domain} does not resolve yet — create a DNS record "
-                   f"(CNAME to your tracker host, or A record to this server's "
-                   f"public IP), wait for propagation, then retry.")
+            detail=f"{domain} does not resolve yet — add a DNS record for it "
+                   f"(a CNAME to your tracker host, or an A record to this "
+                   f"server's public IP), wait for propagation, then retry.")
     if not (set(addresses) & _local_ips()):
         await _mark_ssl_status(pg, domain_id, "error")
         raise HTTPException(
             status_code=400,
-            detail=f"{domain} resolves to {', '.join(addresses)} which is not "
-                   f"this server — point it at this machine first, then retry.")
+            detail=f"{domain} resolves to {', '.join(addresses)}, which is not "
+                   f"this tracker — point the record here first, then retry.")
 
     try:
         path = await generate_nginx_conf(domain, domain_id)

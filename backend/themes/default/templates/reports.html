@@ -526,7 +526,7 @@
                 <v-card-text>
                     <div class="caption grey--text mb-3">
                         Email a snapshot of <b>{{ emailScheduleReportName }}</b> on a schedule.
-                        Sending uses the Brevo/SMTP credentials from Settings → Email reports.
+                        Sending uses this deployment's mail service — set the recipients and send hour here or under Settings → Email reports.
                     </div>
                     <v-text-field v-model="emailSchedule.recipients" label="Recipients (comma-separated)" outlined dense
                                   placeholder="ops@example.com, boss@example.com"></v-text-field>

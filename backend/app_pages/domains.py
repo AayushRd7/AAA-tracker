@@ -109,17 +109,19 @@ async def get_domains(request: Request, db: Session = Depends(get_db)):
 # ====== GET /domains/dns-status ======
 @router.get("/server-info")
 async def server_info():
-    """What an operator's DNS record should point at (A record target for
-    self-hosted; the CNAME target hostname for the SaaS model)."""
+    """The address a tracking domain's DNS record should point at.
+
+    The page shows this as the A-record alternative to a CNAME so an operator
+    never has to look the host's public IP up by hand."""
     return {"server_ip": server_public_ip()}
 
 
 @router.get("/dns-status")
 async def dns_status(domain: str, db: Session = Depends(get_db)):
     """Pre-SSL DNS check: does the domain resolve, and does it point at this
-    server? Let's Encrypt's HTTP-01 challenge can only succeed once the domain
-    routes to this box — same reason RedTrack/Keitaro ask for a CNAME/A record
-    FIRST. Only domains already in our table may be looked up (no open resolver)."""
+    server? The certificate challenge is fetched over plain HTTP at the domain,
+    so it can only succeed once the domain routes here. Only domains already in
+    our table may be looked up (no open resolver)."""
     row = db.query(DomainORM).filter(DomainORM.domain == domain).first()
     if not row:
         raise HTTPException(status_code=404, detail="Domain not in the domain list")

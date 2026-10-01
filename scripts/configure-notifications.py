@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """One-shot notification setup:
-1. reads the chat id from the Telegram bot (getUpdates)
-2. saves Telegram + Brevo email settings
+1. reads your chat id from the deployment's Telegram bot (getUpdates)
+2. saves the tenant notification settings (chat id + report recipients)
 3. sends a Telegram test message and a test daily report email
 Run from the repo root:  python3 scripts/configure-notifications.py
 
-Credentials come from environment variables — no secrets are stored in the repo:
+The relay and bot credentials come from the environment (see .env.example):
   TELEGRAM_BOT_TOKEN   from @BotFather
-  BREVO_SMTP_LOGIN / BREVO_SMTP_KEY   from Brevo → SMTP & API
-  BREVO_API_KEY        from Brevo → SMTP & API → API keys (recommended; not IP-restricted)
+  SMTP_HOST / SMTP_PORT / SMTP_LOGIN / SMTP_PASSWORD, or EMAIL_API_KEY
   REPORT_FROM_EMAIL / REPORT_RECIPIENTS
 """
 import json
@@ -18,12 +17,7 @@ import urllib.error
 
 BASE = "http://localhost/backend"
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-SMTP = {
-    "smtp_host": os.environ.get("BREVO_SMTP_HOST", "smtp-relay.brevo.com"),
-    "smtp_port": 587,
-    "smtp_login": os.environ.get("BREVO_SMTP_LOGIN", ""),
-    "smtp_password": os.environ.get("BREVO_SMTP_KEY", ""),
-    "api_key": os.environ.get("BREVO_API_KEY", ""),
+TENANT_EMAIL = {
     "from_name": "AAA Tracker",
     "from_email": os.environ.get("REPORT_FROM_EMAIL", ""),
     "recipients": os.environ.get("REPORT_RECIPIENTS", ""),
@@ -44,7 +38,7 @@ def http(method, url, data=None, headers=None):
 
 def main():
     if not BOT_TOKEN:
-        print("ERROR: set TELEGRAM_BOT_TOKEN (and the Brevo variables) first — see the docstring.")
+        print("ERROR: set TELEGRAM_BOT_TOKEN first — see the docstring.")
         return
 
     # 1. chat id from the bot's updates
@@ -78,11 +72,11 @@ def main():
         "settings": {
             "domain": "localhost", "currency": "USD", "timezone": "UTC",
             "telegram": {
-                "enabled": True, "bot_token": BOT_TOKEN, "chat_id": chat_id,
+                "enabled": True, "chat_id": chat_id,
                 "statuses": {"lead": True, "sale": True, "upsale": True,
                              "rejected": True, "hold": True, "trash": True},
             },
-            "email_reports": dict(SMTP, enabled=True),
+            "email_reports": dict(TENANT_EMAIL, enabled=True),
         },
         "subIdMapping": [],
     }

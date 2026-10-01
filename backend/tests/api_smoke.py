@@ -4301,19 +4301,30 @@ print("ESCAPED-OK")
     print("== Ops polish: settings backup ==")
     r = s.get(f"{api}/settings/")
     op_settings_backup = (r.json().get("settings") or {}) if r.status_code == 200 else {}
+    op_deployment = (r.json() or {}).get("deployment") or {}
     op_tg_backup = op_settings_backup.get("telegram") or {}
     op_cur_backup = op_settings_backup.get("currency")
+    check("ops-backup: settings report deployment readiness, not credentials",
+          set(op_deployment.keys()) == {"email_configured", "telegram_bot_configured",
+                                        "telegram_bot_url"}
+          and isinstance(op_deployment.get("email_configured"), bool),
+          str(op_deployment)[:150])
     r = s.post(f"{api}/settings/", json={"settings": {"telegram": {
         "bot_token": f"smoke-tok-{op_pid}", "chat_id": f"smoke-chat-{op_pid}"}}})
-    check("ops-backup: token seeded", r.status_code == 200, r.text[:150])
+    check("ops-backup: telegram chat seeded", r.status_code == 200, r.text[:150])
+    r = s.get(f"{api}/settings/")
+    dep_tg = ((r.json().get("settings") or {}).get("telegram") or {}) if r.status_code == 200 else {}
+    check("ops-backup: a deployment-owned bot token is never returned to a reader",
+          "bot_token" not in dep_tg and dep_tg.get("chat_id") == f"smoke-chat-{op_pid}",
+          str(dep_tg)[:150])
     r = s.get(f"{api}/settings/export")
     check("ops-backup: export downloads a JSON document",
           r.status_code == 200
           and "attachment" in r.headers.get("Content-Disposition", "")
           and isinstance(r.json().get("data"), dict), r.text[:200])
     exp_tg = ((r.json().get("data") or {}).get("settings") or {}).get("telegram") or {}
-    check("ops-backup: export nulls secrets but keeps the keys",
-          "bot_token" in exp_tg and exp_tg.get("bot_token") is None, str(exp_tg)[:150])
+    check("ops-backup: export carries no deployment-owned bot token",
+          "bot_token" not in exp_tg, str(exp_tg)[:150])
     check("ops-backup: export keeps non-secret values",
           exp_tg.get("chat_id") == f"smoke-chat-{op_pid}", str(exp_tg)[:150])
     r = s.post(f"{api}/settings/import", json={
@@ -4323,20 +4334,19 @@ print("ESCAPED-OK")
     imp_settings = (r.json().get("settings") or {}) if r.status_code == 200 else {}
     check("ops-backup: import applied the change",
           imp_settings.get("currency") == "EUR", str(imp_settings.get("currency"))[:60])
-    check("ops-backup: import kept the live secret for nulled keys",
-          (imp_settings.get("telegram") or {}).get("bot_token") == f"smoke-tok-{op_pid}",
-          str((imp_settings.get("telegram") or {}).get("bot_token"))[:80])
+    op_stored = pg_exec_out(
+        "SELECT value FROM settings WHERE name = 'settings' AND tenant_id = 1")
+    check("ops-backup: import kept the live deployment key (null means redacted)",
+          f"smoke-tok-{op_pid}" in op_stored, op_stored[:150])
     r = s.post(f"{api}/settings/import", json="not-a-settings-document")
     check("ops-backup: import rejects garbage (400)", r.status_code == 400, str(r.status_code))
     r = s.post(f"{api}/settings/", json={
         "settings": {"currency": op_cur_backup, "telegram": op_tg_backup}})
     check("ops-backup: original settings restored", r.status_code == 200, r.text[:150])
-    if "chat_id" not in op_tg_backup:
-        s.post(f"{api}/settings/", json={"settings": {"telegram": {"chat_id": None}}})
-    r = s.get(f"{api}/settings/")
-    check("ops-backup: live secret back to original after restore",
-          ((r.json().get("settings") or {}).get("telegram") or {}).get("bot_token")
-          == op_tg_backup.get("bot_token"), r.text[:150])
+    # A deployment-owned key cannot be blanked through a settings save, so clear
+    # the seeded token directly for a clean store.
+    pg_exec("UPDATE settings SET value = (value::jsonb #- '{telegram,bot_token}')::text "
+            "WHERE name = 'settings' AND tenant_id = 1")
 
     print("== Ops polish: conversion URL filter ==")
     r = s.post(f"{api}/offers/", json={
@@ -7696,16 +7706,20 @@ print("ESCAPED-OK")
               and st.get("matched") == 4 and st.get("unmatched") == 1
               and "last_error" in st, str(st)[:250])
 
-        # -- token masked for a settings-reading non-admin, nulled on export --
+        # -- the token and Graph endpoint are deployment-owned: no reader sees them --
         r = s.get(f"{api}/settings/")
-        admin_token = ((r.json().get("settings") or {}).get("meta_ads") or {}).get("access_token")
-        check("meta-ads: admin sees the real token", admin_token == meta_token,
-              str(admin_token)[:40])
+        ma_block = ((r.json().get("settings") or {}).get("meta_ads") or {})
+        check("meta-ads: settings never return the token or Graph endpoint",
+              "access_token" not in ma_block and "api_version" not in ma_block
+              and "graph_base_url" not in ma_block
+              and ma_block.get("ad_account_ids") == [meta_acct],
+              str(ma_block)[:200])
         r = s.get(f"{api}/settings/export")
-        export_token = (((r.json().get("data") or {}).get("settings") or {})
-                        .get("meta_ads") or {}).get("access_token")
-        check("meta-ads: settings export nulls the token", export_token is None,
-              str(export_token)[:40])
+        export_ma = (((r.json().get("data") or {}).get("settings") or {})
+                     .get("meta_ads") or {})
+        check("meta-ads: settings export carries no token or Graph endpoint",
+              "access_token" not in export_ma and "api_version" not in export_ma
+              and "graph_base_url" not in export_ma, str(export_ma)[:150])
 
         meta_user = f"smoke-meta-user-{meta_pid}"
         r = s.post(f"{api}/users/", json={
@@ -7716,10 +7730,8 @@ print("ESCAPED-OK")
         meta_user_sess.verify = not INSECURE
         meta_user_sess.post(f"{api}/login", json={"username": meta_user, "password": "smokepass1"})
         r = meta_user_sess.get(f"{api}/settings/")
-        masked = ((r.json().get("settings") or {}).get("meta_ads") or {}).get("access_token")
-        check("meta-ads: non-admin GET masks the token",
-              meta_token not in r.text and bool(masked) and "\u2022" in masked,
-              str(masked)[:40])
+        check("meta-ads: non-admin GET leaks no token either",
+              meta_token not in r.text, r.text[:150])
 
         # -- served pages carry the new UI markers --
         rp = s.get(f"{BASE}/backend/settings")
@@ -10524,6 +10536,14 @@ print("ESCAPED-OK")
           "settings page marker missing")
     check("settings page: no unreplaced jinja tags",
           "{%" not in rp.text, "unreplaced jinja tag")
+    check("settings page: no deployment-owned credential fields",
+          not any(m in rp.text for m in (
+              'settings.telegram.bot_token',
+              'settings.email_reports.smtp_password',
+              'settings.email_reports.smtp_host',
+              'settings.meta_ads.access_token',
+              'settings.meta_ads.graph_base_url')),
+          "a deployment-owned field is still rendered")
 
     r = s.get(f"{api}/settings/")
     check("settings: document + rev returned",

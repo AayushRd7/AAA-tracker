@@ -1,4 +1,4 @@
-"""G76 — AI auto-optimizer (Voluum/RedTrack-style flow reweighting).
+"""G76 — AI auto-optimizer (performance-driven flow reweighting).
 
 For campaigns in 'weight' distribution mode the optimizer periodically
 re-balances flow weights from real performance over a lookback window:

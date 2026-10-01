@@ -2309,7 +2309,10 @@ def notify_telegram_conversion(click_id: str, status: str, payout: float, row: d
         statuses = cfg.get("statuses") or {}
         if statuses and not statuses.get(status, False):
             return
-        token = (cfg.get("bot_token") or "").strip()
+        # The bot token is the deployment's (TELEGRAM_BOT_TOKEN); the chat is
+        # this workspace's saved setting.
+        token = ((os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+                 or (cfg.get("bot_token") or "").strip())
         chat_id = (cfg.get("chat_id") or "").strip()
         if not token or not chat_id:
             return

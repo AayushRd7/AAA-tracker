@@ -224,16 +224,6 @@
                                         outlined dense
                                 ></v-select>
                             </v-col>
-                            <v-col cols="12" md="4">
-                                <v-text-field
-                                        label="API version"
-                                        v-model="settings.meta_capi.api_version"
-                                        :disabled="!settings.meta_capi.enabled"
-                                        outlined dense
-                                        hint="e.g. v21.0"
-                                        persistent-hint
-                                ></v-text-field>
-                            </v-col>
                         </v-row>
 
                         <div class="caption grey--text mt-2 mb-1">Send these conversion statuses</div>
@@ -249,14 +239,6 @@
                                 ></v-checkbox>
                             </v-col>
                         </v-row>
-
-                        <v-text-field
-                                label="Graph base URL (test only)"
-                                v-model="settings.meta_capi.graph_base_url"
-                                outlined dense class="mt-3"
-                                hint="Leave empty for https://graph.facebook.com. Point at a mock receiver when testing."
-                                persistent-hint
-                        ></v-text-field>
 
                         <div class="d-flex align-center mt-3">
                             <v-btn small outlined color="primary" :loading="metaTesting" @click="testMetaCapi">
@@ -417,8 +399,6 @@
                         access_token: '',
                         test_event_code: '',
                         default_currency: 'USD',
-                        api_version: 'v21.0',
-                        graph_base_url: '',
                         dry_run: true,
                         status_events: {sale: 'Purchase', lead: 'Lead', upsale: 'Subscribe'},
                         send_statuses: ['lead', 'sale', 'upsale'],
@@ -557,7 +537,7 @@
                         const mcDefaults = {
                             enabled: false, dataset_id: '', access_token: '',
                             test_event_code: '', default_currency: 'USD',
-                            api_version: 'v21.0', graph_base_url: '', dry_run: true,
+                            dry_run: true,
                             status_events: {sale: 'Purchase', lead: 'Lead', upsale: 'Subscribe'},
                             send_statuses: ['lead', 'sale', 'upsale'],
                             include_customer_match: true, pixel_overrides: {},

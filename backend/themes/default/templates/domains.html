@@ -18,11 +18,20 @@
             </v-col>
         </v-row>
 
-        <v-alert type="info" text dense class="mb-4" v-if="serverIp">
-            <strong>Before SSL can be issued, the domain must point at this server.</strong>
-            Create a DNS record for your tracking domain — an <code>A</code> record to
-            <code>{{ serverIp }}</code> (self-hosted), or a <code>CNAME</code> to your tracker host
-            (SaaS) — wait for propagation, then use "Check DNS" and "Update SSL".
+        <v-alert type="info" text dense class="mb-4">
+            <strong>Your tracking domain is the address the tracker answers on —
+            clicks, landing pages and postbacks.</strong>
+            Add it here first, then point it at us in your DNS provider: a
+            <code>CNAME</code> for the tracking domain (for example
+            <code>track.yoursite.com</code>) to your tracker host<span v-if="serverIp">,
+            or an <code>A</code> record to <code>{{ serverIp }}</code></span>. Once it
+            resolves here, press the DNS button on the row to confirm, then
+            <em>Update SSL</em> to issue its certificate automatically.
+            <br>
+            Your own website is not affected — it keeps running on its own domain and
+            nothing is moved or copied. The tracker only takes over the tracking
+            address you choose; visitors who land on your real site are served by your
+            own server as before.
         </v-alert>
 
 

@@ -1,18 +1,19 @@
-"""Scheduled daily email reports (Brevo/any SMTP) + test send.
+"""Scheduled daily email reports + test send.
 
-Configuration lives in the `settings` row under the `email_reports` key:
+Tenant-owned configuration lives in the `settings` row under the
+`email_reports` key:
 {
     "enabled": bool,
-    "smtp_host": "smtp-relay.brevo.com",
-    "smtp_port": 587,
-    "smtp_login": "...",
-    "smtp_password": "...",
     "from_name": "AAA Tracker",
     "from_email": "...",
     "recipients": "a@x.com, b@y.com",
     "hour": 9,               # UTC hour to send the daily report
     "last_sent": "2026-09-24"  # written back after each send
 }
+
+The relay that actually delivers the mail (SMTP host/port/login/password, or an
+API key) belongs to the deployment and is read from the environment — see
+``env_config``. It is never asked for in the product UI.
 """
 import asyncio
 import html
@@ -26,6 +27,7 @@ from email.utils import formataddr
 from db import SessionLocal
 from tenant_context import current_tenant
 from tenant_settings import for_each_tenant, tenant_feature
+from env_config import email_configured, resolve_email_config
 from sqlalchemy import text
 from models.settings import SettingsORM
 from models.campaigns import CampaignORM
@@ -230,10 +232,13 @@ def build_daily_report_html(ch, db, day: datetime) -> str:
 
 
 def send_email(cfg: dict, subject: str, html: str, recipients) -> None:
+    # The relay credentials come from the deployment's environment; anything
+    # stored in settings is only a fallback for an older installation.
+    cfg = resolve_email_config(cfg)
     sender_email = cfg.get("from_email") or cfg.get("smtp_login")
     sender_name = cfg.get("from_name") or "AAA Tracker"
 
-    # Brevo API path (preferred when an api_key is set — not subject to SMTP IP restrictions)
+    # HTTP API path (preferred when a key is set — not subject to SMTP IP restrictions)
     api_key = (cfg.get("api_key") or "").strip()
     if api_key:
         import httpx
@@ -425,9 +430,8 @@ def send_scheduled_report(ch, email_cfg: dict, schedule: dict) -> tuple:
     recipients = [r.strip() for r in (schedule.get("recipients") or "").split(",") if r.strip()]
     if not recipients:
         return False, "No recipients configured for this schedule"
-    if not (email_cfg.get("api_key") or "").strip() and not all(
-            (email_cfg.get(f) or "").strip() for f in ("smtp_host", "smtp_login", "smtp_password")):
-        return False, "Email is not configured — set a Brevo API key or SMTP credentials in Settings first"
+    if not email_configured(email_cfg):
+        return False, "Email delivery is not configured for this deployment"
 
     db = SessionLocal()
     try:

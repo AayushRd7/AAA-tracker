@@ -59,11 +59,12 @@
                         <section class="doc-section" id="getting-started" data-doc-id="getting-started">
                             <h2 class="doc-h2">Getting started</h2>
                             <p>
-                                AAA Tracker is a self-hosted tracking and analytics platform built for affiliate
-                                marketers who want full control: your data lives on your server, every click is
-                                accounted for, and nothing is metered, tiered or shared with a third party.
-                                Connect a traffic source, bind your offers, and watch campaigns route, convert
-                                and report in real time.
+                                AAA Tracker is a tracking and analytics platform built for affiliate and
+                                performance marketers who want to move fast and keep every number honest:
+                                every click is accounted for, your data is yours alone, and nothing is
+                                metered per event or shared with a third party. Connect a traffic source,
+                                bind your offers, and watch campaigns route, convert and report in real
+                                time.
                             </p>
 
                             <h3 class="doc-h3">Why AAA Tracker</h3>
@@ -626,7 +627,7 @@
                             </p>
                             <ul class="doc-list">
                                 <li><b>Saved reports</b> — persist dimensions, columns, custom metrics, date basis and filters; reload from the saved dropdown.</li>
-                                <li><b>Scheduled emails</b> — email a saved report snapshot daily at a chosen UTC hour to a recipient list (SMTP or Brevo; configured in Settings).</li>
+                                <li><b>Scheduled emails</b> — email a saved report snapshot daily at a chosen UTC hour to a recipient list (delivery is set up for the deployment; recipients and send hour in Settings).</li>
                                 <li><b>Public share links</b> — a read-only, login-free copy of a saved report; revocable at any time.</li>
                             </ul>
 
@@ -928,9 +929,9 @@
                             <h3 class="doc-h3">General</h3>
                             <p>Dark mode, tracker domain, default currency and timezone — the global defaults for new data and display.</p>
                             <h3 class="doc-h3">Telegram notifications</h3>
-                            <p>Bot token (from @BotFather), chat ID and per-status toggles — receive a message for every conversion (or only chosen statuses); includes a "send test message" button.</p>
-                            <h3 class="doc-h3">Email reports / SMTP</h3>
-                            <p>Daily report scheduling: SMTP host/port/login/password or a Brevo API key, "from" name/address, recipients and the UTC send hour. Powers the report email schedules created on the Reports page; includes a test send.</p>
+                            <p>Chat ID and per-status toggles — receive a message for every conversion (or only chosen statuses). The bot itself is part of this deployment, so there is nothing to create: the card links straight to the bot to start the chat, and includes a "send test message" button.</p>
+                            <h3 class="doc-h3">Email reports</h3>
+                            <p>Daily report scheduling: "from" name/address, recipients and the UTC send hour. The mail service that delivers them is part of this deployment, so no relay details are entered here. Powers the report email schedules created on the Reports page; includes a test send.</p>
                             <h3 class="doc-h3">Postback security</h3>
                             <p>Optionally require a <b>secret key</b> (query param) and/or an <b>IP allowlist</b> for inbound <code>/pb</code> postbacks — denied postbacks return 403.</p>
                             <h3 class="doc-h3">Data retention</h3>
@@ -1020,7 +1021,7 @@
                                 <tr><td>Optimizer</td><td>periodic</td><td>For campaigns with the optimizer on, recomputes flow weights from the chosen metric over the lookback window, respecting min clicks, max shift %, the exploration boost and the weight floor.</td></tr>
                                 <tr><td>Anomaly insights</td><td>with the auto-rules pass</td><td>Runs the six insight detectors over all active campaigns, caches the findings block and fires one Telegram alert per run when new critical anomalies appear.</td></tr>
                                 <tr><td>Retention prune</td><td>daily</td><td>Deletes raw clicks older than the configured retention window (Settings → Data retention).</td></tr>
-                                <tr><td>Email reports</td><td>periodic</td><td>Sends the daily summary email and due saved-report schedules (recipients + UTC hour from the schedule, SMTP/Brevo from Settings).</td></tr>
+                                <tr><td>Email reports</td><td>periodic</td><td>Sends the daily summary email and due saved-report schedules (recipients + UTC hour from the schedule; the mail service is set up for the deployment).</td></tr>
                                 </tbody>
                             </table>
                         </section>

@@ -245,6 +245,10 @@
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-telegram</v-icon>
                             Telegram notifications
+                            <v-spacer></v-spacer>
+                            <v-chip x-small :color="settings.telegram.enabled ? 'green' : 'grey'" dark>
+                                {{ settings.telegram.enabled ? 'enabled' : 'disabled' }}
+                            </v-chip>
                         </v-card-title>
                         <v-card-text>
                             <v-switch
@@ -255,23 +259,33 @@
                                     hide-details
                             ></v-switch>
 
-                            <v-text-field
-                                    label="Bot token"
-                                    v-model="settings.telegram.bot_token"
-                                    outlined
-                                    dense
-                                    hint="Create a bot with @BotFather → /newbot → copy its token (looks like 123456789:AAExampleTokenFormat)"
-                                    persistent-hint
-                            ></v-text-field>
+                            <v-alert v-if="!deployment.telegram_bot_configured"
+                                     type="warning" text dense class="mt-3 mb-0">
+                                Telegram is not set up for this deployment yet, so these
+                                notifications stay off. There is nothing to fill in here.
+                            </v-alert>
+                            <template v-else>
+                                <div class="caption grey--text mt-3 mb-1">
+                                    Step 1 — open the bot and press Start
+                                </div>
+                                <v-btn v-if="deployment.telegram_bot_url" small outlined color="primary"
+                                       :href="deployment.telegram_bot_url" target="_blank" rel="noopener"
+                                       class="mb-3">
+                                    <v-icon small class="mr-1">mdi-open-in-new</v-icon>Open Telegram bot
+                                </v-btn>
 
-                            <v-text-field
-                                    label="Chat ID"
-                                    v-model="settings.telegram.chat_id"
-                                    outlined
-                                    dense
-                                    hint="Message your bot once, then open api.telegram.org/bot<TOKEN>/getUpdates in a browser and copy chat.id (groups use a negative id)"
-                                    persistent-hint
-                            ></v-text-field>
+                                <div class="caption grey--text mb-1">
+                                    Step 2 — paste the chat you want alerts in
+                                </div>
+                                <v-text-field
+                                        label="Chat ID"
+                                        v-model="settings.telegram.chat_id"
+                                        outlined
+                                        dense
+                                        hint="Send the bot any message, then forward it to @userinfobot to see your numeric chat ID (group chats use a negative id)"
+                                        persistent-hint
+                                ></v-text-field>
+                            </template>
 
                             <div class="caption grey--text mt-2 mb-1">Notify for statuses</div>
                             <v-row dense no-gutters>
@@ -287,7 +301,8 @@
                             </v-row>
 
                             <div class="d-flex align-center mt-3">
-                                <v-btn small outlined color="primary" :loading="tgTesting" @click="testTelegram">
+                                <v-btn small outlined color="primary" :loading="tgTesting"
+                                       :disabled="!deployment.telegram_bot_configured" @click="testTelegram">
                                     <v-icon small class="mr-1">mdi-send-outline</v-icon>Send test message
                                 </v-btn>
                                 <div class="caption grey--text ml-2">Saves settings first, then sends a test to your chat</div>
@@ -301,6 +316,10 @@
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-email-outline</v-icon>
                             Daily email reports
+                            <v-spacer></v-spacer>
+                            <v-chip x-small :color="settings.email_reports.enabled ? 'green' : 'grey'" dark>
+                                {{ settings.email_reports.enabled ? 'enabled' : 'disabled' }}
+                            </v-chip>
                         </v-card-title>
                         <v-card-text>
                             <v-switch
@@ -311,48 +330,14 @@
                                     hide-details
                             ></v-switch>
 
-                            <v-row dense>
-                                <v-col cols="8">
-                                    <v-text-field
-                                            label="SMTP host"
-                                            v-model="settings.email_reports.smtp_host"
-                                            outlined
-                                            dense
-                                            hint="e.g. smtp-relay.brevo.com (Brevo) or smtp.gmail.com (Gmail)"
-                                            persistent-hint
-                                    ></v-text-field>
-                                </v-col>
-                                <v-col cols="4">
-                                    <v-text-field
-                                            label="Port"
-                                            v-model="settings.email_reports.smtp_port"
-                                            type="number"
-                                            outlined
-                                            dense
-                                            hint="587 (STARTTLS)"
-                                            persistent-hint
-                                    ></v-text-field>
-                                </v-col>
-                            </v-row>
-
-                            <v-text-field
-                                    label="SMTP login"
-                                    v-model="settings.email_reports.smtp_login"
-                                    outlined
-                                    dense
-                            ></v-text-field>
-
-                            <v-text-field
-                                    label="SMTP password"
-                                    v-model="settings.email_reports.smtp_password"
-                                    :append-icon="showSmtpPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
-                                    :type="showSmtpPassword ? 'text' : 'password'"
-                                    @click:append="showSmtpPassword = !showSmtpPassword"
-                                    outlined
-                                    dense
-                                    hint="Brevo SMTP key, Gmail App Password, or SendGrid API key"
-                                    persistent-hint
-                            ></v-text-field>
+                            <v-alert v-if="!deployment.email_configured"
+                                     type="warning" text dense class="mt-3 mb-0">
+                                Email delivery is not set up for this deployment yet, so reports
+                                cannot be sent. There is nothing to fill in here.
+                            </v-alert>
+                            <div v-else class="caption grey--text mt-3 mb-2">
+                                Delivered by this deployment's mail service — nothing to set up here.
+                            </div>
 
                             <v-row dense>
                                 <v-col cols="6">
@@ -372,18 +357,6 @@
                                     ></v-text-field>
                                 </v-col>
                             </v-row>
-
-                            <v-text-field
-                                    label="Brevo API key (optional)"
-                                    v-model="settings.email_reports.api_key"
-                                    :append-icon="showBrevoApiKey ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
-                                    :type="showBrevoApiKey ? 'text' : 'password'"
-                                    @click:append="showBrevoApiKey = !showBrevoApiKey"
-                                    outlined
-                                    dense
-                                    hint="Optional — paste your Brevo API key (xkeysib-…) to send via the API instead of SMTP. The API has no IP restriction, so it works even when the relay returns 'Unauthorized IP address'"
-                                    persistent-hint
-                            ></v-text-field>
 
                             <v-text-field
                                     label="Recipients"
@@ -406,7 +379,8 @@
                             ></v-text-field>
 
                             <div class="d-flex align-center mt-2">
-                                <v-btn small outlined color="primary" :loading="emailTesting" @click="testEmailReport">
+                                <v-btn small outlined color="primary" :loading="emailTesting"
+                                       :disabled="!deployment.email_configured" @click="testEmailReport">
                                     <v-icon small class="mr-1">mdi-send-outline</v-icon>Send test report now
                                 </v-btn>
                                 <div class="caption grey--text ml-2">Saves settings first, then emails yesterday's report</div>
@@ -853,61 +827,39 @@
                         </v-card-title>
                         <v-card-text>
                             <div class="caption grey--text mb-2">
-                                Pulls daily spend/impressions/clicks from Meta for the configured ad
-                                accounts and writes each matched campaign-day's spend into the tracker
-                                cost (per-click). Runs off the redirect/postback path on a schedule, or
-                                on demand with Sync now.
+                                Keeps your campaign costs in step with Meta automatically. Connect
+                                Meta and pick your ad accounts under <b>Integrations</b>, then switch
+                                the sync on here — the tracker pulls each day's spend and folds it
+                                into the matching campaign, so reports and ROI line up without any
+                                manual entry. It runs on a schedule, off the tracking path, or on
+                                demand with Sync now.
                             </div>
                             <v-switch
                                     v-model="settings.meta_ads.enabled"
-                                    label="Enable Meta Ads cost sync"
+                                    label="Keep my Meta costs up to date"
                                     inset dense hide-details
                             ></v-switch>
                             <v-switch
                                     v-model="settings.meta_ads.dry_run"
-                                    label="Dry-run (build + log the request and matching, write nothing)"
+                                    label="Test mode — work out the numbers and log them, but don't change any costs yet"
                                     inset dense hide-details
                                     :disabled="!settings.meta_ads.enabled"
                             ></v-switch>
 
+                            <v-alert v-if="!metaAdsSavedAccounts.length"
+                                     type="info" text dense class="mt-3 mb-0">
+                                No ad accounts chosen yet. Connect Meta under Integrations and pick
+                                the accounts to sync.
+                                <a href="/backend/integrations" class="ml-1">Open Integrations</a>
+                            </v-alert>
+                            <div v-else class="caption grey--text mt-3" id="meta-ads-accounts-summary">
+                                <strong>Ad accounts:</strong> {{ metaAdsSavedAccounts.join(', ') }}
+                            </div>
+
                             <v-row dense class="mt-3">
-                                <v-col cols="12" md="6">
-                                    <!-- Accounts are chosen ONCE, under Integrations → Meta;
-                                         this is a read-only reflection of the saved list. -->
-                                    <div v-if="metaAdsSavedAccounts.length"
-                                         class="caption grey--text mt-2"
-                                         id="meta-ads-accounts-summary">
-                                        <strong>Ad accounts:</strong>
-                                        {{ metaAdsSavedAccounts.join(', ') }}
-                                        (chosen under Integrations → Meta)
-                                    </div>
-                                </v-col>
-                                <v-col cols="12" md="6">
-                                    <v-text-field
-                                            label="Access token"
-                                            v-model="settings.meta_ads.access_token"
-                                            :disabled="!settings.meta_ads.enabled"
-                                            :append-icon="showMetaAdsToken ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
-                                            :type="showMetaAdsToken ? 'text' : 'password'"
-                                            @click:append="showMetaAdsToken = !showMetaAdsToken"
-                                            outlined dense
-                                            hint="Stored as a secret (masked for non-admins, nulled on export)."
-                                            persistent-hint
-                                    ></v-text-field>
-                                </v-col>
-                                <v-col cols="12" md="4">
-                                    <v-text-field
-                                            label="API version"
-                                            v-model="settings.meta_ads.api_version"
-                                            :disabled="!settings.meta_ads.enabled"
-                                            outlined dense
-                                            hint="e.g. v21.0"
-                                            persistent-hint
-                                    ></v-text-field>
-                                </v-col>
                                 <v-col cols="12" md="4">
                                     <v-select
-                                            label="Cadence"
+                                            label="How often"
                                             :items="metaAdsCadences"
                                             v-model="settings.meta_ads.cadence"
                                             :disabled="!settings.meta_ads.enabled"
@@ -916,35 +868,25 @@
                                 </v-col>
                                 <v-col cols="12" md="4">
                                     <v-text-field
-                                            label="Backfill days"
+                                            label="Days to look back"
                                             v-model="settings.meta_ads.backfill_days"
                                             type="number"
                                             :disabled="!settings.meta_ads.enabled"
                                             outlined dense
-                                            hint="Window re-synced each run (0 = yesterday preset)"
+                                            hint="Re-checked on each run (0 = yesterday only)"
                                             persistent-hint
                                     ></v-text-field>
                                 </v-col>
-                                <v-col cols="12" md="6">
+                                <v-col cols="12" md="4">
                                     <v-select
-                                            label="Campaign matching"
+                                            label="Match campaigns by"
                                             :items="metaAdsMatchPreferences"
                                             v-model="settings.meta_ads.match_preference"
                                             :disabled="!settings.meta_ads.enabled"
                                             outlined dense
-                                            hint="How platform campaigns are matched to tracker campaigns"
+                                            hint="How Meta campaigns are matched to yours"
                                             persistent-hint
                                     ></v-select>
-                                </v-col>
-                                <v-col cols="12" md="6">
-                                    <v-text-field
-                                            label="Graph base URL (test only)"
-                                            v-model="settings.meta_ads.graph_base_url"
-                                            :disabled="!settings.meta_ads.enabled"
-                                            outlined dense
-                                            hint="Leave empty for https://graph.facebook.com"
-                                            persistent-hint
-                                    ></v-text-field>
                                 </v-col>
                             </v-row>
 
@@ -1055,7 +997,6 @@
                     enableLogging: false,
                     telegram: {
                         enabled: false,
-                        bot_token: '',
                         chat_id: '',
                         statuses: {
                             lead: true, sale: true, upsale: true,
@@ -1064,11 +1005,6 @@
                     },
                     email_reports: {
                         enabled: false,
-                        smtp_host: '',
-                        smtp_port: 587,
-                        smtp_login: '',
-                        smtp_password: '',
-                        api_key: '',
                         from_name: 'AAA Tracker',
                         from_email: '',
                         recipients: '',
@@ -1100,15 +1036,14 @@
                     },
                     // Meta Ads cost auto-sync (Meta only): pulls daily spend and
                     // allocates it into clicks_data.cost for matched campaigns.
+                    // The token and Graph endpoint are the deployment's; accounts
+                    // are chosen under Integrations.
                     meta_ads: {
                         enabled: false,
                         ad_account_ids: [],
-                        access_token: '',
-                        api_version: 'v21.0',
                         dry_run: true,
                         cadence: 'hourly',
                         backfill_days: 7,
-                        graph_base_url: '',
                         match_preference: 'auto',
                     },
                     // Copilot: AI summary / Q&A over the account's own aggregates.
@@ -1157,21 +1092,27 @@
                 rowColumnSuggestions: ['clicks', 'conversions', 'leads', 'revenue',
                     'payout', 'profit', 'roi', 'cr', 'epc', 'cost', 'postback_count',
                     'attempts', 'http_status', 'updated_rows', 'flow_index', 'is_bot'],
+                // What the deployment has configured (readiness only — never a
+                // credential or endpoint); drives the status lines on the cards.
+                deployment: {
+                    email_configured: false,
+                    telegram_bot_configured: false,
+                    telegram_bot_url: '',
+                },
                 // Meta Ads cost sync card state
                 metaAdsStatus: null,
                 metaAdsSyncing: false,
                 metaAdsResult: '',
-                showMetaAdsToken: false,
                 showCopilotKey: false,
                 metaAdsCadences: [
                     {text: 'Hourly', value: 'hourly'},
                     {text: 'Daily', value: 'daily'},
                 ],
                 metaAdsMatchPreferences: [
-                    {text: 'Auto (id, then name, then tracking id)', value: 'auto'},
-                    {text: 'Ad-platform campaign id only', value: 'ad_platform_campaign_id'},
-                    {text: 'Campaign name only', value: 'name'},
-                    {text: 'Tracking id (utm_campaign / sub_id)', value: 'tracking_id'},
+                    {text: 'Auto — best match (recommended)', value: 'auto'},
+                    {text: 'Meta campaign ID', value: 'ad_platform_campaign_id'},
+                    {text: 'Campaign name', value: 'name'},
+                    {text: 'Tracking ID (UTM / sub-id)', value: 'tracking_id'},
                 ],
                 subIdMapping: [
                 ],
@@ -1180,8 +1121,6 @@
                 telegramStatusList: ['lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'],
                 tgTesting: false,
                 emailTesting: false,
-                showSmtpPassword: false,
-                showBrevoApiKey: false,
                 showPbSecret: false,
                 darkMode: false,
                 auditEntries: [],
@@ -1339,7 +1278,6 @@
                         // merge so freshly saved keys never lose their defaults
                         const tgDefaults = {
                             enabled: false,
-                            bot_token: '',
                             chat_id: '',
                             statuses: {
                                 lead: true, sale: true, upsale: true,
@@ -1347,8 +1285,7 @@
                             },
                         };
                         const erDefaults = {
-                            enabled: false, smtp_host: '', smtp_port: 587,
-                            smtp_login: '', smtp_password: '', api_key: '',
+                            enabled: false,
                             from_name: 'AAA Tracker', from_email: '',
                             recipients: '', hour: 9,
                         };
@@ -1375,15 +1312,15 @@
                         this.settings.login_security = Object.assign(
                             {}, {ip_whitelist: ''}, this.settings.login_security || {});
                         const maDefaults = {
-                            enabled: false, ad_account_ids: [], access_token: '',
-                            api_version: 'v21.0', dry_run: true, cadence: 'hourly',
-                            backfill_days: 7, graph_base_url: '', match_preference: 'auto',
+                            enabled: false, ad_account_ids: [], dry_run: true,
+                            cadence: 'hourly', backfill_days: 7, match_preference: 'auto',
                         };
                         this.settings.meta_ads = Object.assign(
                             {}, maDefaults, this.settings.meta_ads || {});
                         if (!Array.isArray(this.settings.meta_ads.ad_account_ids)) {
                             this.settings.meta_ads.ad_account_ids = [];
                         }
+                        this.deployment = Object.assign({}, this.deployment, data.deployment || {});
                         this.settings.copilot = Object.assign({}, {
                             enabled: true, model: '',
                             max_tokens: 400, api_key: '',

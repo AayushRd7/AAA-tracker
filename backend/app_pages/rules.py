@@ -194,10 +194,13 @@ def perform_action(rule: dict, evaluation: dict) -> dict:
         try:
             from email_reports import send_email
             from app_pages.monitor import _load_main_settings
+            from env_config import email_configured
             cfg = (_load_main_settings().get("email_reports") or {})
             recipients = [r.strip() for r in (cfg.get("recipients") or "").split(",") if r.strip()]
             if not recipients:
                 return {"ok": False, "detail": "no email recipients configured"}
+            if not email_configured(cfg):
+                return {"ok": False, "detail": "email delivery is not configured for this deployment"}
             send_email(cfg, f"Auto rule fired: {rule.get('name')}",
                        f"<p>Rule <b>{rule.get('name')}</b> matched:</p>"
                        f"<p>{cond_desc}</p>", recipients)
