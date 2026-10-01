@@ -6265,6 +6265,17 @@ print("ESCAPED-OK")
           all(f"value: '{v}'" in rp.text for v in
               ("meta", "snapchat", "tiktok", "google", "pinterest", "applovin", "openai")),
           "a platform is missing from the hub")
+    # -- real, brand-coloured logos, vendored locally (no runtime CDN call) --
+    _capi_logos = ("meta.svg", "snapchat.svg", "tiktok.svg", "google.svg",
+                   "pinterest.svg", "applovin.png", "openai.png")
+    check("capi-pixels: the hub shows the real platform logos",
+          all(f"/backend/backend/img/capi/{f}" in rp.text for f in _capi_logos)
+          and "capi-platform-logo" in rp.text,
+          "a platform logo is missing from the hub")
+    check("capi-pixels: every platform logo is served",
+          all(s.get(f"{BASE}/backend/backend/img/capi/{f}").status_code == 200
+              for f in _capi_logos),
+          "a logo asset does not serve")
 
     # -- delete --
     r = s.delete(f"{api}/settings/capi-pixels/{pxc['id']}")

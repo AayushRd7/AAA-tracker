@@ -47,7 +47,10 @@
                         <v-card outlined class="capi-platform-tile pa-3"
                                 :class="{'capi-platform-tile--on': selectedPlatform === tile.value}">
                             <div class="d-flex align-center">
-                                <v-icon color="primary" class="mr-2">{{ tile.icon }}</v-icon>
+                                <span v-if="tile.logo" class="capi-platform-logo" :style="{background: tile.tint}">
+                                    <img :src="tile.logo" :alt="tile.text + ' logo'">
+                                </span>
+                                <v-icon v-else color="primary" class="mr-2">{{ tile.icon }}</v-icon>
                                 <div class="capi-platform-name">{{ tile.text }}</div>
                                 <v-spacer></v-spacer>
                                 <v-chip v-if="!tile.live" x-small label color="amber darken-2" dark>
@@ -83,7 +86,12 @@
                         <v-btn text small class="mr-1" @click="backToHub">
                             <v-icon small class="mr-1">mdi-arrow-left</v-icon>All platforms
                         </v-btn>
-                        <v-icon color="primary" class="mr-2">{{ capiPlatformIcon(selectedPlatform) }}</v-icon>
+                        <span v-if="capiPlatformLogo(selectedPlatform)" class="capi-platform-logo capi-platform-logo--sm"
+                              :style="{background: capiPlatformLogo(selectedPlatform).tint}">
+                            <img :src="capiPlatformLogo(selectedPlatform).src"
+                                 :alt="capiPlatformLabel(selectedPlatform) + ' logo'">
+                        </span>
+                        <v-icon v-else color="primary" class="mr-2">{{ capiPlatformIcon(selectedPlatform) }}</v-icon>
                         {{ capiPlatformLabel(selectedPlatform) }}
                         <v-spacer></v-spacer>
                         <v-btn small color="primary" elevation="0"
@@ -422,7 +430,19 @@
                 // Platform hub: which platform's panel is open, and the tile filter.
                 selectedPlatform: null,
                 capiSearch: '',
-                // Brand-free icons — the platform names carry the identity.
+                // Real, brand-coloured platform logos (vendored under
+                // themes/default/img/capi — no runtime CDN call). The tint is the
+                // brand colour at low alpha so light marks (Snapchat) stay legible.
+                capiPlatformLogos: {
+                    meta: {src: '/backend/backend/img/capi/meta.svg', tint: 'rgba(4,103,223,0.10)'},
+                    snapchat: {src: '/backend/backend/img/capi/snapchat.svg', tint: 'rgba(233,184,0,0.16)'},
+                    tiktok: {src: '/backend/backend/img/capi/tiktok.svg', tint: 'rgba(0,0,0,0.07)'},
+                    google: {src: '/backend/backend/img/capi/google.svg', tint: 'rgba(66,133,244,0.10)'},
+                    pinterest: {src: '/backend/backend/img/capi/pinterest.svg', tint: 'rgba(230,0,35,0.10)'},
+                    applovin: {src: '/backend/backend/img/capi/applovin.png', tint: 'rgba(0,0,0,0.07)'},
+                    openai: {src: '/backend/backend/img/capi/openai.png', tint: 'rgba(0,0,0,0.07)'},
+                },
+                // Fallback mark for a platform without a logo file.
                 capiPlatformIcons: {
                     meta: 'mdi-broadcast',
                     snapchat: 'mdi-ghost-outline',
@@ -506,12 +526,17 @@
                 const q = String(this.capiSearch || '').trim().toLowerCase();
                 return this.capiPlatforms
                     .filter(p => !q || (p.text || '').toLowerCase().includes(q))
-                    .map(p => ({
-                        value: p.value,
-                        text: p.text,
-                        icon: this.capiPlatformIcons[p.value] || 'mdi-broadcast',
-                        live: this.capiPlatformLive(p.value),
-                    }));
+                    .map(p => {
+                        const logo = this.capiPlatformLogos[p.value] || null;
+                        return {
+                            value: p.value,
+                            text: p.text,
+                            icon: this.capiPlatformIcons[p.value] || 'mdi-broadcast',
+                            logo: logo ? logo.src : '',
+                            tint: logo ? logo.tint : '',
+                            live: this.capiPlatformLive(p.value),
+                        };
+                    });
             },
             capiPixelsForPlatform() {
                 const want = this.selectedPlatform || 'meta';
@@ -608,6 +633,9 @@
             },
             capiPlatformIcon(value) {
                 return this.capiPlatformIcons[value || 'meta'] || 'mdi-broadcast';
+            },
+            capiPlatformLogo(value) {
+                return this.capiPlatformLogos[value] || null;
             },
             capiPlatformLive(value) {
                 return this.capiLivePlatforms.includes(value || 'meta');

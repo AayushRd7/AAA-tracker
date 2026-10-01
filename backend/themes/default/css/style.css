@@ -818,6 +818,35 @@ body::-webkit-scrollbar-thumb:hover {
 
 /* CAPI platform hub: one tile per destination platform (mirrors the
    manage-all / add-new flow). */
+.capi-platform-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  flex: none;
+  margin-right: 10px;
+}
+
+.capi-platform-logo img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
+}
+
+.capi-platform-logo--sm {
+  width: 30px;
+  height: 30px;
+  margin-right: 8px;
+}
+
+.capi-platform-logo--sm img {
+  width: 18px;
+  height: 18px;
+}
+
 .capi-platform-search {
   max-width: 260px;
 }
