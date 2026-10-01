@@ -171,6 +171,8 @@ services:
       - ./letsencrypt:/etc/letsencrypt
       - ./frontend/landings:/var/www/landings
       - ./nginx:/var/www/nginx
+      # Public marketing site (static files served at the root of the main domain)
+      - ./site:/var/www/site:ro
     depends_on:
       - frontend
       - backend

@@ -1,0 +1,22 @@
+# AAA Tracker — https://aaatracker.website
+User-agent: *
+Allow: /
+
+# The application itself is not public content.
+Disallow: /backend/
+
+# Tracking and routing endpoints must never be crawled.
+Disallow: /l/
+Disallow: /pb
+Disallow: /i/
+Disallow: /p/
+Disallow: /c/
+Disallow: /t/
+Disallow: /t.js
+Disallow: /optout
+Disallow: /click-api/
+Disallow: /simulate/
+Disallow: /meta-capi/
+Disallow: /__hide_referrer
+
+Sitemap: https://aaatracker.website/sitemap.xml

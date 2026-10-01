@@ -1,0 +1,14 @@
+{
+  "name": "AAA Tracker",
+  "short_name": "AAA Tracker",
+  "description": "Affiliate and performance marketing tracker: traffic routing, server-side conversion tracking, ad-platform cost sync and anti-fraud.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a101c",
+  "theme_color": "#0a101c",
+  "icons": [
+    { "src": "/assets/img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

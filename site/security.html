@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security &amp; Anti-Fraud — Data Isolation, Encrypted Tokens, Bot Filtering | AAA Tracker</title>
+<meta name="description" content="Per-workspace data isolation, tokens encrypted at rest, protected postback endpoints, bot filtering and a 0–100 fraud score on every click.">
+<link rel="canonical" href="https://aaatracker.website/security">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#0a101c">
+<link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="AAA Tracker">
+<meta property="og:title" content="Your data, your numbers, nobody else's.">
+<meta property="og:description" content="Per-workspace isolation, encrypted tokens, protected postbacks, bot filtering and a 0–100 fraud score on every click.">
+<meta property="og:url" content="https://aaatracker.website/security">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-security.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Security &amp; anti-fraud — AAA Tracker">
+<meta name="twitter:description" content="Per-workspace isolation, encrypted tokens, protected postbacks and fraud scoring on every click.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-security.png">
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/inter.css">
+<link rel="stylesheet" href="/assets/css/site.css?v=1">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://aaatracker.website/" },
+        { "@type": "ListItem", "position": 2, "name": "Security", "item": "https://aaatracker.website/security" }
+      ]
+    },
+    { "@type": "WebPage", "url": "https://aaatracker.website/security", "name": "Security & Anti-Fraud", "isPartOf": { "@id": "https://aaatracker.website/#website" } }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="AAA Tracker home">
+      <img src="/assets/img/logo-mark.svg" alt="" width="32" height="32">
+      <span>AAA&nbsp;<b>TRACKER</b></span>
+    </a>
+    <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <nav class="site-nav" id="site-nav" aria-label="Primary">
+      <a href="/features">Features</a>
+      <a href="/integrations">Integrations</a>
+      <a href="/security" aria-current="page">Security</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+    </nav>
+    <div class="header-actions">
+      <a class="btn btn-ghost btn-sm" href="/backend/">Log in</a>
+      <a class="btn btn-primary btn-sm" href="/contact">Book a walkthrough</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ── hero ─────────────────────────────────────────────── -->
+  <section class="page-hero">
+    <div class="wrap">
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>/</span>Security</nav>
+      <span class="eyebrow">Security &amp; anti-fraud</span>
+      <h1>Your data, your numbers, nobody else's.</h1>
+      <p class="lead">Tracking touches your spend, your traffic and your conversion data. This
+      page is the honest version of what protects it — the controls that exist, what they do,
+      and where the line sits between a practice and a certificate.</p>
+    </div>
+  </section>
+
+  <!-- ── workspace isolation ──────────────────────────────── -->
+  <section class="tight">
+    <div class="wrap split">
+      <div class="reveal">
+        <span class="eyebrow">Workspace isolation</span>
+        <h2>One workspace, one filtered view of the world.</h2>
+        <p>Every record in AAA Tracker — campaigns, clicks, conversions, offers, landers and
+        saved credentials — carries the workspace it belongs to, and every query is filtered by
+        that workspace. There is no shared pool your numbers fall into.</p>
+        <ul class="checklist">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Scoped records</b> — campaigns, clicks, conversions, offers and tokens are all bound to a workspace.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Filtered queries</b> — reads and writes are filtered by the workspace the request belongs to.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Roles &amp; permissions</b> — team members get a role with section-level access.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Invited users see only what they were granted</b> — nothing is visible by default.</span></li>
+        </ul>
+      </div>
+      <div class="reveal">
+        <div class="mock" aria-label="Workspace access preview" role="img">
+          <div class="mock-bar"><i></i><i></i><i></i><span class="mock-title">workspace / team access</span></div>
+          <div class="mock-body">
+            <div class="flow">
+              <div class="flow-row head"><span></span><span>Member</span><span>Role</span><span class="val">Scope</span></div>
+              <div class="flow-row"><span class="dot"></span><span>owner</span><span>admin</span><span class="val">all sections</span></div>
+              <div class="flow-row"><span class="dot"></span><span>buyer</span><span>editor</span><span class="val">campaigns, reports</span></div>
+              <div class="flow-row"><span class="dot warn"></span><span>analyst</span><span>viewer</span><span class="val">reports only</span></div>
+              <div class="flow-row"><span class="dot off"></span><span>external</span><span>invited</span><span class="val">1 dashboard</span></div>
+            </div>
+            <p class="mono" style="margin:14px 0 0;font-size:0.78rem;color:var(--muted-2)">every read filtered by workspace_id</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── credentials ──────────────────────────────────────── -->
+  <section class="tight" style="background:var(--ink-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+    <div class="wrap split reverse">
+      <div class="reveal">
+        <div class="mock" aria-label="Masked credential preview" role="img">
+          <div class="mock-bar"><i></i><i></i><i></i><span class="mock-title">ad platform / connection</span></div>
+          <div class="mock-body">
+            <div class="flow">
+              <div class="flow-row head"><span></span><span>Field</span><span>State</span><span class="val">Value</span></div>
+              <div class="flow-row"><span class="dot"></span><span>Access token</span><span>encrypted</span><span class="val">••••••••4f21</span></div>
+              <div class="flow-row"><span class="dot"></span><span>Refresh token</span><span>encrypted</span><span class="val">••••••••9c07</span></div>
+              <div class="flow-row"><span class="dot off"></span><span>Settings export</span><span>excluded</span><span class="val">not included</span></div>
+            </div>
+            <p class="mono" style="margin:14px 0 0;font-size:0.78rem;color:var(--muted-2)">decrypted only for the job that needs it</p>
+          </div>
+        </div>
+      </div>
+      <div class="reveal">
+        <span class="eyebrow">Credentials</span>
+        <h2>Tokens are secrets, and they're treated like it.</h2>
+        <p>Connecting an ad platform means storing something that can spend money. Ad-platform
+        tokens are encrypted at rest and decrypted only when a job needs them — never held in
+        the open on a request.</p>
+        <ul class="checklist">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Encrypted at rest</b> — ad-platform tokens are stored encrypted.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Decrypted on demand</b> — only when a job needs the token to run.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Masked in responses</b> — tokens come back as a masked value, never in full.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Not in settings export</b> — exporting your settings does not carry your tokens out.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Deployment credentials live in the environment</b> — platform-level secrets are configuration, not a field a customer fills in.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── postback protection ──────────────────────────────── -->
+  <section>
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Postback protection</span>
+        <h2>Conversion endpoints that only accept what you accept.</h2>
+        <p>An open postback URL is an invitation: anyone who guesses it can write a fake
+        conversion into your reports. Inbound endpoints can be locked down the same way you'd
+        lock down any other API.</p>
+      </div>
+      <div class="grid grid-3">
+        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M17 6l2 2M15 8l2 2"/></svg></div><h3>Secret key or IP allowlist</h3><p>A conversion endpoint can require a secret key, restrict the source to an IP allowlist, or enforce both. You choose per endpoint.</p></div>
+        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 16H3z"/><path d="M12 9v5M12 17h.01"/></svg></div><h3>Rejected with 403</h3><p>A postback that arrives without valid authentication is rejected with 403 and recorded — not silently dropped in.</p></div>
+        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 018-8 8 8 0 017 4M20 12a8 8 0 01-8 8 8 8 0 01-7-4"/><path d="M15 4h4v4M9 20H5v-4"/></svg></div><h3>De-duplication</h3><p>A retried postback is de-duplicated inside a 60-second window and by transaction id, so one sale stays one sale.</p></div>
+      </div>
+      <div class="reveal" style="margin-top:32px">
+        <div class="mock" aria-label="Postback log preview" role="img">
+          <div class="mock-bar"><i></i><i></i><i></i><span class="mock-title">postback log — inbound</span></div>
+          <div class="mock-body">
+            <div class="flow">
+              <div class="flow-row head"><span></span><span>Endpoint</span><span>Auth</span><span class="val">Result</span></div>
+              <div class="flow-row"><span class="dot"></span><span class="mono">/postback/acme</span><span>key + ip</span><span class="val">accepted</span></div>
+              <div class="flow-row"><span class="dot"></span><span class="mono">/postback/acme</span><span>key + ip</span><span class="val">duplicate — deduped</span></div>
+              <div class="flow-row"><span class="dot warn"></span><span class="mono">/postback/acme</span><span>key</span><span class="val">403 forbidden</span></div>
+              <div class="flow-row"><span class="dot off"></span><span class="mono">/postback/acme</span><span>none</span><span class="val">403 forbidden</span></div>
+            </div>
+            <p class="mono" style="margin:14px 0 0;font-size:0.78rem;color:var(--muted-2)">de-duplication window: 60s · transaction id matched</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── bot & fraud defence ──────────────────────────────── -->
+  <section class="tight" style="background:var(--ink-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Bot &amp; fraud defence</span>
+        <h2>Filter the traffic that was never going to convert.</h2>
+        <p>Paid traffic brings bots with it. AAA Tracker scores every click and gives you the
+        switches to act on what it finds — globally, per campaign, and permanently once a
+        visitor outs itself.</p>
+      </div>
+      <div class="grid grid-4">
+        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4v5c0 4.5-3.2 8.3-8 9-4.8-.7-8-4.5-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>0–100 fraud score</h3><p>Every click is scored from proxy, datacenter-ISP and headless-browser signals, so you can set the threshold you're comfortable with.</p></div>
+        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M8 14h.01M16 14h.01"/></svg></div><h3>Verified-crawler detection</h3><p>Built-in detection recognises verified crawlers, so search and preview bots don't distort your click numbers.</p></div>
+        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="18" cy="18" r="3"/></svg></div><h3>Blocklists &amp; shields</h3><p>Editable global user-agent and IP blocklists, plus per-campaign shields with IP, referrer and user-agent allowlists.</p></div>
+        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3a9 9 0 019 9M12 6a6 6 0 016 6"/></svg></div><h3>Configurable response</h3><p>When a shield matches, choose what the visitor gets: a blank page, a 404, or a fall-through to a safe flow.</p></div>
+      </div>
+      <div class="reveal" style="margin-top:32px">
+        <div class="mock" aria-label="Fraud score preview" role="img">
+          <div class="mock-bar"><i></i><i></i><i></i><span class="mock-title">click / fraud signals</span></div>
+          <div class="mock-body">
+            <div class="flow">
+              <div class="flow-row head"><span></span><span>Signal</span><span>Source</span><span class="val">Score</span></div>
+              <div class="flow-row"><span class="dot"></span><span>residential IP</span><span>ip intel</span><span class="val">4</span></div>
+              <div class="flow-row"><span class="dot warn"></span><span>datacenter ISP</span><span>ip intel</span><span class="val">71</span></div>
+              <div class="flow-row"><span class="dot off"></span><span>headless browser</span><span>client</span><span class="val">88</span></div>
+              <div class="flow-row"><span class="dot off"></span><span>honeypot hit</span><span>trap link</span><span class="val">100 — flagged</span></div>
+            </div>
+            <p class="mono" style="margin:14px 0 0;font-size:0.78rem;color:var(--muted-2)">honeypot traps permanently flag automated visitors</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── privacy controls ─────────────────────────────────── -->
+  <section>
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Privacy controls</span>
+        <h2>Collect less, keep it for a defined window, and let people opt out.</h2>
+        <p>These are switches on the workspace, not promises in a document. Each one changes
+        what the tracker stores or how long it stores it.</p>
+      </div>
+      <div class="grid grid-3">
+        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.6a3 3 0 004.2 4.2"/><path d="M9.9 5.2A10 10 0 0112 5c5 0 9 4.5 9 7 0 .9-.5 2-1.4 3.1M6.1 7.1C3.9 8.7 3 10.6 3 12c0 2.5 4 7 9 7 1 0 2-.2 2.9-.5"/></svg></div><h3>IP anonymisation</h3><p>Anonymise the IP address recorded with a click, so the tracking record keeps its use without keeping the full address.</p></div>
+        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div><h3>Retention window</h3><p>A configurable data-retention window with automatic pruning — old click and conversion records are trimmed on schedule.</p></div>
+        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/></svg></div><h3>Opt-out endpoint</h3><p>An opt-out endpoint suppresses further tracking for a visitor who asks not to be followed.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── account security ─────────────────────────────────── -->
+  <section class="tight" style="background:var(--ink-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+    <div class="wrap split">
+      <div class="reveal">
+        <span class="eyebrow">Account security</span>
+        <h2>Lock the front door, then write down who walked through it.</h2>
+        <p>Access to the data is the other half of the job. Sign-in is protected, and every
+        change leaves a trace you can read later.</p>
+        <ul class="checklist">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Two-factor authentication</b> — TOTP-based 2FA on your account.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Login IP allowlist</b> — restrict sign-in to the addresses you expect.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Session cookies</b> — sessions are carried in cookies, not in URLs.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Audit log</b> — records who changed what, and from where.</span></li>
+        </ul>
+      </div>
+      <div class="reveal">
+        <div class="mock" aria-label="Audit log preview" role="img">
+          <div class="mock-bar"><i></i><i></i><i></i><span class="mock-title">audit log — recent</span></div>
+          <div class="mock-body">
+            <div class="flow">
+              <div class="flow-row head"><span></span><span>Action</span><span>Actor</span><span class="val">From</span></div>
+              <div class="flow-row"><span class="dot"></span><span>campaign.pause</span><span>buyer</span><span class="val">203.0.113.24</span></div>
+              <div class="flow-row"><span class="dot"></span><span>2fa.enabled</span><span>owner</span><span class="val">203.0.113.7</span></div>
+              <div class="flow-row"><span class="dot warn"></span><span>login.blocked</span><span>unknown</span><span class="val">198.51.100.9</span></div>
+              <div class="flow-row"><span class="dot off"></span><span>role.changed</span><span>owner</span><span class="val">203.0.113.7</span></div>
+            </div>
+            <p class="mono" style="margin:14px 0 0;font-size:0.78rem;color:var(--muted-2)">who changed what · from where</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── data handling / GDPR posture ─────────────────────── -->
+  <section>
+    <div class="wrap" style="max-width:900px">
+      <div class="section-head reveal">
+        <span class="eyebrow">Data handling</span>
+        <h2>What we store, for how long, and who can take it out.</h2>
+        <p>Rather than a badge, here is the plain description. You stay the controller of your
+        campaign data; AAA Tracker processes it on your behalf.</p>
+      </div>
+      <div class="grid grid-2">
+        <div class="card reveal">
+          <h3>What is stored</h3>
+          <p>Click, conversion and cost records, together with the identifiers you send us —
+          click id, sub-ids, campaign and placement data, and the conversion values your
+          network posts back. That is the data the reports are built from.</p>
+        </div>
+        <div class="card reveal">
+          <h3>How long</h3>
+          <p>For as long as your configured retention window allows. Once a record falls outside
+          it, it is pruned automatically. You can clear tracking history on demand before that
+          window elapses.</p>
+        </div>
+        <div class="card reveal">
+          <h3>Your controls</h3>
+          <p>Export your settings at any time, clear tracking history on demand, and tune
+          retention, anonymisation and opt-out to match your own policy. Credentials are
+          excluded from the settings export.</p>
+        </div>
+        <div class="card reveal">
+          <h3>Agreements</h3>
+          <p>A data processing agreement is available on request. Tell us what your legal or
+          procurement team needs and we'll work through it with you — <a href="/contact" style="color:var(--accent)">get in touch</a>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── stats ────────────────────────────────────────────── -->
+  <section class="tight">
+    <div class="wrap">
+      <div class="stats reveal">
+        <div class="stat"><b>0–100</b><small>fraud score on every click</small></div>
+        <div class="stat"><b>60 s</b><small>postback de-duplication window</small></div>
+        <div class="stat"><b>Per-workspace</b><small>query isolation</small></div>
+        <div class="stat"><b>2FA + audit log</b><small>on every account</small></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FAQ ──────────────────────────────────────────────── -->
+  <section>
+    <div class="wrap" style="max-width:900px">
+      <div class="section-head reveal">
+        <span class="eyebrow">Questions</span>
+        <h2>The security questions buyers ask first.</h2>
+      </div>
+      <div class="faq reveal">
+        <details open>
+          <summary>Where is my data stored?</summary>
+          <p>Your clicks, conversions, cost records and the identifiers you send are stored in
+          the deployment that serves your workspace. If you need to know the region for a
+          procurement review, ask us and we'll confirm it for your setup rather than guess.</p>
+        </details>
+        <details>
+          <summary>Who on my team can see what?</summary>
+          <p>Access is role-based and section-scoped. An owner can see everything; an editor
+          might get campaigns and reports; a viewer might only get reports. Invited users see
+          exactly what their grant allows and nothing else, because every query is filtered by
+          workspace and permission.</p>
+        </details>
+        <details>
+          <summary>What happens if a postback has no valid key?</summary>
+          <p>It is rejected with a 403 and recorded in the log, so you can see that something
+          tried and was turned away. If the endpoint requires an IP allowlist as well, a request
+          from outside it is rejected the same way.</p>
+        </details>
+        <details>
+          <summary>Can I delete tracking history?</summary>
+          <p>Yes. You can clear tracking history on demand, and your retention window prunes old
+          records automatically. Exporting your settings and clearing history are both self-serve.</p>
+        </details>
+        <details>
+          <summary>Is my data used to train anything or shared?</summary>
+          <p>No. Your campaign data is processed to run your tracking and reporting, not to train
+          models and not sold or shared as a data set. Each workspace's records are isolated, and
+          platform credentials stay encrypted and outside settings exports.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CTA ──────────────────────────────────────────────── -->
+  <section class="tight" style="padding-bottom:96px">
+    <div class="wrap">
+      <div class="cta-band reveal">
+        <div>
+          <h2>Questions about your setup?</h2>
+          <p>Tell us how you buy traffic and what your compliance team needs. We'll walk through
+          the controls that apply to you — isolation, postback auth, retention, agreements — on a
+          call.</p>
+        </div>
+        <div class="btn-row">
+          <a class="btn btn-primary" href="/contact">Talk to us</a>
+          <a class="btn btn-ghost" href="/privacy">Read the privacy policy</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/" aria-label="AAA Tracker home">
+          <img src="/assets/img/logo-mark.svg" alt="" width="32" height="32">
+          <span>AAA&nbsp;<b>TRACKER</b></span>
+        </a>
+        <p style="margin-top:16px;max-width:36ch">Every click, accounted for. Routing, conversion tracking, cost sync and anti-fraud in one place.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul class="footer-links">
+          <li><a href="/features">Features</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Security &amp; anti-fraud</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul class="footer-links">
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/backend/">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul class="footer-links">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> AAA Tracker. All rights reserved.</span>
+      <span>aaatracker.website</span>
+    </div>
+  </div>
+</footer>
+<script src="/assets/js/site.js" defer></script>
+</body>
+</html>
