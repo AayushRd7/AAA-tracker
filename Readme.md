@@ -293,6 +293,9 @@ Environment variables:
 - `TEST_BASE_URL` — base URL of the running instance (default: `http://localhost`).
 - `TEST_INSECURE=1` — skip TLS certificate verification (needed for the self-signed local cert).
 - `TEST_USER` / `TEST_PASS` — login credentials (default: `tracker_admin` / `admin`).
+- The Copilot provider round-trip checks need the **instance** (not this command) to point
+  `OPENROUTER_BASE_URL` at a bindable mock on the host, e.g. `http://host.docker.internal:18999`; the
+  provider endpoint is env-fixed, so without it those checks are skipped and the contract checks still run.
 
 Two other checks sit next to it:
 

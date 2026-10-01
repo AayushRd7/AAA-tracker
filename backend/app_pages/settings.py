@@ -225,6 +225,10 @@ def get_settings(request: Request, db: Session = Depends(get_db)):
     if isinstance(doc, dict) and isinstance(doc.get("copilot"), dict) \
             and doc["copilot"].get("api_key"):
         doc["copilot"]["api_key"] = _SECRET_MASK
+    # Copilot's provider base URL is deployment-environment only; never hand a
+    # stale value back to the page (which would appear editable).
+    if isinstance(doc, dict) and isinstance(doc.get("copilot"), dict):
+        doc["copilot"].pop("base_url", None)
     # Optimistic-concurrency token for the Settings page, hashed from the raw
     # stored value (never the masked view). Additive, so nothing that reads the
     # response today is affected.
@@ -242,6 +246,13 @@ def save_settings(payload: dict, request: Request, db: Session = Depends(get_db)
     # mismatched = another writer changed the document since it loaded. Either
     # way the write is refused before anything is touched.
     base_rev = payload.pop("_base_rev", _MISSING)
+    # Copilot's provider base URL is env-only (OPENROUTER_BASE_URL): drop it
+    # from any incoming document so an admin cannot repoint the provider — and
+    # the environment API key with it — at an arbitrary host.
+    _copilot_block = (payload.get("settings") or {}).get("copilot") \
+        if isinstance(payload.get("settings"), dict) else None
+    if isinstance(_copilot_block, dict):
+        _copilot_block.pop("base_url", None)
     if base_rev is not _MISSING:
         current_rev = _current_settings_rev(db)
         if not base_rev:

@@ -14,19 +14,22 @@ touched.
 
 Provider
 --------
-OpenRouter (``https://openrouter.ai/api/v1/chat/completions``). The API key is
-read from the ``OPENROUTER_API_KEY`` environment variable at call time. A key
-may also be supplied through the ``copilot.api_key`` settings field for
-deployments that cannot set environment variables; that value is masked from
-*every* reader (admin included) and is never returned, echoed or logged, so no
-endpoint can leak it back. The environment key always wins.
+OpenRouter (``https://openrouter.ai/api/v1/chat/completions``). The provider
+base URL is fixed by the deployment's environment (``OPENROUTER_BASE_URL``,
+falling back to the OpenRouter default) and is *not* a settings field: an admin
+must not be able to repoint the provider — and with it the environment API key —
+at an arbitrary host. The API key is read from the ``OPENROUTER_API_KEY``
+environment variable at call time. A key may also be supplied through the
+``copilot.api_key`` settings field for deployments that cannot set environment
+variables; that value is masked from *every* reader (admin included) and is
+never returned, echoed or logged, so no endpoint can leak it back. The
+environment key always wins.
 
 Settings block (``settings.copilot``), all defaults shown below::
 
     enabled    bool   True                     # switch the whole surface off
     model      str    "google/gemini-2.5-flash-lite"
     max_tokens int    400                      # hard cap, clamped to 60..800
-    base_url   str    ""                       # override for proxies/tests only
     api_key    str    ""                       # optional override, always masked
 
 Token discipline: a compact system prompt, at most 8 campaign rows in the
@@ -64,7 +67,6 @@ DEFAULTS = {
     "enabled": True,
     "model": "google/gemini-2.5-flash-lite",
     "max_tokens": 400,
-    "base_url": "",
     "api_key": "",
 }
 
@@ -125,7 +127,9 @@ def load_copilot_settings(db: Session) -> dict:
         pass
     cfg["max_tokens"] = _clamp_tokens(cfg.get("max_tokens"))
     cfg["api_key"] = (os.environ.get(ENV_KEY_VAR) or "").strip() or (cfg.get("api_key") or "").strip()
-    cfg["base_url"] = (cfg.get("base_url") or "").strip() or (os.environ.get(ENV_BASE_URL_VAR) or "").strip()
+    # The provider base URL is env-only: any value left in an older settings
+    # document is deliberately ignored so an admin cannot repoint the provider.
+    cfg["base_url"] = (os.environ.get(ENV_BASE_URL_VAR) or "").strip()
     cfg["model"] = (cfg.get("model") or "").strip() or DEFAULTS["model"]
     return cfg
 

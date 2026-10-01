@@ -9975,10 +9975,14 @@ print("ESCAPED-OK")
             s.delete(f"{api}/users/{maa_uid}")
 
     # ===== Slice 5b: Copilot page + grounded AI endpoints =====
-    # The provider base URL points at a local mock receiver (the same pattern the
-    # CAPI / Meta cost-sync blocks use), so no real model call is ever made. The
-    # key is a settings override here; in production it comes from the
-    # OPENROUTER_API_KEY environment variable and is never returned to anyone.
+    # The provider base URL is fixed by the deployment environment
+    # (OPENROUTER_BASE_URL) and is no longer a settings field, so the round-trip
+    # checks require this stack to point that variable at the mock receiver
+    # below (the same pattern the CAPI / Meta cost-sync blocks use). When it is
+    # not pointed at a bindable mock the round-trip is skipped — no real model
+    # call is made either way — while the contract checks (endpoint not settable
+    # or served) still run. The key is a settings override here; in production it
+    # comes from OPENROUTER_API_KEY and is never returned to anyone.
     print("== Slice 5b: Copilot page ==")
     for s5b_pg, s5b_markers in (
             ("copilot", ("copilot-card", "summariseAccount", "askQuestion")),):
@@ -9994,9 +9998,25 @@ print("ESCAPED-OK")
     import http.server as _s5b_httpserver
     import socketserver as _s5b_socketserver
     import threading as _s5b_threading
+    import urllib.parse as _s5b_urlparse
 
     s5b_pid = os.getpid()
-    s5b_port = 22000 + (s5b_pid % 700)
+    # The mock must sit at the deployment's provider endpoint. Read it from the
+    # backend container and bind the same port on the host so the container
+    # reaches the receiver via host.docker.internal. Unset (or not a local host)
+    # => the round-trip is skipped.
+    s5b_env_base = ""
+    try:
+        s5b_env_base = (subprocess.run(
+            ["docker", "exec", "tracker_backend", "printenv", "OPENROUTER_BASE_URL"],
+            capture_output=True, text=True, timeout=10).stdout or "").strip()
+    except Exception:
+        pass
+    _s5b_url = _s5b_urlparse.urlparse(s5b_env_base) if s5b_env_base else None
+    s5b_mock = bool(_s5b_url and _s5b_url.port
+                    and (_s5b_url.hostname or "") in
+                    ("host.docker.internal", "localhost", "127.0.0.1"))
+    s5b_port = _s5b_url.port if s5b_mock else 22000 + (s5b_pid % 700)
     s5b_captured = []
     _s5b_socketserver.TCPServer.allow_reuse_address = True
 
@@ -10050,8 +10070,10 @@ print("ESCAPED-OK")
     s5b_saved = ((s.get(f"{api}/settings/").json().get("settings") or {}).get("copilot"))
 
     def s5b_cfg(**over):
+        # The provider base URL is env-fixed (OPENROUTER_BASE_URL) and is not a
+        # settings field — the mock is reached by pointing that variable at it.
         cfg = {"enabled": True, "model": "stub/model", "max_tokens": 123,
-               "base_url": s5b_base, "api_key": s5b_key}
+               "api_key": s5b_key}
         cfg.update(over)
         return s.post(f"{api}/settings/", json={"settings": {"copilot": cfg}})
 
@@ -10089,71 +10111,97 @@ print("ESCAPED-OK")
               r.status_code == 200 and r.json().get("configured") is True
               and r.json().get("model") == "stub/model", r.text[:200])
 
-        # -- one-click summary: request shape + grounded snapshot
-        r = s.post(f"{api}/copilot/summary", json=s5b_window)
-        body = r.json() if r.status_code == 200 else {}
-        check("slice5b: summary returns 200 with text",
-              r.status_code == 200 and bool(body.get("summary"))
-              and body.get("configured") is True, r.text[:200])
-        check("slice5b: summary key never appears in the response",
-              s5b_key not in r.text, r.text[:150])
+        # -- contract: the provider endpoint is env-fixed, never a settings field.
+        #    It is not served back, and a document that tries to set it is
+        #    refused the key (an admin must not be able to repoint the provider,
+        #    and with it the deployment's API key, at an arbitrary host).
+        r = s.get(f"{api}/settings/")
+        _s5b_block = ((r.json().get("settings") or {}).get("copilot") or {})
+        check("slice5b: settings never expose a copilot base_url",
+              "base_url" not in _s5b_block, str(list(_s5b_block.keys()))[:120])
+        s5b_cfg(base_url="http://evil.example.com/steal")
+        r = s.get(f"{api}/settings/")
+        _s5b_block = ((r.json().get("settings") or {}).get("copilot") or {})
+        check("slice5b: a settings write cannot set a copilot base_url",
+              "base_url" not in _s5b_block, str(_s5b_block.get("base_url"))[:80])
+        check("slice5b: the provider base_url is absent from the stored document",
+              pg_exec_out("SELECT count(*) FROM settings WHERE name='settings' "
+                          "AND (value::jsonb->'copilot') ? 'base_url'"
+                          ).strip() == "0", "base_url persisted under copilot")
 
-        req = s5b_captured[-1] if s5b_captured else {}
-        req_body = req.get("body") or {}
-        msgs = req_body.get("messages") or []
-        check("slice5b: provider request carries the model",
-              req_body.get("model") == "stub/model", str(req_body.get("model"))[:80])
-        check("slice5b: provider request carries the token cap",
-              req_body.get("max_tokens") == 123, str(req_body.get("max_tokens")))
-        check("slice5b: provider request is a system+user message pair",
-              len(msgs) == 2 and msgs[0].get("role") == "system"
-              and msgs[1].get("role") == "user", str([m.get("role") for m in msgs]))
-        check("slice5b: provider request carries the key as a bearer header",
-              req.get("headers", {}).get("authorization") == f"Bearer {s5b_key}",
-              str(req.get("headers", {}).get("authorization"))[:40])
-
-        snap = body.get("snapshot") or {}
-        tiles = snap.get("totals") or {}
-        check("slice5b: snapshot totals are the seeded aggregates",
-              tiles.get("clicks", 0) >= 3 and float(tiles.get("revenue") or 0) >= 15.0,
-              str(tiles)[:200])
-        check("slice5b: snapshot rows carry only aggregate fields",
-              all(set(c) == {"campaign", "visits", "clicks", "conversions",
-                             "cost", "revenue", "profit", "roas"}
-                  for c in (snap.get("top_campaigns") or [])),
-              str(snap.get("top_campaigns"))[:200])
-        # Only aggregates leave the box: none of the seeded visitor / sub-id / IP
-        # values, and no raw identifier field names, appear in the response.
-        check("slice5b: only aggregate metrics are sent — no visitor/sub-id/IP",
-              s5b_visitor not in r.text and s5b_sub not in r.text
-              and s5b_ip not in r.text and "visitor_id" not in r.text
-              and "click_id" not in r.text and "@" not in r.text, r.text[:200])
-
-        # -- question box: the snapshot is attached and the question is passed through
-        r = s.post(f"{api}/copilot/ask", json=dict(
-            question="Which campaign lost money in this window?",
-            **s5b_window))
-        body = r.json() if r.status_code == 200 else {}
-        check("slice5b: ask returns 200 with an answer",
-              r.status_code == 200 and bool(body.get("answer")), r.text[:200])
-        check("slice5b: ask key never appears in the response",
-              s5b_key not in r.text, r.text[:150])
-        ask_msg = ((s5b_captured[-1].get("body") or {}).get("messages") or [{}])[-1].get("content") or ""
-        check("slice5b: ask attaches the snapshot and the operator question",
-              "Account snapshot for" in ask_msg
-              and "Which campaign lost money in this window?" in ask_msg, ask_msg[:200])
+        # -- an empty question is refused before any provider call
         r = s.post(f"{api}/copilot/ask", json=dict(question="   ", **s5b_window))
         check("slice5b: an empty question is refused (400)", r.status_code == 400,
               str(r.status_code))
 
-        # -- provider failure degrades to a readable message, never a 500
-        s5b_cfg(model="fail/stub")
-        r = s.post(f"{api}/copilot/summary", json=s5b_window)
-        body = r.json() if r.status_code == 200 else {}
-        check("slice5b: provider failure returns 200 with a readable error",
-              r.status_code == 200 and bool(body.get("error"))
-              and "provider" in str(body.get("error")).lower(), r.text[:200])
-        check("slice5b: provider failure leaks no key", s5b_key not in r.text, r.text[:150])
+        if not s5b_mock:
+            print("  -   slice5b: provider round-trip skipped — point this stack's "
+                  "OPENROUTER_BASE_URL at the suite's mock "
+                  "(http://host.docker.internal:<port>) to exercise it")
+
+        if s5b_mock:
+            # -- one-click summary: request shape + grounded snapshot
+            r = s.post(f"{api}/copilot/summary", json=s5b_window)
+            body = r.json() if r.status_code == 200 else {}
+            check("slice5b: summary returns 200 with text",
+                  r.status_code == 200 and bool(body.get("summary"))
+                  and body.get("configured") is True, r.text[:200])
+            check("slice5b: summary key never appears in the response",
+                  s5b_key not in r.text, r.text[:150])
+
+            req = s5b_captured[-1] if s5b_captured else {}
+            req_body = req.get("body") or {}
+            msgs = req_body.get("messages") or []
+            check("slice5b: provider request carries the model",
+                  req_body.get("model") == "stub/model", str(req_body.get("model"))[:80])
+            check("slice5b: provider request carries the token cap",
+                  req_body.get("max_tokens") == 123, str(req_body.get("max_tokens")))
+            check("slice5b: provider request is a system+user message pair",
+                  len(msgs) == 2 and msgs[0].get("role") == "system"
+                  and msgs[1].get("role") == "user", str([m.get("role") for m in msgs]))
+            check("slice5b: provider request carries the key as a bearer header",
+                  req.get("headers", {}).get("authorization") == f"Bearer {s5b_key}",
+                  str(req.get("headers", {}).get("authorization"))[:40])
+
+            snap = body.get("snapshot") or {}
+            tiles = snap.get("totals") or {}
+            check("slice5b: snapshot totals are the seeded aggregates",
+                  tiles.get("clicks", 0) >= 3 and float(tiles.get("revenue") or 0) >= 15.0,
+                  str(tiles)[:200])
+            check("slice5b: snapshot rows carry only aggregate fields",
+                  all(set(c) == {"campaign", "visits", "clicks", "conversions",
+                                 "cost", "revenue", "profit", "roas"}
+                      for c in (snap.get("top_campaigns") or [])),
+                  str(snap.get("top_campaigns"))[:200])
+            # Only aggregates leave the box: none of the seeded visitor / sub-id / IP
+            # values, and no raw identifier field names, appear in the response.
+            check("slice5b: only aggregate metrics are sent — no visitor/sub-id/IP",
+                  s5b_visitor not in r.text and s5b_sub not in r.text
+                  and s5b_ip not in r.text and "visitor_id" not in r.text
+                  and "click_id" not in r.text and "@" not in r.text, r.text[:200])
+
+            # -- question box: the snapshot is attached and the question is passed through
+            r = s.post(f"{api}/copilot/ask", json=dict(
+                question="Which campaign lost money in this window?",
+                **s5b_window))
+            body = r.json() if r.status_code == 200 else {}
+            check("slice5b: ask returns 200 with an answer",
+                  r.status_code == 200 and bool(body.get("answer")), r.text[:200])
+            check("slice5b: ask key never appears in the response",
+                  s5b_key not in r.text, r.text[:150])
+            ask_msg = ((s5b_captured[-1].get("body") or {}).get("messages") or [{}])[-1].get("content") or ""
+            check("slice5b: ask attaches the snapshot and the operator question",
+                  "Account snapshot for" in ask_msg
+                  and "Which campaign lost money in this window?" in ask_msg, ask_msg[:200])
+
+            # -- provider failure degrades to a readable message, never a 500
+            s5b_cfg(model="fail/stub")
+            r = s.post(f"{api}/copilot/summary", json=s5b_window)
+            body = r.json() if r.status_code == 200 else {}
+            check("slice5b: provider failure returns 200 with a readable error",
+                  r.status_code == 200 and bool(body.get("error"))
+                  and "provider" in str(body.get("error")).lower(), r.text[:200])
+            check("slice5b: provider failure leaks no key", s5b_key not in r.text, r.text[:150])
 
         # -- switched off degrades cleanly too
         s5b_cfg(enabled=False)
