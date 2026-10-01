@@ -1031,8 +1031,8 @@
                 });
                 return [
                     {title: 'Version', value: s.version || '—', colorClass: '', hint: ''},
-                    dbCard('Database', s.postgres || {}),
-                    dbCard('Analytics', s.clickhouse || {}),
+                    dbCard('Database', s.database || {}),
+                    dbCard('Analytics', s.analytics || {}),
                     {title: 'Clicks (24h)', value: Number(s.clicks_24h || 0).toLocaleString(), colorClass: '', hint: ''},
                     {title: 'Conversions (24h)', value: Number(s.conversions_24h || 0).toLocaleString(), colorClass: '', hint: ''},
                 ];

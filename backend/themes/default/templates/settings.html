@@ -636,7 +636,7 @@
                                     inset
                                     dense
                                     hide-details
-                                    hint="The tracking plane masks visitor IPs (last octet zeroed: 203.0.113.55 → 203.0.113.0) before writing ClickHouse rows. Geo detection still works; per-IP drill-down is lost. Applied to new traffic only."
+                                    hint="The tracking plane masks visitor IPs (last octet zeroed: 203.0.113.55 → 203.0.113.0) before writing analytics rows. Geo detection still works; per-IP drill-down is lost. Applied to new traffic only."
                                     persistent-hint
                                     class="mb-3"
                             ></v-switch>
@@ -986,9 +986,8 @@
                             <div class="caption grey--text mb-2">
                                 Powers the Copilot page: a plain-language summary of the account's own
                                 aggregated numbers, plus an operator question box. Each call costs money, so
-                                the page is admin-only. The provider key comes from the deployment
-                                environment; the optional field below is a fallback for deployments that
-                                cannot set environment variables and is never shown back.
+                                the page is admin-only. The service that answers is configured for this
+                                deployment and is not chosen here.
                             </div>
                             <v-switch
                                     v-model="settings.copilot.enabled"
@@ -996,17 +995,7 @@
                                     inset dense hide-details
                             ></v-switch>
                             <v-row dense class="mt-3">
-                                <v-col cols="12" md="6">
-                                    <v-text-field
-                                            label="Model"
-                                            v-model="settings.copilot.model"
-                                            :disabled="!settings.copilot.enabled"
-                                            outlined dense
-                                            hint="Any chat model the provider offers — default is the cheapest flash-lite tier"
-                                            persistent-hint
-                                    ></v-text-field>
-                                </v-col>
-                                <v-col cols="12" md="3">
+                                <v-col cols="12" md="4">
                                     <v-text-field
                                             label="Max output tokens"
                                             v-model.number="settings.copilot.max_tokens"
@@ -1017,24 +1006,18 @@
                                             persistent-hint
                                     ></v-text-field>
                                 </v-col>
-                                <v-col cols="12" md="3">
+                                <v-col cols="12" md="8">
                                     <v-text-field
-                                            label="API key (optional)"
+                                            label="Service key (optional)"
                                             v-model="settings.copilot.api_key"
                                             :disabled="!settings.copilot.enabled"
                                             :append-icon="showCopilotKey ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
                                             :type="showCopilotKey ? 'text' : 'password'"
                                             @click:append="showCopilotKey = !showCopilotKey"
                                             outlined dense
-                                            hint="Leave masked to keep the stored value"
+                                            hint="Leave as-is unless advised — usually set for the whole deployment"
                                             persistent-hint
                                     ></v-text-field>
-                                </v-col>
-                                <v-col cols="12">
-                                    <div class="caption grey--text">
-                                        The model endpoint is fixed by this deployment's environment
-                                        (<code>OPENROUTER_BASE_URL</code>) and is not editable here.
-                                    </div>
                                 </v-col>
                             </v-row>
                         </v-card-text>
@@ -1130,10 +1113,10 @@
                     },
                     // Copilot: AI summary / Q&A over the account's own aggregates.
                     // Serialised into the settings document as the `copilot` key;
-                    // the provider key normally lives in the deployment environment.
+                    // the model and service key are set for the deployment.
                     copilot: {
                         enabled: true,
-                        model: 'google/gemini-2.5-flash-lite',
+                        model: '',
                         max_tokens: 400,
                         api_key: '',
                     },
@@ -1402,7 +1385,7 @@
                             this.settings.meta_ads.ad_account_ids = [];
                         }
                         this.settings.copilot = Object.assign({}, {
-                            enabled: true, model: 'google/gemini-2.5-flash-lite',
+                            enabled: true, model: '',
                             max_tokens: 400, api_key: '',
                         }, this.settings.copilot || {});
                         this.loadMetaAdsStatus();

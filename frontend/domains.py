@@ -35,7 +35,7 @@ def ping():
     return "OK"
 
 
-@router.get("/domain_update_nginx_and_ssl")
+@router.get("/domain_update_ssl")
 async def create_nginx(request: Request, domain_id: int):
     pg = request.app.state.pg
 

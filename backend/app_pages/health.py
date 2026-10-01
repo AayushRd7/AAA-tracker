@@ -4,10 +4,10 @@ GET /api/health (admin-only 'settings' section, mounted in app.py) is the one
 call the Health centre page makes. It answers, from the backend's own vantage
 point:
 
-* database reachability + a small round-trip latency for Postgres and
-  ClickHouse;
-* the row counts that matter (clicks, conversions, campaigns, users) plus the
-  largest Postgres tables by live-tuple estimate;
+* reachability + a small round-trip latency for the primary store and the
+  analytics store (reported under neutral labels — the deployment's stack is not
+  named to tenants);
+* the row counts that matter (clicks, conversions, campaigns, users);
 * the last run of every background loop the backend owns — monitor, rules,
   optimizer, insights, Meta cost-sync — and whether any is stale;
 * the process's version and uptime;
@@ -116,18 +116,6 @@ def health_centre(request: Request, db: Session = Depends(get_db)):
     counts["capi_attempts"] = _pg_count(
         "SELECT count(*) FROM meta_capi_log WHERE tenant_id = :tid", {"tid": tid})
 
-    # Largest Postgres tables by live-tuple estimate — cheap catalog read, no
-    # per-table COUNT on big tables.
-    largest = []
-    if pg_ok:
-        try:
-            rows = db.execute(text(
-                "SELECT relname, n_live_tup FROM pg_stat_user_tables "
-                "ORDER BY n_live_tup DESC NULLS LAST LIMIT 8")).fetchall()
-            largest = [{"table": r[0], "rows": int(r[1] or 0)} for r in rows]
-        except Exception:
-            largest = []
-
     # Loop heartbeats
     last_runs = _loop_last_runs()
     loops = {}
@@ -158,9 +146,9 @@ def health_centre(request: Request, db: Session = Depends(get_db)):
 
     attention = []
     if not pg_ok:
-        attention.append("Postgres is not answering")
+        attention.append("The database is not answering")
     if not ch_ok:
-        attention.append("ClickHouse is not answering")
+        attention.append("The analytics store is not answering")
     for name, age_min in stale_loops:
         attention.append(f"{name} loop has not run for {age_min:.0f} min")
     if capi_failed_24h and capi_failed_24h > CAPI_FAILURE_ATTENTION:
@@ -176,11 +164,10 @@ def health_centre(request: Request, db: Session = Depends(get_db)):
         "started_at": datetime.fromtimestamp(PROCESS_START, tz=timezone.utc).isoformat(),
         "checked_at": now.replace(tzinfo=timezone.utc).isoformat(),
         "databases": {
-            "postgres": {"ok": pg_ok, "latency_ms": pg_ms},
-            "clickhouse": {"ok": ch_ok, "latency_ms": ch_ms},
+            "database": {"ok": pg_ok, "latency_ms": pg_ms},
+            "analytics": {"ok": ch_ok, "latency_ms": ch_ms},
         },
         "counts": counts,
-        "largest_tables": largest,
         "loops": loops,
         "errors": {"capi_failed_24h": capi_failed_24h or 0},
     }

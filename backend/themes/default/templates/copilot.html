@@ -7,7 +7,7 @@
                 <div class="page-subtitle">A plain-language read on this account's own numbers</div>
             </div>
             <v-chip v-if="status && status.configured" small outlined color="primary">
-                <v-icon small left>mdi-robot-outline</v-icon>{{ status.model }}
+                <v-icon small left>mdi-robot-outline</v-icon>Ready
             </v-chip>
         </div>
 
@@ -15,7 +15,7 @@
                  id="copilot-not-configured">
             <strong>Copilot is not available here.</strong>
             {{ status.message || 'Copilot is not configured for this deployment.' }}
-            Ask an administrator to set the provider key for this workspace.
+            Ask an administrator to enable Copilot for this workspace.
         </v-alert>
 
         <v-card class="pa-4 mb-4" id="copilot-filters-card">

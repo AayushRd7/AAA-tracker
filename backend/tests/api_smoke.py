@@ -3128,13 +3128,17 @@ print("ESCAPED-OK")
     body = r.json() if r.status_code == 200 else {}
     check("status: 200 with version + sections",
           r.status_code == 200 and body.get("version") == "0.9.0"
-          and all(k in body for k in ("postgres", "clickhouse", "loops",
+          and all(k in body for k in ("database", "analytics", "loops",
                                       "clicks_24h", "conversions_24h")), r.text[:200])
-    check("status: both databases up with latency",
-          (body.get("postgres") or {}).get("ok") is True
-          and (body.get("clickhouse") or {}).get("ok") is True
-          and isinstance(body.get("postgres", {}).get("latency_ms"), (int, float)),
+    check("status: both stores up with latency",
+          (body.get("database") or {}).get("ok") is True
+          and (body.get("analytics") or {}).get("ok") is True
+          and isinstance(body.get("database", {}).get("latency_ms"), (int, float)),
           r.text[:200])
+    check("status: payload names no internal technology",
+          not any(t in json.dumps(body).lower()
+                  for t in ("postgres", "clickhouse", "asyncpg", "uvicorn")),
+          r.text[:160])
     check("status: loop timestamps section shaped",
           set((body.get("loops") or {}).keys()) == {"monitor", "rules", "optimizer",
                                                    "meta_ads"},
@@ -10105,29 +10109,32 @@ print("ESCAPED-OK")
         s5b_today = str(datetime.now(timezone.utc).date())
         s5b_window = {"date_from": s5b_today, "date_to": s5b_today}
 
-        # -- status reflects the configured model
+        # -- status reports readiness (and never the upstream model)
         r = s.get(f"{api}/copilot/status")
-        check("slice5b: status reports configured with the saved model",
+        check("slice5b: status reports configured without naming the model",
               r.status_code == 200 and r.json().get("configured") is True
-              and r.json().get("model") == "stub/model", r.text[:200])
+              and r.json().get("enabled") is True and "model" not in r.json(),
+              r.text[:200])
 
-        # -- contract: the provider endpoint is env-fixed, never a settings field.
-        #    It is not served back, and a document that tries to set it is
-        #    refused the key (an admin must not be able to repoint the provider,
-        #    and with it the deployment's API key, at an arbitrary host).
+        # -- contract: the provider endpoint and upstream model are deployment-only.
+        #    Neither is served back to a tenant reader, the endpoint cannot be
+        #    persisted through the API, and neither appears in a settings export —
+        #    the product does not advertise what it runs on.
         r = s.get(f"{api}/settings/")
         _s5b_block = ((r.json().get("settings") or {}).get("copilot") or {})
-        check("slice5b: settings never expose a copilot base_url",
-              "base_url" not in _s5b_block, str(list(_s5b_block.keys()))[:120])
+        check("slice5b: settings expose neither copilot base_url nor model",
+              "base_url" not in _s5b_block and "model" not in _s5b_block,
+              str(sorted(_s5b_block.keys()))[:120])
         s5b_cfg(base_url="http://evil.example.com/steal")
-        r = s.get(f"{api}/settings/")
-        _s5b_block = ((r.json().get("settings") or {}).get("copilot") or {})
-        check("slice5b: a settings write cannot set a copilot base_url",
-              "base_url" not in _s5b_block, str(_s5b_block.get("base_url"))[:80])
-        check("slice5b: the provider base_url is absent from the stored document",
+        check("slice5b: a settings write cannot persist a copilot base_url",
               pg_exec_out("SELECT count(*) FROM settings WHERE name='settings' "
                           "AND (value::jsonb->'copilot') ? 'base_url'"
                           ).strip() == "0", "base_url persisted under copilot")
+        r = s.get(f"{api}/settings/export")
+        _s5b_exp = ((r.json().get("data") or {}).get("settings") or {}).get("copilot") or {}
+        check("slice5b: the settings export carries no copilot model or endpoint",
+              r.status_code == 200 and "base_url" not in _s5b_exp
+              and "model" not in _s5b_exp, str(sorted(_s5b_exp.keys()))[:120])
 
         # -- an empty question is refused before any provider call
         r = s.post(f"{api}/copilot/ask", json=dict(question="   ", **s5b_window))
@@ -10300,7 +10307,7 @@ print("ESCAPED-OK")
           rp.status_code == 200, f"{rp.status_code}")
     check("slice6b: health page carries its page markers",
           all(m in rp.text for m in ("health-verdict-card", "healthVerdict",
-                                     "Background loops", "Largest tables")),
+                                     "Background loops")),
           "missing health page marker")
     check("slice6b: health page has no unreplaced jinja tags",
           "{%" not in rp.text, "unreplaced jinja tag")
@@ -10309,10 +10316,22 @@ print("ESCAPED-OK")
     hb = r.json() if r.status_code == 200 else {}
     check("slice6b: /api/health serves the admin report",
           r.status_code == 200, r.text[:160])
-    check("slice6b: both databases reported reachable",
-          (hb.get("databases") or {}).get("postgres", {}).get("ok") is True
-          and (hb.get("databases") or {}).get("clickhouse", {}).get("ok") is True,
+    check("slice6b: both stores reported reachable",
+          (hb.get("databases") or {}).get("database", {}).get("ok") is True
+          and (hb.get("databases") or {}).get("analytics", {}).get("ok") is True,
           r.text[:200])
+    # A SaaS does not advertise what it runs on: no internal technology names in
+    # the tenant-facing health/documentation surfaces or their payloads.
+    _stack_terms = ("postgres", "clickhouse", "asyncpg", "uvicorn", "redis")
+    _rp_docs = s.get(f"{BASE}/backend/documentation")
+    check("slice6b: tenant-facing pages name no internal technology",
+          not any(t in rp.text.lower() for t in _stack_terms)
+          and not any(t in (_rp_docs.text or "").lower() for t in _stack_terms),
+          "a stack name leaked into the health/documentation page")
+    check("slice6b: health payload names no internal technology",
+          not any(t in json.dumps(hb).lower() for t in _stack_terms), r.text[:160])
+    check("slice6b: health payload carries no internal table list",
+          "largest_tables" not in hb, str(sorted(hb.keys()))[:160])
     check("slice6b: loop keys present (incl. insights)",
           set((hb.get("loops") or {}).keys()) == {"monitor", "rules", "optimizer",
                                                   "insights", "meta_ads"},

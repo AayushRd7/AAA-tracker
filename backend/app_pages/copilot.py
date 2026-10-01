@@ -14,23 +14,27 @@ touched.
 
 Provider
 --------
-OpenRouter (``https://openrouter.ai/api/v1/chat/completions``). The provider
-base URL is fixed by the deployment's environment (``OPENROUTER_BASE_URL``,
-falling back to the OpenRouter default) and is *not* a settings field: an admin
-must not be able to repoint the provider — and with it the environment API key —
-at an arbitrary host. The API key is read from the ``OPENROUTER_API_KEY``
-environment variable at call time. A key may also be supplied through the
-``copilot.api_key`` settings field for deployments that cannot set environment
-variables; that value is masked from *every* reader (admin included) and is
-never returned, echoed or logged, so no endpoint can leak it back. The
-environment key always wins.
+An OpenAI-compatible chat-completions endpoint. Its base URL is fixed by the
+deployment's environment (``OPENROUTER_BASE_URL``, falling back to a built-in
+default) and is *not* a settings field: an admin must not be able to repoint the
+provider — and with it the environment API key — at an arbitrary host. The API
+key is read from the ``OPENROUTER_API_KEY`` environment variable at call time;
+it may also be supplied through the ``copilot.api_key`` settings field for
+deployments that cannot set environment variables, but that value is masked from
+*every* reader (admin included) and is never returned, echoed or logged, so no
+endpoint can leak it back. The environment key always wins.
 
 Settings block (``settings.copilot``), all defaults shown below::
 
     enabled    bool   True                     # switch the whole surface off
-    model      str    "google/gemini-2.5-flash-lite"
+    model      str    <see DEFAULTS>           # COPILOT_MODEL wins when set
     max_tokens int    400                      # hard cap, clamped to 60..800
     api_key    str    ""                       # optional override, always masked
+
+Neither the upstream vendor nor the model is advertised in the product UI: the
+endpoint is environment-only and the model is chosen for the deployment
+(``COPILOT_MODEL`` when set), so the Settings card exposes only the on/off
+switch and the token cap.
 
 Token discipline: a compact system prompt, at most 8 campaign rows in the
 snapshot, money rounded to two decimals and a hard ``max_tokens`` ceiling.
@@ -60,12 +64,12 @@ ENV_KEY_VAR = "OPENROUTER_API_KEY"
 ENV_BASE_URL_VAR = "OPENROUTER_BASE_URL"
 ENV_MODEL_VAR = "COPILOT_MODEL"
 
-# The documented defaults. The model is a settings field so it can be changed
-# without a deploy; this is the cheapest model in the well-supported flash-lite
-# tier (see the module docstring / report for the price rationale).
+# The documented defaults. The model is chosen for the deployment (COPILOT_MODEL
+# when set, else this) rather than exposed in the UI, so the upstream provider is
+# not advertised to tenants. This is a fast, low-cost flash tier.
 DEFAULTS = {
     "enabled": True,
-    "model": "google/gemini-2.5-flash-lite",
+    "model": "z-ai/glm-5.3-flash",
     "max_tokens": 400,
     "api_key": "",
 }
@@ -130,7 +134,10 @@ def load_copilot_settings(db: Session) -> dict:
     # The provider base URL is env-only: any value left in an older settings
     # document is deliberately ignored so an admin cannot repoint the provider.
     cfg["base_url"] = (os.environ.get(ENV_BASE_URL_VAR) or "").strip()
-    cfg["model"] = (cfg.get("model") or "").strip() or DEFAULTS["model"]
+    # The model is not a tenant setting: the deployment picks it (COPILOT_MODEL),
+    # then a stored value, then the built-in default.
+    cfg["model"] = ((os.environ.get(ENV_MODEL_VAR) or "").strip()
+                    or (cfg.get("model") or "").strip() or DEFAULTS["model"])
     return cfg
 
 
@@ -336,8 +343,9 @@ def _run(db: Session, request: Request, date_from, date_to, question=None):
 @router.get("/status")
 def copilot_status(db: Session = Depends(get_db)):
     cfg = load_copilot_settings(db)
-    return {"configured": _configured(cfg), "enabled": bool(cfg["enabled"]),
-            "model": cfg["model"], "max_tokens": cfg["max_tokens"]}
+    # The model is deliberately not reported: the deployment's upstream choice is
+    # not advertised to tenants (the UI needs only readiness).
+    return {"configured": _configured(cfg), "enabled": bool(cfg["enabled"])}
 
 
 @router.post("/summary")

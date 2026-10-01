@@ -3653,7 +3653,7 @@
                 this.loadCampaignMetrics();
             },
             loadCampaignMetrics() {
-                // Live per-campaign stats from ClickHouse over the selected period
+                // Live per-campaign stats from the analytics store over the selected period
                 const now = new Date();
                 const iso = d => d.toISOString().split('T')[0];
                 const daysAgo = n => { const d = new Date(now); d.setDate(d.getDate() - n); return d; };

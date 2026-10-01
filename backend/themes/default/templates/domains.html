@@ -571,7 +571,7 @@
 
                 this.$root.$emit('show-overlay', 'Issuing SSL certificate — this can take up to 10 minutes per domain. Keep this page open.');
 
-                fetch(`/domain_update_nginx_and_ssl?domain_id=`+item.id, {
+                fetch(`/domain_update_ssl?domain_id=`+item.id, {
                     method: 'GET',
                     credentials: 'include'
                 })

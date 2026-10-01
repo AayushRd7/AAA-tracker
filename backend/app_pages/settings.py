@@ -201,6 +201,21 @@ def _current_settings_rev(db: Session) -> str:
 # never loaded — refused).
 _MISSING = object()
 
+# Copilot keys that belong to the deployment, not the tenant: the provider
+# endpoint and the upstream model are set from the environment and are never
+# handed to a tenant-facing reader (the Settings page or a settings export), so
+# the product does not advertise what it runs on. They stay writable through the
+# API for deployments that cannot set environment variables.
+_COPILOT_DEPLOYMENT_ONLY = ("base_url", "model")
+
+
+def _strip_copilot_deployment_keys(doc):
+    """Drop the deployment-only copilot keys from a settings document (in place)."""
+    if isinstance(doc, dict) and isinstance(doc.get("copilot"), dict):
+        for key in _COPILOT_DEPLOYMENT_ONLY:
+            doc["copilot"].pop(key, None)
+    return doc
+
 
 @router.get("/")
 def get_settings(request: Request, db: Session = Depends(get_db)):
@@ -225,10 +240,7 @@ def get_settings(request: Request, db: Session = Depends(get_db)):
     if isinstance(doc, dict) and isinstance(doc.get("copilot"), dict) \
             and doc["copilot"].get("api_key"):
         doc["copilot"]["api_key"] = _SECRET_MASK
-    # Copilot's provider base URL is deployment-environment only; never hand a
-    # stale value back to the page (which would appear editable).
-    if isinstance(doc, dict) and isinstance(doc.get("copilot"), dict):
-        doc["copilot"].pop("base_url", None)
+    _strip_copilot_deployment_keys(doc)
     # Optimistic-concurrency token for the Settings page, hashed from the raw
     # stored value (never the masked view). Additive, so nothing that reads the
     # response today is affected.
@@ -740,6 +752,8 @@ def export_settings(db: Session = Depends(get_db)):
     except Exception:
         pass
     doc = {"exported_at": int(time.time()), "data": _sanitize_for_export(data)}
+    # The export is a tenant-facing document too: no upstream model or endpoint.
+    _strip_copilot_deployment_keys((doc["data"] or {}).get("settings"))
     return JSONResponse(
         content=doc,
         headers={"Content-Disposition": 'attachment; filename="settings-backup.json"'})

@@ -119,23 +119,6 @@
                         not run since boot is marked "not yet run", not stale.
                     </div>
                 </v-card>
-
-                <v-card class="pa-4" id="health-tables-card">
-                    <v-card-title class="px-0 subtitle-1 font-weight-bold">
-                        <v-icon color="primary" class="mr-2">mdi-table-large</v-icon>Largest tables
-                    </v-card-title>
-                    <v-data-table
-                            :headers="tableHeaders"
-                            :items="report ? report.largest_tables : []"
-                            dense
-                            hide-default-footer
-                            :items-per-page="-1"
-                    ></v-data-table>
-                    <div class="caption grey--text mt-2">
-                        Row counts are the Postgres live-tuple estimate — a cheap catalog read, not an
-                        exact per-table scan.
-                    </div>
-                </v-card>
             </v-col>
         </v-row>
     </v-container>
@@ -154,10 +137,6 @@
                     {text: 'Cadence', value: 'cadence'},
                     {text: 'Last run', value: 'last'},
                     {text: 'State', value: 'stale', sortable: false},
-                ],
-                tableHeaders: [
-                    {text: 'Table', value: 'table'},
-                    {text: 'Rows (estimate)', value: 'rows', align: 'end'},
                 ],
             };
         },
@@ -182,10 +161,10 @@
             databases() {
                 const d = (this.report && this.report.databases) || {};
                 return [
-                    {name: 'Postgres', ok: !!(d.postgres && d.postgres.ok),
-                     latency_ms: d.postgres ? d.postgres.latency_ms : null},
-                    {name: 'ClickHouse', ok: !!(d.clickhouse && d.clickhouse.ok),
-                     latency_ms: d.clickhouse ? d.clickhouse.latency_ms : null},
+                    {name: 'Database', ok: !!(d.database && d.database.ok),
+                     latency_ms: d.database ? d.database.latency_ms : null},
+                    {name: 'Analytics', ok: !!(d.analytics && d.analytics.ok),
+                     latency_ms: d.analytics ? d.analytics.latency_ms : null},
                 ];
             },
             countTiles() {

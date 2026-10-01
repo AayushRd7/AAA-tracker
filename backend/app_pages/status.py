@@ -1,10 +1,11 @@
 """G78 — in-UI system status.
 
 GET /api/status (admin-only 'settings' section, mounted in app.py) reports:
-app version, Postgres and ClickHouse health (SELECT 1 + latency), the last
-run of each background loop (monitor / auto-rules / optimizer), 24h click
-counts from ClickHouse, 24h conversions from Postgres, and — when the
-landings volume is visible to this container — its disk usage.
+app version, reachability + latency for the primary store and the analytics
+store (SELECT 1 + latency, under neutral keys — the deployment's stack is not
+named to tenants), the last run of each background loop (monitor / auto-rules /
+optimizer), 24h click counts, 24h conversions, and — when the landings volume is
+visible to this container — its disk usage.
 """
 import os
 import shutil
@@ -76,8 +77,9 @@ def system_status(request: Request, db: Session = Depends(get_db)):
 
     status = {
         "version": __version__,
-        "postgres": {"ok": pg_ok, "latency_ms": pg_ms},
-        "clickhouse": {"ok": ch_ok, "latency_ms": ch_ms},
+        # Neutral keys: the deployment's stack is not named to tenants.
+        "database": {"ok": pg_ok, "latency_ms": pg_ms},
+        "analytics": {"ok": ch_ok, "latency_ms": ch_ms},
         "loops": loops,
         "clicks_24h": clicks_24h,
         "conversions_24h": conversions_24h,
@@ -89,7 +91,6 @@ def system_status(request: Request, db: Session = Depends(get_db)):
                 "total_gb": round(usage.total / (1024 ** 3), 2),
                 "used_gb": round(usage.used / (1024 ** 3), 2),
                 "free_gb": round(usage.free / (1024 ** 3), 2),
-                "path": LANDINGS_DIR,
             }
         except Exception:
             pass
