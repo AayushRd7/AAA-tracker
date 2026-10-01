@@ -816,6 +816,32 @@ body::-webkit-scrollbar-thumb:hover {
   color: var(--accent) !important;
 }
 
+/* CAPI platform hub: one tile per destination platform (mirrors the
+   manage-all / add-new flow). */
+.capi-platform-search {
+  max-width: 260px;
+}
+
+.capi-platform-tile {
+  height: 100%;
+  transition: border-color var(--t-fast) ease, background var(--t-fast) ease;
+}
+
+.capi-platform-tile:hover {
+  border-color: var(--accent);
+}
+
+.capi-platform-tile--on {
+  border-color: var(--accent) !important;
+  background: var(--accent-soft);
+}
+
+.capi-platform-name {
+  font-size: var(--fs-15);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 /* Slim light top bar */
 .topbar {
   background: var(--surface) !important;

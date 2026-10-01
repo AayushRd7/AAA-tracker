@@ -6250,6 +6250,22 @@ print("ESCAPED-OK")
     check("capi-pixels: CAPI integrations page has no unreplaced jinja tags",
           "{%" not in rp.text, "unreplaced jinja tag")
 
+    # -- the page is a platform hub: a tile per platform with manage-all (and its
+    #    record count) plus add-new, and Coming soon for platforms whose sender
+    #    has not shipped.
+    check("capi-pixels: CAPI page is a platform hub with per-platform panels",
+          all(m in rp.text for m in ("capi-platforms-card", "capiPlatformTiles",
+                                     "countFor", "selectPlatform", "backToHub",
+                                     "capiPixelsForPlatform", "capi-platform-tile")),
+          "platform-hub markers missing")
+    check("capi-pixels: only Meta is live and the rest say Coming soon",
+          "capiLivePlatforms: ['meta']" in rp.text and "Coming soon" in rp.text,
+          "coming-soon marker missing")
+    check("capi-pixels: every platform has a hub tile",
+          all(f"value: '{v}'" in rp.text for v in
+              ("meta", "snapchat", "tiktok", "google", "pinterest", "applovin", "openai")),
+          "a platform is missing from the hub")
+
     # -- delete --
     r = s.delete(f"{api}/settings/capi-pixels/{pxc['id']}")
     check("capi-pixels: delete removes the record", r.status_code == 200, r.text[:150])

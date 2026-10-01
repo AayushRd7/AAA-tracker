@@ -29,24 +29,80 @@
                    @click="loadCapiSettings">Reload</v-btn>
         </v-alert>
 
-        <v-row>
+        <!-- Platform hub: one card per destination platform, with the same
+             "manage all / add new" flow. Platforms whose sender has not shipped
+             are marked Coming soon. -->
+        <v-card class="pa-4 mb-4" id="capi-platforms-card">
+            <v-card-title class="d-flex align-center px-0">
+                <v-icon color="primary" class="mr-2">mdi-view-grid-outline</v-icon>
+                Platforms
+                <v-spacer></v-spacer>
+                <v-text-field v-model="capiSearch" dense outlined hide-details clearable
+                              prepend-inner-icon="mdi-magnify" label="Search platforms"
+                              class="capi-platform-search"></v-text-field>
+            </v-card-title>
+            <v-card-text class="px-0 pt-2">
+                <v-row dense>
+                    <v-col v-for="tile in capiPlatformTiles" :key="tile.value" cols="12" md="4">
+                        <v-card outlined class="capi-platform-tile pa-3"
+                                :class="{'capi-platform-tile--on': selectedPlatform === tile.value}">
+                            <div class="d-flex align-center">
+                                <v-icon color="primary" class="mr-2">{{ tile.icon }}</v-icon>
+                                <div class="capi-platform-name">{{ tile.text }}</div>
+                                <v-spacer></v-spacer>
+                                <v-chip v-if="!tile.live" x-small label color="amber darken-2" dark>
+                                    Coming soon
+                                </v-chip>
+                            </div>
+                            <div class="d-flex align-center mt-3 flex-wrap">
+                                <v-btn small outlined color="primary" @click="selectPlatform(tile.value)">
+                                    Manage all
+                                    <v-chip x-small label class="ml-2">{{ countFor(tile.value) }}</v-chip>
+                                </v-btn>
+                                <v-btn small color="primary" elevation="0" class="ml-2"
+                                       @click="selectPlatform(tile.value, true)">
+                                    Add new
+                                </v-btn>
+                            </div>
+                            <div v-if="!tile.live" class="caption grey--text mt-2">
+                                Records can be added and bound now; sending events is coming soon.
+                            </div>
+                        </v-card>
+                    </v-col>
+                    <v-col v-if="!capiPlatformTiles.length" cols="12" class="grey--text">
+                        No platform matches “{{ capiSearch }}”.
+                    </v-col>
+                </v-row>
+            </v-card-text>
+        </v-card>
+
+        <v-row v-if="selectedPlatform">
             <v-col cols="12">
                 <v-card class="pa-4">
-                    <v-card-title class="d-flex align-center">
-                        <v-icon color="primary" class="mr-2">mdi-broadcast</v-icon>
-                        CAPI integrations
+                    <v-card-title class="d-flex align-center flex-wrap">
+                        <v-btn text small class="mr-1" @click="backToHub">
+                            <v-icon small class="mr-1">mdi-arrow-left</v-icon>All platforms
+                        </v-btn>
+                        <v-icon color="primary" class="mr-2">{{ capiPlatformIcon(selectedPlatform) }}</v-icon>
+                        {{ capiPlatformLabel(selectedPlatform) }}
                         <v-spacer></v-spacer>
-                        <v-btn small color="primary" elevation="0" @click="openPixelDialog()">
+                        <v-btn small color="primary" elevation="0"
+                               @click="openPixelDialog(null, selectedPlatform)">
                             <v-icon small class="mr-1">mdi-plus</v-icon>Add new pixel
                         </v-btn>
                     </v-card-title>
                     <v-card-text>
+                        <v-alert v-if="!capiPlatformLive(selectedPlatform)" type="warning" text dense class="mb-3">
+                            Sending to {{ capiPlatformLabel(selectedPlatform) }} is coming soon — records are
+                            stored and bindable now, but no events are sent yet.
+                        </v-alert>
                         <div class="caption grey--text mb-2">
                             Pixels are first-class records. Bind a pixel to a traffic channel or an
                             offer/website; conversions are sent server-side so ad clicks are matched by
                             fbc/fbp, IP and (optionally) hashed email/phone. Runs off the redirect and
                             postback path.
                         </div>
+                        <template v-if="selectedPlatform === 'meta'">
                         <v-switch
                                 v-model="settings.meta_capi.enabled"
                                 label="Send conversions to Meta"
@@ -70,7 +126,11 @@
                                 hide-details
                                 :disabled="!settings.meta_capi.enabled"
                         ></v-switch>
+                        </template>
 
+                        <div class="caption grey--text mt-2 mb-1">
+                            {{ capiPlatformLabel(selectedPlatform) }} pixels
+                        </div>
                         <v-simple-table dense class="mt-3">
                             <thead>
                                 <tr>
@@ -82,7 +142,7 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="p in capiPixels" :key="p.id">
+                                <tr v-for="p in capiPixelsForPlatform" :key="p.id">
                                     <td>{{ p.title }}</td>
                                     <td>{{ p.pixel_id }}</td>
                                     <td>{{ capiPlatformLabel(p.platform) }}</td>
@@ -100,15 +160,16 @@
                                         </v-btn>
                                     </td>
                                 </tr>
-                                <tr v-if="!capiPixels.length">
+                                <tr v-if="!capiPixelsForPlatform.length">
                                     <td colspan="5" class="grey--text">
-                                        No pixels yet — use “Add new pixel”, then bind it to a channel
-                                        (Sources) or an offer.
+                                        No {{ capiPlatformLabel(selectedPlatform) }} pixels yet — use
+                                        “Add new pixel”, then bind it to a channel (Sources) or an offer.
                                     </td>
                                 </tr>
                             </tbody>
                         </v-simple-table>
 
+                        <template v-if="selectedPlatform === 'meta'">
                         <v-row dense class="mt-3">
                             <v-col cols="12" md="6">
                                 <v-text-field
@@ -193,6 +254,7 @@
                             <div class="caption grey--text ml-2">Saves settings first, then sends one synthetic event</div>
                         </div>
                         <pre v-if="metaTestResult" class="caption meta-test-result mt-2">{{ metaTestResult }}</pre>
+                        </template>
                     </v-card-text>
                 </v-card>
             </v-col>
@@ -357,6 +419,22 @@
                 capiPixels: [],
                 capiDialog: false,
                 capiSaving: false,
+                // Platform hub: which platform's panel is open, and the tile filter.
+                selectedPlatform: null,
+                capiSearch: '',
+                // Brand-free icons — the platform names carry the identity.
+                capiPlatformIcons: {
+                    meta: 'mdi-broadcast',
+                    snapchat: 'mdi-ghost-outline',
+                    tiktok: 'mdi-music-note-outline',
+                    google: 'mdi-magnify',
+                    pinterest: 'mdi-image-multiple-outline',
+                    applovin: 'mdi-cellphone-link',
+                    openai: 'mdi-robot-outline',
+                },
+                // Platforms whose sender has shipped. The rest are recorded and
+                // bindable, and marked Coming soon on the hub.
+                capiLivePlatforms: ['meta'],
                 // Load gate: Save stays disabled until a settings load succeeds,
                 // and every save echoes the rev the server handed out.
                 capiSettingsLoaded: false,
@@ -421,6 +499,23 @@
             },
             capiIsMeta() {
                 return (this.capiForm.platform || 'meta') === 'meta';
+            },
+            // The hub's tiles: filtered by the search box, each carrying its icon
+            // and whether its sender has shipped.
+            capiPlatformTiles() {
+                const q = String(this.capiSearch || '').trim().toLowerCase();
+                return this.capiPlatforms
+                    .filter(p => !q || (p.text || '').toLowerCase().includes(q))
+                    .map(p => ({
+                        value: p.value,
+                        text: p.text,
+                        icon: this.capiPlatformIcons[p.value] || 'mdi-broadcast',
+                        live: this.capiPlatformLive(p.value),
+                    }));
+            },
+            capiPixelsForPlatform() {
+                const want = this.selectedPlatform || 'meta';
+                return this.capiPixels.filter(p => (p.platform || 'meta') === want);
             },
         },
         methods: {
@@ -511,6 +606,24 @@
                 const p = this.capiPlatforms.find(x => x.value === value);
                 return p ? p.text : (value || '');
             },
+            capiPlatformIcon(value) {
+                return this.capiPlatformIcons[value || 'meta'] || 'mdi-broadcast';
+            },
+            capiPlatformLive(value) {
+                return this.capiLivePlatforms.includes(value || 'meta');
+            },
+            countFor(value) {
+                return this.capiPixels.filter(p => (p.platform || 'meta') === value).length;
+            },
+            selectPlatform(value, addNew) {
+                this.selectedPlatform = value;
+                this.metaTestResult = '';
+                if (addNew) this.openPixelDialog(null, value);
+            },
+            backToHub() {
+                this.selectedPlatform = null;
+                this.metaTestResult = '';
+            },
             async loadCapiPixels() {
                 try {
                     const res = await fetch("/backend/api/settings/capi-pixels",
@@ -522,7 +635,7 @@
                     /* non-fatal: the list stays as-is */
                 }
             },
-            openPixelDialog(pixel) {
+            openPixelDialog(pixel, platform) {
                 if (pixel) {
                     this.capiForm = Object.assign({}, pixel, {
                         conversion_matching: (pixel.conversion_matching || []).map(r => Object.assign({}, r)),
@@ -530,7 +643,7 @@
                     });
                 } else {
                     this.capiForm = {
-                        title: '', platform: 'meta', pixel_id: '', access_token: '',
+                        title: '', platform: platform || 'meta', pixel_id: '', access_token: '',
                         default_event_name: 'Purchase', event_url: '',
                         action_source: 'website', data_quality_token: '',
                         custom_matching: false, status: 'active',
