@@ -99,6 +99,15 @@ SYSTEM_PROMPT = (
     "question about the numbers — do not recite the metrics.\n"
     "4. If the snapshot is empty or too thin for a conclusion on a genuine data "
     "question, say so plainly instead of guessing.\n"
+    "5. The snapshot holds ONLY the window totals and the leading campaigns. If "
+    "the question asks for a breakdown or a metric that is not in it (by day, "
+    "geo, device, source, ad platform; impressions, CTR; click time vs "
+    "conversion time), say plainly that this view carries totals and the top "
+    "campaigns only, then answer with what is there. Never imply data you do "
+    "not have.\n"
+    "6. The metric names are already defined for you: roas = revenue / cost, "
+    "cr = conversions / clicks, cpc = cost / clicks, cpa = cost / conversions. "
+    "Do not restate the formulas.\n"
     "Keep it short: at most three short bullets or two short paragraphs, plain "
     "language for a busy operator — what stands out, what moved, what to look at "
     "next. No preamble and no restating of the question."
@@ -216,8 +225,16 @@ class WindowIn(BaseModel):
     date_to: Optional[str] = None
 
 
+class ChatTurn(BaseModel):
+    role: str = ""
+    text: str = ""
+
+
 class AskIn(WindowIn):
     question: str = ""
+    # Recent turns of this page's own thread, so a follow-up keeps its context.
+    # Bounded server-side; the page keeps the thread, we persist nothing.
+    history: list[ChatTurn] = []
 
 
 # ---------------------------------------------------------------------------
@@ -327,12 +344,24 @@ def build_snapshot(ch, db: Session, date_from: str, date_to: str) -> dict:
 
     out_totals = {
         "visits": int(totals.get("visits") or 0),
+        "unique_visits": int(totals.get("unique_visits") or 0),
         "clicks": int(totals.get("clicks") or 0),
+        "unique_clicks": int(totals.get("unique_clicks") or 0),
         "conversions": int(totals.get("conversions") or 0),
         "cost": cost,
         "revenue": revenue,
         "profit": profit,
+        # Derived metrics are written out so the model never has to guess a
+        # formula: roas = revenue / cost, cr = conversions / clicks,
+        # cpc = cost / clicks, cpa = cost / conversions.
         "roas": _round(revenue / cost) if cost > 0 else None,
+        "cr": _round(int(totals.get("conversions") or 0) / int(totals.get("clicks") or 1))
+              if int(totals.get("clicks") or 0) else None,
+        "cpc": _round(cost / int(totals.get("clicks") or 1))
+               if int(totals.get("clicks") or 0) else None,
+        "cpa": _round(cost / int(totals.get("conversions") or 1))
+               if int(totals.get("conversions") or 0) else None,
+        "roi": totals.get("roi"),
     }
 
     rows = get_report_breakdown_multi(ch, filters, ["campaign_id"], limit=MAX_SNAPSHOT_ROWS)
@@ -379,17 +408,39 @@ def build_prompt(snapshot: dict, question: Optional[str] = None):
     return SYSTEM_PROMPT, user
 
 
-def call_provider(system: str, user: str, cfg: dict):
+MAX_HISTORY_TURNS = 6
+MAX_HISTORY_CHARS = 400
+
+
+def _bounded_history(history) -> list:
+    """The last few thread turns, trimmed — a follow-up keeps its context while
+    the token cost stays bounded. Accepts ChatTurn models or plain dicts."""
+    turns = []
+    for turn in list(history or [])[-MAX_HISTORY_TURNS:]:
+        if isinstance(turn, dict):
+            role, text = turn.get("role"), turn.get("text")
+        else:
+            role, text = getattr(turn, "role", None), getattr(turn, "text", None)
+        role = "user" if str(role or "").lower() == "user" else "assistant"
+        text = str(text or "").strip()[:MAX_HISTORY_CHARS]
+        if text:
+            turns.append({"role": role, "text": text})
+    return turns
+
+
+def call_provider(system: str, user: str, cfg: dict, history=None):
     """Call the chat provider. Returns (text, error). Never raises, never logs
-    or echoes the key."""
+    or echoes the key. `history` is the bounded slice of the page's own thread
+    that gives a follow-up its context."""
     base = (cfg.get("base_url") or OPENROUTER_URL).rstrip("/")
     url = base + "/chat/completions"
+    messages = [{"role": "system", "content": system}]
+    for turn in _bounded_history(history):
+        messages.append({"role": turn["role"], "content": turn["text"]})
+    messages.append({"role": "user", "content": user})
     body = {
         "model": cfg["model"],
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
+        "messages": messages,
         "max_tokens": int(cfg["max_tokens"]),
         "temperature": 0.2,
     }
@@ -427,7 +478,7 @@ def _audit(request: Request, question, cfg: dict, ok: bool, kind: str, rows: int
                 request.client.host if request.client else "")
 
 
-def _run(db: Session, request: Request, date_from, date_to, question=None):
+def _run(db: Session, request: Request, date_from, date_to, question=None, history=None):
     cfg = load_copilot_settings(db)
     if not _configured(cfg):
         return {"configured": False, "message": _not_configured_message(cfg)}
@@ -451,7 +502,7 @@ def _run(db: Session, request: Request, date_from, date_to, question=None):
         return {"configured": True, "error": "Could not build the account snapshot right now."}
 
     system, user = build_prompt(snapshot, question)
-    text, error = call_provider(system, user, cfg)
+    text, error = call_provider(system, user, cfg, history)
 
     kind = "answer" if question else "summary"
     # Last line of defence: if the model echoed something it must not, replace it.
@@ -496,4 +547,5 @@ def copilot_ask(payload: AskIn, request: Request, db: Session = Depends(get_db))
         raise HTTPException(status_code=400, detail="A question is required")
     if len(question) > MAX_QUESTION_CHARS:
         question = question[:MAX_QUESTION_CHARS]
-    return _run(db, request, payload.date_from, payload.date_to, question=question)
+    return _run(db, request, payload.date_from, payload.date_to, question=question,
+                history=payload.history)

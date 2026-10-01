@@ -10180,6 +10180,10 @@ print("ESCAPED-OK")
                                  "cost", "revenue", "profit", "roas"}
                       for c in (snap.get("top_campaigns") or [])),
                   str(snap.get("top_campaigns"))[:200])
+            check("slice5b: snapshot totals carry the derived metrics",
+                  all(k in tiles for k in ("roas", "cr", "cpc", "cpa", "roi",
+                                           "unique_visits", "unique_clicks")),
+                  str(sorted(tiles.keys()))[:180])
             # Only aggregates leave the box: none of the seeded visitor / sub-id / IP
             # values, and no raw identifier field names, appear in the response.
             check("slice5b: only aggregate metrics are sent — no visitor/sub-id/IP",
@@ -10209,6 +10213,20 @@ print("ESCAPED-OK")
                   r.status_code == 200 and bool(body.get("error"))
                   and "provider" in str(body.get("error")).lower(), r.text[:200])
             check("slice5b: provider failure leaks no key", s5b_key not in r.text, r.text[:150])
+
+            # -- a follow-up carries the page's own thread so the answer keeps
+            #    its context (bounded server-side).
+            s5b_cfg()
+            s.post(f"{api}/copilot/ask", json=dict(
+                question="and by campaign?",
+                history=[{"role": "user", "text": "how is spend trending?"},
+                         {"role": "assistant", "text": "Spend is flat."}],
+                **s5b_window))
+            _h_msgs = ((s5b_captured[-1].get("body") or {}).get("messages")
+                       or []) if s5b_captured else []
+            check("slice5b: a follow-up carries the thread to the provider",
+                  [m.get("role") for m in _h_msgs] == ["system", "user", "assistant", "user"]
+                  and "Spend is flat." in json.dumps(_h_msgs), str(_h_msgs)[:220])
 
         # -- switched off degrades cleanly too
         s5b_cfg(enabled=False)
@@ -10285,6 +10303,11 @@ print("ESCAPED-OK")
               rp.status_code == 200 and all(m in rp.text for m in
                   ("copilot-thread", "copilot-composer", "askQuestion")),
               "chat markers missing")
+        check("slice5b: copilot page carries the chat polish",
+              all(m in rp.text for m in
+                  ("copilot-chat-shell", "useSuggestion", "chat-thinking",
+                   "shimmer-line", "Getting a good answer")),
+              "chat polish markers missing")
         check("slice5b: the account summary card sits below the chat thread",
               rp.text.find('id="copilot-thread"') != -1
               and rp.text.find('id="copilot-card"') > rp.text.find('id="copilot-thread"'),

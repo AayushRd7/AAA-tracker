@@ -62,62 +62,79 @@
                 </v-btn>
             </v-card-title>
             <v-card-text class="px-0">
-                <div class="copilot-thread" id="copilot-thread" ref="thread">
-                    <div v-if="!history.length" class="empty-state">
-                        <v-icon>mdi-robot-outline</v-icon>
-                        <div class="mt-2">
-                            Ask me about this account's numbers — or just say hello and I'll point you
-                            the right way.
+                <div class="copilot-chat-shell">
+                    <div class="copilot-thread" id="copilot-thread" ref="thread">
+                        <div v-if="!history.length" class="empty-state">
+                            <v-icon>mdi-robot-outline</v-icon>
+                            <div class="mt-2 mb-3">
+                                Ask me about this account's numbers — or just say hello and I'll point
+                                you the right way.
+                            </div>
+                            <div class="d-flex flex-wrap justify-center">
+                                <v-chip v-for="s in suggestions" :key="s" small outlined class="ma-1"
+                                        :disabled="!canRun" @click="useSuggestion(s)">{{ s }}</v-chip>
+                            </div>
+                        </div>
+                        <div v-for="(m, i) in history" :key="i"
+                             class="chat-row"
+                             :class="m.role === 'user' ? 'chat-row-user' : 'chat-row-assistant'">
+                            <div class="chat-bubble"
+                                 :class="[m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant',
+                                          m.error ? 'chat-bubble-error' : '']">
+                                <div v-for="(para, j) in paragraphs(m.text)" :key="j">{{ para }}</div>
+                            </div>
+                        </div>
+                        <div v-if="askLoading" class="chat-row chat-row-assistant">
+                            <div class="chat-bubble chat-bubble-assistant chat-thinking">
+                                <div class="thinking-head">
+                                    <v-icon small class="mr-1">mdi-robot-outline</v-icon>
+                                    <span>Copilot is thinking<span class="thinking-dots"><i>.</i><i>.</i><i>.</i></span></span>
+                                </div>
+                                <div class="shimmer-line"></div>
+                                <div class="shimmer-line short"></div>
+                            </div>
                         </div>
                     </div>
-                    <div v-for="(m, i) in history" :key="i"
-                         class="chat-row"
-                         :class="m.role === 'user' ? 'chat-row-user' : 'chat-row-assistant'">
-                        <div class="chat-bubble"
-                             :class="[m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant',
-                                      m.error ? 'chat-bubble-error' : '']">
-                            <div v-for="(para, j) in paragraphs(m.text)" :key="j">{{ para }}</div>
-                        </div>
+
+                    <v-alert v-if="askError" type="warning" dense outlined class="mt-3" id="copilot-ask-error">
+                        {{ askError }}
+                    </v-alert>
+
+                    <div class="copilot-composer mt-3" id="copilot-composer">
+                        <v-textarea
+                                v-model="question"
+                                label="Your question"
+                                placeholder="e.g. Which campaigns lost money this week, and by how much?"
+                                outlined
+                                dense
+                                rows="1"
+                                auto-grow
+                                hide-details
+                                :disabled="!canRun"
+                                @keydown.enter.exact.prevent="askQuestion"
+                                @keydown.ctrl.enter="askQuestion"
+                        ></v-textarea>
+                        <v-btn color="primary" elevation="0" class="ml-2" :loading="askLoading"
+                               :disabled="!canRun || !question.trim()" @click="askQuestion">
+                            <v-icon>mdi-send</v-icon>
+                        </v-btn>
                     </div>
-                    <div v-if="askLoading" class="chat-row chat-row-assistant">
-                        <div class="chat-bubble chat-bubble-assistant chat-typing">
-                            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                    <div class="d-flex align-center mt-2 flex-wrap">
+                        <div class="caption grey--text">
+                            Enter to send · Shift+Enter for a new line · answers are not saved and vanish
+                            when you leave the page.
                         </div>
+                        <v-spacer></v-spacer>
+                        <v-btn text small color="primary" :disabled="!canRun" @click="summariseAccount">
+                            <v-icon small class="mr-1">mdi-text-box-search-outline</v-icon>Summarise my account
+                        </v-btn>
                     </div>
                 </div>
-
-                <v-alert v-if="askError" type="warning" dense outlined class="mt-3" id="copilot-ask-error">
-                    {{ askError }}
-                </v-alert>
-
-                <div class="copilot-composer mt-3" id="copilot-composer">
-                    <v-textarea
-                            v-model="question"
-                            label="Your question"
-                            placeholder="e.g. Which campaigns lost money this week, and by how much?"
-                            outlined
-                            dense
-                            rows="1"
-                            auto-grow
-                            hide-details
-                            :disabled="!canRun"
-                            @keydown.enter.exact.prevent="askQuestion"
-                            @keydown.ctrl.enter="askQuestion"
-                    ></v-textarea>
-                    <v-btn color="primary" elevation="0" class="ml-2" :loading="askLoading"
-                           :disabled="!canRun || !question.trim()" @click="askQuestion">
-                        <v-icon>mdi-send</v-icon>
-                    </v-btn>
-                </div>
-                <div class="d-flex align-center mt-2 flex-wrap">
-                    <div class="caption grey--text">
-                        Enter to send · Shift+Enter for a new line · answers are not saved and vanish
-                        when you leave the page.
-                    </div>
-                    <v-spacer></v-spacer>
-                    <v-btn text small color="primary" :disabled="!canRun" @click="summariseAccount">
-                        <v-icon small class="mr-1">mdi-text-box-search-outline</v-icon>Summarise my account
-                    </v-btn>
+                <div class="copilot-ask-help caption grey--text mt-3">
+                    <strong>Getting a good answer:</strong> the window above is already applied. Name the
+                    metric you care about (ROAS, CPA, profit…) and how many campaigns you want ("top 5").
+                    This view carries window totals and the leading campaigns — not yet breakdowns by day,
+                    geo, device or source.
                 </div>
             </v-card-text>
         </v-card>
@@ -175,6 +192,13 @@
                 askLoading: false,
                 askError: '',
                 history: [],
+                suggestions: [
+                    'What stood out this window?',
+                    'Which campaigns made the most profit?',
+                    'Which campaigns lost money?',
+                    "What's my ROAS and CPA?",
+                    'Compare spend and revenue by campaign',
+                ],
                 dateMenu: false,
                 activePreset: 'Last 7 days',
                 datePresets: [
@@ -253,6 +277,10 @@
                 this.history = [];
                 this.askError = '';
             },
+            useSuggestion(text) {
+                this.question = text;
+                this.askQuestion();
+            },
             post(url, body) {
                 return fetch(url, {
                     method: 'POST',
@@ -285,12 +313,19 @@
             askQuestion() {
                 const q = this.question.trim();
                 if (!q || !this.canRun || this.askLoading) return;
+                // The thread so far gives a follow-up its context (bounded
+                // server-side); error bubbles are left out of the model's view.
+                const priorHistory = this.history
+                    .filter(m => !m.error)
+                    .slice(-6)
+                    .map(m => ({role: m.role, text: m.text}));
                 this.history.push({role: 'user', text: q});
                 this.question = '';
                 this.askLoading = true;
                 this.askError = '';
                 this.scrollThread();
-                return this.post('/backend/api/copilot/ask', Object.assign({question: q}, this.windowPayload()))
+                return this.post('/backend/api/copilot/ask',
+                                 Object.assign({question: q, history: priorHistory}, this.windowPayload()))
                     .then(res => {
                         if (res.data && res.data.configured === false) {
                             this.status = {configured: false, message: res.data.message};
@@ -318,6 +353,11 @@
 </script>
 
 <style>
+    /* Keep the conversation readable: a bounded column so bubbles never span the
+       whole viewport on a wide screen. */
+    .copilot-chat-shell {
+        max-width: 780px;
+    }
     .copilot-thread {
         max-height: 46vh;
         overflow-y: auto;
@@ -339,6 +379,7 @@
         border-radius: 12px;
         white-space: pre-line;
         line-height: 1.5;
+        animation: copilot-bubble-in 0.16s ease-out;
     }
     .chat-bubble > div + div {
         margin-top: 0.4rem;
@@ -357,21 +398,49 @@
     .chat-bubble-error {
         background: rgba(255, 152, 0, 0.16);
     }
-    .chat-typing .dot {
-        display: inline-block;
-        width: 6px;
-        height: 6px;
-        margin-right: 3px;
-        border-radius: 50%;
-        background: currentColor;
-        opacity: 0.4;
-        animation: copilot-blink 1.2s infinite both;
+    @keyframes copilot-bubble-in {
+        from { opacity: 0; transform: translateY(4px); }
+        to { opacity: 1; transform: translateY(0); }
     }
-    .chat-typing .dot:nth-child(2) { animation-delay: 0.2s; }
-    .chat-typing .dot:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes copilot-blink {
-        0%, 80%, 100% { opacity: 0.25; }
-        40% { opacity: 0.9; }
+    /* Thinking state: a labelled bubble with a shimmering placeholder, so the
+       wait reads as work being done rather than an empty pause. */
+    .chat-thinking {
+        min-width: 190px;
+    }
+    .thinking-head {
+        display: flex;
+        align-items: center;
+        font-weight: 600;
+        opacity: 0.75;
+    }
+    .thinking-dots i {
+        font-style: normal;
+        opacity: 0.3;
+        animation: copilot-dot 1.2s infinite both;
+    }
+    .thinking-dots i:nth-child(2) { animation-delay: 0.2s; }
+    .thinking-dots i:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes copilot-dot {
+        0%, 80%, 100% { opacity: 0.2; }
+        40% { opacity: 0.95; }
+    }
+    .shimmer-line {
+        height: 8px;
+        margin-top: 8px;
+        border-radius: 4px;
+        background: linear-gradient(90deg,
+            rgba(128, 128, 128, 0.16) 25%,
+            rgba(128, 128, 128, 0.34) 37%,
+            rgba(128, 128, 128, 0.16) 63%);
+        background-size: 320px 100%;
+        animation: copilot-shimmer 1.25s ease-in-out infinite;
+    }
+    .shimmer-line.short {
+        width: 58%;
+    }
+    @keyframes copilot-shimmer {
+        from { background-position: -160px 0; }
+        to { background-position: 260px 0; }
     }
     .copilot-composer {
         display: flex;
