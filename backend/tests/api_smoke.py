@@ -10354,6 +10354,12 @@ print("ESCAPED-OK")
                   "greeting+question was swallowed by the greeting rail")
         check("slice5b: the ask response does not carry the model id",
               "model" not in _b, str(_b)[:120])
+        # The audit trail is visible in the product, so it must not record what
+        # the deployment runs on either.
+        check("slice5b: the copilot audit trail records no model",
+              pg_exec_out("SELECT count(*) FROM audit_log WHERE entity = 'copilot' "
+                          "AND detail ? 'model'").strip() == "0",
+              "the copilot audit detail still carries the model")
 
         # -- the page is a chat: a thread with a composer, and the account summary
         #    card sits below it.

@@ -468,13 +468,16 @@ def call_provider(system: str, user: str, cfg: dict, history=None):
     return text, None
 
 
-def _audit(request: Request, question, cfg: dict, ok: bool, kind: str, rows: int = 0, days=None):
+def _audit(request: Request, question, ok: bool, kind: str, rows: int = 0, days=None):
+    """Record the call without recording what we run on: the audit trail is
+    visible in the product, so the upstream model is deliberately not part of
+    it (see the module docstring)."""
     from audit_logger import audit_event
     from auth import get_caller
     caller, _ = get_caller(request)
     audit_event(caller or "api_token", "copilot_ask" if question else "copilot_summary",
                 "copilot", "",
-                {"kind": kind, "model": cfg["model"], "days": days, "rows": rows, "ok": ok},
+                {"kind": kind, "days": days, "rows": rows, "ok": ok},
                 request.client.host if request.client else "")
 
 
@@ -489,7 +492,7 @@ def _run(db: Session, request: Request, date_from, date_to, question=None, histo
     if question:
         kind = _classify(question)
         if kind in _CANNED:
-            _audit(request, question, cfg, ok=True, kind=kind)
+            _audit(request, question, ok=True, kind=kind)
             return {"configured": True, "kind": kind, "answer": _CANNED[kind]}
 
     df, dt = _resolve_window(date_from, date_to)
@@ -509,7 +512,7 @@ def _run(db: Session, request: Request, date_from, date_to, question=None, histo
     if not error and text and _looks_like_disclosure(text):
         text, kind = REFUSAL_REPLY, "refusal"
 
-    _audit(request, question, cfg, ok=error is None, kind=kind,
+    _audit(request, question, ok=error is None, kind=kind,
            rows=len(snapshot["top_campaigns"]), days=snapshot["window"]["days"])
 
     out = {"configured": True, "kind": kind,
