@@ -816,6 +816,16 @@ body::-webkit-scrollbar-thumb:hover {
   color: var(--accent) !important;
 }
 
+/* Integrations: one tile per platform, matching the CAPI hub's language. */
+.integration-tile {
+  height: 100%;
+  transition: border-color var(--t-fast) ease;
+}
+
+.integration-tile--on {
+  border-color: var(--accent) !important;
+}
+
 /* CAPI platform hub: one tile per destination platform (mirrors the
    manage-all / add-new flow). */
 .capi-platform-logo {
@@ -1568,6 +1578,28 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 }
 
 /* "Why AAA Tracker" feature cards on the docs hub */
+/* Annotated step screenshots in the docs (SVG wrappers that embed the capture
+   and draw the numbered highlight markers). */
+.doc-figure {
+  margin: 14px 0 6px;
+}
+
+.doc-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.doc-figure figcaption {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+
 .doc-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

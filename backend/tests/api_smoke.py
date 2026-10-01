@@ -6269,16 +6269,16 @@ print("ESCAPED-OK")
     _capi_logos = ("meta.svg", "snapchat.svg", "tiktok.svg", "google.svg",
                    "pinterest.svg", "applovin.png", "chatgpt.svg")
     check("capi-pixels: the hub shows the real platform logos",
-          all(f"/backend/backend/img/capi/{f}" in rp.text for f in _capi_logos)
+          all(f"/backend/backend/img/platforms/{f}" in rp.text for f in _capi_logos)
           and "capi-platform-logo" in rp.text,
           "a platform logo is missing from the hub")
     check("capi-pixels: every platform logo is served",
-          all(s.get(f"{BASE}/backend/backend/img/capi/{f}").status_code == 200
+          all(s.get(f"{BASE}/backend/backend/img/platforms/{f}").status_code == 200
               for f in _capi_logos),
           "a logo asset does not serve")
     check("capi-pixels: ChatGPT Ads is listed with its own icon",
           "ChatGPT Ads" in rp.text
-          and "/backend/backend/img/capi/chatgpt.svg" in rp.text,
+          and "/backend/backend/img/platforms/chatgpt.svg" in rp.text,
           "the ChatGPT Ads tile is missing its icon")
 
     # -- delete --
@@ -10471,6 +10471,19 @@ print("ESCAPED-OK")
           not any(t in rp.text.lower() for t in _stack_terms)
           and not any(t in (_rp_docs.text or "").lower() for t in _stack_terms),
           "a stack name leaked into the health/documentation page")
+    # The docs carry annotated step screenshots (self-contained SVGs) for the
+    # quick-start walkthrough.
+    _doc_figs = ("campaigns", "sources", "conversion-tracking",
+                 "capi-integrations", "reports")
+    check("slice6b: documentation embeds the annotated step screenshots",
+          _rp_docs.status_code == 200
+          and all(f"/backend/backend/img/docs/{f}.svg" in _rp_docs.text for f in _doc_figs)
+          and "doc-figure" in _rp_docs.text,
+          "a docs figure is missing")
+    check("slice6b: every documentation figure serves",
+          all(s.get(f"{BASE}/backend/backend/img/docs/{f}.svg").status_code == 200
+              for f in _doc_figs),
+          "a docs figure does not serve")
     check("slice6b: health payload names no internal technology",
           not any(t in json.dumps(hb).lower() for t in _stack_terms), r.text[:160])
     check("slice6b: health payload carries no internal table list",

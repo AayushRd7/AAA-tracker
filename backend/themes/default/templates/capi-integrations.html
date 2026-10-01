@@ -433,20 +433,9 @@
                 // Platform hub: which platform's panel is open, and the tile filter.
                 selectedPlatform: null,
                 capiSearch: '',
-                // Real, brand-coloured platform logos (vendored under
-                // themes/default/img/capi — no runtime CDN call). The tint is the
-                // brand colour at low alpha so light marks (Snapchat) stay legible.
-                capiPlatformLogos: {
-                    meta: {src: '/backend/backend/img/capi/meta.svg', tint: 'rgba(4,103,223,0.10)'},
-                    snapchat: {src: '/backend/backend/img/capi/snapchat.svg', tint: 'rgba(233,184,0,0.16)'},
-                    tiktok: {src: '/backend/backend/img/capi/tiktok.svg', tint: 'rgba(0,0,0,0.07)'},
-                    google: {src: '/backend/backend/img/capi/google.svg', tint: 'rgba(66,133,244,0.10)'},
-                    pinterest: {src: '/backend/backend/img/capi/pinterest.svg', tint: 'rgba(230,0,35,0.10)'},
-                    applovin: {src: '/backend/backend/img/capi/applovin.png', tint: 'rgba(0,0,0,0.07)'},
-                    // ChatGPT Ads: the mark is the knot on its own — a green
-                    // glyph on a light-green chip, like the other platforms.
-                    openai: {src: '/backend/backend/img/capi/chatgpt.svg', tint: 'rgba(16,163,127,0.12)'},
-                },
+                // Ad-platform logos live on the root app (`platformLogos`) so the
+                // Integrations and CAPI pages share one source of truth; that map
+                // is read via this.$root.platformLogos.
                 // Fallback mark for a platform without a logo file.
                 capiPlatformIcons: {
                     meta: 'mdi-broadcast',
@@ -532,7 +521,7 @@
                 return this.capiPlatforms
                     .filter(p => !q || (p.text || '').toLowerCase().includes(q))
                     .map(p => {
-                        const logo = this.capiPlatformLogos[p.value] || null;
+                        const logo = (this.$root.platformLogos || {})[p.value] || null;
                         return {
                             value: p.value,
                             text: p.text,
@@ -641,7 +630,7 @@
                 return this.capiPlatformIcons[value || 'meta'] || 'mdi-broadcast';
             },
             capiPlatformLogo(value) {
-                return this.capiPlatformLogos[value] || null;
+                return (this.$root.platformLogos || {})[value] || null;
             },
             capiPlatformLive(value) {
                 return this.capiLivePlatforms.includes(value || 'meta');

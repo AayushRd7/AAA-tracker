@@ -163,6 +163,95 @@
                                 it (widths persist per table); double-click a handle to reset.</li>
                                 <li><b>Dark mode</b> — Settings → General → theme, remembered per browser.</li>
                             </ul>
+
+                            <h3 class="doc-h3">Quick start — your first campaign, end to end</h3>
+                            <p>
+                                The whole path is: create a campaign, give it a traffic source and an offer,
+                                hand the network a postback URL, send the conversions on to the ad platform,
+                                then read it back. The numbered boxes in each picture mark the control the
+                                step is talking about.
+                            </p>
+                            <ol class="doc-steps">
+                                <li>
+                                    <b>Create the campaign.</b> Open <b>Manage → Campaigns</b> and press
+                                    <b>Create campaign</b> (1). The editor works in three panes —
+                                    <b>Basics</b> (name, alias, type, status), <b>Flows</b> (what a visitor
+                                    is served and how the winner is chosen) and <b>Postbacks</b> (what we
+                                    tell the traffic source or network when a conversion lands) — then
+                                    <b>Save</b>. Use <b>Columns</b> (2) to choose which metrics the list
+                                    shows.
+                                    <figure class="doc-figure">
+                                        <img src="/backend/backend/img/docs/campaigns.svg"
+                                             alt="Campaigns list: Create campaign and Columns highlighted">
+                                        <figcaption>Campaigns — create, clone, bulk-edit, and pick your
+                                        columns.</figcaption>
+                                    </figure>
+                                </li>
+                                <li>
+                                    <b>Add the traffic source.</b> Sources carry the cost and the sub-ids
+                                    that come back on the postback, and they hold the network's S2S
+                                    postback URL. Press <b>Add source</b> (1) to start from scratch, or
+                                    <b>New from template</b> (2) to pre-fill a known channel.
+                                    <figure class="doc-figure">
+                                        <img src="/backend/backend/img/docs/sources.svg"
+                                             alt="Traffic sources: Add source and New from template highlighted">
+                                        <figcaption>Traffic sources — the channel record, its postback
+                                        and its cost rules.</figcaption>
+                                    </figure>
+                                </li>
+                                <li>
+                                    <b>Add the offer.</b> In <b>Manage → Offers</b>, set the payout, the
+                                    offer URL and its macros (<code>{click_id}</code> is replaced with the
+                                    visitor's click id), the caps, and the landing it should use. Anything
+                                    the network needs to identify the click travels on this URL.
+                                </li>
+                                <li>
+                                    <b>Hand the network the postback URL.</b> Open
+                                    <b>Tools → Conversion tracking</b>, choose the <b>Integration type</b> (1)
+                                    for how the network talks to you, copy the postback URL it shows (2) into
+                                    the network's own settings, and add any <b>Conversion type</b> you use
+                                    beyond the built-ins. <b>Save</b> (3) when done.
+                                    <figure class="doc-figure">
+                                        <img src="/backend/backend/img/docs/conversion-tracking.svg"
+                                             alt="Conversion tracking: integration type, postback URL and Save highlighted">
+                                        <figcaption>Conversion tracking — the postback contract with your
+                                        network.</figcaption>
+                                    </figure>
+                                </li>
+                                <li>
+                                    <b>Send conversions on to the ad platform.</b> In
+                                    <b>Manage → CAPI integrations</b>, pick the platform, then
+                                    <b>Manage all</b> (1) to see and bind its pixels or <b>Add new</b> (2)
+                                    to create one. A pixel is bound to a traffic channel or to an
+                                    offer/website; the server then sends conversions with the click
+                                    identifiers so the platform can match them.
+                                    <figure class="doc-figure">
+                                        <img src="/backend/backend/img/docs/capi-integrations.svg"
+                                             alt="CAPI integrations: platform tiles with Manage all and Add new highlighted">
+                                        <figcaption>CAPI integrations — one record per platform dataset,
+                                        bound where it should fire.</figcaption>
+                                    </figure>
+                                </li>
+                                <li>
+                                    <b>Read it back.</b> <b>Performance → Reports</b> with a
+                                    <b>Date range</b> (1), the <b>Columns</b> you care about (2), grouped by
+                                    any dimension you add — campaign, country, device, sub-id — then
+                                    <b>Run report</b> (3). Save a set of columns and filters as a preset so
+                                    the next look is one click.
+                                    <figure class="doc-figure">
+                                        <img src="/backend/backend/img/docs/reports.svg"
+                                             alt="Reports: date range, columns and Run report highlighted">
+                                        <figcaption>Reports — cost, clicks, conversions, revenue and
+                                        profit, grouped how you need them.</figcaption>
+                                    </figure>
+                                </li>
+                            </ol>
+                            <p>
+                                When the numbers are flowing, two things are worth turning on next:
+                                <b>Copilot</b> (Performance → Copilot) for a plain-language read of the
+                                window, and the <b>Optimizer</b>, which reweights a campaign's flows
+                                towards its best performer on a schedule.
+                            </p>
                         </section>
 
                         <!-- 2 ── CAMPAIGNS & FLOWS ───────────────────────── -->

@@ -32,7 +32,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/terser@5.30.2/dist/bundle.min.js"></script>
 
-    <link href="/backend/backend/css/style.css?v=22" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=24" rel="stylesheet">
 
     <!-- Theme toggle helper: reads localStorage('theme'), exposes window.setTheme(t) -->
     <script>
@@ -733,6 +733,19 @@
                 // `group` is presentation only — it drives the sidebar's small
                 // uppercase section headers. Section keys, permissions, routing
                 // and mounts are unchanged; an item without a group renders flat.
+                // Ad-platform logos, vendored under themes/default/img/platforms
+                // (no runtime CDN call) and shared by the Integrations and CAPI
+                // pages. `tint` is the brand colour at low alpha so light marks
+                // (Snapchat) stay legible.
+                platformLogos: {
+                    meta: {src: '/backend/backend/img/platforms/meta.svg', tint: 'rgba(4,103,223,0.10)'},
+                    snapchat: {src: '/backend/backend/img/platforms/snapchat.svg', tint: 'rgba(233,184,0,0.16)'},
+                    tiktok: {src: '/backend/backend/img/platforms/tiktok.svg', tint: 'rgba(0,0,0,0.07)'},
+                    google: {src: '/backend/backend/img/platforms/google.svg', tint: 'rgba(66,133,244,0.10)'},
+                    pinterest: {src: '/backend/backend/img/platforms/pinterest.svg', tint: 'rgba(230,0,35,0.10)'},
+                    applovin: {src: '/backend/backend/img/platforms/applovin.png', tint: 'rgba(0,0,0,0.07)'},
+                    openai: {src: '/backend/backend/img/platforms/chatgpt.svg', tint: 'rgba(16,163,127,0.12)'},
+                },
                 navItems: [
                     {key: 'dashboard', title: 'Dashboard', icon: 'mdi-view-dashboard-outline', group: 'Performance'},
                     {key: 'reports', title: 'Reports', icon: 'mdi-chart-line', group: 'Performance'},
