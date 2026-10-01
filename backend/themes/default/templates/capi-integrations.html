@@ -47,7 +47,9 @@
                         <v-card outlined class="capi-platform-tile pa-3"
                                 :class="{'capi-platform-tile--on': selectedPlatform === tile.value}">
                             <div class="d-flex align-center">
-                                <span v-if="tile.logo" class="capi-platform-logo" :style="{background: tile.tint}">
+                                <span v-if="tile.logo" class="capi-platform-logo"
+                                      :class="{'capi-platform-logo--flat': tile.flat}"
+                                      :style="{background: tile.tint}">
                                     <img :src="tile.logo" :alt="tile.text + ' logo'">
                                 </span>
                                 <v-icon v-else color="primary" class="mr-2">{{ tile.icon }}</v-icon>
@@ -87,6 +89,7 @@
                             <v-icon small class="mr-1">mdi-arrow-left</v-icon>All platforms
                         </v-btn>
                         <span v-if="capiPlatformLogo(selectedPlatform)" class="capi-platform-logo capi-platform-logo--sm"
+                              :class="{'capi-platform-logo--flat': capiPlatformLogo(selectedPlatform).flat}"
                               :style="{background: capiPlatformLogo(selectedPlatform).tint}">
                             <img :src="capiPlatformLogo(selectedPlatform).src"
                                  :alt="capiPlatformLabel(selectedPlatform) + ' logo'">
@@ -440,7 +443,9 @@
                     google: {src: '/backend/backend/img/capi/google.svg', tint: 'rgba(66,133,244,0.10)'},
                     pinterest: {src: '/backend/backend/img/capi/pinterest.svg', tint: 'rgba(230,0,35,0.10)'},
                     applovin: {src: '/backend/backend/img/capi/applovin.png', tint: 'rgba(0,0,0,0.07)'},
-                    openai: {src: '/backend/backend/img/capi/openai.png', tint: 'rgba(0,0,0,0.07)'},
+                    // ChatGPT Ads: the mark is the knot on its own — a green
+                    // glyph on a light-green chip, like the other platforms.
+                    openai: {src: '/backend/backend/img/capi/chatgpt.svg', tint: 'rgba(16,163,127,0.12)'},
                 },
                 // Fallback mark for a platform without a logo file.
                 capiPlatformIcons: {
@@ -473,7 +478,7 @@
                     {text: 'Google', value: 'google'},
                     {text: 'Pinterest', value: 'pinterest'},
                     {text: 'AppLovin', value: 'applovin'},
-                    {text: 'OpenAI Ads', value: 'openai'},
+                    {text: 'ChatGPT Ads', value: 'openai'},
                 ],
                 capiPlatformFieldLabels: {
                     meta: {id: 'Pixel / Dataset ID', token: 'API key / Access token'},
@@ -534,6 +539,7 @@
                             icon: this.capiPlatformIcons[p.value] || 'mdi-broadcast',
                             logo: logo ? logo.src : '',
                             tint: logo ? logo.tint : '',
+                            flat: logo ? !!logo.flat : false,
                             live: this.capiPlatformLive(p.value),
                         };
                     });

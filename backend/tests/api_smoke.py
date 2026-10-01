@@ -6267,7 +6267,7 @@ print("ESCAPED-OK")
           "a platform is missing from the hub")
     # -- real, brand-coloured logos, vendored locally (no runtime CDN call) --
     _capi_logos = ("meta.svg", "snapchat.svg", "tiktok.svg", "google.svg",
-                   "pinterest.svg", "applovin.png", "openai.png")
+                   "pinterest.svg", "applovin.png", "chatgpt.svg")
     check("capi-pixels: the hub shows the real platform logos",
           all(f"/backend/backend/img/capi/{f}" in rp.text for f in _capi_logos)
           and "capi-platform-logo" in rp.text,
@@ -6276,6 +6276,10 @@ print("ESCAPED-OK")
           all(s.get(f"{BASE}/backend/backend/img/capi/{f}").status_code == 200
               for f in _capi_logos),
           "a logo asset does not serve")
+    check("capi-pixels: ChatGPT Ads is listed with its own icon",
+          "ChatGPT Ads" in rp.text
+          and "/backend/backend/img/capi/chatgpt.svg" in rp.text,
+          "the ChatGPT Ads tile is missing its icon")
 
     # -- delete --
     r = s.delete(f"{api}/settings/capi-pixels/{pxc['id']}")

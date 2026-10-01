@@ -847,6 +847,24 @@ body::-webkit-scrollbar-thumb:hover {
   height: 18px;
 }
 
+/* A logo that is its own tile (ChatGPT's green app icon): fill the chip and let
+   the mark's own rounding show through. */
+.capi-platform-logo--flat {
+  background: none !important;
+}
+
+.capi-platform-logo--flat img {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+}
+
+.capi-platform-logo--sm.capi-platform-logo--flat img {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
 .capi-platform-search {
   max-width: 260px;
 }
