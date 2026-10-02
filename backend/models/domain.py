@@ -19,6 +19,9 @@ class DomainORM(TenantMixin, Base):
     group_name = Column(String(255), nullable=True)
     status = Column(String(50), nullable=False, server_default="pending")
     ssl_status = Column(String(50), nullable=False, server_default="not_started")
+    # Owner scope parity with campaigns.owner_id: the domains:'own' permission
+    # limits a caller to domains they own.
+    owner_id = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

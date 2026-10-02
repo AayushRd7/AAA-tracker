@@ -96,6 +96,80 @@ def _require_mutation_access(request: Request, db: Session, campaigns) -> None:
                                 detail="You can only modify your own campaigns")
 
 
+def _flow_campaign_targets(config) -> list:
+    """Every campaign a config's flows point at — the single ``redirect_campaign``
+    target and the ``campaigns`` destinations a multi flow mixes in with its
+    offers. Unparseable ids are dropped, matching the tracking plane's
+    flow_config_id."""
+    targets = []
+    if not isinstance(config, dict):
+        return targets
+    flows = config.get("flows")
+    if not isinstance(flows, list):
+        return targets
+    for flow in flows:
+        if not isinstance(flow, dict):
+            continue
+        raw_campaigns = flow.get("campaigns")
+        entries = raw_campaigns if isinstance(raw_campaigns, list) else []
+        for raw in [flow.get("redirect_campaign")] + entries:
+            if raw is None or isinstance(raw, bool):
+                continue
+            try:
+                targets.append(int(str(raw).strip()))
+            except (TypeError, ValueError):
+                continue
+    return targets
+
+
+def _uses_multi_campaign_targets(config) -> bool:
+    """True when the config has a flow mixing campaigns in with its offers."""
+    if not isinstance(config, dict) or not isinstance(config.get("flows"), list):
+        return False
+    for flow in config["flows"]:
+        if isinstance(flow, dict) and isinstance(flow.get("campaigns"), list) and flow["campaigns"]:
+            return True
+    return False
+
+
+def _validate_campaign_targets(db: Session, config, campaign_id: int) -> None:
+    """Refuse a config that targets its own campaign or closes a redirect cycle
+    back onto it. Runtime still caps depth — this catches the operator error at
+    save time, where the message can name the campaign instead of a silent 404.
+
+    Cycle rejection applies to the campaign-as-offer ``campaigns`` destinations
+    (the new shape). A pure ``redirect_campaign`` chain keeps its long-standing
+    contract — save it, and let the runtime depth cap turn a loop into a 404 —
+    so existing configs and the smoke suite route exactly as before. A direct
+    self-target is refused for either shape; no existing config relies on it.
+    A pre-existing cycle that does not involve this campaign is left alone: the
+    visited set bounds the walk and only a path back to ``campaign_id`` errors.
+    """
+    if campaign_id is None:
+        return
+    direct = _flow_campaign_targets(config)
+    if campaign_id in direct:
+        raise HTTPException(status_code=400,
+                            detail="A flow cannot target its own campaign")
+    if not _uses_multi_campaign_targets(config):
+        return
+    queue = list(direct)
+    visited = set()
+    while queue:
+        node = queue.pop(0)
+        if node in visited:
+            continue
+        visited.add(node)
+        if node == campaign_id:
+            raise HTTPException(
+                status_code=400,
+                detail="That target would create a campaign redirect cycle — "
+                       "a campaign cannot target itself, directly or through another")
+        row = db.query(CampaignORM).filter(CampaignORM.id == node).first()
+        if row is not None:
+            queue.extend(_flow_campaign_targets(row.config))
+
+
 def _purge_campaign(db: Session, ch, campaign_id: int) -> None:
     """Purge the tracking history — otherwise orphaned clicks keep feeding
     dashboard/report numbers for a campaign that no longer exists."""
@@ -489,8 +563,11 @@ def update_campaign(campaign_id: int, data: CampaignIn, request: Request, db: Se
 
     # Only touch fields the caller actually sent — omitted fields (e.g. tags
     # edited from elsewhere) keep their current value.
+    sent = data.dict(exclude_unset=True)
+    if "config" in sent:
+        _validate_campaign_targets(db, sent["config"], campaign_id)
     changed = []
-    for key, value in data.dict(exclude_unset=True).items():
+    for key, value in sent.items():
         if getattr(campaign, key, None) != value:
             changed.append(key)
         setattr(campaign, key, value)

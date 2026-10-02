@@ -289,6 +289,191 @@
 
                         </v-card-text>
                     </v-card>
+
+                    <v-card class="pa-4 mt-4" id="fx-rates">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-currency-usd</v-icon>
+                            Multi-currency reporting
+                        </v-card-title>
+                        <v-card-text>
+                            <div class="caption grey--text mb-3">
+                                Report revenue, cost and payout in one base currency.
+                                Rates are fetched daily and cached — reports never call a
+                                rate provider, and a stale or manually pinned rate is
+                                flagged here.
+                            </div>
+                            <v-row dense>
+                                <v-col cols="6">
+                                    <v-combobox
+                                            label="Base currency"
+                                            :items="fxCurrencyOptions"
+                                            v-model="fxDraft.base"
+                                            outlined dense hide-details
+                                            hint="Reporting currency"
+                                            persistent-hint
+                                    ></v-combobox>
+                                </v-col>
+                                <v-col cols="6">
+                                    <v-text-field
+                                            label="Stale after (hours)"
+                                            type="number" min="1" max="720" step="1"
+                                            v-model.number="fxDraft.stale_after_hours"
+                                            outlined dense hide-details
+                                            hint="Older rates are marked stale"
+                                            persistent-hint
+                                    ></v-text-field>
+                                </v-col>
+                            </v-row>
+                            <v-combobox
+                                    label="Currencies to convert"
+                                    :items="fxCurrencyOptions"
+                                    v-model="fxDraft.currencies"
+                                    multiple chips small-chips deletable-chips
+                                    outlined dense hide-details class="mt-3"
+                                    hint="The currencies conversions can arrive in"
+                                    persistent-hint
+                            ></v-combobox>
+
+                            <div class="d-flex align-center mt-4">
+                                <div class="subtitle-2">Rate table</div>
+                                <v-chip x-small label class="ml-2"
+                                        v-if="fxStatus && fxStatus.active"
+                                        :color="fxStatus.stale ? 'error' : 'success'">
+                                    {{ fxStatus.stale ? 'Stale' : 'Fresh' }}
+                                </v-chip>
+                                <v-spacer></v-spacer>
+                                <span class="caption grey--text mr-3" v-if="fxStatus">
+                                    Source: {{ fxStatus.source || '—' }}
+                                    <span v-if="fxStatus.age_hours !== null && fxStatus.age_hours !== undefined">
+                                        · age {{ fxAgeLabel }}
+                                    </span>
+                                </span>
+                                <v-btn small text color="primary"
+                                       :loading="fxRefreshing" @click="refreshFxNow">
+                                    <v-icon small class="mr-1">mdi-refresh</v-icon>Refresh now
+                                </v-btn>
+                            </div>
+                            <div class="caption error--text mt-1" v-if="fxStatus && fxStatus.last_error">
+                                Last refresh failed: {{ fxStatus.last_error }} — last good rates kept.
+                            </div>
+                            <v-simple-table dense class="mt-2 fx-table">
+                                <thead>
+                                <tr>
+                                    <th>Currency</th>
+                                    <th class="text-right">1 {{ fxBaseLabel }} =</th>
+                                    <th>Source</th>
+                                    <th></th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                <tr v-for="row in fxRows" :key="row.currency">
+                                    <td>{{ row.currency }}</td>
+                                    <td class="text-right">
+                                        {{ row.rate === null ? '—' : row.rate.toFixed(4) }}
+                                    </td>
+                                    <td class="caption grey--text">
+                                        <v-chip x-small label v-if="row.overridden" color="warning">manual</v-chip>
+                                        <span v-else>{{ row.source }}</span>
+                                    </td>
+                                    <td class="text-right">
+                                        <v-btn x-small icon color="error" v-if="row.overridden"
+                                               @click="clearFxOverride(row.currency)">
+                                            <v-icon x-small>mdi-close</v-icon>
+                                        </v-btn>
+                                    </td>
+                                </tr>
+                                <tr v-if="!fxRows.length">
+                                    <td colspan="4" class="caption grey--text">
+                                        No rates yet — pick currencies and press Refresh now.
+                                    </td>
+                                </tr>
+                                </tbody>
+                            </v-simple-table>
+                            <div class="d-flex align-center mt-3">
+                                <v-combobox
+                                        v-model="fxNewOverride.currency"
+                                        :items="fxCurrencyOptions"
+                                        label="Override currency"
+                                        outlined dense hide-details
+                                        class="mr-2 fx-override-cur"
+                                ></v-combobox>
+                                <v-text-field
+                                        v-model.number="fxNewOverride.rate"
+                                        type="number" min="0" step="0.0001"
+                                        :label="'1 ' + fxBaseLabel + ' ='"
+                                        outlined dense hide-details
+                                        class="mr-2 fx-override-rate"
+                                ></v-text-field>
+                                <v-btn small text color="primary"
+                                       :disabled="!fxNewOverride.currency || !(fxNewOverride.rate > 0)"
+                                       @click="addFxOverride">
+                                    <v-icon small class="mr-1">mdi-pin</v-icon>Pin rate
+                                </v-btn>
+                            </div>
+                            <div class="mt-3">
+                                <v-btn small color="primary" elevation="0"
+                                       :loading="fxSaving" @click="saveFxConfig">
+                                    <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save FX settings
+                                </v-btn>
+                            </div>
+                        </v-card-text>
+                    </v-card>
+
+                    <v-card class="pa-4 mt-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-account-convert</v-icon>
+                            Attribution
+                        </v-card-title>
+                        <v-card-text>
+                            <div class="caption grey--text mb-3">
+                                How a conversion is matched to a click, per workspace.
+                                Defaults reproduce the tracker's previous behaviour:
+                                a 7-day window and last click.
+                            </div>
+
+                            <v-select label="Attribution window"
+                                      :items="attributionWindowOptions"
+                                      v-model="attributionWindowChoice"
+                                      outlined dense hide-details class="mb-2"></v-select>
+                            <v-text-field v-if="attributionWindowChoice === 'custom'"
+                                          label="Custom window (days)"
+                                          v-model.number="settings.attribution.window_days"
+                                          type="number" min="1" max="3650" step="1"
+                                          outlined dense hide-details
+                                          hint="1–3650 days"
+                                          persistent-hint class="mb-3"></v-text-field>
+
+                            <v-select label="Attribution model"
+                                      :items="attributionModelOptions"
+                                      v-model="settings.attribution.model"
+                                      outlined dense hide-details
+                                      hint="First click credits the visitor's earliest resolvable click; it needs a visitor ID or click rows that carry one."
+                                      persistent-hint class="mb-3"></v-select>
+
+                            <v-divider class="my-3"></v-divider>
+                            <div class="subtitle-2 mb-1">Cross-device identifiers</div>
+                            <div class="caption grey--text mb-2">
+                                Stitch a clickless conversion onto a click using an
+                                identifier the conversion carries.
+                            </div>
+                            <v-switch v-model="settings.attribution.stitch_visitor_id"
+                                      label="First-party visitor ID (aaa_vid)"
+                                      inset dense hide-details class="mb-1"
+                                      hint="Already cross-session; the only identifier wired today."
+                                      persistent-hint></v-switch>
+                            <v-switch :input-value="settings.attribution.stitch_hashed_email"
+                                      label="Hashed email (not available yet)"
+                                      inset dense hide-details disabled class="mb-1"></v-switch>
+                            <v-switch :input-value="settings.attribution.stitch_hashed_phone"
+                                      label="Hashed phone (not available yet)"
+                                      inset dense hide-details disabled class="mb-1"></v-switch>
+                            <div class="caption grey--text">
+                                No hashed email/phone is stored on clicks or conversions
+                                yet, so those toggles have no effect — conversions fall
+                                back to today's behaviour.
+                            </div>
+                        </v-card-text>
+                    </v-card>
                 </v-col>
 
                 <v-col cols="12" md="6">
@@ -1108,11 +1293,24 @@
                         custom_columns: [],
                         grouping_view: false,
                     },
+                    // G28 attribution: how a conversion is matched to a click,
+                    // per workspace. Defaults reproduce the previous behaviour
+                    // (7-day window, last click, no identifier stitching).
+                    attribution: {
+                        window_days: 7,
+                        model: 'last_click',
+                        stitch_visitor_id: false,
+                        stitch_hashed_email: false,
+                        stitch_hashed_phone: false,
+                    },
                 },
                 // Draft inputs for the custom report column form (not persisted
                 // until Add is pressed — the list itself is what gets saved).
                 newCustomColumn: {name: '', formula: ''},
                 customColumnError: '',
+                // True while the operator picks "Custom…" in the attribution
+                // window select; lets a non-preset value stay editable.
+                attributionCustomWindow: false,
                 // The metrics a custom-column formula may reference — the same
                 // whitelist the report builder evaluates against (built-ins
                 // plus derived rates).
@@ -1136,6 +1334,19 @@
                     {text: 'Comma — 1,234.50', value: 'comma'},
                     {text: 'Space — 1 234.50', value: 'space'},
                     {text: 'None — 1234.50', value: 'none'},
+                ],
+                // Attribution (G28). The window select offers the common
+                // presets plus a custom day count.
+                attributionWindowOptions: [
+                    {text: '1 day', value: 1},
+                    {text: '7 days (default)', value: 7},
+                    {text: '30 days', value: 30},
+                    {text: '90 days', value: 90},
+                    {text: 'Custom…', value: 'custom'},
+                ],
+                attributionModelOptions: [
+                    {text: 'Last click (default)', value: 'last_click'},
+                    {text: 'First click', value: 'first_click'},
                 ],
                 rowColorOptions: [
                     {text: 'Green', value: 'green'},
@@ -1174,6 +1385,27 @@
                 subIdMapping: [
                 ],
                 currencies: ['USD', 'EUR', 'GBP', 'JPY'],
+                // --- multi-currency reporting (Settings → Multi-currency) ---
+                // fxDraft is the operator-editable config, saved through its own
+                // endpoint so a Settings save cannot clobber the fetched rates.
+                fxStatus: null,
+                fxDraft: {
+                    base: 'USD',
+                    currencies: [],
+                    overrides: {},
+                    stale_after_hours: 36,
+                },
+                fxNewOverride: {currency: '', rate: null},
+                fxSaving: false,
+                fxRefreshing: false,
+                fxCurrencyOptions: [
+                    'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD',
+                    'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'HUF', 'RON', 'BGN',
+                    'TRY', 'ILS', 'INR', 'CNY', 'HKD', 'SGD', 'KRW', 'THB',
+                    'MYR', 'IDR', 'PHP', 'VND', 'BRL', 'MXN', 'ARS', 'CLP',
+                    'COP', 'PEN', 'ZAR', 'NGN', 'KES', 'EGP', 'AED', 'SAR',
+                    'ISK', 'HRK', 'RUB', 'UAH',
+                ],
                 timezones: ['UTC', 'America/New_York', 'Europe/Berlin', 'Asia/Tokyo'],
                 telegramStatusList: ['lead', 'sale', 'upsale', 'rejected', 'hold', 'trash'],
                 tgTesting: false,
@@ -1228,6 +1460,7 @@
             this.loadAudit(1);
             this.loadAuditFacets();
             this.loadMonitorStatus();
+            this.loadFxStatus();
             this.$root.$on('load-settings', this.loadSettings);
         },
         watch: {
@@ -1280,6 +1513,57 @@
                 if (ws.divider === 'space') out = out.replace(/,/g, '\u00a0');
                 else if (ws.divider === 'none') out = out.replace(/,/g, '');
                 return out;
+              },
+              // Two-way bridge between the preset select and the numeric
+              // window_days: a non-preset value (or an explicit Custom pick)
+              // shows the custom day field.
+              attributionWindowChoice: {
+                get() {
+                  const days = parseInt((this.settings.attribution || {}).window_days, 10);
+                  const preset = [1, 7, 30, 90].includes(days);
+                  return (!preset || this.attributionCustomWindow) ? 'custom' : days;
+                },
+                set(value) {
+                  if (value === 'custom') {
+                    this.attributionCustomWindow = true;
+                    return;
+                  }
+                  this.attributionCustomWindow = false;
+                  this.settings.attribution.window_days = value;
+                }
+              },
+              fxBaseLabel() {
+                return (this.fxDraft.base || 'USD').toUpperCase();
+              },
+              fxAgeLabel() {
+                const age = this.fxStatus ? this.fxStatus.age_hours : null;
+                if (age === null || age === undefined) return 'never';
+                if (age < 1) return Math.round(age * 60) + ' min';
+                return age.toFixed(1) + ' h';
+              },
+              // One row per currency the operator listed, the provider
+              // returned, or an override pins; the pinned rate wins.
+              fxRows() {
+                const st = this.fxStatus || {};
+                const fetched = st.fetched_rates || {};
+                const overrides = (this.fxDraft && this.fxDraft.overrides) || {};
+                const codes = new Set([
+                  ...((this.fxDraft && this.fxDraft.currencies) || []),
+                  ...Object.keys(fetched),
+                  ...Object.keys(overrides),
+                ]);
+                codes.delete((st.base || this.fxDraft.base || '').toUpperCase());
+                return Array.from(codes).sort().map((code) => {
+                  const override = overrides[code];
+                  const hasOverride = override !== undefined && override !== null && override !== '';
+                  const raw = hasOverride ? Number(override) : Number(fetched[code]);
+                  return {
+                    currency: code,
+                    rate: (raw || raw === 0) && !isNaN(raw) ? raw : null,
+                    source: hasOverride ? 'manual' : (st.source || 'provider'),
+                    overridden: hasOverride,
+                  };
+                });
               }
         },
         methods: {
@@ -1327,6 +1611,85 @@
             },
             insertFallbackToken(token) {
                 this.settings.fallback_url = (this.settings.fallback_url || '') + '{' + token + '}';
+            },
+            // --- multi-currency reporting ---
+            loadFxStatus() {
+                return fetch('/backend/api/settings/fx-rates', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : {})
+                    .then(data => {
+                        this.fxStatus = data;
+                        this.fxDraft = {
+                            base: data.base || 'USD',
+                            currencies: Array.isArray(data.currencies) ? data.currencies.slice() : [],
+                            overrides: Object.assign({}, data.overrides || {}),
+                            stale_after_hours: data.stale_after_hours || 36,
+                        };
+                        this.fxNewOverride = {currency: '', rate: null};
+                    })
+                    .catch(() => { /* advisory — the card still saves config */ });
+            },
+            async saveFxConfig() {
+                this.fxSaving = true;
+                try {
+                    const res = await fetch('/backend/api/settings/fx-rates', {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify(this.fxDraft),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+                    this.fxStatus = data;
+                    this.fxDraft.overrides = Object.assign({}, data.overrides || {});
+                    this.$root.$emit('show-message',
+                        {type: 'success', text: 'FX settings saved'});
+                    return true;
+                } catch (err) {
+                    this.$root.$emit('show-message',
+                        {type: 'error', text: 'FX save failed: ' + sanitizeToastMessage(err.message)});
+                    return false;
+                } finally {
+                    this.fxSaving = false;
+                }
+            },
+            async refreshFxNow() {
+                this.fxRefreshing = true;
+                try {
+                    if (!(await this.saveFxConfig())) return;
+                    const res = await fetch('/backend/api/settings/fx-rates/refresh', {
+                        method: 'POST', credentials: 'include',
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+                    if (data.status === 'ok') {
+                        this.$root.$emit('show-message', {type: 'success',
+                            text: `Rates refreshed from ${data.source} ` +
+                                  `(${data.count} currencies)`});
+                    } else {
+                        this.$root.$emit('show-message', {type: 'warning',
+                            text: 'Refresh failed — keeping last good rates: ' +
+                                  (data.error || 'no provider reachable')});
+                    }
+                    await this.loadFxStatus();
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Refresh failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.fxRefreshing = false;
+                }
+            },
+            addFxOverride() {
+                const code = String(this.fxNewOverride.currency || '').trim().toUpperCase();
+                const rate = Number(this.fxNewOverride.rate);
+                if (!/^[A-Z]{3}$/.test(code) || !(rate > 0)) return;
+                this.fxDraft.overrides = Object.assign({},
+                    this.fxDraft.overrides, {[code]: rate});
+                this.fxNewOverride = {currency: '', rate: null};
+            },
+            clearFxOverride(code) {
+                const overrides = Object.assign({}, this.fxDraft.overrides);
+                delete overrides[code];
+                this.fxDraft.overrides = overrides;
             },
             async clearData() {
                 if (!confirm("Are you sure you want to delete all tracking data?")) return;
@@ -1430,6 +1793,27 @@
                         if (typeof this.settings.workspace.grouping_view !== 'boolean') {
                             this.settings.workspace.grouping_view = false;
                         }
+                        // Attribution (G28): fill defaults and coerce, so the
+                        // controls never bind to an undefined model/toggle.
+                        this.settings.attribution = Object.assign(
+                            {}, {window_days: 7, model: 'last_click',
+                                 stitch_visitor_id: false,
+                                 stitch_hashed_email: false,
+                                 stitch_hashed_phone: false},
+                            this.settings.attribution || {});
+                        let attrDays = parseInt(this.settings.attribution.window_days, 10);
+                        if (!(attrDays >= 1 && attrDays <= 3650)) attrDays = 7;
+                        this.settings.attribution.window_days = attrDays;
+                        if (!['last_click', 'first_click'].includes(
+                                this.settings.attribution.model)) {
+                            this.settings.attribution.model = 'last_click';
+                        }
+                        ['stitch_visitor_id', 'stitch_hashed_email',
+                         'stitch_hashed_phone'].forEach((k) => {
+                            this.settings.attribution[k] =
+                                this.settings.attribution[k] === true;
+                        });
+                        this.attributionCustomWindow = ![1, 7, 30, 90].includes(attrDays);
                         if (data.subIdMapping) this.subIdMapping = data.subIdMapping;
                         // loadMonitorStatus writes settings.monitoring from the
                         // server, so snapshot only after it settles.
@@ -1809,6 +2193,15 @@
     .cc-formula {
         font-size: var(--fs-12, 12px);
         color: var(--text-secondary, #667085);
+    }
+    .fx-table {
+        max-width: 560px;
+    }
+    .fx-override-cur {
+        max-width: 180px;
+    }
+    .fx-override-rate {
+        max-width: 150px;
     }
     .demo-label {
         min-width: 42px;

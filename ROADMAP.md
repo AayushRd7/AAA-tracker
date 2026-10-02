@@ -338,18 +338,34 @@ is genuinely still open. Waves 17–20 turned out to be shipped; see above.
   profit, ROI…) from a specific user. Enforced server-side across the breakdown, metrics,
   logs, report lists and CSV exports (a hidden metric is never sent), and ignored for
   owners/admins.
-- [ ] Per-resource ACLs beyond `campaigns:'own'` (offers / sources / networks / domains).
-  **The one item from this batch still open.**
+- [x] **Per-resource ACL scoping** — offers / traffic sources / affiliate networks / domains, with owner stamping, list filtering, mutation guards and scope validation; bulk owner-reassignment is implemented for campaigns and offers only.
 - [x] **Tracking-path id validation** — a flow holding a non-numeric id (`lt-caps`) now 404s
   the flow instead of raising `asyncpg.DataError` and killing the worker; guarded by smoke.
 
+**In progress (2026-10-02)**
+- Multi-currency rate store (frankfurter.dev → ECB → open.er-api.com, cached with manual override
+  and stale-rate disclosure) with conversion applied in reporting.
+
+**Queued**
+- Geo-specific payout (G22) — per-offer payout overrides by country/region, resolved at
+  conversion time.
+- Campaign-as-offer (G11) — use a campaign as an offer inside another campaign.
+- Roll-up reporting across child workspaces.
+- Bulk offer update.
+- Lander views-vs-clicks split.
+
 **Not built (product decisions or new surface)**
+- Ecommerce / CRM / call-tracking integrations, iGaming integrations.
+
+**Dropped by the owner (2026-10-02)**
+- Offer marketplace / partner directory.
+- Mobile apps (iOS/Android).
+- In-UI update channel.
+- Per-workspace white-label branding (also see Phase 3).
+- TLS-fingerprint (JA3/JA4) detection.
+
+**Deferred by the owner (2026-10-02)**
 - Self-serve signup + a first-campaign wizard (access is invite-only today).
-- Roll-up reporting across a workspace and its children.
-- Multi-currency conversion and geo-specific payout.
-- Cross-device attribution; offline/phone-sales ingestion.
-- Ecommerce / CRM / call-tracking integrations, offer marketplace, iGaming integrations,
-  mobile apps, BI-warehouse export.
 
 **Installer portability** (shipped; recorded for context): `make install` works with either
 the `docker compose` plugin or the legacy `docker-compose` binary (auto-detected, with an

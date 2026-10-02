@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+import asyncio
 import hashlib
 import json
 import re
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from db import get_db
 from tenant_context import current_tenant
+from app_pages import rates as fx_rates
 from models.settings import SettingsORM  # the settings model
 from models.capi_pixels import (
     CapiPixelORM, CapiPixelBindingORM, CapiChannelSettingORM,
@@ -17,12 +19,66 @@ from models.capi_pixels import (
 from email_reports import send_daily_report, send_scheduled_report, schedule_due
 from env_config import (email_configured, resolve_email_config, telegram_bot_token,
                         telegram_bot_url)
-from clickHouse import compile_formula, FORMULA_METRIC_KEYS
+from clickHouse import compile_formula, FORMULA_METRIC_KEYS, normalize_attribution
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
+
+# Daily multi-currency refresh. Registered here (not in app.py) because the
+# Settings router is the feature's home; FastAPI copies a router's startup
+# handlers onto the app when it is included.
+router.add_event_handler("startup", fx_rates.rates_startup)
+
+
+@router.get("/fx-rates")
+def get_fx_rates(db: Session = Depends(get_db)):
+    """The workspace's cached FX store: config, provenance and rates.
+
+    Read-only and network-free — this is what the Settings card polls and what
+    makes a report honest about a stale or manually pinned rate."""
+    return fx_rates.status(db)
+
+
+@router.put("/fx-rates")
+def save_fx_rates(payload: dict, request: Request, db: Session = Depends(get_db)):
+    """Save the operator-editable FX config (base, currencies, overrides).
+
+    Deliberately separate from the general settings save: the fetched rates and
+    their ``fetched_at`` are owned by the refresh job, so a Settings-page save
+    can never clobber them with what an open tab last loaded."""
+    from audit_logger import audit_event
+    from auth import get_caller
+    try:
+        config = fx_rates.validate_config(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    store = fx_rates.load_store(db)
+    store.update(config)
+    try:
+        fx_rates.save_store(store, db)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not save FX settings")
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "save", "settings", "fx_rates",
+                {"keys": sorted(config.keys())},
+                request.client.host if request.client else "")
+    return fx_rates.status(db)
+
+
+@router.post("/fx-rates/refresh")
+async def refresh_fx_rates(request: Request):
+    """Fetch fresh rates now. The network call runs in a thread and the job
+    never raises: a provider outage keeps the last good rates."""
+    from audit_logger import audit_event
+    from auth import get_caller
+    result = await asyncio.to_thread(fx_rates.refresh)
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "fx_refresh", "settings", "fx_rates",
+                {"status": result.get("status"), "source": result.get("source")},
+                request.client.host if request.client else "")
+    return result
 
 @router.post("/clear-tracking-data")
 async def clear_tracking_data(
@@ -451,6 +507,13 @@ def save_settings(payload: dict, request: Request, db: Session = Depends(get_db)
             # JSON truthiness would turn the string "false" into True; only a
             # real boolean True enables the grouped view.
             _workspace_block["grouping_view"] = _workspace_block["grouping_view"] is True
+    # Attribution (G28) is a top-level block: normalise it so a hand-edited or
+    # stale payload cannot store an unknown model or a nonsense window that the
+    # tracking/report paths would then have to defend against on every hit.
+    _attribution_block = payload.get("settings", {}).get("attribution") \
+        if isinstance(payload.get("settings"), dict) else None
+    if isinstance(_attribution_block, dict):
+        payload["settings"]["attribution"] = normalize_attribution(_attribution_block)
     # Merge top-level keys server-side under a row lock: two rapid saves of
     # different keys must not clobber each other (read-modify-write race).
     for key, val in payload.items():

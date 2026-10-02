@@ -646,3 +646,12 @@ def public_shared_report(token: str, request: Request, db: Session = Depends(get
     except Exception as e:
         print("public shared report error:", repr(e))
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# Warehouse (BI) CSV exports live in their own module but are exposed from this
+# router so the single dashboard mount in app.py stays untouched. Imported here
+# (bottom of the module) so the new module's routes are registered alongside
+# the existing ones without adding a second mount.
+from app_pages import exports as _exports  # noqa: E402
+
+router.include_router(_exports.router)

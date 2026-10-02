@@ -38,6 +38,41 @@
             </v-col>
         </v-row>
 
+        <!-- Refund-claim evidence export -->
+        <v-card class="pa-4 mt-4 mb-2">
+            <div class="d-flex align-center flex-wrap">
+                <div class="mr-4">
+                    <div class="font-weight-medium">Refund-claim evidence</div>
+                    <div class="caption grey--text">
+                        Flagged traffic for a date range — CSV to hand to the network, printable view for PDF.
+                    </div>
+                </div>
+                <v-spacer></v-spacer>
+                <v-menu v-model="evidenceMenu" :close-on-content-click="false"
+                        transition="scale-transition" offset-y min-width="auto">
+                    <template v-slot:activator="{ on, attrs }">
+                        <v-text-field
+                                v-model="evidenceRangeText"
+                                label="Date range"
+                                prepend-icon="mdi-calendar"
+                                readonly dense outlined hide-details
+                                v-bind="attrs" v-on="on"
+                                class="range-field mr-3"
+                        ></v-text-field>
+                    </template>
+                    <v-date-picker v-model="evidenceRange" range
+                                   @input="evidenceMenu = false"></v-date-picker>
+                </v-menu>
+                <v-btn color="primary" elevation="0" class="mr-2"
+                       :loading="evidenceExporting" @click="exportEvidenceCsv">
+                    <v-icon small class="mr-1">mdi-download</v-icon>CSV
+                </v-btn>
+                <v-btn outlined color="primary" @click="openEvidencePrint">
+                    <v-icon small class="mr-1">mdi-printer-outline</v-icon>Printable view
+                </v-btn>
+            </div>
+        </v-card>
+
         <!-- Live fraud feed -->
         <v-row class="mt-4">
             <v-col cols="12">
@@ -394,6 +429,12 @@
             return {
                 loading: false,
                 mainTab: 'overview',
+                evidenceRange: [
+                    new Date(new Date().setDate(new Date().getDate() - 6)).toISOString().split('T')[0],
+                    new Date().toISOString().split('T')[0],
+                ],
+                evidenceMenu: false,
+                evidenceExporting: false,
                 insights: null,
                 insightsRunning: false,
                 insightHeaders: [
@@ -484,6 +525,9 @@
         computed: {
             insightFindings() {
                 return (this.insights && this.insights.findings) || [];
+            },
+            evidenceRangeText() {
+                return this.evidenceRange.join(' ~ ');
             },
             summaryCards() {
                 const s = this.summary;
@@ -596,6 +640,41 @@
                 if (s >= 50) return 'status-chip--danger';
                 if (s >= 25) return 'status-chip--warning';
                 return 'status-chip--neutral';
+            },
+            // --- refund-claim evidence export ---
+            evidenceParams() {
+                // v-date-picker range can emit the picked ends in either order.
+                const range = [...this.evidenceRange].sort();
+                const p = new URLSearchParams();
+                p.set('date_from', range[0]);
+                p.set('date_to', range[range.length - 1]);
+                return p;
+            },
+            async exportEvidenceCsv() {
+                this.evidenceExporting = true;
+                try {
+                    const res = await fetch(
+                        '/backend/api/fraud/evidence.csv?' + this.evidenceParams().toString(),
+                        {credentials: 'include'});
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const blob = await res.blob();
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'fraud-evidence.csv';
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    this.$root.$emit('show-message', {type: 'success', text: 'Evidence CSV exported'});
+                } catch (err) {
+                    this.$root.$emit('show-message', {type: 'error',
+                        text: 'Evidence export failed: ' + sanitizeToastMessage(err.message)});
+                } finally {
+                    this.evidenceExporting = false;
+                }
+            },
+            openEvidencePrint() {
+                window.open(
+                    '/backend/api/fraud/evidence.html?' + this.evidenceParams().toString(),
+                    '_blank');
             },
             loadAll() {
                 this.loading = true;

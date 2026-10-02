@@ -338,6 +338,28 @@
                         </div>
                         <v-divider class="my-3"></v-divider>
                         <div class="subtitle-2 mb-1 d-flex align-center">
+                            <v-icon small class="mr-1">mdi-account-key-outline</v-icon>Owner scope
+                        </div>
+                        <div class="caption grey--text mb-2">
+                            <b>Own only</b> limits a section to records the user owns (they can only see and change those);
+                            <b>All</b> keeps full access. A user with no scope set keeps full access.
+                        </div>
+                        <v-row dense>
+                            <v-col cols="6" sm="4" v-for="s in scopeSections" :key="s">
+                                <v-select
+                                        v-model="form.permissions[s]"
+                                        :items="scopeOptions"
+                                        item-text="text"
+                                        item-value="value"
+                                        :label="s.charAt(0).toUpperCase() + s.slice(1)"
+                                        dense
+                                        outlined
+                                        hide-details
+                                ></v-select>
+                            </v-col>
+                        </v-row>
+                        <v-divider class="my-3"></v-divider>
+                        <div class="subtitle-2 mb-1 d-flex align-center">
                             <v-icon small class="mr-1">mdi-eye-off-outline</v-icon>Hidden metrics
                         </div>
                         <v-select
@@ -630,6 +652,14 @@
                 ],
                 permSections: ['dashboard', 'campaigns', 'landings', 'affiliates', 'offers',
                     'sources', 'reports', 'domains', 'settings', 'users'],
+                // Sections that support a per-resource 'own' scope. The server
+                // accepts only 'own' for these keys; 'all' (the default) means
+                // the key is omitted on save, leaving full access.
+                scopeSections: ['campaigns', 'offers', 'sources', 'affiliates', 'domains'],
+                scopeOptions: [
+                    {text: 'All', value: 'all'},
+                    {text: 'Own only', value: 'own'},
+                ],
                 // Hideable report metrics with their labels. Mirrors the server's
                 // auth.HIDDEN_METRIC_KEYS; the server re-validates every key, so
                 // a stale entry can only be ignored.
@@ -951,7 +981,11 @@
                 sections.domains = false;
                 sections.settings = false;
                 sections.users = false;
-                return {sections: sections, write: true, hidden_metrics: []};
+                const permissions = {sections: sections, write: true, hidden_metrics: []};
+                // Seed every scope selector with 'All'; save() drops the keys
+                // that stay 'all' so the stored blob carries 'own' only.
+                this.scopeSections.forEach(s => { permissions[s] = 'all'; });
+                return permissions;
             },
 
             openEdit(user) {
@@ -966,6 +1000,12 @@
                 if (!Array.isArray(permissions.hidden_metrics)) {
                     permissions.hidden_metrics = [];
                 }
+                // Normalize stored scopes into the select: a section scoped to
+                // 'own' stays 'own', everything else (absent / legacy value)
+                // shows as 'All'. Only 'own' is ever persisted.
+                this.scopeSections.forEach(s => {
+                    if (permissions[s] !== 'own') permissions[s] = 'all';
+                });
                 this.form = {
                     id: user.id,
                     username: user.username,
@@ -1004,7 +1044,13 @@
                 };
 
                 if (this.form.customPermissions && this.form.permissions) {
-                    payload.permissions = this.form.permissions;
+                    // Strip the scope keys left at 'All' — the server accepts
+                    // only 'own', and an absent key already means full access.
+                    const permissions = JSON.parse(JSON.stringify(this.form.permissions));
+                    this.scopeSections.forEach(s => {
+                        if (permissions[s] !== 'own') delete permissions[s];
+                    });
+                    payload.permissions = permissions;
                 } else if (this.isEdit) {
                     payload.clear_permissions = true;  // back to role defaults
                 }

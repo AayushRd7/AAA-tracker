@@ -309,6 +309,12 @@
                                                             <b>{{ offerMap[flow.offer] || '—' }}</b>
                                                           </span>
                                                     </div>
+                                                    <div v-if="flow.redirect_campaign || (flow.campaigns && flow.campaigns.length)">
+                                                      <span class="mr-3">
+                                                        Campaign:
+                                                        <b>{{ flowCampaignSummary(flow) }}</b>
+                                                      </span>
+                                                    </div>
                                                     <div>
                                                       <span v-if="flowFiltersSummary(flow).length" class="d-block mt-2">
                                                         Filters:
@@ -336,7 +342,7 @@
 
                                     <v-btn small color="primary" @click="openFlowEdit()">Add flow</v-btn>
                                     <div class="caption grey--text mt-2">
-                                        Each flow carries its own target (offer and/or lander), filters, schedule, caps and
+                                        Each flow carries its own target (offer, lander and/or campaign), filters, schedule, caps and
                                         weight. A flow set to “Default” is the fallback when nothing else matches.
                                     </div>
                                 </template>
@@ -1375,6 +1381,24 @@
                                                     dense
                                             ></v-select>
                                         </v-col>
+                                        <v-col cols="12">
+                                            <v-select
+                                                    v-model="flowForm.campaigns"
+                                                    :items="campaignTargetChoices"
+                                                    item-text="name"
+                                                    item-value="id"
+                                                    label="Campaigns (multi — used like an offer)"
+                                                    multiple
+                                                    chips
+                                                    outlined
+                                                    dense
+                                            ></v-select>
+                                            <div class="caption grey--text">
+                                                A campaign target competes with the offer pool for the
+                                                destination slot, so one flow can split traffic between an
+                                                offer and a nested campaign. Depth-capped at 3 at runtime.
+                                            </div>
+                                        </v-col>
                                     </template>
 
                                     <v-col cols="12" v-if="flowForm.schema === 'redirect'">
@@ -1397,7 +1421,7 @@
                                     <v-col cols="12" v-if="flowForm.schema === 'redirect_campaign'">
                                         <v-select
                                                 v-model="flowForm.redirect_campaign"
-                                                :items="campaigns"
+                                                :items="campaignTargetChoices"
                                                 item-text="name"
                                                 item-value="id"
                                                 label="Target campaign"
@@ -2242,6 +2266,7 @@
                         landing: null,
                         offer: null,
                         offers: [],
+                        campaigns: [],
                         filters: [],
                         schedule: {timezone: 'UTC', days: [], hoursFrom: 0, hoursTo: 23},
                         caps: {per_hour: 0, per_day: 0, total: 0},
@@ -2349,6 +2374,15 @@
                 const map = {};
                 this.offers.forEach(o => (map[o.id] = o.name));
                 return map;
+            },
+            campaignMap() {
+                const map = {};
+                this.campaigns.forEach(c => (map[c.id] = c.name));
+                return map;
+            },
+            campaignTargetChoices() {
+                // A campaign can't target itself; hide the campaign being edited.
+                return this.isEdit ? this.campaigns.filter(c => c.id !== this.form.id) : this.campaigns;
             },
             sourceMap() {
                 const map = {};
@@ -2991,6 +3025,14 @@
                 if (caps.total) parts.push(`${caps.total} total`);
                 return parts.join(', ') || '—';
             },
+            flowCampaignSummary(flow) {
+                // A multi flow can mix several campaigns in with its offers;
+                // a redirect_campaign flow carries a single target.
+                const ids = (flow.campaigns && flow.campaigns.length)
+                    ? flow.campaigns
+                    : (flow.redirect_campaign ? [flow.redirect_campaign] : []);
+                return ids.map(id => this.campaignMap[id] || ('Campaign #' + id)).join(', ') || '—';
+            },
             flowFiltersSummary(flow) {
                 const f = flow.filters;
                 if (!f || (Array.isArray(f) && !f.length)) return [];
@@ -3309,6 +3351,7 @@
                         landing: null,
                         landings: [],
                         offers: [],
+                        campaigns: [],
                         filters: [],
                         action: 'redirect',
                         html: ''
@@ -3316,6 +3359,10 @@
                     this.editedFlowIndex = null;
                 }
                 // normalize the optional per-flow blocks for the editor
+                if (!Array.isArray(this.flowForm.campaigns)) {
+                    // older flow objects predate campaign-as-destination targets
+                    this.flowForm.campaigns = [];
+                }
                 if (!this.flowForm.schedule || typeof this.flowForm.schedule !== 'object') {
                     this.flowForm.schedule = {timezone: 'UTC', days: [], hoursFrom: 0, hoursTo: 23};
                 } else {

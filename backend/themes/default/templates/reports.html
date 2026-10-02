@@ -306,6 +306,51 @@
             </div>
         </v-card>
 
+        <!-- Warehouse export (BI): one raw CSV per dataset, or a ZIP of all of
+             them, with a schema/manifest. Plain download — no credentials. -->
+        <v-card class="pa-4 mb-4">
+            <div class="d-flex align-center flex-wrap mb-2">
+                <div class="builder-label mb-0">Warehouse export</div>
+                <span class="builder-hint ml-2">
+                    Raw CSV datasets with a schema manifest — point BigQuery, Snowflake or Google Sheets at the file
+                </span>
+            </div>
+            <div class="filter-bar align-center">
+                <v-menu v-model="warehouseDateMenu" :close-on-content-click="false" transition="scale-transition" offset-y min-width="auto">
+                    <template v-slot:activator="{ on, attrs }">
+                        <v-text-field
+                                v-model="warehouseDateText"
+                                label="Date range"
+                                prepend-icon="mdi-calendar"
+                                readonly
+                                v-bind="attrs"
+                                v-on="on"
+                                outlined
+                                dense
+                                hide-details
+                                class="range-field"
+                        ></v-text-field>
+                    </template>
+                    <v-date-picker v-model="warehouseDateRange" range @input="warehouseDateMenu = false"></v-date-picker>
+                </v-menu>
+                <div class="d-flex align-center mr-3">
+                    <v-checkbox v-for="d in warehouseDatasetOptions" :key="d.value"
+                            v-model="warehouseDatasets" :value="d.value" :label="d.label"
+                            dense hide-details class="mr-3 warehouse-check"></v-checkbox>
+                </div>
+                <v-checkbox v-model="warehouseBom" label="UTF-8 BOM (Sheets)" dense hide-details class="mr-3 warehouse-check"></v-checkbox>
+                <v-checkbox v-model="warehouseGzip" label="gzip" dense hide-details class="mr-3 warehouse-check"></v-checkbox>
+                <v-btn color="primary" elevation="0" :loading="warehouseLoading" @click="downloadWarehouseExport">
+                    <v-icon small class="mr-1">mdi-download</v-icon>
+                    Download
+                </v-btn>
+            </div>
+            <div class="caption grey--text mt-2">
+                One file per dataset; one dataset downloads a plain .csv (gzip optional), two or more a ZIP with README.txt + _manifest.csv.
+                Load hints inside cover BigQuery (<code>--autodetect</code>), Snowflake (<code>COPY INTO</code>) and Google Sheets ("Import as CSV").
+            </div>
+        </v-card>
+
         <!-- Breakdown table -->
         <div :key="'rep-table-' + loading" class="section-enter">
         <v-card>
@@ -779,6 +824,26 @@
                 </v-btn>
             </div>
         </v-card>
+        <!-- Automated offline / phone-sale ingestion for a CRM or call platform.
+             No credential is entered here — the workspace API token is the
+             credential, and the CSV importer stays the manual path. -->
+        <v-card class="pa-4 mb-2">
+            <div class="d-flex align-center justify-space-between">
+                <div>
+                    <div class="font-weight-medium">Offline / phone ingestion</div>
+                    <div class="page-subtitle">Post sales automatically from a CRM or call platform</div>
+                </div>
+                <v-btn text small color="primary" @click="openImport">
+                    <v-icon small class="mr-1">mdi-upload</v-icon>Open CSV importer
+                </v-btn>
+            </div>
+            <div class="caption mt-2">
+                Endpoint: <code>{{ ingestEndpoint }}</code>. Authenticate with your workspace
+                API token as <code>Authorization: Bearer &lt;token&gt;</code> (see Settings).
+                No credential is stored in this page. JSON and form-encoded bodies are accepted.
+            </div>
+            <pre class="ingest-curl mt-2"><code>{{ ingestCurl }}</code></pre>
+        </v-card>
         <div :key="'conv-table-' + convLoading" class="section-enter">
         <v-row dense>
             <v-col>
@@ -943,7 +1008,9 @@
                 <v-card-title class="text-h6">Import conversions</v-card-title>
                 <v-card-text>
                     <div class="caption grey--text mb-2">
-                        One conversion per line: <code>click_id,payout,transaction_id,status</code>.
+                        One conversion per line:
+                        <code>click_id,payout,transaction_id,status,occurred_at,currency</code>.
+                        The last two columns are optional (ISO-8601 timestamp, ISO currency code).
                         Existing click ids accumulate onto their conversion (LTV); unknown ids create
                         unattributed rows. Status may be a built-in or custom status.
                     </div>
@@ -1154,6 +1221,22 @@
                     to: new Date().toISOString().split('T')[0],
                     cost: '',
                 },
+                // Warehouse (BI) export state — its own range so it never
+                // disturbs the report builder's window.
+                warehouseDateMenu: false,
+                warehouseDateRange: [
+                    new Date(new Date().setDate(new Date().getDate() - 6)).toISOString().split('T')[0],
+                    new Date().toISOString().split('T')[0],
+                ],
+                warehouseDatasets: ['clicks', 'conversions', 'costs'],
+                warehouseDatasetOptions: [
+                    { value: 'clicks', label: 'Clicks' },
+                    { value: 'conversions', label: 'Conversions' },
+                    { value: 'costs', label: 'Costs' },
+                ],
+                warehouseBom: false,
+                warehouseGzip: false,
+                warehouseLoading: false,
                 dimensionPresets: [
                     // All ten sub IDs, so the preset accepts them; the builder
                     // still caps a chain at 5 (MAX_BREAKDOWN_DIMENSIONS).
@@ -1383,6 +1466,9 @@
             dateRangeText() {
                 return this.dateRange.join(' ~ ');
             },
+            warehouseDateText() {
+                return this.warehouseDateRange.join(' ~ ');
+            },
             // Workspace columns first, then the ad-hoc per-report metrics; a
             // repeated name is folded into one column (the workspace one wins).
             allCustomColumns() {
@@ -1487,6 +1573,19 @@
             },
             funnelCampaigns() {
                 return (this.campaigns || []).filter(c => c.config && c.config.funnel && c.config.funnel.enabled);
+            },
+            // Inbound ingestion endpoint for a CRM / call platform. Built from
+            // the page origin so the copy-ready curl fits this deployment.
+            ingestEndpoint() {
+                return `${window.location.origin}/backend/api/reports/ingest`;
+            },
+            ingestCurl() {
+                return `curl -X POST '${this.ingestEndpoint}' \\\n`
+                    + `  -H 'Authorization: Bearer <WORKSPACE_API_TOKEN>' \\\n`
+                    + `  -H 'Content-Type: application/json' \\\n`
+                    + `  -d '{"click_id":"abc123","transaction_id":"order-42",`
+                    + `"status":"sale","payout":19.99,"currency":"USD",`
+                    + `"occurred_at":"2026-09-30T10:00:00Z"}'`;
             },
         },
         mounted() {
@@ -2337,6 +2436,53 @@
                 URL.revokeObjectURL(a.href);
                 this.$root.$emit('show-message', {type: 'success', text: 'CSV exported'});
             },
+            // Warehouse export: one dataset -> plain .csv (gzip optional);
+            // two or more -> a ZIP carrying every selected CSV plus the manifest.
+            downloadWarehouseExport() {
+                const selected = this.warehouseDatasets || [];
+                if (!selected.length) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Select at least one dataset'});
+                    return;
+                }
+                const params = new URLSearchParams();
+                params.set('date_from', this.warehouseDateRange[0]);
+                params.set('date_to', this.warehouseDateRange[1]);
+                if (this.warehouseBom) params.set('bom', '1');
+                let url, filename;
+                if (selected.length === 1) {
+                    url = '/backend/api/dashboard/exports/' + selected[0];
+                    filename = selected[0] + '_export.csv' + (this.warehouseGzip ? '.gz' : '');
+                    if (this.warehouseGzip) params.set('gzip', '1');
+                } else {
+                    url = '/backend/api/dashboard/exports/zip';
+                    params.set('datasets', selected.join(','));
+                    filename = 'warehouse_export.zip';
+                }
+                this.warehouseLoading = true;
+                fetch(url + '?' + params.toString(), {credentials: 'include'})
+                    .then(async res => {
+                        if (!res.ok) {
+                            let detail = 'HTTP ' + res.status;
+                            try {
+                                const err = await res.json();
+                                if (err && err.detail) detail = err.detail;
+                            } catch (e) {}
+                            throw new Error(detail);
+                        }
+                        return res.blob();
+                    })
+                    .then(blob => {
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = filename;
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                        this.$root.$emit('show-message', {type: 'success', text: 'Warehouse export downloaded'});
+                    })
+                    .catch(err => this.$root.$emit('show-message',
+                        {type: 'error', text: 'Export failed: ' + sanitizeToastMessage(err.message)}))
+                    .finally(() => { this.warehouseLoading = false; });
+            },
             reloadReports() {
                 this.convSelected = [];
                 this.loadReports();
@@ -2746,6 +2892,16 @@
         font-size: var(--fs-12, 12px);
         color: var(--text-secondary);
     }
+    /* Copy-ready curl block on the offline-ingestion card. */
+    .ingest-curl {
+        background: var(--surface-2, rgba(0, 0, 0, 0.04));
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin: 0;
+        overflow-x: auto;
+        font-size: var(--fs-12, 12px);
+        white-space: pre;
+    }
     .group-chip {
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -2757,6 +2913,12 @@
     }
     .log-filter-sm {
         max-width: 120px;
+    }
+    /* Warehouse export toggles sit on one row with the dataset checkboxes. */
+    .warehouse-check {
+        margin-top: 0;
+        padding-top: 0;
+        flex: 0 0 auto;
     }
     .log-filter-status {
         max-width: 140px;

@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from db import get_db
 from models.affiliate_networks import AffiliateNetworkORM
 from models.offers import OfferORM  # imported for the offer check
+from auth import owner_scope_query, require_owned_mutation, owner_id_for_create
 
 router = APIRouter()
 
@@ -184,6 +185,7 @@ class AffiliateNetworkIn(BaseModel):
 
 class AffiliateNetworkOut(AffiliateNetworkIn):
     id: int
+    owner_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -250,15 +252,19 @@ def get_favicon(domain: str):
 
 
 @router.get("/", response_model=List[AffiliateNetworkOut])
-def get_networks(db: Session = Depends(get_db)):
+def get_networks(request: Request, db: Session = Depends(get_db)):
     seed_network_presets(db)
-    return db.query(AffiliateNetworkORM).order_by(AffiliateNetworkORM.id.desc()).all()
+    query = db.query(AffiliateNetworkORM).order_by(AffiliateNetworkORM.id.desc())
+    return owner_scope_query(request, db, query, "affiliates", AffiliateNetworkORM).all()
 
 
 @router.post("/")
 def create_network(data: AffiliateNetworkIn, request: Request, db: Session = Depends(get_db)):
     from audit_logger import audit_event
-    new = AffiliateNetworkORM(**data.dict())
+    # Stamp the creator as owner when they hold affiliates:'own'; else leave it
+    # unassigned.
+    new = AffiliateNetworkORM(**data.dict(),
+                              owner_id=owner_id_for_create(request, db, "affiliates"))
     db.add(new)
     try:
         db.commit()
@@ -279,6 +285,7 @@ def update_network(network_id: int, data: AffiliateNetworkIn, request: Request, 
     net = db.query(AffiliateNetworkORM).filter_by(id=network_id).first()
     if not net:
         raise HTTPException(status_code=404, detail="Affiliate network not found")
+    require_owned_mutation(request, db, "affiliates", [net], "affiliate networks")
 
     changed = []
     # Only touch fields the caller actually sent — omitted fields keep their
@@ -303,6 +310,7 @@ def delete_network(network_id: int, request: Request, db: Session = Depends(get_
     net = db.query(AffiliateNetworkORM).filter_by(id=network_id).first()
     if not net:
         raise HTTPException(status_code=404, detail="Affiliate network not found")
+    require_owned_mutation(request, db, "affiliates", [net], "affiliate networks")
 
     # Check whether any offers are linked to this network
     has_offers = db.query(OfferORM).filter_by(affiliate_network_id=network_id).first()
@@ -333,6 +341,7 @@ def bulk_networks(data: NetworkBulkIn, request: Request, db: Session = Depends(g
     from auth import get_caller
     networks = db.query(AffiliateNetworkORM).filter(
         AffiliateNetworkORM.id.in_(data.ids)).all()
+    require_owned_mutation(request, db, "affiliates", networks, "affiliate networks")
     if data.action != 'delete':
         raise HTTPException(status_code=400, detail=f"Unknown action '{data.action}'")
 

@@ -5,6 +5,8 @@ from sqlalchemy import text
 from db import get_db
 from tenant_context import current_tenant
 from models.offers import OfferORM
+from models.user import UserORM
+from auth import owner_scope_query, require_owned_mutation, owner_id_for_create
 
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -38,8 +40,13 @@ class OfferBulkNetworkIn(BaseModel):
 class OfferImportIn(BaseModel):
     lines: str
 
+class OfferBulkOwnerIn(BaseModel):
+    ids: List[int]
+    owner_id: Optional[int] = None  # null = unassigned
+
 class OfferOut(OfferIn):
     id: int
+    owner_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -57,13 +64,17 @@ OFFER_EXPORT_FIELDS = ["id", "name", "url", "affiliate_network_id", "countries",
 
 
 @router.get("/", response_model=List[OfferOut])
-def get_offers(db: Session = Depends(get_db)):
-    return db.query(OfferORM).order_by(OfferORM.id.desc()).all()
+def get_offers(request: Request, db: Session = Depends(get_db)):
+    query = db.query(OfferORM).order_by(OfferORM.id.desc())
+    return owner_scope_query(request, db, query, "offers", OfferORM).all()
 
 @router.post("/")
 def create_offer(offer: OfferIn, request: Request, db: Session = Depends(get_db)):
     from audit_logger import audit_event
-    new_offer = OfferORM(**offer.dict())
+    # Stamp the creator as owner when they hold offers:'own', so the row they
+    # just created is visible to them; otherwise leave it unassigned.
+    new_offer = OfferORM(**offer.dict(),
+                         owner_id=owner_id_for_create(request, db, "offers"))
     db.add(new_offer)
     try:
         db.commit()
@@ -83,6 +94,7 @@ def update_offer(offer_id: int, offer: OfferIn, request: Request, db: Session = 
     db_offer = db.query(OfferORM).filter_by(id=offer_id).first()
     if not db_offer:
         raise HTTPException(status_code=404, detail="Offer not found")
+    require_owned_mutation(request, db, "offers", [db_offer], "offers")
 
     changed = []
     # Only touch fields the caller actually sent — omitted fields (e.g. tags or
@@ -120,6 +132,7 @@ def set_offer_status(offer_id: int, data: OfferStatusIn, request: Request,
     db_offer = db.query(OfferORM).filter_by(id=offer_id).first()
     if not db_offer:
         raise HTTPException(status_code=404, detail="Offer not found")
+    require_owned_mutation(request, db, "offers", [db_offer], "offers")
 
     db_offer.status = status
     db.commit()
@@ -136,6 +149,7 @@ def delete_offer(offer_id: int, request: Request, db: Session = Depends(get_db))
     db_offer = db.query(OfferORM).filter_by(id=offer_id).first()
     if not db_offer:
         raise HTTPException(status_code=404, detail="Offer not found")
+    require_owned_mutation(request, db, "offers", [db_offer], "offers")
 
     db.delete(db_offer)
     db.commit()
@@ -153,6 +167,7 @@ def bulk_offers(data: OfferBulkIn, request: Request, db: Session = Depends(get_d
     from auth import get_caller
     caller, _ = get_caller(request)
     offers = db.query(OfferORM).filter(OfferORM.id.in_(data.ids)).all()
+    require_owned_mutation(request, db, "offers", offers, "offers")
     clean = sorted({str(t).strip() for t in (data.tags or []) if str(t).strip()})
 
     if data.action == 'tags_add':
@@ -196,6 +211,7 @@ def bulk_set_network(data: OfferBulkNetworkIn, request: Request, db: Session = D
         if not network:
             raise HTTPException(status_code=404, detail="Affiliate network not found")
     offers = db.query(OfferORM).filter(OfferORM.id.in_(data.ids)).all()
+    require_owned_mutation(request, db, "offers", offers, "offers")
     for offer in offers:
         offer.affiliate_network_id = data.affiliate_network_id
     db.commit()
@@ -205,6 +221,29 @@ def bulk_set_network(data: OfferBulkNetworkIn, request: Request, db: Session = D
                 {"bulk": "network", "affiliate_network_id": data.affiliate_network_id,
                  "count": len(offers)}, _client_ip(request))
     return {"message": f"Network set on {len(offers)} offers", "updated": len(offers)}
+
+
+@router.post("/bulk/owner", response_model=dict)
+def bulk_set_owner(data: OfferBulkOwnerIn, request: Request, db: Session = Depends(get_db)):
+    """Set (or clear, with null) the owning user on many offers at once —
+    mirrors POST /api/campaigns/bulk/owner so the two sections share one shape."""
+    from audit_logger import audit_event
+    if data.owner_id is not None:
+        owner = db.query(UserORM).filter(UserORM.id == data.owner_id).first()
+        if not owner:
+            raise HTTPException(status_code=404, detail="Owner user not found")
+    offers = db.query(OfferORM).filter(OfferORM.id.in_(data.ids)).all()
+    require_owned_mutation(request, db, "offers", offers, "offers")
+    for offer in offers:
+        offer.owner_id = data.owner_id
+        offer.updated_at = datetime.utcnow()
+    db.commit()
+    from auth import get_caller
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "update", "offers", ",".join(map(str, data.ids)),
+                {"bulk": "owner", "owner_id": data.owner_id, "count": len(offers)},
+                _client_ip(request))
+    return {"message": f"Owner set on {len(offers)} offers", "updated": len(offers)}
 
 
 def _csv_safe(value):
@@ -217,12 +256,13 @@ def _csv_safe(value):
 
 
 @router.get("/export")
-def export_offers(db: Session = Depends(get_db)):
+def export_offers(request: Request, db: Session = Depends(get_db)):
     """G67 CSV export (tags ;-separated, countries as ISO codes)."""
     import csv as _csv
     import io as _io
     from fastapi.responses import Response
-    rows = db.query(OfferORM).order_by(OfferORM.id.asc()).all()
+    rows = owner_scope_query(request, db, db.query(OfferORM),
+                             "offers", OfferORM).order_by(OfferORM.id.asc()).all()
     buf = _io.StringIO()
     writer = _csv.writer(buf, lineterminator="\n")
     writer.writerow(OFFER_EXPORT_FIELDS)
@@ -314,6 +354,7 @@ def import_offers(data: OfferImportIn, request: Request, db: Session = Depends(g
         }
 
         if offer is not None:
+            require_owned_mutation(request, db, "offers", [offer], "offers")
             for key, value in fields.items():
                 setattr(offer, key, value)
             db.commit()
@@ -321,6 +362,7 @@ def import_offers(data: OfferImportIn, request: Request, db: Session = Depends(g
                             "detail": f"updated offer {offer.id}"})
         else:
             offer = OfferORM(name=name, tokens={},
+                             owner_id=owner_id_for_create(request, db, "offers"),
                              **{k: v for k, v in fields.items() if k != "name"})
             db.add(offer)
             try:

@@ -12,6 +12,7 @@ from db import get_db
 from tenant_context import current_tenant
 from models.domain import DomainORM
 from models.user import UserORM
+from auth import owner_scope_query, require_owned_mutation, owner_id_for_create
 from models.domain_groups import DomainGroupORM, DomainGroupDomainORM, DomainGroupUserORM
 import httpx
 import ssl as ssl_mod
@@ -65,7 +66,9 @@ class DomainCreateUpdate(BaseModel):
 # ====== GET /domains ======
 @router.get("/", response_model=List[dict])
 async def get_domains(request: Request, db: Session = Depends(get_db)):
-    domains = db.query(DomainORM).order_by(DomainORM.id.asc()).all()
+    # domains:'own' callers only see domains they own; managers are unfiltered.
+    domains = owner_scope_query(request, db, db.query(DomainORM),
+                                "domains", DomainORM).order_by(DomainORM.id.asc()).all()
 
     # D2 — domains that belong to a group are only listed for granted users
     # (and admins); everyone else still sees ungrouped domains. This endpoint
@@ -99,6 +102,7 @@ async def get_domains(request: Request, db: Session = Depends(get_db)):
             "group_name": domain.group_name,
             "status": domain.status,
             "ssl_status": domain.ssl_status,
+            "owner_id": domain.owner_id,
             "created_at": domain.created_at.isoformat() if domain.created_at else None,
             "updated_at": domain.updated_at.isoformat() if domain.updated_at else None,
         }
@@ -117,12 +121,15 @@ async def server_info():
 
 
 @router.get("/dns-status")
-async def dns_status(domain: str, db: Session = Depends(get_db)):
+async def dns_status(domain: str, request: Request, db: Session = Depends(get_db)):
     """Pre-SSL DNS check: does the domain resolve, and does it point at this
     server? The certificate challenge is fetched over plain HTTP at the domain,
     so it can only succeed once the domain routes here. Only domains already in
     our table may be looked up (no open resolver)."""
-    row = db.query(DomainORM).filter(DomainORM.domain == domain).first()
+    # A domains:'own' caller cannot probe a domain that is invisible to them.
+    row = owner_scope_query(
+        request, db, db.query(DomainORM).filter(DomainORM.domain == domain),
+        "domains", DomainORM).first()
     if not row:
         raise HTTPException(status_code=404, detail="Domain not in the domain list")
     addresses = resolve_domain(domain)
@@ -160,12 +167,14 @@ def _cert_expiry_days(domain: str) -> Optional[int]:
 
 
 @router.get("/ssl-expiry")
-async def ssl_expiry(db: Session = Depends(get_db)):
+async def ssl_expiry(request: Request, db: Session = Depends(get_db)):
     """Days-to-expiry per managed domain. Domains without a certificate on
     disk report status "unknown" so the UI shows a neutral chip instead of
     failing."""
     out = []
-    for d in db.query(DomainORM).order_by(DomainORM.id.asc()).all():
+    rows = owner_scope_query(request, db, db.query(DomainORM),
+                             "domains", DomainORM).order_by(DomainORM.id.asc()).all()
+    for d in rows:
         days = _cert_expiry_days(d.domain)
         if days is None:
             status = "unknown"
@@ -197,7 +206,9 @@ async def create_domain(domain: DomainCreateUpdate, request: Request, db: Sessio
             handle_404=domain.handle_404,
             default_campaign_id=domain.default_campaign_id,
             group_name=domain.group_name,
-            status='pending'  # <-- always set to 'pending'
+            status='pending',  # <-- always set to 'pending'
+            # Stamp the creator when they hold domains:'own'; else unassigned.
+            owner_id=owner_id_for_create(request, db, "domains"),
         )
         db.add(new_domain)
         db.commit()
@@ -222,6 +233,7 @@ async def update_domain(domain_id: int, domain: DomainCreateUpdate, request: Req
     domain_obj = db.query(DomainORM).filter(DomainORM.id == domain_id).first()
     if not domain_obj:
         raise HTTPException(status_code=404, detail="Domain not found")
+    require_owned_mutation(request, db, "domains", [domain_obj], "domains")
 
     changed = []
     for key, value in domain.dict(exclude_unset=True).items():
@@ -245,6 +257,7 @@ async def delete_domain(domain_id: int, request: Request, db: Session = Depends(
     domain_obj = db.query(DomainORM).filter(DomainORM.id == domain_id).first()
     if not domain_obj:
         raise HTTPException(status_code=404, detail="Domain not found")
+    require_owned_mutation(request, db, "domains", [domain_obj], "domains")
 
     from models.campaigns import CampaignORM
     if db.query(CampaignORM).filter_by(domain_id=domain_obj.id).first():
@@ -283,8 +296,10 @@ async def check_domain_http(domain: str) -> bool:
 
 
 @router.get("/check-domains")
-async def check_domains(db: Session = Depends(get_db)):
-    domains = db.execute(select(DomainORM)).scalars().all()
+async def check_domains(request: Request, db: Session = Depends(get_db)):
+    # A domains:'own' caller only refreshes the status of domains they own.
+    domains = owner_scope_query(request, db, db.query(DomainORM),
+                                "domains", DomainORM).all()
     results = []
 
     for domain_obj in domains:

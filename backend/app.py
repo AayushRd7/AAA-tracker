@@ -507,6 +507,12 @@ async def startup():
             _mig(conn, "ALTER TABLE offers ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false")
             # D1c — campaign ownership for the campaigns:'own' permission
             _mig(conn, "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS owner_id INTEGER")
+            # Owner scope extended beyond campaigns: the same nullable owner_id
+            # backs offers:'own', sources:'own', affiliates:'own', domains:'own'.
+            _mig(conn, "ALTER TABLE offers ADD COLUMN IF NOT EXISTS owner_id INTEGER")
+            _mig(conn, "ALTER TABLE sources ADD COLUMN IF NOT EXISTS owner_id INTEGER")
+            _mig(conn, "ALTER TABLE affiliate_networks ADD COLUMN IF NOT EXISTS owner_id INTEGER")
+            _mig(conn, "ALTER TABLE domains ADD COLUMN IF NOT EXISTS owner_id INTEGER")
             # Wave 19B — conversion approval lifecycle (reconciliation for
             # networks that approve conversions) and the dedupe-path flag
             # exposed as the conversions-log duplicate column.

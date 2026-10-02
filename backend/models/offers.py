@@ -22,5 +22,8 @@ class OfferORM(TenantMixin, Base):
     overflow_offer_id = Column(Integer)
     # G66 — soft-delete flag (archive without purging)
     archived = Column(Boolean, nullable=False, default=False)
+    # Owner scope parity with campaigns.owner_id: the offers:'own' permission
+    # limits a caller to offers they own.
+    owner_id = Column(Integer, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

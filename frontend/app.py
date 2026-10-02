@@ -1681,6 +1681,91 @@ def load_postback_security() -> dict:
     return value
 
 
+# ─── Attribution configuration (G28) ───────────────────────────────
+# Per-workspace: the attribution window, the model, and which identifiers may
+# be stitched. Stored as the settings document's top-level ``attribution``
+# block. Like the other settings blocks above this is read with a short TTL and
+# cached per tenant, so the click hot path never pays a DB round trip per
+# request. Defaults reproduce today's behaviour exactly: a 7-day window (the
+# old hard-coded clickless sub-id fallback), last-click model, and stitching
+# off.
+ATTRIBUTION_DEFAULTS = {
+    "window_days": 7,
+    "model": "last_click",
+    "stitch_visitor_id": False,
+    "stitch_hashed_email": False,
+    "stitch_hashed_phone": False,
+}
+ATTRIBUTION_MODELS = ("last_click", "first_click")
+MAX_ATTRIBUTION_WINDOW_DAYS = 3650
+_ATTRIBUTION_CACHE_TTL = 30.0
+_attribution_cache: dict = {}
+
+
+def _normalize_attribution(raw) -> dict:
+    """Coerce a stored attribution block to a safe, complete config.
+
+    Mirrors backend/clickHouse.normalize_attribution (separate process, so the
+    code is duplicated rather than imported). A bad value falls back to the
+    default instead of disabling attribution."""
+    cfg = dict(ATTRIBUTION_DEFAULTS)
+    if not isinstance(raw, dict):
+        return cfg
+    try:
+        days = int(raw.get("window_days", cfg["window_days"]))
+        if 1 <= days <= MAX_ATTRIBUTION_WINDOW_DAYS:
+            cfg["window_days"] = days
+    except (TypeError, ValueError):
+        pass
+    model = str(raw.get("model") or "").strip().lower()
+    if model in ATTRIBUTION_MODELS:
+        cfg["model"] = model
+    for key in ("stitch_visitor_id", "stitch_hashed_email", "stitch_hashed_phone"):
+        cfg[key] = raw.get(key) is True
+    return cfg
+
+
+def load_attribution_config(tenant_id: int = 1) -> dict:
+    """Cached (30s TTL) per-workspace attribution config.
+
+    The tracking plane has no request tenant context, so the caller passes the
+    tenant it already resolved (the click/campaign's). One cache miss per tenant
+    per TTL window costs a single indexed settings read; every other request is
+    served from memory. A read failure returns the defaults uncached, so an
+    outage attributes exactly as an un-configured workspace and recovers
+    immediately.
+    """
+    tid = int(tenant_id or 1)
+    now = time.monotonic()
+    hit = _attribution_cache.get(tid)
+    if hit is not None and now - hit[0] < _ATTRIBUTION_CACHE_TTL:
+        return hit[1]
+    cfg = dict(ATTRIBUTION_DEFAULTS)
+    try:
+        conn = pg_connect()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE name = 'settings' "
+                    "AND tenant_id = %s", (tid,))
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0]:
+            cfg = _normalize_attribution(json.loads(row[0]).get("attribution"))
+    except Exception as e:
+        log_track(f"Attribution config load error (tenant {tid}): {e}")
+        return cfg
+    _attribution_cache[tid] = (now, cfg)
+    return cfg
+
+
+def _request_visitor_id(request: Request) -> str:
+    """The first-party visitor id on this request (cookie, else query param).
+
+    This is the aaa_vid the campaign hit stamps, already cross-session; it is
+    the only identifier we can deterministically stitch on. Empty when absent."""
+    vid = request.cookies.get(VISITOR_COOKIE) or request.query_params.get("visitor_id") or ""
+    return str(vid).strip()
+
+
 def check_postback_access(request: Request, sec: dict) -> tuple[bool, str]:
     """Enforce the optional secret key and IP allowlist on inbound postbacks."""
     if sec.get("read_failed"):
@@ -2386,7 +2471,24 @@ async def click_attribution_from_clickhouse(click_id: str) -> dict:
         return {}
 
     raw = dict(zip(res.column_names, res.result_rows[0]))
+    return _attribution_from_click_row(raw)
 
+
+_ATTRIBUTION_CH_COLUMNS = (
+    "SELECT click_id, campaign_id, offer_id, landing_id, currency, flow_index, "
+    "       ad_campaign_id, traffic_source_name, visitor_id, tenant_id, "
+    "       sub_id_1, sub_id_2, sub_id_3, sub_id_4, sub_id_5, "
+    "       sub_id_6, sub_id_7, sub_id_8, sub_id_9, sub_id_10, "
+    "       utm_campaign, utm_creative, utm_source, fbc, fbp "
+    "FROM clicks_data"
+)
+
+
+def _attribution_from_click_row(raw: dict) -> dict:
+    """Map one clicks_data row onto the conversions_data attribution shape.
+
+    Shared by the by-click-id and by-visitor lookups so first-click resolves to
+    exactly the same fields a last-click recovery would."""
     def _int(value):
         try:
             return int(value)
@@ -2416,9 +2518,56 @@ async def click_attribution_from_clickhouse(click_id: str) -> dict:
         "fbc": _str(raw.get("fbc"), 4096),
         "fbp": _str(raw.get("fbp"), 4096),
     }
+    # click_id is carried only by the by-visitor lookup (the conversion is
+    # inserted against it); it is None for the by-click-id lookup and dropped.
+    click_id = _str(raw.get("click_id"), 100)
+    if click_id:
+        attribution["click_id"] = click_id
     for i in range(1, 11):
         attribution[f"sub_id_{i}"] = _str(raw.get(f"sub_id_{i}"), 50)
     return {k: v for k, v in attribution.items() if v is not None}
+
+
+async def visitor_click_attribution(visitor_id: str, tenant_id: int, window_days: int,
+                                    earliest: bool = False) -> dict:
+    """Attribution of a visitor's earliest (or latest) click inside the window.
+
+    This is the deterministic cross-session link: it keys only on the
+    first-party visitor id (`aaa_vid`), which the tracking plane stamps on both
+    the ClickHouse click row and the Postgres conversion row — so it can never
+    merge two different customers. Returns {} when the visitor has no click in
+    the window, which is what makes first-click "not resolvable" for clicks
+    with no first-party id. Hashed email/phone have no equivalent click-side
+    link and are deliberately NOT resolved here.
+    """
+    vid = str(visitor_id or "").strip()[:50]
+    if not vid:
+        return {}
+    try:
+        days = max(1, min(int(window_days or ATTRIBUTION_DEFAULTS["window_days"]),
+                          MAX_ATTRIBUTION_WINDOW_DAYS))
+    except (TypeError, ValueError):
+        days = ATTRIBUTION_DEFAULTS["window_days"]
+    order = "ASC" if earliest else "DESC"
+    ch = None
+    try:
+        ch = acquire_ch()
+        res = await asyncio.to_thread(
+            ch.query,
+            f"{_ATTRIBUTION_CH_COLUMNS} "
+            "WHERE visitor_id = %(vid)s AND tenant_id = %(tid)s "
+            f"AND received_at >= now() - INTERVAL {int(days)} DAY "
+            f"ORDER BY received_at {order}, click_id {order} LIMIT 1",
+            parameters={"vid": vid, "tid": int(tenant_id or 1)})
+    except Exception as e:
+        log_track(f"visitor attribution: ClickHouse lookup failed for {vid}: {e!r}")
+        return {}
+    finally:
+        if ch is not None:
+            release_ch(ch)
+    if not res.result_rows:
+        return {}
+    return _attribution_from_click_row(dict(zip(res.column_names, res.result_rows[0])))
 
 
 async def sync_conversion_to_clickhouse(click_id: str):
@@ -2476,8 +2625,11 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
 
     Clickless (G20): click_id absent/'none'/0 records an unattributed row
     (click_id 'none'), attributing via transaction/external id or, when
-    sub_id_1..5 params uniquely match one real click in the last 7 days,
-    to that click instead.
+    sub_id_1..5 params uniquely match one real click inside the workspace's
+    attribution window (default 7 days), to that click instead. When the
+    workspace opts into visitor-id stitching (or selects first-click), the
+    first-party visitor id can also attach the conversion to that visitor's
+    latest/earliest click — see load_attribution_config.
 
     Mode (settings.custom_statuses): a custom status with mode='new' whose
     matched row already carries that same status writes an ADDITIONAL row
@@ -2531,6 +2683,40 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                 tenant_id_value = int(_attr["tenant_id"])
     except Exception:
         tenant_id_value = tenant_id_value or 1
+
+    # This workspace's attribution config (cached; no per-request DB read once
+    # warm). Loaded after the tenant is resolved so it is the right workspace's
+    # window/model/identifier choices. Defaults reproduce today's behaviour.
+    attr_cfg = load_attribution_config(tenant_id_value)
+    try:
+        attr_window_days = max(1, min(int(attr_cfg.get("window_days") or
+                                         ATTRIBUTION_DEFAULTS["window_days"]),
+                                      MAX_ATTRIBUTION_WINDOW_DAYS))
+    except (TypeError, ValueError):
+        attr_window_days = ATTRIBUTION_DEFAULTS["window_days"]
+    first_click = attr_cfg.get("model") == "first_click"
+    stitch_visitor = bool(attr_cfg.get("stitch_visitor_id"))
+    visitor_hint = _request_visitor_id(request)
+
+    async def resolved_attribution() -> dict:
+        """Click attribution under this workspace's model (G28).
+
+        last_click (the default) returns exactly the by-click-id row, as
+        before. first_click resolves the visitor's EARLIEST click inside the
+        window and uses its identity. When there is no first-party visitor id
+        (or no click for it) first-click is not resolvable and this falls back
+        to the click's own row — never to unattributed. Hashed email/phone are
+        not resolvable: no click-side link exists for them.
+        """
+        attr = await ch_attribution()
+        if not first_click:
+            return attr
+        vid = visitor_hint or attr.get("visitor_id")
+        if not vid:
+            return attr
+        first = await visitor_click_attribution(
+            vid, tenant_id_value, attr_window_days, earliest=True)
+        return first or attr
 
     # conversions_data has no cost column → profit recomputes to revenue.
     # The dedupe guard lives in the WHERE clause of one atomic UPDATE: the
@@ -2814,18 +3000,52 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                     "OR external_id = $1 ORDER BY received_at DESC LIMIT 1", ext_id)
             if row is None:
                 # Attribution fallback: sub_id_1..5 uniquely matching one real
-                # click in the last 7 days attaches to that click
+                # click inside the workspace's window attach to that click. The
+                # window is configurable (default 7 days, today's value); the
+                # match must still be unique, so we never merge two customers.
                 subs = {k: v for k, v in extra_fields.items()
                         if re.fullmatch(r"sub_id_[1-5]", k) and v}
                 if subs:
                     conds = " AND ".join(f"{k} = ${i + 1}" for i, k in enumerate(subs))
+                    win_idx = len(subs) + 1
                     candidates = await conn.fetch(
                         f"SELECT * FROM conversions_data "
                         f"WHERE click_id IS NOT NULL AND click_id <> 'none' "
-                        f"AND received_at >= NOW() - INTERVAL '7 days' AND {conds} "
-                        f"ORDER BY received_at DESC LIMIT 2", *subs.values())
+                        f"AND received_at >= NOW() - (${win_idx}::int * INTERVAL '1 day') "
+                        f"AND {conds} "
+                        f"ORDER BY received_at DESC LIMIT 2",
+                        *subs.values(), attr_window_days)
                     if len(candidates) == 1:
                         row = candidates[0]
+            if row is None and (stitch_visitor or first_click) and visitor_hint:
+                # Cross-device/session stitch on the first-party visitor id: the
+                # visitor's latest (last_click) or earliest (first_click) click
+                # inside the window. Keyed only on aaa_vid, so two customers can
+                # never be merged; absent id/click leaves the row unattributed.
+                vattr = await visitor_click_attribution(
+                    visitor_hint, tenant_id_value, attr_window_days,
+                    earliest=first_click)
+                vclick = vattr.get("click_id")
+                if vclick:
+                    row = await conn.fetchrow(JOINED_CLICK_QUERY, vclick)
+                    if row is None:
+                        # The click exists in ClickHouse but has no PG row yet.
+                        # Write this conversion against it using the stitched
+                        # attribution — the clickless analogue of the recovery
+                        # path below.
+                        await insert_row(conn, vclick, vattr)
+                        enriched = await conn.fetchrow(JOINED_CLICK_QUERY, vclick)
+                        if enriched:
+                            background_tasks.add_task(
+                                notify_telegram_conversion_async, vclick, status,
+                                payout_value, dict(enriched))
+                            await fanout(conn, enriched, vclick)
+                        schedule_ch_sync(vclick)
+                        schedule_meta_capi(vclick, enriched)
+                        return {"status": "ok", "click_id": vclick,
+                                "updated_status": status, "duplicate": False,
+                                "tenant_id": tenant_id_value, "clickless": True,
+                                "attributed": bool(vattr.get("campaign_id"))}
             if row is not None:
                 row = await conn.fetchrow(JOINED_CLICK_QUERY, row["click_id"]) or row
                 is_duplicate = await write_conversion(conn, row)
@@ -2851,8 +3071,9 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             # background task, and the redirect/landing flows never write one.
             # The ClickHouse click row is written inline at click-out, so recover
             # the attribution from it — otherwise the conversion lands as a bare
-            # row that no offer cap or campaign postback would ever see.
-            attribution = await ch_attribution()
+            # row that no offer cap or campaign postback would ever see. Under
+            # first_click this resolves the visitor's earliest click instead.
+            attribution = await resolved_attribution()
             await insert_row(conn, click_id, attribution)
             # The insert already carries this conversion (status/payout), so no
             # write_conversion here — just the side effects the normal path runs.
@@ -4380,6 +4601,27 @@ def flow_config_id(value):
         return None
 
 
+async def redirect_to_campaign(campaign, request: Request, campaign_id, depth: int):
+    """Execute a campaign target, or None when it is unusable.
+
+    Shared by the ``redirect_campaign`` schema and the campaign destinations a
+    ``multi`` flow can mix in with its offers — there is exactly one campaign
+    router. Returns None past MAX_REDIRECT_DEPTH or on a missing/unparseable id
+    so the caller keeps its normal 404/fallback behaviour.
+    """
+    campaign_id = flow_config_id(campaign_id)
+    if not campaign_id or depth >= MAX_REDIRECT_DEPTH:
+        return None
+    pg = app.state.pg
+    async with pg.acquire() as conn:
+        target_campaign = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", campaign_id)
+    if not target_campaign:
+        return None
+    # The inner campaign executes (and tracks) its own level; the depth guard
+    # turns A→B→A loops into a 404/fallback.
+    return await do_campaign_execution(target_campaign, request, depth=depth + 1)
+
+
 async def execute_flow_schema(campaign, request: Request, config: dict, meta_data: dict,
                               flow: dict, bound: dict, served: dict, campaign_redirect,
                               depth: int = 0) -> Response:
@@ -4451,11 +4693,23 @@ async def execute_flow_schema(campaign, request: Request, config: dict, meta_dat
                     if v is not None]
         offers = [v for v in (flow_config_id(i) for i in (flow.get("offers") or []))
                   if v is not None]
+        # Campaign-as-offer: a campaign target competes with the offer pool for
+        # the destination slot, so one flow can A/B an offer against a nested
+        # campaign. Engaged only when the flow actually lists campaigns — an
+        # offer-only flow keeps its exact legacy selection.
+        campaigns = [v for v in (flow_config_id(i) for i in (flow.get("campaigns") or []))
+                     if v is not None]
+        if offer_id is None:
+            pool = [("offer", o) for o in offers] + [("campaign", c) for c in campaigns]
+            if pool:
+                kind, target = random.choice(pool)
+                if kind == "campaign":
+                    response = await redirect_to_campaign(campaign, request, target, depth)
+                    return response if response is not None else render_404_html()
+                offer_id = target
         # Empty pools make the flow ineligible — never crash on random.choice
         if landing_id is None and landings:
             landing_id = random.choice(landings)
-        if offer_id is None and offers:
-            offer_id = random.choice(offers)
         served["landing"] = landing_id
         served["offer"] = offer_id
 
@@ -4487,16 +4741,8 @@ async def execute_flow_schema(campaign, request: Request, config: dict, meta_dat
 
     # SCHEMA: redirect_campaign ++++
     elif schema == "redirect_campaign":
-        campaign_id = flow_config_id(flow.get("redirect_campaign"))
-
-        if campaign_id and depth < MAX_REDIRECT_DEPTH:
-            async with pg.acquire() as conn:
-                target_campaign = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", campaign_id)
-                if target_campaign:
-                    # The inner campaign executes (and tracks) its own level;
-                    # the depth guard turns A→B→A loops into a 404/fallback.
-                    return await do_campaign_execution(target_campaign, request, depth=depth + 1)
-        return render_404_html()
+        response = await redirect_to_campaign(campaign, request, flow.get("redirect_campaign"), depth)
+        return response if response is not None else render_404_html()
 
     # SCHEMA: return_404 +++
     elif schema == "return_404":
@@ -5708,6 +5954,29 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
                           if v is not None]
             m_offers = [v for v in (flow_config_id(i) for i in (flow.get("offers") or []))
                         if v is not None]
+            m_campaigns = [v for v in (flow_config_id(i) for i in (flow.get("campaigns") or []))
+                           if v is not None]
+            # Campaign-as-offer: mirror of execute_flow_schema's destination
+            # pool (KEEP IN SYNC). A chosen campaign recurses into the target's
+            # own decision and carries the same depth cap.
+            if m_offer is None:
+                pool = [("offer", o) for o in m_offers] + [("campaign", c) for c in m_campaigns]
+                if pool:
+                    kind, target = random.choice(pool)
+                    if kind == "campaign":
+                        target_campaign = None
+                        if depth < MAX_REDIRECT_DEPTH:
+                            async with pg.acquire() as conn:
+                                target_campaign = await conn.fetchrow(
+                                    "SELECT * FROM campaigns WHERE id = $1", target)
+                        if target_campaign:
+                            nested = await decide_campaign_flow(
+                                target_campaign, request, click_id, depth=depth + 1)
+                            nested["redirected_from"] = campaign["id"]
+                            return nested
+                        decision["schema"] = "return_404"
+                        return decision
+                    m_offer = target
             if m_landing is None and m_landings:
                 m_landing = random.choice(m_landings)
             if m_offer is None and m_offers:

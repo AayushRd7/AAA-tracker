@@ -20,7 +20,8 @@ from models.user import UserORM
 from auth import (hash_password, get_caller, verify_password, _hash_backup_code,
                   is_platform_operator, session_token, list_sessions,
                   revoke_session_prefix, revoke_other_sessions,
-                  normalize_hidden_metrics, caller_role_in_tenant)
+                  normalize_hidden_metrics, caller_role_in_tenant,
+                  validate_permission_scopes)
 
 router = APIRouter()
 
@@ -98,14 +99,20 @@ def _sync_membership_permissions(db: Session, user_id: int, permissions) -> None
 
 def _validated_permissions(permissions, role: Optional[str]):
     """Copy a permissions blob for storage, validating the `hidden_metrics`
-    list (known metric keys only, deduped, capped). A workspace owner is never
-    metric-restricted, so storing a hidden list for one is refused outright
-    rather than silently ignored. Returns a JSON-ready dict, or None."""
+    list (known metric keys only, deduped, capped) and the per-resource owner
+    scopes (campaigns/offers/sources/affiliates/domains, 'own' only). A
+    workspace owner is never metric-restricted, so storing a hidden list for one
+    is refused outright rather than silently ignored. Returns a JSON-ready dict,
+    or None."""
     if permissions is None:
         return None
     if not isinstance(permissions, dict):
         raise HTTPException(status_code=400, detail="permissions must be an object")
     perms = dict(permissions)
+    try:
+        validate_permission_scopes(perms)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if "hidden_metrics" in perms:
         try:
             hidden = normalize_hidden_metrics(perms.get("hidden_metrics"))

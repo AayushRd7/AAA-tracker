@@ -7,6 +7,7 @@ from typing import List, Optional, Any, Tuple, Dict, Union
 
 from schemas import Filters
 from tenant_context import current_tenant
+from app_pages import rates as fx_rates
 
 CLICKHOUSE_HOST = os.environ.get("CLICKHOUSE_HOST", "tracker_clickhouse")
 CLICKHOUSE_PORT = int(os.environ.get("CLICKHOUSE_PORT", "8123"))
@@ -14,6 +15,60 @@ CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "user")
 # dev-only fallback so imports work without env; the real value comes from .env
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD") or "_".join(["password"] * 3)
 CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DB", "default")
+
+
+# ---------------------------------------------------------------------------
+# Attribution configuration (G28) — per workspace, stored under the settings
+# document's top-level ``attribution`` block (written by Settings → Attribution).
+# This module is the backend service's shared ClickHouse/report helper, so every
+# backend report path normalises the block through here. The tracking plane
+# (frontend/app.py) runs in a separate process and keeps its own copy of the
+# same defaults, because it cannot import across services.
+# ---------------------------------------------------------------------------
+ATTRIBUTION_DEFAULTS = {
+    # 7 days is today's effective window: the pre-existing clickless sub-id
+    # fallback matched a click within the last 7 days. Keeping it the default
+    # means an un-configured workspace attributes exactly as before.
+    "window_days": 7,
+    # "last_click" (default) reproduces today's behaviour; "first_click" credits
+    # the visitor's earliest resolvable click. Linear/position-based are NOT
+    # offered: they need a per-visitor touch chain we do not store.
+    "model": "last_click",
+    # Identifier stitching is opt-in. visitor_id (the first-party aaa_vid cookie)
+    # is the only identifier actually wired; email/phone cannot be resolved yet
+    # (no column, no click-side link) and fall back to today's behaviour.
+    "stitch_visitor_id": False,
+    "stitch_hashed_email": False,
+    "stitch_hashed_phone": False,
+}
+ATTRIBUTION_MODELS = ("last_click", "first_click")
+# Upper bound on a custom window (10 years): a runaway value would turn the
+# click-search into an unbounded scan.
+MAX_ATTRIBUTION_WINDOW_DAYS = 3650
+
+
+def normalize_attribution(raw) -> dict:
+    """Merge a stored ``attribution`` block over the defaults, coercing types.
+
+    A bad value falls back to the default rather than disabling attribution:
+    an unknown model becomes last_click, a non-positive/oversized window
+    becomes 7 days, and the identifier toggles are only true for a real
+    boolean True (a JSON string "true" must not enable stitching)."""
+    cfg = dict(ATTRIBUTION_DEFAULTS)
+    if not isinstance(raw, dict):
+        return cfg
+    try:
+        days = int(raw.get("window_days", cfg["window_days"]))
+        if 1 <= days <= MAX_ATTRIBUTION_WINDOW_DAYS:
+            cfg["window_days"] = days
+    except (TypeError, ValueError):
+        pass
+    model = str(raw.get("model") or "").strip().lower()
+    if model in ATTRIBUTION_MODELS:
+        cfg["model"] = model
+    for key in ("stitch_visitor_id", "stitch_hashed_email", "stitch_hashed_phone"):
+        cfg[key] = raw.get(key) is True
+    return cfg
 
 
 def get_clickhouse_client():
@@ -268,6 +323,23 @@ def get_click_log_total(client, filters: dict) -> int:
     return int(result.result_rows[0][0]) if result.result_rows else 0
 
 
+# ---------------------------------------------------------------------------
+# Multi-currency reporting
+# ---------------------------------------------------------------------------
+# clicks_data money is expressed in the row's own `currency` when the tracking
+# macro set one; a blank currency means the row is already in the workspace's
+# base currency. The CASE multiplier converts each row before it is summed, so
+# a mixed-currency window aggregates correctly, while a base-currency workspace
+# (or one with no fx_rates row) multiplies by 1 — today's exact behaviour.
+# Reading the store is one indexed settings-row read; it never makes a network
+# call, because the background refresh owns that.
+def _fx_factor_sql() -> Optional[str]:
+    try:
+        return fx_rates.sql_factor(fx_rates.load_store())
+    except Exception:
+        return None
+
+
 def generate_date_range(start: str, end: str) -> List[str]:
     date_from = datetime.strptime(start, "%Y-%m-%d")
     date_to = datetime.strptime(end, "%Y-%m-%d")
@@ -292,6 +364,13 @@ def get_metrics_series(client, filters: Filters, limit: int = 30) -> List[Dict[s
     where_clause, params = build_filters(filters_dict)
     params["limit"] = limit
 
+    # Multi-currency: convert each row's money before summing. `None` when no
+    # rates are configured, which keeps the SQL byte-identical to before.
+    factor = _fx_factor_sql()
+    cost_expr = f"sumOrNull(toFloat64(cost) * ({factor}))" if factor else "sumOrNull(toFloat64(cost))"
+    revenue_expr = (f"sumOrNull(toFloat64(revenue) * ({factor}))" if factor
+                    else "sumOrNull(toFloat64(revenue))")
+
     query = f"""
         SELECT
             toDate(received_at) AS day,
@@ -300,8 +379,8 @@ def get_metrics_series(client, filters: Filters, limit: int = 30) -> List[Dict[s
             countIf(click = true) AS clicks,
             uniqIf(visitor_id, click = true) AS unique_clicks,
             countIf(status IN ('sale', 'upsale')) AS conversions,
-            sumOrNull(toFloat64(cost)) AS cost,
-            sumOrNull(toFloat64(revenue)) AS revenue
+            {cost_expr} AS cost,
+            {revenue_expr} AS revenue
         FROM clicks_data
         {where_clause}
         GROUP BY day
@@ -411,6 +490,18 @@ def get_report_breakdown(client, filters: dict, dimension: str, limit: int = 100
 
     where_clause, params = build_filters(filters)
 
+    # Money is converted per row (see _fx_factor_sql) before aggregation.
+    factor = _fx_factor_sql()
+    cost_expr = f"sumOrNull(toFloat64(cost) * ({factor}))" if factor else "sumOrNull(toFloat64(cost))"
+    revenue_expr = (f"sumOrNull(toFloat64(revenue) * ({factor}))" if factor
+                    else "sumOrNull(toFloat64(revenue))")
+    profit_expr = (f"sumOrNull(toFloat64(profit) * ({factor}))" if factor
+                   else "sumOrNull(toFloat64(profit))")
+    bot_cost_expr = (f"sumIf(toFloat64(clicks_data.cost) * ({factor}), "
+                     "is_bot = true AND (click IS NULL OR click = false))" if factor
+                     else "sumIf(toFloat64(clicks_data.cost), "
+                          "is_bot = true AND (click IS NULL OR click = false))")
+
     query = f"""
         SELECT
             {dim_expr} AS dimension,
@@ -421,11 +512,11 @@ def get_report_breakdown(client, filters: dict, dimension: str, limit: int = 100
             countIf(status IN ('lead', 'sale')) AS leads,
             countIf(status IN ('sale', 'upsale')) AS conversions,
             countIf(status = 'rejected') AS rejected,
-            sumOrNull(toFloat64(cost)) AS cost,
-            sumOrNull(toFloat64(revenue)) AS revenue,
-            sumOrNull(toFloat64(profit)) AS profit,
+            {cost_expr} AS cost,
+            {revenue_expr} AS revenue,
+            {profit_expr} AS profit,
             countIf(is_bot = true AND (click IS NULL OR click = false)) AS bot_clicks,
-            sumIf(toFloat64(clicks_data.cost), is_bot = true AND (click IS NULL OR click = false)) AS bot_cost,
+            {bot_cost_expr} AS bot_cost,
             avgOrNull(fraud_score) AS fraud_score_avg
         FROM clicks_data
         {where_clause}
@@ -468,7 +559,25 @@ FORMULA_METRIC_KEYS = frozenset(BASE_METRICS + ("cr", "epc", "roi", "rejected_ra
                                                 "click_through_rate", "human_clicks",
                                                 "fraud_score_avg"))
 
-METRIC_SELECT_SQL = """
+def metric_select_sql(factor: Optional[str] = None) -> str:
+    """Aggregate metric columns; money converted per row when a factor is set.
+
+    ``factor`` is the ClickHouse CASE expression from rates.sql_factor — the
+    same shape get_report_breakdown uses, so single- and multi-dimension
+    breakdowns convert identically."""
+    if factor:
+        cost = f"sumOrNull(toFloat64(cost) * ({factor}))"
+        revenue = f"sumOrNull(toFloat64(revenue) * ({factor}))"
+        profit = f"sumOrNull(toFloat64(profit) * ({factor}))"
+        bot_cost = (f"sumIf(toFloat64(clicks_data.cost) * ({factor}), "
+                    "is_bot = true AND (click IS NULL OR click = false))")
+    else:
+        cost = "sumOrNull(toFloat64(cost))"
+        revenue = "sumOrNull(toFloat64(revenue))"
+        profit = "sumOrNull(toFloat64(profit))"
+        bot_cost = ("sumIf(toFloat64(clicks_data.cost), "
+                    "is_bot = true AND (click IS NULL OR click = false))")
+    return f"""
             countIf(click IS NULL OR click = false) AS visits,
             uniqIf(visitor_id, click IS NULL OR click = false) AS unique_visits,
             countIf(click = true) AS clicks,
@@ -476,13 +585,17 @@ METRIC_SELECT_SQL = """
             countIf(status IN ('lead', 'sale')) AS leads,
             countIf(status IN ('sale', 'upsale')) AS conversions,
             countIf(status = 'rejected') AS rejected,
-            sumOrNull(toFloat64(cost)) AS cost,
-            sumOrNull(toFloat64(revenue)) AS revenue,
-            sumOrNull(toFloat64(profit)) AS profit,
+            {cost} AS cost,
+            {revenue} AS revenue,
+            {profit} AS profit,
             countIf(is_bot = true AND (click IS NULL OR click = false)) AS bot_clicks,
-            sumIf(toFloat64(clicks_data.cost), is_bot = true AND (click IS NULL OR click = false)) AS bot_cost,
+            {bot_cost} AS bot_cost,
             avgOrNull(fraud_score) AS fraud_score_avg
 """
+
+
+# The no-conversion select, kept as a constant for callers/tests that import it.
+METRIC_SELECT_SQL = metric_select_sql()
 
 
 def derive_metrics(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -544,6 +657,8 @@ def get_report_breakdown_multi(
     desc = str(sort_dir).lower() != "asc"
 
     sql_sort = sort_by if sort_by in BASE_METRICS else "visits"
+    # Convert each row's money to the workspace base before aggregating.
+    metric_sql = metric_select_sql(_fx_factor_sql())
 
     rows: List[Dict[str, Any]] = []
     for level, dim in enumerate(dims, 1):
@@ -551,7 +666,7 @@ def get_report_breakdown_multi(
         query = f"""
             SELECT
                 {', '.join(select_dims)},
-                {METRIC_SELECT_SQL}
+                {metric_sql}
             FROM clicks_data
             {where_clause}
             GROUP BY {', '.join(f'd{i}' for i in range(level))}

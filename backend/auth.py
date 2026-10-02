@@ -746,6 +746,29 @@ def denied_permissions() -> dict:
     return {"sections": {s: False for s in PERMISSION_SECTIONS}, "write": False}
 
 
+# Sections that support a per-resource 'own' scope. The value lives as a
+# top-level key on the permissions blob ({"offers": "own"}), the shape
+# campaigns already uses; `resolve_membership_permissions` carries it through
+# untouched. An absent key means full access, so existing blobs are unaffected.
+OWN_SCOPE_SECTIONS = ("campaigns", "offers", "sources", "affiliates", "domains")
+
+
+def validate_permission_scopes(raw: Optional[dict]) -> Optional[dict]:
+    """Reject an unknown owner-scope value on a permissions write.
+
+    A scope key, when present, must be exactly 'own' — anything else ('all',
+    a boolean, a typo) is refused so a caller can never silently widen or
+    half-apply a scope. Absent keys mean full access. Returns the input
+    unchanged; raises ValueError so the endpoint answers with a clear 400."""
+    if not isinstance(raw, dict):
+        return raw
+    for section in OWN_SCOPE_SECTIONS:
+        if section in raw and raw[section] != "own":
+            raise ValueError(
+                f"{section} scope must be 'own' when set (got {raw[section]!r})")
+    return raw
+
+
 def membership_for(db: Session, username: Optional[str],
                    tenant_id: Optional[int] = None):
     """(user_id, role, raw_permissions_dict) for `username` in `tenant_id`
@@ -998,6 +1021,52 @@ def get_caller(request: Request, authorization: Optional[str] = None):
         return username, bool(user and user.is_admin)
     finally:
         db.close()
+
+
+def owner_scope_query(request: Request, db: Session, query, section: str, model):
+    """Apply the per-resource 'own' scope to an ORM query: a caller whose
+    membership carries e.g. offers:'own' only sees rows they own. Admins, API
+    tokens, a caller with no membership, and anyone without the scope key are
+    unaffected — so an existing install sees everything exactly as before."""
+    username, is_admin = get_caller(request)
+    if is_admin or not username:
+        return query
+    member = membership_for(db, username)
+    raw = member[2] if member and isinstance(member[2], dict) else {}
+    if member and raw.get(section) == "own":
+        query = query.filter(model.owner_id == member[0])
+    return query
+
+
+def require_owned_mutation(request: Request, db: Session, section: str, rows, label: str) -> None:
+    """Refuse mutating a row the caller does not own when their membership
+    carries `section:'own'` — the campaigns idiom, enforced on every mutation
+    path. Raises 403 (never a silent no-op); admins and unscoped callers pass."""
+    username, is_admin = get_caller(request)
+    if is_admin or not username:
+        return
+    member = membership_for(db, username)
+    raw = member[2] if member and isinstance(member[2], dict) else {}
+    if not member or raw.get(section) != "own":
+        return
+    for row in rows:
+        if row is not None and row.owner_id != member[0]:
+            raise HTTPException(status_code=403,
+                                detail=f"You can only modify your own {label}")
+
+
+def owner_id_for_create(request: Request, db: Session, section: str) -> Optional[int]:
+    """The owner_id to stamp on a newly created row: the caller's user id when
+    they hold `section:'own'`, otherwise None (unassigned, visible to managers
+    only)."""
+    username, is_admin = get_caller(request)
+    if is_admin or not username:
+        return None
+    member = membership_for(db, username)
+    raw = member[2] if member and isinstance(member[2], dict) else {}
+    if member and raw.get(section) == "own":
+        return member[0]
+    return None
 
 
 def request_is_https(request: Request) -> bool:

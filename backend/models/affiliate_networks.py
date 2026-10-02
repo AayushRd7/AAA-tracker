@@ -10,5 +10,8 @@ class AffiliateNetworkORM(TenantMixin, Base):
     name = Column(String(255), nullable=False)
     offer_parameters = Column(String(1024))
     s2s_postback = Column(String(1024))
+    # Owner scope parity with campaigns.owner_id: the affiliates:'own' permission
+    # limits a caller to affiliate networks they own.
+    owner_id = Column(Integer, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

@@ -10,6 +10,8 @@ Endpoints:
   GET /api/fraud/feed?after=    — live feed of bot/high-score clicks (polling)
   GET/PUT /api/fraud/bot-lists  — global editable lists in settings "bot_lists"
   GET /api/fraud/honeypot-hits  — recent PG honeypot_hits rows
+  GET /api/fraud/evidence.csv   — refund-claim evidence, one flat CSV table
+  GET /api/fraud/evidence.html  — same evidence as a printable self-contained page
 """
 import ipaddress
 import json
@@ -226,6 +228,362 @@ def fraud_feed(request: Request, after: str = None, limit: int = FEED_LIMIT):
     result = ch.query(query, parameters=params)
     columns = result.column_names
     return [dict(zip(columns, row)) for row in result.result_rows]
+
+
+# ---------------------------------------------------------------------------
+# Refund-claim evidence export
+#
+# The artefact a media buyer sends an ad network when disputing fraudulent
+# traffic: the flagged clicks in a date range aggregated per offending
+# dimension, plus the totals and the exact filter set so the claim is
+# self-describing and reproducible. Two formats:
+#   GET /evidence.csv   — one flat table; a `section` column preserves shape
+#   GET /evidence.html  — self-contained printable page ("Print to PDF")
+# A single flat CSV is chosen over a zip of per-section files on purpose: a
+# refund claim is emailed as one attachment, and one table with a `section`
+# column opens directly in any spreadsheet while staying filterable by section
+# (no unzip step, no locked-down archive tooling on the recipient's side).
+# No credential and no storage/serving technology name appears in the output.
+# ---------------------------------------------------------------------------
+
+EVIDENCE_SCORE_THRESHOLD = FRAUD_SCORE_THRESHOLD  # one threshold drives card + export
+EVIDENCE_ROW_LIMIT = 500        # per dimension; the artefact says when it truncates
+EVIDENCE_MAX_RANGE_DAYS = 62    # ~two months — a longer window is a different report
+
+# (key, human title, grouping expression). Empty values tombstone to "(unknown)"
+# so a blank bucket is visible in the evidence rather than silently dropped.
+EVIDENCE_DIMENSIONS = (
+    ("ip", "IP address", "if(empty(ip_full), toString(ip), ip_full)"),
+    ("user_agent", "User agent",
+     "if(empty(user_agent), if(empty(browser), '(unknown)', browser), user_agent)"),
+    ("country", "Country", "if(empty(country), '(unknown)', country)"),
+    ("traffic_source", "Traffic source",
+     "if(empty(traffic_source_name), '(unknown)', traffic_source_name)"),
+    ("sub_id", "Sub-ID", "if(empty(sub_id_1), '(unknown)', sub_id_1)"),
+    ("campaign", "Campaign", "toString(coalesce(campaign_id, -1))"),
+)
+
+# Flat CSV columns. meta/totals rows carry the key in `key` and the figure in
+# `value`; a dimension row carries the offending value in `key` (leaving
+# `value` blank) and its counts across the remaining columns.
+EVIDENCE_CSV_FIELDS = ("section", "key", "value", "hits", "bot_hits",
+                       "high_score_hits", "avg_fraud_score", "max_fraud_score",
+                       "cost", "first_seen", "last_seen")
+
+
+def _parse_evidence_range(date_from: str, date_to: str) -> tuple:
+    """Default to the last 7 days; reject a bad format, an inverted range or an
+    oversized window — a bounded query is the contract here, not a hope."""
+    from datetime import timedelta
+    today = datetime.utcnow().date()
+    try:
+        start = (datetime.strptime(str(date_from), "%Y-%m-%d").date()
+                 if date_from else today - timedelta(days=6))
+        end = (datetime.strptime(str(date_to), "%Y-%m-%d").date()
+               if date_to else today)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400,
+                            detail="date_from and date_to must be YYYY-MM-DD")
+    if start > end:
+        raise HTTPException(status_code=400, detail="date_from must not be after date_to")
+    if (end - start).days + 1 > EVIDENCE_MAX_RANGE_DAYS:
+        raise HTTPException(status_code=400,
+                            detail=f"Date range too large (max {EVIDENCE_MAX_RANGE_DAYS} days)")
+    return start.isoformat(), end.isoformat()
+
+
+def _evidence_where(tenant) -> str:
+    """Tenant-scoped, date-bounded predicate; the dates ride in as query params
+    (only the tenant is interpolated — an int from the request context)."""
+    return (f"tenant_id = {int(tenant)} "
+            "AND toDate(received_at) BETWEEN toDate(%(date_from)s) AND toDate(%(date_to)s)")
+
+
+def _evidence_totals(ch, tenant, date_from, date_to) -> dict:
+    flag = f"(is_bot = true OR fraud_score >= {EVIDENCE_SCORE_THRESHOLD})"
+    rows = ch.query(f"""
+        SELECT count() AS tracked_events,
+               countIf(click = true) AS clicks,
+               countIf({flag}) AS flagged_events,
+               countIf(click = true AND {flag}) AS flagged_clicks,
+               countIf(is_bot = true) AS bot_events,
+               round(avg(fraud_score), 2) AS avg_fraud_score,
+               max(fraud_score) AS max_fraud_score,
+               round(sum(toFloat64(coalesce(cost, 0))), 4) AS total_spend,
+               round(sumIf(toFloat64(coalesce(cost, 0)), {flag}), 4) AS wasted_spend
+        FROM clicks_data
+        WHERE {_evidence_where(tenant)}""",
+        parameters={"date_from": date_from, "date_to": date_to}).result_rows
+    r = rows[0] if rows else (0,) * 9
+    tracked = int(r[0] or 0)
+    bot_events = int(r[4] or 0)
+    totals = {
+        "tracked_events": tracked,
+        "clicks": int(r[1] or 0),
+        "flagged_events": int(r[2] or 0),
+        "flagged_clicks": int(r[3] or 0),
+        "bot_events": bot_events,
+        "bot_share_pct": round(bot_events / tracked * 100, 2) if tracked else 0.0,
+        "avg_fraud_score": float(r[5] or 0),
+        "max_fraud_score": int(r[6] or 0),
+        "total_spend": float(r[7] or 0),
+        "wasted_spend": float(r[8] or 0),
+    }
+    totals["flagged_share_pct"] = (round(totals["flagged_events"] / tracked * 100, 2)
+                                   if tracked else 0.0)
+    return totals
+
+
+def _evidence_section_rows(ch, tenant, dim_expr, date_from, date_to) -> tuple:
+    """Aggregate one dimension over flagged clicks only. Over-fetches by one to
+    detect truncation, then drops the sentinel so the reported cap stays exact."""
+    flag = f"(is_bot = true OR fraud_score >= {EVIDENCE_SCORE_THRESHOLD})"
+    rows = ch.query(f"""
+        SELECT {dim_expr} AS value,
+               count() AS hits,
+               countIf(is_bot = true) AS bot_hits,
+               countIf(fraud_score >= {EVIDENCE_SCORE_THRESHOLD}) AS high_score_hits,
+               round(avg(fraud_score), 1) AS avg_fraud_score,
+               max(fraud_score) AS max_fraud_score,
+               round(sum(toFloat64(coalesce(cost, 0))), 4) AS cost,
+               min(received_at) AS first_seen,
+               max(received_at) AS last_seen
+        FROM clicks_data
+        WHERE {_evidence_where(tenant)} AND {flag}
+        GROUP BY value
+        ORDER BY hits DESC, value ASC
+        LIMIT {EVIDENCE_ROW_LIMIT + 1}""",
+        parameters={"date_from": date_from, "date_to": date_to}).result_rows
+    truncated = len(rows) > EVIDENCE_ROW_LIMIT
+    out = []
+    for r in rows[:EVIDENCE_ROW_LIMIT]:
+        bot_hits, high_hits = int(r[2] or 0), int(r[3] or 0)
+        reasons = []
+        if bot_hits:
+            reasons.append("bot")
+        if high_hits:
+            reasons.append(f"score>={EVIDENCE_SCORE_THRESHOLD}")
+        out.append({
+            "value": str(r[0]),
+            "hits": int(r[1] or 0),
+            "bot_hits": bot_hits,
+            "high_score_hits": high_hits,
+            "avg_fraud_score": float(r[4] or 0),
+            "max_fraud_score": int(r[5] or 0),
+            "cost": float(r[6] or 0),
+            "first_seen": str(r[7]) if r[7] is not None else "",
+            "last_seen": str(r[8]) if r[8] is not None else "",
+            "flag_reasons": "+".join(reasons) or "flagged",
+        })
+    return out, truncated
+
+
+def _campaign_names(db: Session) -> dict:
+    """id -> name for the tenant, so a campaign bucket reads as a claimable
+    reference rather than a bare number."""
+    rows = db.execute(text("SELECT id, name FROM campaigns WHERE tenant_id = :tid"),
+                      {"tid": current_tenant()}).fetchall()
+    return {int(r[0]): (r[1] or "") for r in rows}
+
+
+def _build_evidence(request: Request, db: Session, date_from: str, date_to: str) -> dict:
+    ch = request.state.ch
+    tenant = current_tenant()
+    totals = _evidence_totals(ch, tenant, date_from, date_to)
+    names = _campaign_names(db)
+    sections, notes = [], []
+    if totals["flagged_events"] == 0:
+        notes.append("No flagged traffic in the selected range.")
+    for key, title, expr in EVIDENCE_DIMENSIONS:
+        rows, truncated = _evidence_section_rows(ch, tenant, expr, date_from, date_to)
+        if key == "campaign":
+            for row in rows:
+                cid = row["value"]
+                name = names.get(int(cid)) if cid.lstrip("-").isdigit() else None
+                row["value"] = f"{name} (#{cid})" if name else f"#{cid}"
+        if truncated:
+            notes.append(f"{title}: showing the top {EVIDENCE_ROW_LIMIT} groups by hit "
+                         "count — the list was cut off.")
+        sections.append({"key": key, "title": title, "rows": rows, "truncated": truncated})
+    return {
+        "title": "Fraud evidence report",
+        "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "date_from": date_from,
+        "date_to": date_to,
+        "workspace_id": int(tenant),
+        "flag_rule": f"is_bot = true OR fraud_score >= {EVIDENCE_SCORE_THRESHOLD}",
+        "score_threshold": EVIDENCE_SCORE_THRESHOLD,
+        "row_limit": EVIDENCE_ROW_LIMIT,
+        "totals": totals,
+        "sections": sections,
+        "notes": notes,
+    }
+
+
+def _evidence_csv_response(evidence: dict):
+    """One flat, UTF-8-BOM CSV with the formula-injection guard from the log
+    exports (reused, not reimplemented)."""
+    import csv as _csv
+    import io as _io
+    from fastapi.responses import Response
+    from app_pages.logs import _csv_safe
+
+    buf = _io.StringIO()
+    writer = _csv.writer(buf, lineterminator="\n")
+    writer.writerow(EVIDENCE_CSV_FIELDS)
+
+    def row(cells: dict):
+        writer.writerow([_csv_safe(cells.get(f, "")) for f in EVIDENCE_CSV_FIELDS])
+
+    for key, value in (("generated_at", evidence["generated_at"]),
+                       ("date_from", evidence["date_from"]),
+                       ("date_to", evidence["date_to"]),
+                       ("workspace_id", evidence["workspace_id"]),
+                       ("flag_rule", evidence["flag_rule"]),
+                       ("row_limit", evidence["row_limit"])):
+        row({"section": "meta", "key": key, "value": value})
+    for key, value in evidence["totals"].items():
+        row({"section": "totals", "key": key, "value": value})
+    for note in evidence["notes"]:
+        row({"section": "note", "key": note})
+    for section in evidence["sections"]:
+        for r in section["rows"]:
+            row({"section": section["key"], "key": r["value"],
+                 "hits": r["hits"], "bot_hits": r["bot_hits"],
+                 "high_score_hits": r["high_score_hits"],
+                 "avg_fraud_score": r["avg_fraud_score"],
+                 "max_fraud_score": r["max_fraud_score"], "cost": r["cost"],
+                 "first_seen": r["first_seen"], "last_seen": r["last_seen"]})
+    return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition":
+                             'attachment; filename="fraud-evidence.csv"'})
+
+
+def _evidence_html_response(evidence: dict):
+    """A single self-contained page: inline CSS only, a print button hidden when
+    printing, every dynamic value HTML-escaped (UA/sub-id strings are visitor
+    input and must never become markup)."""
+    import html as _html
+    from fastapi.responses import HTMLResponse
+
+    esc = _html.escape
+    t = evidence["totals"]
+
+    def money(v):
+        return f"${float(v or 0):,.4f}"
+
+    tables = []
+    for section in evidence["sections"]:
+        if section["rows"]:
+            body = "".join(
+                "<tr>"
+                f"<td class='mono'>{esc(str(r['value']))}</td>"
+                f"<td class='num'>{r['hits']:,}</td>"
+                f"<td class='num'>{r['bot_hits']:,}</td>"
+                f"<td class='num'>{r['high_score_hits']:,}</td>"
+                f"<td class='num'>{r['avg_fraud_score']:.1f}</td>"
+                f"<td class='num'>{r['max_fraud_score']:,}</td>"
+                f"<td class='num'>{money(r['cost'])}</td>"
+                f"<td class='mono small'>{esc(r['first_seen'])}</td>"
+                f"<td class='mono small'>{esc(r['last_seen'])}</td>"
+                f"<td>{esc(r['flag_reasons'])}</td>"
+                "</tr>" for r in section["rows"])
+        else:
+            body = ("<tr><td colspan='10' class='empty'>"
+                    "No flagged traffic in this dimension.</td></tr>")
+        tables.append(
+            f"<h2>{esc(section['title'])}</h2>"
+            "<table><thead><tr>"
+            "<th>Value</th><th class='num'>Flagged hits</th><th class='num'>Bot hits</th>"
+            "<th class='num'>High-score hits</th><th class='num'>Avg score</th>"
+            "<th class='num'>Max score</th><th class='num'>Wasted spend</th>"
+            "<th>First seen</th><th>Last seen</th><th>Reason</th>"
+            "</tr></thead><tbody>" + body + "</tbody></table>")
+
+    notes = "".join(f"<li>{esc(n)}</li>" for n in evidence["notes"])
+    notes_html = (f"<div class='note'><strong>Notes</strong><ul>{notes}</ul></div>"
+                  if notes else "")
+    empty_banner = ("<p class='empty-banner'>No flagged traffic in the selected range.</p>"
+                    if t["flagged_events"] == 0 else "")
+    totals_items = [
+        ("Tracked events", f"{t['tracked_events']:,}"),
+        ("Clicks", f"{t['clicks']:,}"),
+        ("Flagged events", f"{t['flagged_events']:,}"),
+        ("Flagged clicks", f"{t['flagged_clicks']:,}"),
+        ("Bot share", f"{t['bot_share_pct']:.2f}%"),
+        ("Flagged share", f"{t['flagged_share_pct']:.2f}%"),
+        ("Avg fraud score", f"{t['avg_fraud_score']:.2f}"),
+        ("Max fraud score", f"{t['max_fraud_score']:,}"),
+        ("Total spend", money(t["total_spend"])),
+        ("Est. wasted spend", money(t["wasted_spend"])),
+    ]
+    cards = "".join(f"<div class='card'><div class='k'>{esc(k)}</div>"
+                    f"<div class='v'>{v}</div></div>" for k, v in totals_items)
+
+    css = """
+body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+       color: #1f2937; margin: 24px; }
+h1 { font-size: 22px; margin: 0 0 6px; }
+h2 { font-size: 15px; margin: 26px 0 8px; }
+.sub { color: #6b7280; font-size: 12px; margin-bottom: 3px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th, td { border: 1px solid #e5e7eb; padding: 5px 7px; text-align: left; vertical-align: top; }
+th { background: #f3f4f6; }
+td.num, th.num { text-align: right; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        word-break: break-all; }
+.small { font-size: 11px; color: #6b7280; white-space: nowrap; }
+.empty { color: #6b7280; text-align: center; }
+.cards { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 12px; min-width: 150px; }
+.card .k { font-size: 11px; color: #6b7280; }
+.card .v { font-size: 17px; font-weight: 600; margin-top: 2px; }
+.note { border: 1px solid #f59e0b; background: #fffbeb; padding: 8px 12px;
+        border-radius: 6px; margin: 14px 0; font-size: 12px; }
+.note ul { margin: 4px 0 0 18px; padding: 0; }
+.empty-banner { border: 1px solid #e5e7eb; background: #f9fafb; padding: 12px;
+                border-radius: 6px; font-size: 13px; }
+.toolbar { margin-bottom: 16px; }
+.toolbar button { padding: 8px 14px; border: 1px solid #2563eb; background: #2563eb;
+                  color: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; }
+@media print { .toolbar { display: none; } body { margin: 0; }
+               h2 { page-break-after: avoid; } tr { page-break-inside: avoid; } }
+"""
+    header = (
+        f"<h1>{esc(evidence['title'])}</h1>"
+        f"<div class='sub'>Date range: {esc(evidence['date_from'])} to "
+        f"{esc(evidence['date_to'])} (inclusive)</div>"
+        f"<div class='sub'>Generated: {esc(evidence['generated_at'])}</div>"
+        f"<div class='sub'>Workspace scope: {evidence['workspace_id']}</div>"
+        f"<div class='sub'>Flag rule: {esc(evidence['flag_rule'])} &middot; "
+        f"score threshold {evidence['score_threshold']} &middot; "
+        f"row cap {evidence['row_limit']} per dimension</div>"
+        f"<div class='cards'>{cards}</div>")
+    return HTMLResponse(
+        content=(
+            "<!doctype html>\n<html lang='en'><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+            f"<title>{esc(evidence['title'])}</title><style>{css}</style></head><body>"
+            "<div class='toolbar'><button onclick='window.print()'>Print / Save as PDF"
+            "</button></div>"
+            + header + empty_banner + notes_html
+            + "".join(tables) +
+            "</body></html>"),
+        media_type="text/html")
+
+
+@router.get("/evidence.csv")
+def fraud_evidence_csv(request: Request, date_from: str = None, date_to: str = None,
+                       db: Session = Depends(get_db)):
+    start, end = _parse_evidence_range(date_from, date_to)
+    return _evidence_csv_response(_build_evidence(request, db, start, end))
+
+
+@router.get("/evidence.html")
+def fraud_evidence_html(request: Request, date_from: str = None, date_to: str = None,
+                        db: Session = Depends(get_db)):
+    start, end = _parse_evidence_range(date_from, date_to)
+    return _evidence_html_response(_build_evidence(request, db, start, end))
 
 
 @router.get("/bot-lists")

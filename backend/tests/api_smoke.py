@@ -13,6 +13,10 @@ import os
 import re
 import sys
 import json
+import csv
+import gzip
+import io
+import zipfile
 import base64
 import shutil
 import subprocess
@@ -75,6 +79,21 @@ def main():
     print("== Auth ==")
     r = s.post(f"{api}/login", json={"username": USER, "password": PASS})
     check("login", r.status_code == 200, r.text[:120])
+
+    # A previous run (or an operator) can leave IP anonymization on. The suite's
+    # own privacy block restores what it found, so a dirty start would silently
+    # mask IPs in every earlier assertion. Normalise it to off before anything
+    # asserts on a stored address, and only pay the cache-settle when we had to.
+    r = s.get(f"{api}/settings/")
+    _startup_cfg = dict((r.json() or {}).get("settings") or {})
+    _startup_privacy = _startup_cfg.get("privacy")
+    if isinstance(_startup_privacy, dict) and _startup_privacy.get("anonymize_ip"):
+        _startup_cfg["privacy"] = {**_startup_privacy, "anonymize_ip": False}
+        s.post(f"{api}/settings/", json={"settings": _startup_cfg})
+        settle_settings_cache()
+        check("startup: a leftover anonymize_ip setting was normalised off", True, "")
+    else:
+        check("startup: anonymize_ip is off", True, "")
 
     r = requests.get(f"{api}/campaigns/", verify=not INSECURE)
     check("API requires auth (401 unauth)", r.status_code == 401, str(r.status_code))
@@ -11046,6 +11065,307 @@ print("ESCAPED-OK")
           str(sorted(_atot))[:150])
     if hid_uid:
         s.delete(f"{api}/users/{hid_uid}")
+
+    print("== Rules parity + refund-claim evidence ==")
+    _rp = os.getpid()
+    r = s.post(f"{api}/rules/", json={
+        "name": f"smoke-rule-parity-{_rp}",
+        "conditions": [{"metric": "roi", "period_hours": 24, "comparator": "<", "value": -10}],
+        "action": "alert_telegram", "email_recipients": ["smoke@example.com"],
+        "schedule": {"mode": "interval", "interval_minutes": 30}})
+    _rule = (r.json() or {}).get("rule") or {}
+    _rid = _rule.get("id")
+    check("rules: a per-rule email target + interval schedule are accepted",
+          r.status_code == 200 and _rule.get("email_recipients") == ["smoke@example.com"]
+          and (_rule.get("schedule") or {}).get("mode") == "interval", r.text[:200])
+    check("rules: the creator is recorded", bool(_rule.get("created_by")),
+          str(_rule.get("created_by"))[:60])
+    r = s.post(f"{api}/rules/", json={
+        "name": f"smoke-rule-badmail-{_rp}",
+        "conditions": [{"metric": "roi", "period_hours": 1, "comparator": "<", "value": 1}],
+        "action": "alert_telegram", "email_recipients": ["not-an-email"]})
+    check("rules: an invalid recipient is rejected 400", r.status_code == 400, r.text[:120])
+    r = s.post(f"{api}/rules/", json={
+        "name": f"smoke-rule-badsched-{_rp}",
+        "conditions": [{"metric": "roi", "period_hours": 1, "comparator": "<", "value": 1}],
+        "action": "alert_telegram",
+        "schedule": {"mode": "days_times", "days": [1], "times": ["25:00"]}})
+    check("rules: an invalid schedule time is rejected 400", r.status_code == 400, r.text[:120])
+    r = s.get(f"{api}/rules/")
+    _rl = next((x for x in ((r.json() or {}).get("rules") or []) if x.get("id") == _rid), {})
+    check("rules: the list exposes creator + last_result",
+          "created_by" in _rl and "last_result" in _rl, str(_rl)[:150])
+    if _rid:
+        s.delete(f"{api}/rules/{_rid}")
+
+    _evq = {"date_from": "2020-01-01", "date_to": "2020-01-07"}
+    r = s.get(f"{api}/fraud/evidence.csv", params=_evq)
+    check("fraud evidence: CSV is 200 + BOM + the expected header",
+          r.status_code == 200 and r.content[:3] == b"\xef\xbb\xbf"
+          and r.text.lstrip("\ufeff").startswith("section,key,value,hits,bot_hits"),
+          r.text[:130])
+    _secs = {ln.split(",", 1)[0] for ln in r.text.lstrip("\ufeff").splitlines()[1:] if ln}
+    check("fraud evidence: meta + totals always present, sections bounded",
+          {"meta", "totals"} <= _secs
+          and _secs <= {"meta", "totals", "note", "ip", "user_agent", "country",
+                        "traffic_source", "sub_id", "campaign"}, str(sorted(_secs))[:200])
+    check("fraud evidence: an empty range is a clean artefact, not an error",
+          "No flagged traffic" in r.text, r.text[-140:])
+    r = s.get(f"{api}/fraud/evidence.csv",
+              params={"date_from": "2020-01-01", "date_to": "2030-01-01"})
+    check("fraud evidence: an oversized range is rejected 400", r.status_code == 400,
+          str(r.status_code))
+    r = s.get(f"{api}/fraud/evidence.html", params=_evq)
+    check("fraud evidence: printable view renders, naming no storage technology",
+          r.status_code == 200 and "Fraud evidence report" in r.text
+          and not any(t in r.text.lower() for t in ("clickhouse", "postgres", "nginx")),
+          str(r.status_code))
+
+    print("== Offline / phone ingestion ==")
+    _in_pid = os.getpid()
+    _created_ids = []
+    r = s.post(f"{api}/reports/ingest", json={
+        "click_id": f"smoke-ing-{_in_pid}", "transaction_id": f"smoke-ing-txn-{_in_pid}",
+        "status": "sale", "payout": 12.5, "currency": "USD",
+        "occurred_at": "2026-09-30T10:00:00Z", "phone": "+15551234567",
+        "note": "call sale", "sub_id_1": f"ing-{_in_pid}"})
+    check("ingest: a valid payload is created",
+          r.status_code == 200 and (r.json() or {}).get("result") == "created", r.text[:200])
+    if (r.json() or {}).get("id"):
+        _created_ids.append(r.json()["id"])
+    r = s.post(f"{api}/reports/ingest", json={
+        "click_id": f"smoke-ing-{_in_pid}", "transaction_id": f"smoke-ing-txn-{_in_pid}",
+        "status": "sale", "payout": 3.0})
+    check("ingest: a repeat transaction_id updates instead of duplicating",
+          r.status_code == 200 and (r.json() or {}).get("duplicate") is True, r.text[:200])
+    r = s.post(f"{api}/reports/ingest", json={
+        "transaction_id": f"smoke-ing-unmatched-{_in_pid}", "status": "sale", "payout": 1.0})
+    check("ingest: an unmatched sale lands unattributed, never dropped",
+          r.status_code == 200 and (r.json() or {}).get("created") is True
+          and (r.json() or {}).get("attributed") is False, r.text[:200])
+    if (r.json() or {}).get("id"):
+        _created_ids.append(r.json()["id"])
+    r = s.post(f"{api}/reports/ingest",
+               data={"transaction_id": f"smoke-ing-form-{_in_pid}",
+                     "status": "lead", "payout": "4,25"})
+    check("ingest: a form-encoded payload is accepted",
+          r.status_code == 200 and (r.json() or {}).get("result") == "created", r.text[:200])
+    if (r.json() or {}).get("id"):
+        _created_ids.append(r.json()["id"])
+    r = s.post(f"{api}/reports/ingest", data="{not-json",
+               headers={"Content-Type": "application/json"})
+    check("ingest: a malformed payload is a clean 4xx, never a 500",
+          400 <= r.status_code < 500, str(r.status_code))
+    r = s.post(f"{api}/reports/import", json={"lines": (
+        f"smoke-ing-csv-{_in_pid},5.5,smoke-ing-csv2-{_in_pid},sale,2026-09-29T08:30:00Z,EUR")})
+    check("import: the optional occurred_at + currency columns are accepted",
+          r.status_code == 200 and (r.json() or {}).get("imported") == 1, r.text[:200])
+    _csv_rec = None
+    for _ in range(10):
+        _rows = s.get(f"{api}/reports/", params={"search": f"smoke-ing-csv2-{_in_pid}"})
+        _rows = _rows.json() if _rows.status_code == 200 else []
+        if _rows:
+            _csv_rec = _rows[0]
+            break
+        time.sleep(0.4)
+    check("import: occurred_at + currency are stored on the row",
+          bool(_csv_rec) and _csv_rec.get("currency") == "EUR"
+          and str(_csv_rec.get("received_at", "")).startswith("2026-09-29"), str(_csv_rec)[:160])
+    if _csv_rec and _csv_rec.get("id"):
+        _created_ids.append(_csv_rec["id"])
+    r = s.get(f"{BASE}/backend/reports")
+    check("reports: the offline-ingestion card is rendered",
+          r.status_code == 200 and "Offline / phone ingestion" in r.text, str(r.status_code))
+    for _cid in _created_ids:
+        s.delete(f"{api}/reports/{_cid}")
+
+    print("== Per-resource 'own' scoping ==")
+    _own_pid = os.getpid()
+    _own_user = f"smoke-own-{_own_pid}"
+    r = s.post(f"{api}/users/", json={
+        "username": _own_user, "password": "smokepass1",
+        "permissions": {"sections": {"offers": True, "dashboard": True},
+                        "write": True, "offers": "own"}})
+    _own_uid = (r.json() or {}).get("id") if r.status_code == 200 else None
+    check("own scope: a user scoped to 'own' offers is created", bool(_own_uid), r.text[:150])
+    _ou = requests.Session()
+    _ou.verify = not INSECURE
+    r = _ou.post(f"{api}/login", json={"username": _own_user, "password": "smokepass1"})
+    check("own scope: the scoped user can log in", r.status_code == 200, r.text[:120])
+    r = s.post(f"{api}/offers/", json={"name": f"smoke-own-admin-{_own_pid}",
+                                       "url": "https://example.com/own-admin"})
+    _admin_oid = (r.json() or {}).get("id")
+    r = _ou.post(f"{api}/offers/", json={"name": f"smoke-own-user-{_own_pid}",
+                                         "url": "https://example.com/own-user"})
+    _own_oid = (r.json() or {}).get("id")
+    check("own scope: both offers were created", bool(_admin_oid) and bool(_own_oid), r.text[:150])
+    _owner = pg_scalar(f"SELECT owner_id FROM offers WHERE id = {_own_oid}") if _own_oid else ""
+    check("own scope: the creator is stamped as the owner",
+          _owner.strip() == str(_own_uid), f"owner={_owner!r} uid={_own_uid}")
+    _mine = [o["id"] for o in (_ou.get(f"{api}/offers/").json() or [])] if _own_uid else []
+    check("own scope: the scoped user sees only their own offer",
+          _own_oid in _mine and _admin_oid not in _mine, str(_mine)[:120])
+    _all = [o["id"] for o in (s.get(f"{api}/offers/").json() or [])]
+    check("own scope: an admin still sees everything",
+          _admin_oid in _all and _own_oid in _all, str(_all)[:120])
+    if _own_oid and _admin_oid:
+        r = _ou.patch(f"{api}/offers/{_admin_oid}", json={
+            "name": f"smoke-own-admin-{_own_pid}", "url": "https://example.com/own-admin"})
+        check("own scope: mutating another user's offer is refused 403",
+              r.status_code == 403, r.text[:150])
+        r = _ou.patch(f"{api}/offers/{_own_oid}", json={
+            "name": f"smoke-own-user-{_own_pid}", "url": "https://example.com/own-user"})
+        check("own scope: mutating their own offer is allowed",
+              r.status_code == 200, r.text[:150])
+    r = s.post(f"{api}/users/", json={
+        "username": f"smoke-badscope-{_own_pid}", "password": "smokepass1",
+        "permissions": {"sections": {"offers": True}, "write": True, "offers": "everything"}})
+    check("own scope: an invalid scope value is rejected 400", r.status_code == 400, r.text[:150])
+    if _own_oid:
+        s.delete(f"{api}/offers/{_own_oid}")
+    if _admin_oid:
+        s.delete(f"{api}/offers/{_admin_oid}")
+    if _own_uid:
+        s.delete(f"{api}/users/{_own_uid}")
+
+    print("== Attribution config ==")
+    r = s.post(f"{api}/settings/", json={"settings": {"attribution": {
+        "window_days": 30, "model": "first_click",
+        "stitch_visitor_id": True, "stitch_hashed_phone": "true"}}})
+    check("attribution: config is saved", r.status_code == 200, r.text[:150])
+    r = s.get(f"{api}/settings/")
+    _att = ((r.json() or {}).get("settings") or {}).get("attribution") or {}
+    check("attribution: round-trips and coerces a bad value to a real bool",
+          _att.get("window_days") == 30 and _att.get("model") == "first_click"
+          and _att.get("stitch_hashed_phone") is False, str(_att)[:180])
+    r = s.post(f"{api}/settings/", json={"settings": {"attribution": {
+        "window_days": 7, "model": "last_click",
+        "stitch_visitor_id": False, "stitch_hashed_phone": False}}})
+    check("attribution: defaults are restored", r.status_code == 200, r.text[:120])
+    r = s.get(f"{api}/reports/", params={"date_from": "2020-01-01", "date_to": "2030-01-01",
+                                         "date_basis": "click_date"})
+    check("attribution: the click-date report path still returns 200",
+          r.status_code == 200, r.text[:150])
+    r = s.get(f"{BASE}/backend/settings")
+    check("attribution: the Settings card is rendered",
+          r.status_code == 200 and "attributionWindowChoice" in r.text, str(r.status_code))
+
+    print("== Warehouse (BI) CSV export ==")
+    r = s.get(f"{api}/dashboard/exports/clicks")
+    check("bi export: the clicks CSV is 200 with a snake_case header",
+          r.status_code == 200 and "text/csv" in (r.headers.get("content-type") or "")
+          and r.content.decode("utf-8").splitlines()[0].startswith(
+              "received_at,click_id,visitor_id"), r.text[:130])
+    _bi_rows = list(csv.reader(io.StringIO(r.content.decode("utf-8"))))
+    check("bi export: every timestamp is ISO-8601 in UTC",
+          all(re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", c)
+              for c in [x[0] for x in _bi_rows[1:]] if c), "bad timestamp")
+    r = s.get(f"{api}/dashboard/exports/costs")
+    check("bi export: the costs CSV header",
+          r.status_code == 200
+          and list(csv.reader(io.StringIO(r.content.decode())))[0]
+          == ["date", "campaign_id", "cost"], r.text[:120])
+    r = s.get(f"{api}/dashboard/exports/zip")
+    _zf = zipfile.ZipFile(io.BytesIO(r.content)) if r.status_code == 200 else None
+    check("bi export: the ZIP carries the three datasets + the manifest",
+          bool(_zf) and set(_zf.namelist()) == {"README.txt", "_manifest.csv", "clicks.csv",
+                                                "conversions.csv", "costs.csv"},
+          str(_zf.namelist() if _zf else r.text[:120]))
+    if _zf:
+        _readme = _zf.read("README.txt").decode()
+        check("bi export: the README names each destination's load hint",
+              all(k in _readme for k in ("BigQuery", "Snowflake", "Google Sheets",
+                                         "--autodetect", "COPY INTO")), _readme[:130])
+        _mf = list(csv.reader(io.StringIO(_zf.read("_manifest.csv").decode())))
+        check("bi export: the manifest lists columns with types",
+              _mf[0] == ["dataset", "column", "type"] and len(_mf) > 40, str(len(_mf)))
+    _plain = s.get(f"{api}/dashboard/exports/clicks")
+    r = s.get(f"{api}/dashboard/exports/clicks", params={"bom": "1"})
+    check("bi export: the BOM toggle changes the first bytes",
+          r.content.startswith(b"\xef\xbb\xbf")
+          and not _plain.content.startswith(b"\xef\xbb\xbf"), "")
+    r = s.get(f"{api}/dashboard/exports/clicks", params={"gzip": "1"})
+    check("bi export: the gzip toggle yields valid gzip",
+          r.headers.get("content-type") == "application/gzip"
+          and gzip.decompress(r.content) == _plain.content, str(r.headers.get("content-type")))
+    r = s.get(f"{api}/dashboard/exports/clicks",
+              params={"date_from": "2020-01-01", "date_to": "2020-12-31"})
+    check("bi export: an over-long range is rejected 400", r.status_code == 400, str(r.status_code))
+    r = s.get(f"{api}/dashboard/exports/nope")
+    check("bi export: an unknown dataset is 404", r.status_code == 404, str(r.status_code))
+    r = s.get(f"{BASE}/backend/reports")
+    check("bi export: the Reports page ships the Warehouse export card",
+          r.status_code == 200 and "Warehouse export" in r.text, str(r.status_code))
+
+    print("== Multi-currency (FX) config ==")
+    r = s.get(f"{api}/settings/fx-rates")
+    _fx = r.json() if r.status_code == 200 else {}
+    check("fx: the rate config endpoint answers with its shape",
+          r.status_code == 200 and "base" in _fx and "active" in _fx,
+          str(sorted(_fx))[:160])
+    _saved_fx = {"base": _fx.get("base"), "currencies": _fx.get("currencies") or [],
+                 "overrides": _fx.get("overrides") or {}}
+    r = s.put(f"{api}/settings/fx-rates", json={"currencies": ["NOTACUR"]})
+    check("fx: an invalid currency code is rejected 400", r.status_code == 400, r.text[:150])
+    r = s.put(f"{api}/settings/fx-rates", json={"currencies": ["EUR", "GBP"]})
+    check("fx: a valid currency list is accepted and echoed",
+          r.status_code == 200 and (r.json() or {}).get("currencies") == ["EUR", "GBP"],
+          r.text[:160])
+    r = s.get(f"{api}/reports/", params={"date_from": "2020-01-01", "date_to": "2030-01-01"})
+    check("fx: a report still answers with rates configured",
+          r.status_code == 200, r.text[:150])
+    # Restore the workspace's own list.
+    r = s.put(f"{api}/settings/fx-rates", json=_saved_fx)
+    check("fx: the original rate config is restored", r.status_code == 200, r.text[:150])
+
+    print("== Campaign-as-offer ==")
+    _g11 = os.getpid()
+    r = s.post(f"{api}/offers/", json={"name": f"smoke-g11-offer-{_g11}",
+                                       "url": f"https://example.com/g11-{_g11}"})
+    _g11_off = (r.json() or {}).get("id")
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"smoke-g11-target-{_g11}", "alias": f"smoke-g11-b-{_g11}",
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "direct", "offer": _g11_off, "filters": []}],
+                   "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+    _g11_b = (r.json() or {}).get("id")
+    r = s.post(f"{api}/campaigns/", json={
+        "name": f"smoke-g11-source-{_g11}", "alias": f"smoke-g11-a-{_g11}",
+        "type": "campaign", "status": "active", "redirect_mode": "position",
+        "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                              "schema": "multi", "offers": [], "campaigns": [_g11_b],
+                              "landings": [], "filters": []}],
+                   "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+    _g11_a = (r.json() or {}).get("id")
+    check("campaign-as-offer: a multi flow may target another campaign",
+          bool(_g11_a) and bool(_g11_b), r.text[:150])
+    _g11_rows = s.get(f"{api}/campaigns/").json() or []
+    _g11_cfg = next((x.get("config") or {} for x in _g11_rows if x.get("id") == _g11_a), {})
+    check("campaign-as-offer: the target round-trips through the API",
+          ((_g11_cfg.get("flows") or [{}])[0]).get("campaigns") == [_g11_b],
+          str(_g11_cfg.get("flows"))[:160])
+    r = requests.get(f"{BASE}/smoke-g11-a-{_g11}", verify=not INSECURE, allow_redirects=False)
+    check("campaign-as-offer: a click reaches the nested campaign's destination",
+          r.status_code in (301, 302, 307)
+          and f"g11-{_g11}" in (r.headers.get("location") or ""),
+          f"{r.status_code} {(r.headers.get('location') or '')[:90]}")
+    if _g11_a:
+        r = s.put(f"{api}/campaigns/{_g11_a}", json={
+            "name": f"smoke-g11-source-{_g11}", "alias": f"smoke-g11-a-{_g11}",
+            "type": "campaign", "status": "active", "redirect_mode": "position",
+            "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                                  "schema": "multi", "offers": [], "campaigns": [_g11_a],
+                                  "landings": [], "filters": []}],
+                       "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+        check("campaign-as-offer: a self-target is refused 400",
+              r.status_code == 400, r.text[:150])
+    if _g11_a:
+        s.delete(f"{api}/campaigns/{_g11_a}")
+    if _g11_b:
+        s.delete(f"{api}/campaigns/{_g11_b}")
+    if _g11_off:
+        s.delete(f"{api}/offers/{_g11_off}")
 
     print("== Cleanup ==")
     if conv_id:

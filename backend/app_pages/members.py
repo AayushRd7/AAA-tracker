@@ -27,7 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from auth import (TENANT_ROLES, effective_permissions, get_caller, hash_password,
-                  membership_for)
+                  membership_for, validate_permission_scopes)
 from db import get_db
 from tenant_context import api_token_tenant, current_tenant
 
@@ -180,6 +180,12 @@ def add_member(data: MemberAdd, request: Request, tenant_id: Optional[int] = Non
     role = (data.role or "editor").lower()
     if role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"role must be one of {sorted(VALID_ROLES)}")
+    # Reject an unknown owner-scope value before anything is written: a scope
+    # key, when present, must be 'own' (the same validation the users API runs).
+    try:
+        validate_permission_scopes(data.permissions)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if role == "owner" and not is_admin and _owner_count(db, tid) > 0:
         # A workspace owner only ever moves through transfer-ownership; only a
         # platform operator may seed an owner (e.g. into a brand-new workspace).
@@ -255,6 +261,12 @@ def update_member(user_id: int, data: MemberUpdate, request: Request,
         raise HTTPException(status_code=404, detail="Not a member of this workspace")
     target_username = row[1]
     target_role = row[3] or "viewer"
+
+    # Validate an owner-scope value before mutating: only 'own' is accepted.
+    try:
+        validate_permission_scopes(data.permissions)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     new_role = None
     if data.role is not None:

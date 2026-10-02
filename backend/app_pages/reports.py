@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, or_, and_
@@ -18,8 +19,13 @@ import csv
 import io
 import json
 import re
-from datetime import datetime, timedelta
+import time
+import urllib.parse
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
+
+from clickHouse import normalize_attribution, ATTRIBUTION_DEFAULTS
+from app_pages import rates as fx_rates
 
 router = APIRouter()
 
@@ -81,6 +87,34 @@ VALID_APPROVALS = {"pending", "approved", "declined", "other"}
 # IN(...) that exhausts memory.
 CONVERSION_CLICK_WINDOW_ID_CAP = 50_000
 
+# Attribution config (G28), stored per workspace under settings.attribution.
+# Read through a short TTL cache so a conversion list/export (and the bulk
+# ingestion path) does not hit the settings row once per conversion. The
+# tracking plane (frontend/app.py) keeps its own reader of the same block.
+_ATTRIBUTION_CACHE_TTL = 30.0
+_attribution_cache: dict = {}
+
+
+def _attribution_config(db: Session) -> dict:
+    """This workspace's validated attribution config (30s TTL cache).
+
+    Falls back to the defaults (today's behaviour) if the row is missing or
+    unreadable — a bad read must never change how conversions are attributed."""
+    tid = int(current_tenant() or 1)
+    now = time.monotonic()
+    hit = _attribution_cache.get(tid)
+    if hit is not None and now - hit[0] < _ATTRIBUTION_CACHE_TTL:
+        return hit[1]
+    cfg = dict(ATTRIBUTION_DEFAULTS)
+    try:
+        row = db.query(SettingsORM).filter_by(name="settings").first()
+        if row and row.value:
+            cfg = normalize_attribution(json.loads(row.value).get("attribution"))
+    except Exception:
+        return cfg
+    _attribution_cache[tid] = (now, cfg)
+    return cfg
+
 
 def _escape_like(term: str) -> str:
     """Escape SQL LIKE wildcards so user text matches literally (Postgres's
@@ -140,6 +174,25 @@ def normalize_status(status: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(status or "").strip().lower()).strip("_")
 
 
+def _parse_occurred_at(value) -> Optional[datetime]:
+    """Parse an ISO-8601 conversion timestamp into a naive UTC datetime, or
+    None when it is not parseable. A trailing Z is normalized for Python
+    versions whose fromisoformat predates that shorthand; an aware timestamp is
+    converted to UTC so it can be stored in the naive DateTime column."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith(("Z", "z")):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(tz=timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 def all_valid_statuses(db: Session) -> set:
     """Built-ins plus custom statuses configured in the settings row."""
     statuses = set(VALID_STATUSES)
@@ -170,20 +223,33 @@ def get_conversions(request: Request, limit: int = 100, offset: Optional[int] = 
                  .limit(min(max(int(limit or 50), 1), 5000)))
     if offset is not None:
         rows = rows.offset(offset)
-    items = [_conversion_to_dict(row) for row in rows.all()]
+    # One FX store read for the whole page: each row's money is converted from
+    # its own currency to the workspace base currency.
+    store = fx_rates.load_store(db)
+    items = [_conversion_to_dict(row, store) for row in rows.all()]
     hidden = request_hidden_metrics(request, db)
     strip_hidden_metrics_rows(items, hidden)
     if total is not None:
-        return {"items": items, "total": total, "limit": limit, "offset": offset}
+        out = {"items": items, "total": total, "limit": limit, "offset": offset}
+        meta = fx_rates.fx_meta(store)
+        if meta:
+            out["fx"] = meta
+        return out
     return items
 
 
-def _conversion_to_dict(conv: "Conversion") -> dict:
+def _conversion_to_dict(conv: "Conversion", store: Optional[dict] = None) -> dict:
     """Serialize one conversion row, adding ``dedupe_token`` — the
-    transaction/external id the dedupe guard matches on (derived, no column)."""
+    transaction/external id the dedupe guard matches on (derived, no column).
+
+    ``payout``/``revenue``/``profit`` are reported in the workspace base
+    currency: each row is converted from its own ``currency`` (a blank currency
+    is already base). No store => values unchanged."""
     item = dict(conv.__dict__)
     item.pop("_sa_instance_state", None)
     item["dedupe_token"] = conv.transaction_id or conv.external_id
+    if store and fx_rates.store_active(store):
+        fx_rates.convert_money(item, conv.currency, store)
     return item
 
 
@@ -203,13 +269,23 @@ def export_conversions(request: Request, db: Session = Depends(get_db)):
     # also covers its payout alias).
     fields = filter_hidden_fields(
         CONVERSION_EXPORT_FIELDS, request_hidden_metrics(request, db))
+    store = fx_rates.load_store(db)
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
     writer.writerow(fields)
     for conv in rows:
-        writer.writerow([_csv_safe(getattr(conv, k, None)) for k in fields])
+        writer.writerow([_csv_safe(_conversion_export_value(conv, k, store))
+                         for k in fields])
     return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=conversions.csv"})
+
+
+def _conversion_export_value(conv: "Conversion", key: str, store: Optional[dict]):
+    """One export cell, with payout/revenue/profit converted to base currency."""
+    value = getattr(conv, key, None)
+    if key in ("payout", "revenue", "profit") and store:
+        value = fx_rates.convert(value, conv.currency, store)
+    return value
 
 
 def _csv_safe(value):
@@ -246,6 +322,15 @@ def _build_conversions_query(request: Request, db: Session):
         _parse_iso_dt(date_from, "date_from")
         _parse_iso_dt(date_to, "date_to")
 
+    # Attribution model/window for this workspace. Defaults (last_click, 7 days)
+    # leave the query below byte-identical to before; first_click selects the
+    # visitor's EARLIEST click instead. A linear/position-based model is not
+    # offered: it needs the visitor's full ordered touch chain, which we do not
+    # store (clicks_data has rows, not a per-visitor chain).
+    attr_cfg = _attribution_config(db)
+    first_click = attr_cfg.get("model") == "first_click"
+    attr_window_days = int(attr_cfg.get("window_days") or ATTRIBUTION_DEFAULTS["window_days"])
+
     visitor_ids_in_window = None
     if date_from and date_to and date_basis == "click_date":
         ch = request.state.ch
@@ -261,16 +346,35 @@ def _build_conversions_query(request: Request, db: Session):
         # conversion's own received_at window onto the PG side — that would
         # hide exactly the late-landing conversions click_date is meant to keep.
         try:
-            res = ch.query(
-                "SELECT DISTINCT visitor_id FROM clicks_data "
-                "WHERE tenant_id = %(tenant_id)s "
-                "AND toDate(received_at) BETWEEN toDate(%(df)s) AND toDate(%(dt)s) "
-                "AND visitor_id != '' "
-                "LIMIT %(cap)s",
-                parameters={"df": date_from, "dt": date_to,
-                            "tenant_id": current_tenant(),
-                            "cap": CONVERSION_CLICK_WINDOW_ID_CAP + 1},
-            )
+            if first_click:
+                # First click: a visitor is in-window when their EARLIEST click
+                # counted in the report's date range. The attribution window
+                # bounds how far before the range we look for that earliest
+                # click, so a scan can never reach back unboundedly.
+                res = ch.query(
+                    "SELECT visitor_id FROM clicks_data "
+                    "WHERE tenant_id = %(tenant_id)s "
+                    "AND visitor_id != '' "
+                    f"AND received_at >= toDate(%(df)s) - INTERVAL {int(attr_window_days)} DAY "
+                    "AND received_at < toDate(%(dt)s) + INTERVAL 1 DAY "
+                    "GROUP BY visitor_id "
+                    "HAVING toDate(min(received_at)) BETWEEN toDate(%(df)s) AND toDate(%(dt)s) "
+                    "LIMIT %(cap)s",
+                    parameters={"df": date_from, "dt": date_to,
+                                "tenant_id": current_tenant(),
+                                "cap": CONVERSION_CLICK_WINDOW_ID_CAP + 1},
+                )
+            else:
+                res = ch.query(
+                    "SELECT DISTINCT visitor_id FROM clicks_data "
+                    "WHERE tenant_id = %(tenant_id)s "
+                    "AND toDate(received_at) BETWEEN toDate(%(df)s) AND toDate(%(dt)s) "
+                    "AND visitor_id != '' "
+                    "LIMIT %(cap)s",
+                    parameters={"df": date_from, "dt": date_to,
+                                "tenant_id": current_tenant(),
+                                "cap": CONVERSION_CLICK_WINDOW_ID_CAP + 1},
+                )
             ids = [row[0] for row in res.result_rows if row and row[0]]
             if len(ids) > CONVERSION_CLICK_WINDOW_ID_CAP:
                 print(f"CONVERSIONS CLICK WINDOW CAPPED: click window "
@@ -390,12 +494,16 @@ def get_funnel_report(campaign_id: int, request: Request, db: Session = Depends(
     # click-out at /c, so COUNT(*) is the click-out count (status was 'lead'
     # at insert time; a postback may later change it, the row still counts).
     # Conversions = rows whose current status is not rejected/trash.
-    agg_rows = db.execute(text("""
+    fx_store = fx_rates.load_store(db)
+    fx_factor = fx_rates.sql_factor(fx_store)
+    rev_expr = f"revenue * ({fx_factor})" if fx_factor else "revenue"
+    profit_expr = f"profit * ({fx_factor})" if fx_factor else "profit"
+    agg_rows = db.execute(text(f"""
         SELECT funnel_step,
                COUNT(*) AS clickouts,
                COUNT(*) FILTER (WHERE status NOT IN ('rejected', 'trash')) AS conversions,
-               COALESCE(SUM(revenue) FILTER (WHERE status NOT IN ('rejected', 'trash')), 0) AS revenue,
-               COALESCE(SUM(profit)  FILTER (WHERE status NOT IN ('rejected', 'trash')), 0) AS profit
+               COALESCE(SUM({rev_expr}) FILTER (WHERE status NOT IN ('rejected', 'trash')), 0) AS revenue,
+               COALESCE(SUM({profit_expr})  FILTER (WHERE status NOT IN ('rejected', 'trash')), 0) AS profit
         FROM conversions_data
         WHERE tenant_id = :tid AND campaign_id = :cid AND funnel_step IS NOT NULL
         GROUP BY funnel_step
@@ -433,19 +541,35 @@ def get_funnel_report(campaign_id: int, request: Request, db: Session = Depends(
         steps_out.append(strip_hidden_metrics(step_out, hidden))
         prev_visits = visits
 
-    return {"campaign_id": campaign_id, "campaign_name": row["name"],
-            "funnel": {"enabled": True}, "steps": steps_out}
+    out = {"campaign_id": campaign_id, "campaign_name": row["name"],
+           "funnel": {"enabled": True}, "steps": steps_out}
+    meta = fx_rates.fx_meta(fx_store)
+    if meta:
+        out["fx"] = meta
+    return out
 
 
 class ConversionImport(BaseModel):
     lines: str
 
 
-def _append_event(conv: Conversion, status: str, payout: float, source: str) -> None:
+def _event_entry(status: str, payout: float, source: str,
+                 extra: Optional[dict] = None) -> dict:
+    """One conversion event. ``extra`` carries inbound metadata that has no
+    column of its own (phone, note) so an ingestion payload is not silently
+    dropped — it rides the existing events JSONB history instead."""
+    entry = {"status": status, "payout": payout,
+             "received_at": datetime.utcnow().isoformat(), "source": source}
+    if extra:
+        entry.update({k: v for k, v in extra.items() if v not in (None, "")})
+    return entry
+
+
+def _append_event(conv: Conversion, status: str, payout: float, source: str,
+                  extra: Optional[dict] = None) -> None:
     """Accumulate a conversion event onto a row (LTV semantics, mirrors the engine)."""
     events = list(conv.events) if isinstance(conv.events, list) else []
-    events.append({"status": status, "payout": payout,
-                   "received_at": datetime.utcnow().isoformat(), "source": source})
+    events.append(_event_entry(status, payout, source, extra))
     conv.events = events  # new list object — JSONB needs reassignment to be flagged dirty
     conv.status = status
     conv.payout = float(conv.payout or 0) + payout
@@ -481,6 +605,11 @@ def import_conversions(data: ConversionImport, request: Request,
         subid, payout_raw = cells[0], cells[1]
         tid = cells[2] if len(cells) > 2 and cells[2] else None
         status = normalize_status(cells[3]) if len(cells) > 3 and cells[3] else "sale"
+        # Optional columns 5/6: the manual path accepts the same occurred_at /
+        # currency the automated ingestion endpoint does, so both routes store
+        # the same thing. Absent columns keep the old behavior (now / NULL).
+        occurred_raw = cells[4] if len(cells) > 4 and cells[4] else ""
+        currency = cells[5] if len(cells) > 5 and cells[5] else None
         try:
             payout = float(payout_raw.strip().replace(",", "."))
         except ValueError:
@@ -491,6 +620,13 @@ def import_conversions(data: ConversionImport, request: Request,
             results.append({"line": i, "ok": False,
                             "detail": f"invalid status '{cells[3] if len(cells) > 3 else ''}'"})
             continue
+        occurred_at = None
+        if occurred_raw:
+            occurred_at = _parse_occurred_at(occurred_raw)
+            if occurred_at is None:
+                results.append({"line": i, "ok": False,
+                                "detail": f"invalid occurred_at '{occurred_raw}'"})
+                continue
 
         conv = db.query(Conversion).filter(or_(
             Conversion.click_id == subid,
@@ -504,16 +640,19 @@ def import_conversions(data: ConversionImport, request: Request,
             conv.is_duplicate = True
             if tid:
                 conv.transaction_id = tid
+            if currency:
+                conv.currency = currency
             db.add(conv)
             results.append({"line": i, "ok": True, "detail": f"updated conversion {conv.id}"})
         else:
+            now = occurred_at or datetime.utcnow()
             conv = Conversion(
                 click_id="none", status=status, payout=payout, revenue=payout, profit=payout,
-                external_id=tid, postback_count=1,
+                external_id=tid, postback_count=1, currency=currency,
                 approval="pending", is_duplicate=False,
-                received_at=datetime.utcnow(), last_postback_at=datetime.utcnow(),
+                received_at=now, last_postback_at=now,
                 events=[{"status": status, "payout": payout,
-                         "received_at": datetime.utcnow().isoformat(), "source": "import"}])
+                         "received_at": now.isoformat(), "source": "import"}])
             db.add(conv)
             db.flush()
             results.append({"line": i, "ok": True,
@@ -654,6 +793,115 @@ class ConversionCreate(BaseModel):
     sub_ids: Optional[dict] = None
 
 
+def _write_conversion(db: Session, *, source: str, status: str, approval: str,
+                      payout: float, revenue: Optional[float],
+                      click_id: Optional[str] = None,
+                      external_id: Optional[str] = None,
+                      transaction_id: Optional[str] = None,
+                      sub_fields: Optional[dict] = None,
+                      occurred_at: Optional[datetime] = None,
+                      currency: Optional[str] = None,
+                      match_sub_ids: bool = False,
+                      apply_approval: bool = False,
+                      event_extra: Optional[dict] = None):
+    """The one conversion writer. Matches an existing row in the documented
+    order — click_id → external_id → transaction_id — then (when
+    ``match_sub_ids`` is set, i.e. the inbound ingestion path) falls back to a
+    unique sub_id_1..5 click within the last 7 days, mirroring the tracking
+    plane's record_conversion. A match accumulates LTV-style via _append_event;
+    no match inserts an unattributed ``click_id='none'`` row rather than
+    dropping the conversion.
+
+    Returns ``(conv, created, attributed)``.
+    """
+    sub_fields = dict(sub_fields or {})
+    click_id = str(click_id or "").strip()
+    external_id = str(external_id or "").strip() or None
+    transaction_id = str(transaction_id or "").strip() or None
+
+    match_conds = []
+    if click_id:
+        match_conds.append(Conversion.click_id == click_id)
+    if external_id:
+        match_conds.append(Conversion.external_id == external_id)
+    if transaction_id:
+        match_conds.append(Conversion.transaction_id == transaction_id)
+    conv = None
+    if match_conds:
+        conv = db.query(Conversion).filter(or_(*match_conds)).first()
+
+    if conv is None and match_sub_ids and sub_fields:
+        # Clickless attribution fallback: the sub ids (1..5) uniquely matching
+        # one real click inside the workspace's attribution window (default 7
+        # days) attach this conversion to that click, so an offline sale with no
+        # click id still lands on the row it belongs to. Ambiguous (2+
+        # candidates) or absent stays unattributed — uniqueness is what keeps
+        # two different customers from being merged by a shared sub id.
+        subs = {k: v for k, v in sub_fields.items()
+                if re.fullmatch(r"sub_id_[1-5]", k) and v}
+        if subs:
+            attr_cfg = _attribution_config(db)
+            try:
+                window_days = int(attr_cfg.get("window_days")
+                                  or ATTRIBUTION_DEFAULTS["window_days"])
+            except (TypeError, ValueError):
+                window_days = ATTRIBUTION_DEFAULTS["window_days"]
+            cutoff = datetime.utcnow() - timedelta(days=window_days)
+            # first_click would prefer the earliest match, but only a unique
+            # match is ever attached, so this ordering documents intent without
+            # weakening the no-merge guarantee.
+            order = (Conversion.received_at.asc()
+                     if attr_cfg.get("model") == "first_click"
+                     else Conversion.received_at.desc())
+            candidates = db.query(Conversion).filter(
+                Conversion.click_id.isnot(None),
+                Conversion.click_id != "none",
+                Conversion.received_at >= cutoff,
+                *[getattr(Conversion, k) == v for k, v in subs.items()]
+            ).order_by(order).limit(2).all()
+            if len(candidates) == 1:
+                conv = candidates[0]
+                if not click_id:
+                    click_id = conv.click_id or ""
+
+    now = occurred_at or datetime.utcnow()
+    attributed = bool(click_id and click_id.lower() not in ("none", "0"))
+    if conv:
+        _append_event(conv, status, payout, source=source, extra=event_extra)
+        conv.is_duplicate = True
+        if transaction_id:
+            conv.transaction_id = transaction_id
+        if external_id:
+            conv.external_id = external_id
+        if revenue is not None:
+            conv.revenue = revenue
+            conv.profit = revenue
+        if apply_approval:
+            conv.approval = approval
+        if currency:
+            conv.currency = currency
+        for k, v in sub_fields.items():
+            setattr(conv, k, v)
+        created = False
+        attributed = attributed or bool(
+            conv.click_id and str(conv.click_id).lower() not in ("none", "0"))
+    else:
+        conv = Conversion(
+            click_id=click_id or "none", status=status, approval=approval,
+            is_duplicate=False,
+            payout=payout, revenue=revenue if revenue is not None else payout,
+            profit=revenue if revenue is not None else payout,
+            external_id=external_id, transaction_id=transaction_id,
+            currency=currency, postback_count=1,
+            received_at=now, last_postback_at=now,
+            events=[_event_entry(status, payout, source, event_extra)],
+            **sub_fields)
+        db.add(conv)
+        db.flush()
+        created = True
+    return conv, created, attributed
+
+
 @router.post("/conversion")
 def create_conversion(data: ConversionCreate, request: Request, db: Session = Depends(get_db)):
     """Create (or accumulate onto) a single conversion from the manual-add
@@ -679,53 +927,18 @@ def create_conversion(data: ConversionCreate, request: Request, db: Session = De
             status_code=400,
             detail="Provide a click id, external id or transaction id")
     payout = float(data.payout or 0)
-    revenue = float(data.revenue) if data.revenue is not None else payout
+    revenue = float(data.revenue) if data.revenue is not None else None
 
     sub_fields = {}
     for k, v in (data.sub_ids or {}).items():
         if re.fullmatch(r"sub_id_\d{1,2}", str(k)) and v not in (None, ""):
             sub_fields[str(k)] = str(v)[:50]
 
-    conv = None
-    match_conds = []
-    if click_id:
-        match_conds.append(Conversion.click_id == click_id)
-    if external_id:
-        match_conds.append(Conversion.external_id == external_id)
-    if transaction_id:
-        match_conds.append(Conversion.transaction_id == transaction_id)
-    if match_conds:
-        conv = db.query(Conversion).filter(or_(*match_conds)).first()
-
-    now = datetime.utcnow()
-    if conv:
-        _append_event(conv, status, payout, source="manual")
-        conv.is_duplicate = True
-        if transaction_id:
-            conv.transaction_id = transaction_id
-        if external_id:
-            conv.external_id = external_id
-        if data.revenue is not None:
-            conv.revenue = revenue
-            conv.profit = revenue
-        if data.approval:
-            conv.approval = approval
-        for k, v in sub_fields.items():
-            setattr(conv, k, v)
-        created = False
-    else:
-        conv = Conversion(
-            click_id=click_id or "none", status=status, approval=approval,
-            is_duplicate=False,
-            payout=payout, revenue=revenue, profit=revenue,
-            external_id=external_id, transaction_id=transaction_id,
-            postback_count=1, received_at=now, last_postback_at=now,
-            events=[{"status": status, "payout": payout,
-                     "received_at": now.isoformat(), "source": "manual"}],
-            **sub_fields)
-        db.add(conv)
-        db.flush()
-        created = True
+    conv, created, _ = _write_conversion(
+        db, source="manual", status=status, approval=approval, payout=payout,
+        revenue=revenue, click_id=click_id, external_id=external_id,
+        transaction_id=transaction_id, sub_fields=sub_fields,
+        apply_approval=bool(data.approval))
 
     db.commit()
     caller, _ = get_caller(request)
@@ -735,6 +948,124 @@ def create_conversion(data: ConversionCreate, request: Request, db: Session = De
                 request.client.host if request.client else "")
     return {"message": "Conversion created" if created else "Conversion updated",
             "id": conv.id, "created": created}
+
+
+def _ingest_sub_fields(payload: dict) -> dict:
+    """Collect sub ids from either flat ``sub_id_N`` keys or a nested
+    ``sub_ids`` object (the shape the manual-add dialog and create_conversion
+    use), truncated to the column width."""
+    out = {}
+    nested = payload.get("sub_ids")
+    sources = [payload]
+    if isinstance(nested, dict):
+        sources.append(nested)
+    for src in sources:
+        for k, v in src.items():
+            key = str(k)
+            if re.fullmatch(r"sub_id_\d{1,2}", key) and v not in (None, ""):
+                out[key] = str(v)[:50]
+    return out
+
+
+def _ingest_float(value) -> Optional[float]:
+    """Payout parser tolerant of a comma decimal separator (the CSV importer
+    accepts '1,25'); returns None when the value is present but not numeric."""
+    if value is None or str(value).strip() == "":
+        return 0.0
+    try:
+        return float(str(value).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+
+
+@router.post("/ingest")
+async def ingest_conversion(request: Request, db: Session = Depends(get_db)):
+    """Inbound ingestion for a CRM / call platform (workspace API token via
+    ``Authorization: Bearer``; the router's reports write dependency enforces
+    it, and the request runs tenant-scoped). Accepts JSON or form-encoded
+    fields and reuses the single _write_conversion writer, so a repeat
+    transaction id updates the existing row instead of duplicating it. Every
+    bad payload is answered with a clear JSON ``rejected`` result, never a 500.
+    """
+    from audit_logger import audit_event
+    from auth import get_caller
+
+    def reject(reason: str, code: int = 400):
+        return JSONResponse(status_code=code,
+                            content={"result": "rejected", "reason": reason})
+
+    ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    try:
+        body = await request.body()
+        if ctype == "application/json" or body.lstrip()[:1] in (b"{", b"["):
+            payload = json.loads(body.decode("utf-8") or "{}")
+        else:
+            # form-encoded (and any non-JSON body) parsed without pulling in a
+            # multipart dependency.
+            parsed = urllib.parse.parse_qs(body.decode("utf-8"),
+                                           keep_blank_values=True)
+            payload = {k: v[0] for k, v in parsed.items()}
+    except Exception:
+        return reject("Malformed request body: expected a JSON object or "
+                      "form-encoded fields")
+    if not isinstance(payload, dict):
+        return reject("Malformed request body: expected a JSON object")
+
+    def field(*names) -> str:
+        for name in names:
+            value = payload.get(name)
+            if value not in (None, ""):
+                return str(value).strip()
+        return ""
+
+    click_id = field("click_id", "clickid")
+    external_id = field("external_id") or None
+    transaction_id = field("transaction_id") or None
+    sub_fields = _ingest_sub_fields(payload)
+    if not (click_id or external_id or transaction_id or sub_fields):
+        return reject("Provide a click_id, external_id, transaction_id or sub_id")
+
+    status = normalize_status(field("status") or "sale")
+    if status not in all_valid_statuses(db):
+        return reject(f"Invalid status. Allowed: "
+                      f"{', '.join(sorted(all_valid_statuses(db)))}")
+
+    approval = normalize_approval(field("approval") or "pending")
+    if approval not in VALID_APPROVALS:
+        return reject(f"Invalid approval. Allowed: "
+                      f"{', '.join(sorted(VALID_APPROVALS))}")
+
+    payout = _ingest_float(payload.get("payout"))
+    if payout is None:
+        return reject(f"Invalid payout '{payload.get('payout')}'")
+
+    occurred_raw = field("occurred_at")
+    occurred_at = _parse_occurred_at(occurred_raw) if occurred_raw else None
+    if occurred_raw and occurred_at is None:
+        return reject(f"Invalid occurred_at '{occurred_raw}': expected ISO-8601")
+
+    currency = field("currency") or None
+    phone = field("phone")
+    note = field("note")
+    # conversions_data has no phone/note column; the values ride the events
+    # JSONB history rather than inventing columns.
+    conv, created, attributed = _write_conversion(
+        db, source="ingest", status=status, approval=approval, payout=payout,
+        revenue=None, click_id=click_id, external_id=external_id,
+        transaction_id=transaction_id, sub_fields=sub_fields,
+        occurred_at=occurred_at, currency=currency, match_sub_ids=True,
+        apply_approval=False, event_extra={"phone": phone, "note": note})
+    db.commit()
+
+    caller, _ = get_caller(request)
+    audit_event(caller or "api_token", "create" if created else "update",
+                "conversions", str(conv.id),
+                {"source": "ingest", "created": created, "attributed": attributed},
+                request.client.host if request.client else "")
+    return {"result": "created" if created else "updated", "id": conv.id,
+            "created": created, "duplicate": bool(conv.is_duplicate),
+            "attributed": attributed, "click_id": conv.click_id,
+            "transaction_id": conv.transaction_id, "status": conv.status}
 
 
 @router.get("/summary")

@@ -17,5 +17,9 @@ class SourceORM(TenantMixin, Base):
     settings = Column(JSON, default=[])
     additional_settings = Column(JSON, default={})
 
+    # Owner scope parity with campaigns.owner_id: the sources:'own' permission
+    # limits a caller to traffic sources they own.
+    owner_id = Column(Integer, nullable=True)
+
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

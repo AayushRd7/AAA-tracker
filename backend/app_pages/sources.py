@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from db import get_db
 from models.sources import SourceORM
 from models.settings import SettingsORM
+from auth import owner_scope_query, require_owned_mutation, owner_id_for_create
 
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -1507,6 +1508,7 @@ class SourceIn(BaseModel):
 
 class SourceOut(SourceIn):
     id: int
+    owner_id: Optional[int] = None
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
@@ -1515,15 +1517,19 @@ class SourceOut(SourceIn):
 
 
 @router.get("/", response_model=List[SourceOut])
-def get_sources(db: Session = Depends(get_db)):
+def get_sources(request: Request, db: Session = Depends(get_db)):
     seed_source_presets(db)
-    return db.query(SourceORM).order_by(SourceORM.id.asc()).all()
+    query = db.query(SourceORM).order_by(SourceORM.id.asc())
+    return owner_scope_query(request, db, query, "sources", SourceORM).all()
 
 
 @router.post("/", response_model=SourceOut)
 def create_source(payload: SourceIn, request: Request, db: Session = Depends(get_db)):
     from audit_logger import audit_event
-    source = SourceORM(**payload.dict())
+    # Stamp the creator as owner when they hold sources:'own'; else leave it
+    # unassigned (a manager can assign one later).
+    source = SourceORM(**payload.dict(),
+                       owner_id=owner_id_for_create(request, db, "sources"))
     db.add(source)
     try:
         db.commit()
@@ -1545,6 +1551,7 @@ def update_source(source_id: int, payload: SourceIn, request: Request, db: Sessi
     source = db.query(SourceORM).filter(SourceORM.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
+    require_owned_mutation(request, db, "sources", [source], "traffic sources")
 
     changed = []
     for key, value in payload.dict(exclude_unset=True).items():
@@ -1579,6 +1586,7 @@ def bulk_sources(data: SourceBulkIn, request: Request, db: Session = Depends(get
     from auth import get_caller
     from models.campaigns import CampaignORM
     sources = db.query(SourceORM).filter(SourceORM.id.in_(data.ids)).all()
+    require_owned_mutation(request, db, "sources", sources, "traffic sources")
     blocked, deleted = [], []
     for src in sources:
         if db.query(CampaignORM).filter_by(traffic_source_id=src.id).first():
@@ -1601,6 +1609,7 @@ def delete_source(source_id: int, request: Request, db: Session = Depends(get_db
     source = db.query(SourceORM).filter(SourceORM.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
+    require_owned_mutation(request, db, "sources", [source], "traffic sources")
 
     if db.query(CampaignORM).filter_by(traffic_source_id=source.id).first():
         raise HTTPException(status_code=409,
