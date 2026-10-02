@@ -10565,6 +10565,20 @@ print("ESCAPED-OK")
               'settings.meta_ads.graph_base_url')),
           "a deployment-owned field is still rendered")
 
+    # Every settings column lives in one wrapping v-row, so a "height: 100%" on
+    # the card made each one stretch to its flex line's height — leaving blank
+    # cards thousands of pixels tall. Guard against that rule coming back.
+    rc = s.get(f"{BASE}/backend/backend/css/style.css")
+    _css = rc.text or ""
+    _sg = ""
+    if "settings-grid .v-card" in _css:
+        _i = _css.index("settings-grid .v-card")
+        _sg = _css[_i:_css.index("}", _i) + 1]
+    check("settings page: cards are not force-stretched to their row height",
+          rc.status_code == 200 and "height: 100%" not in _sg
+          and "height:100%" not in _sg,
+          _sg[:120])
+
     r = s.get(f"{api}/settings/")
     check("settings: document + rev returned",
           r.status_code == 200 and isinstance(r.json().get("settings"), dict)

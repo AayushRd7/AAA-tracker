@@ -1139,8 +1139,11 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 }
 
 /* ---------- Settings page grid ---------- */
+/* Cards keep their natural height. A "height: 100%" here stretched every card
+   to its flex line's height (all columns share one wrapping row), leaving blank
+   cards thousands of pixels tall. */
 .settings-grid .v-card {
-  height: 100%;
+  height: auto;
 }
 .code-row {
   flex-wrap: nowrap;

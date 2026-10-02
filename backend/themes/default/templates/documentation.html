@@ -292,6 +292,15 @@
                                 matching flows split traffic randomly by their weight (e.g. 70/30).
                             </p>
 
+                            <h3 class="doc-h3">Campaign destinations</h3>
+                            <p>
+                                A flow can send traffic to <b>another campaign</b>, not only to offers and
+                                landings — the target campaign is chosen under the same position / weight
+                                rules as any other destination. Self-targets and circular chains are refused
+                                when the campaign is saved, and the runtime redirect depth cap (3) still
+                                applies, so a misconfiguration cannot loop a visitor.
+                            </p>
+
                             <h3 class="doc-h3">Filters</h3>
                             <p>
                                 Flows (except <code>default</code>) carry filter <b>groups</b>. Groups combine with
@@ -517,6 +526,18 @@
                                 onto their conversion; unknown ids create unattributed rows; the status may be a
                                 built-in or custom status.
                             </p>
+                            <p>
+                                <b>Offline / phone ingestion</b> — <code>POST /backend/api/reports/ingest</code>
+                                brings conversions in from call centres, CRMs and other server-side systems. It
+                                accepts the workspace API token or an admin session, takes JSON or a
+                                form-encoded body, and carries <code>click_id</code>, <code>status</code>,
+                                <code>payout</code>, <code>transaction_id</code>, <code>currency</code>,
+                                <code>occurred_at</code> and any sub-ids. Re-sending the same
+                                <code>transaction_id</code> is idempotent. A conversion is matched in order
+                                click id → external id → transaction id → sub-id; a row that matches nothing is
+                                recorded unattributed rather than dropped. The CSV importer accepts the same
+                                optional <code>occurred_at</code> and <code>currency</code> columns.
+                            </p>
 
                             <h3 class="doc-h3">Direct JS tracking</h3>
                             <p>
@@ -654,6 +675,48 @@
                                 spreadsheet apps and separators/newlines can't break the row structure.
                             </p>
 
+                            <h3 class="doc-h3">Attribution</h3>
+                            <p>
+                                Settings → Attribution controls how a conversion is matched to a click,
+                                per workspace. The <b>window</b> defaults to 7 days (1–3650); the
+                                <b>model</b> is <b>last click</b> by default, or <b>first click</b> —
+                                first click credits the visitor's earliest resolvable click, so it needs
+                                the first-party visitor id or click rows that carry one. A clickless
+                                conversion can be stitched onto a click through that same first-party
+                                visitor id (<code>aaa_vid</code>). Multi-touch attribution is <b>not
+                                available</b>: no per-visitor touch chain is stored, so the
+                                hashed-email/phone stitch toggles are present but disabled and have no
+                                effect.
+                            </p>
+
+                            <h3 class="doc-h3">Multi-currency</h3>
+                            <p>
+                                Settings → Multi-currency lets one workspace report revenue, cost and
+                                payout in a single <b>base currency</b>. Rates are fetched daily from a
+                                free central-bank data source (no key required, with fallbacks) and
+                                cached per workspace — a report never calls a rate provider on the
+                                request path. Currencies are converted <b>before</b> aggregation, so
+                                profit, ROI and EPC come out in the base currency. You can pin a manual
+                                rate for any currency (it wins over the fetched one), and rates older
+                                than the stale-after window are marked stale rather than silently
+                                trusted; if every provider fails, the last good rates are kept and the
+                                failure is shown. With no currencies configured, reporting is unchanged.
+                            </p>
+
+                            <h3 class="doc-h3">Warehouse export</h3>
+                            <p>
+                                For BI tools and data warehouses, a dashboard export writes one CSV per
+                                dataset — <code>clicks</code>, <code>conversions</code> and
+                                <code>costs</code> — or a single ZIP holding all of them plus a
+                                <code>README.txt</code> and a column manifest. Files are RFC-4180
+                                compliant (optional BOM), timestamps are ISO-8601 UTC with a
+                                <code>Z</code>, columns are <code>snake_case</code>, there are no
+                                thousands separators and NULLs are empty. One download covers at most
+                                92&nbsp;days and 100,000&nbsp;rows per dataset; a dataset that hits the
+                                row cap carries a truncation warning in its manifest. Optional gzip for
+                                large ranges.
+                            </p>
+
                             <h3 class="doc-h3">Anomaly insights</h3>
                             <p>
                                 Six always-on detectors compare every active campaign's last 24 hours against its
@@ -739,6 +802,17 @@
                                 score ≥ 50, polled every 5s), top fraud IPs and user-agents, average fraud score
                                 and an <b>estimated savings</b> figure. The admin dashboard's fraud-watch card
                                 summarizes the last 24h and links straight there.
+                            </p>
+
+                            <h3 class="doc-h3">Refund-claim evidence</h3>
+                            <p>
+                                For chargebacks and network disputes, the Fraud page can produce a
+                                <b>refund-claim evidence</b> report as a CSV (one flat table with a
+                                <code>section</code> column) or a printable page. It carries the totals plus
+                                breakdowns by IP, user-agent, country, traffic source, Sub-ID and campaign —
+                                each row with the reason code and the fraud score — so the evidence a claim
+                                needs is in one export. The report is bounded, and truncation is noted when the
+                                bound is hit.
                             </p>
 
                             <h3 class="doc-h3">GDPR</h3>
@@ -884,6 +958,32 @@
                                 granted). The special <b>campaigns:&nbsp;'own'</b> scope limits a user to campaigns
                                 they own (they can only see and mutate those).
                             </p>
+
+                            <h3 class="doc-h3">Owner scope</h3>
+                            <p>
+                                Five sections can be scoped to <b>All</b> or <b>Own</b>: campaigns, offers,
+                                sources, affiliates and domains. With <b>Own</b>, a user lists and edits only
+                                the rows they own — everything else is hidden from their pickers and returns
+                                <b>403</b> if requested directly. Campaigns and offers can be reassigned in
+                                bulk (owner column / bulk action) so an operator can hand a whole batch to
+                                another user.
+                            </p>
+
+                            <h3 class="doc-h3">Metric restrictions</h3>
+                            <p>
+                                A user can be restricted from money metrics — cost, revenue, profit and ROI
+                                are hidden from their tables, dashboards and CSV exports. The restriction is
+                                enforced server-side (the fields are stripped from the response, not merely
+                                hidden in the UI). Owners and admins cannot be restricted.
+                            </p>
+
+                            <h3 class="doc-h3">Session location</h3>
+                            <p>
+                                The Active sessions list shows each signed-in session's device, OS and
+                                browser, plus <b>country, region and city</b> resolved from the proxy/CDN geo
+                                header. Where no such header is present the location stays blank rather than
+                                guessing.
+                            </p>
                             <h3 class="doc-h3">Two-factor authentication (TOTP)</h3>
                             <p>
                                 Users can enable TOTP 2FA from their profile dialog: scan the QR code, confirm a
@@ -944,6 +1044,12 @@
                             <p>Flow health checks: enable to have the monitor probe flow URLs every 15 minutes and (optionally) <b>auto-disable flows after 3 consecutive failures</b>; includes a "Check now" button and status board.</p>
                             <h3 class="doc-h3">Privacy</h3>
                             <p>IP anonymization at rest (zero the last IPv4 octet) and the <code>/optout</code> page behavior.</p>
+                            <h3 class="doc-h3">Workspace display</h3>
+                            <p>Number format (decimals, thousands divider), <b>conditional row colouring</b> (tint a row when a metric matches a rule), the <b>grouped report view</b> (one subtotal row per first-level group) and up to ten <b>custom report columns</b> defined as a formula over the built-in metric keys, e.g. <code>revenue / clicks</code>.</p>
+                            <h3 class="doc-h3">Attribution</h3>
+                            <p>Conversion-to-click matching per workspace: the window (default 7 days, 1–3650) and the model — <b>last click</b> (default) or <b>first click</b> where the first-party visitor id resolves it. Multi-touch chains are not offered.</p>
+                            <h3 class="doc-h3">Currency</h3>
+                            <p>Base reporting currency plus the currencies to convert, the stale-after window, a daily rate refresh and manual per-currency overrides. Conversion happens before aggregation; with nothing configured, output is unchanged.</p>
                             <h3 class="doc-h3">Audit log</h3>
                             <p>Filterable audit-trail browser (user / action / entity filters).</p>
                             <p class="doc-note">Saved reports and email schedules are managed on the Reports page itself; the per-campaign optimizer lives on the Optimizer page.</p>
@@ -994,6 +1100,19 @@
   -H "Authorization: Bearer &lt;api-token&gt;" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
        "params":{"name":"campaigns.metrics","arguments":{"period":"7d"}}}'</pre>
+                            <h3 class="doc-h3">Extended admin endpoints</h3>
+                            <table class="doc-table">
+                                <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+                                <tbody>
+                                <tr><td>POST</td><td><code>/backend/api/reports/ingest</code></td><td>Offline / phone conversion ingestion (JSON or form; idempotent on transaction id)</td></tr>
+                                <tr><td>GET/PUT</td><td><code>/backend/api/settings/fx-rates</code></td><td>Read or save the multi-currency rate configuration</td></tr>
+                                <tr><td>POST</td><td><code>/backend/api/settings/fx-rates/refresh</code></td><td>Refresh rates from the provider on demand</td></tr>
+                                <tr><td>GET</td><td><code>/backend/api/dashboard/exports/{dataset}</code></td><td>Warehouse CSV for one dataset — <code>clicks</code>, <code>conversions</code> or <code>costs</code></td></tr>
+                                <tr><td>GET</td><td><code>/backend/api/dashboard/exports/zip</code></td><td>All selected datasets in one ZIP with <code>README.txt</code> + manifest</td></tr>
+                                <tr><td>GET</td><td><code>/backend/api/fraud/evidence.csv</code> · <code>.html</code></td><td>Refund-claim evidence as CSV or a printable page</td></tr>
+                                <tr><td>POST</td><td><code>/backend/api/offers/bulk/owner</code> · <code>/backend/api/campaigns/bulk/owner</code></td><td>Bulk-reassign owner for the Own-scope sections</td></tr>
+                                </tbody>
+                            </table>
                             <h3 class="doc-h3">Examples</h3>
                             <p>S2S postback with a network's own macros (here <code>{clickid}</code>,
                                 <code>{sum}</code> and <code>{txn}</code>):</p>
@@ -1022,6 +1141,7 @@
                                 <tr><td>Anomaly insights</td><td>with the auto-rules pass</td><td>Runs the six insight detectors over all active campaigns, caches the findings block and fires one Telegram alert per run when new critical anomalies appear.</td></tr>
                                 <tr><td>Retention prune</td><td>daily</td><td>Deletes raw clicks older than the configured retention window (Settings → Data retention).</td></tr>
                                 <tr><td>Email reports</td><td>periodic</td><td>Sends the daily summary email and due saved-report schedules (recipients + UTC hour from the schedule; the mail service is set up for the deployment).</td></tr>
+                                <tr><td>Currency rates</td><td>daily</td><td>Refreshes the workspace's FX rates from the provider chain (manual overrides are never overwritten); a failed refresh keeps the last good rates and records the error.</td></tr>
                                 </tbody>
                             </table>
                         </section>
@@ -1221,6 +1341,10 @@
         font-size: var(--fs-16, 16px);
         font-weight: 600;
         margin-bottom: var(--space-2, 8px);
+    }
+    /* Keep the system-status board off the viewport edges. */
+    .doc-status {
+        padding: var(--space-3, 12px) var(--space-4, 16px) var(--space-6, 24px);
     }
 </style>
 {% endraw %}
