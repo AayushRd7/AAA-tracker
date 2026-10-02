@@ -157,6 +157,16 @@ services:
       - "9000"
     volumes:
       - ./frontend/landings:/var/www/landings
+      # Interpreter hardening: open_basedir, disabled dangerous functions,
+      # upload/exec limits (ini) + .php-only FPM execution (pool).
+      - ./php/conf.d/zz-security.ini:/usr/local/etc/php/conf.d/zz-security.ini:ro
+      - ./php/php-fpm.d/zz-security.conf:/usr/local/etc/php-fpm.d/zz-security.conf:ro
+    # Cap the blast radius of a runaway landing script.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
 
   nginx:
     build:

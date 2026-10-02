@@ -16,6 +16,7 @@ import pyotp
 import qrcode
 
 from db import get_db
+from app_pages.reserved import is_reserved_username
 from models.user import UserORM
 from auth import (hash_password, get_caller, verify_password, _hash_backup_code,
                   is_platform_operator, session_token, list_sessions,
@@ -340,8 +341,9 @@ def create_user(user: UserCreateUpdate, request: Request, db: Session = Depends(
     if not user.password:
         raise HTTPException(status_code=400, detail="Password is required")
 
-    if user.username.lower() == "tracker_admin":
-        raise HTTPException(status_code=403, detail="Cannot create tracker_admin user")
+    if is_reserved_username(user.username):
+        raise HTTPException(status_code=403,
+                            detail="That username is reserved for the platform operator")
 
     password_hash = hash_password(user.password)
 
@@ -396,7 +398,7 @@ def update_user(user_id: int, user: UserCreateUpdate, request: Request, db: Sess
 
     # Lockout guards: the built-in tracker_admin stays active+admin, and the
     # last active admin can never be demoted or deactivated.
-    if user_obj.username.lower() == "tracker_admin":
+    if is_reserved_username(user_obj.username):
         if user.active is not None and not user.active:
             raise HTTPException(status_code=400,
                                 detail="The built-in admin account cannot be deactivated")
@@ -423,7 +425,7 @@ def update_user(user_id: int, user: UserCreateUpdate, request: Request, db: Sess
     changes = {}
     if user.email is not None:
         user_obj.email = user.email
-    if user_obj.username.lower() == "tracker_admin":
+    if is_reserved_username(user_obj.username):
         user_obj.is_admin = True
     elif user.is_admin is not None:
         if user_obj.is_admin != user.is_admin:
@@ -461,7 +463,7 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
     if not user_obj:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if user_obj.username.lower() == "tracker_admin":
+    if is_reserved_username(user_obj.username):
         raise HTTPException(status_code=400,
                             detail="The built-in admin account cannot be deleted")
     if user_obj.is_admin and user_obj.active and _other_active_admins(db, user_obj) == 0:

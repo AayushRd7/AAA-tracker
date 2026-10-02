@@ -25,7 +25,9 @@ Rules enforced here (the server is the authority; the UI mirrors them):
   in the same transaction, so two concurrent accepts yield one user and one
   membership and a token is single-use;
 * the default expiry is 7 days and is recorded on the row; an expired, revoked
-  or already-accepted token is a 410 from both lookup and accept.
+  or already-accepted token is a 410 from both lookup and accept;
+* a username reserved for the platform operator namespace can neither be
+  invited nor minted at accept time (403) — see ``app_pages/reserved.py``.
 
 Still deliberately out of scope: billing, white-label branding and per-tenant
 user accounts (users stay install-global rows; only the membership is scoped).
@@ -42,6 +44,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app_pages.reserved import is_reserved_username
 from auth import (TENANT_ROLES, effective_tenant_role, get_session_username,
                   hash_password, require_api_auth)
 from db import get_db
@@ -194,6 +197,9 @@ def create_invitation(data: InvitationCreate, request: Request,
     username = (data.username or "").strip()
     if not email and not username:
         raise HTTPException(status_code=400, detail="An email or a username is required")
+    if is_reserved_username(username):
+        raise HTTPException(status_code=403,
+                            detail="That username is reserved for the platform operator")
     invited_role = (data.role or "editor").lower()
     if invited_role not in VALID_ROLES:
         raise HTTPException(status_code=400,
@@ -306,6 +312,9 @@ def accept_invitation(data: InvitationAccept, request: Request, db: Session = De
     email = (data.email or "").strip().lower() or None
     if not username:
         raise HTTPException(status_code=400, detail="username is required")
+    if is_reserved_username(username):
+        raise HTTPException(status_code=403,
+                            detail="That username is reserved for the platform operator")
     if not password:
         raise HTTPException(status_code=400, detail="password is required")
     invited_role = (inv["role"] or "viewer").lower()

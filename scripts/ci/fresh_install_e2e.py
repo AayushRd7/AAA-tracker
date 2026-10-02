@@ -25,8 +25,6 @@ import urllib.request
 
 BASE = (os.environ.get("FRESH_BASE_URL") or "http://localhost").rstrip("/")
 API = f"{BASE}/backend/api"
-USER = os.environ.get("TEST_USER", "tracker_admin")
-PASS = os.environ.get("TEST_PASS", "admin")
 CH_CONTAINER = os.environ.get("TEST_CH_CONTAINER", "tracker_clickhouse")
 PG_CONTAINER = os.environ.get("TEST_PG_CONTAINER", "tracker_postgres")
 
@@ -69,6 +67,12 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 ENV = read_env()
+# The installer rotates the seeded admin account and records the password in .env.
+# TEST_USER/TEST_PASS win, then the AAA_ADMIN_* names, then .env.
+USER = (os.environ.get("TEST_USER") or os.environ.get("AAA_ADMIN_USER")
+        or ENV.get("AAA_ADMIN_USER") or "tracker_admin")
+PASS = (os.environ.get("TEST_PASS") or os.environ.get("AAA_ADMIN_PASSWORD")
+        or ENV.get("AAA_ADMIN_PASSWORD") or "")
 JAR = http.cookiejar.CookieJar()
 OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(JAR))
 BARE_OPENER = urllib.request.build_opener(NoRedirect)
@@ -147,6 +151,10 @@ def ch_query(sql):
 
 def main():
     print("== Fresh install: end-to-end ==")
+    if not PASS:
+        print("ERROR: no admin password found — set AAA_ADMIN_PASSWORD or TEST_PASS "
+              "(make install records it in .env).")
+        return 1
 
     # 1. the stack is up and the API is behind the auth gate
     status, body = wait_for_backend()

@@ -38,7 +38,11 @@ read -p "  Domain (empty = HTTP only): " DOMAIN
 step "[1/8] system packages"
 if ! have docker; then
     if have curl && have apt-get; then
-        curl -fsSL https://get.docker.com | sudo sh
+        # Official install docs: https://docs.docker.com/engine/install/
+        # Download first, then execute — never pipe a remote script straight into sh.
+        curl -fsSL -o /tmp/get-docker.sh https://get.docker.com
+        sudo sh /tmp/get-docker.sh
+        rm -f /tmp/get-docker.sh
     else
         pkg_install docker || { warn "install Docker manually: https://docs.docker.com/engine/install/"; exit 1; }
     fi
@@ -81,7 +85,14 @@ ok "$APP_DIR"
 
 step "[5/8] permissions"
 sudo chown -R "$USER":"$USER" "$APP_DIR"
-sudo chmod -R 0777 "$APP_DIR"
+# Least privilege: source and secrets are never world-writable. Only the
+# directories the app/nginx/certbot actually write at runtime get group write.
+if [ -f "$APP_DIR/.env" ]; then sudo chmod 600 "$APP_DIR/.env"; fi
+if [ -d "$APP_DIR/ssl" ]; then sudo chmod -R go-rwx "$APP_DIR/ssl"; fi
+for d in frontend/landings nginx/domains certbot-var letsencrypt; do
+    mkdir -p "$APP_DIR/$d"
+    sudo chmod 775 "$APP_DIR/$d"
+done
 
 step "[6/8] nginx profile"
 cp nginx/nginx.nossl.conf nginx/default.conf
@@ -94,16 +105,26 @@ if [ -n "$DOMAIN" ]; then
     sleep 10
     docker exec tracker_nginx certbot certonly \
         --webroot -w /var/www/certbot -d "$DOMAIN" \
-        --agree-tos -m admin@"$DOMAIN" --non-interactive >/dev/null 2>&1 || \
-        warn "certbot failed — check that $DOMAIN resolves to this server, then: make install-prod-domain"
-    cp nginx/nginx.prod.conf nginx/default.conf
-    $COMPOSE restart nginx >/dev/null
-    ok "HTTPS enabled for $DOMAIN"
-    printf '\n  %s%sdashboard%s   https://%s/backend\n' "$B" "$R" "" "$DOMAIN"
+        --agree-tos -m admin@"$DOMAIN" --non-interactive >/dev/null 2>&1 || true
+    if docker exec tracker_nginx test -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"; then
+        # The static prod profile points at a placeholder domain; substitute the real
+        # one so nginx can load the certificate that was just issued.
+        cp nginx/nginx.prod.conf nginx/default.conf
+        sed -i "s|/etc/letsencrypt/live/yourdomain.com/|/etc/letsencrypt/live/$DOMAIN/|g" nginx/default.conf
+        $COMPOSE restart nginx >/dev/null
+        ok "HTTPS enabled for $DOMAIN"
+        printf '\n  %s%sdashboard%s   https://%s/backend\n' "$B" "$R" "" "$DOMAIN"
+    else
+        # Certbot failed: keep the self-signed HTTPS profile nginx is already running
+        # so the stack stays up. Retry once DNS resolves here: make install-prod-domain
+        warn "certbot failed — staying on the self-signed certificate; check that $DOMAIN resolves here, then retry"
+        printf '\n  %s%sdashboard%s   https://%s/backend   %s(self-signed cert)%s\n' "$B" "$R" "" "$DOMAIN" "$D" "$R"
+    fi
 else
     step "[8/8] HTTP only"
     warn "no domain given — running on HTTP with a self-signed cert"
 fi
 
-printf '\n  %s%slogin%s       tracker_admin / admin   %schange it right away%s\n' "$B" "$R" "" "$Y" "$R"
+printf '\n  %s%slogin%s       admin password + API token were generated at install and printed once\n' "$B" "$R" ""
+printf '  %s%s         %sset AAA_ADMIN_PASSWORD before install to choose the password%s\n' "$D" "$B" "$Y" "$R"
 printf '  %shelp%s        make logs · make restart · make update%s\n\n' "$B" "$R" "$R"

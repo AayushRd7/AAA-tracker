@@ -133,7 +133,14 @@ preclean: check
 # Ensure the database schema exists — idempotent, never drops anything.
 install-db:
 	@docker exec tracker_backend pip install --no-cache-dir -q -r /app/install/requirements.txt
-	docker exec tracker_backend python3 /app/install/install.py
+	@# The admin password is generated once and kept in .env, then handed to the
+	@# installer so the login it prints matches what make doctor / the e2e check use.
+	@admin_pw="$${AAA_ADMIN_PASSWORD:-$$(grep '^AAA_ADMIN_PASSWORD=' .env 2>/dev/null | cut -d= -f2-)}"; \
+	 if [ -z "$$admin_pw" ]; then \
+		admin_pw=$$(openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'); \
+		printf '\n# admin login — install.py rotates the seeded tracker_admin account to this password\nAAA_ADMIN_PASSWORD=%s\n' "$$admin_pw" >> .env; \
+	 fi; \
+	 docker exec -e AAA_ADMIN_PASSWORD="$$admin_pw" tracker_backend python3 /app/install/install.py
 	@printf '  $(C)$(B)▸$(R) databases ready\n'
 	@# The services boot before the tables exist, so their startup migrations could not
 	@# run — restart them now that the schema is in place, then prove they came back.
@@ -227,7 +234,7 @@ summary:
 	[ -z "$$ip" ] && ip=localhost; \
 	printf '\n  $(G)$(B)✓ ready$(R)\n\n'; \
 	printf '  $(B)dashboard$(R)   $(SCHEME)://%s/backend\n' "$$ip"; \
-	printf '  $(B)login$(R)       tracker_admin / admin   $(Y)change it right away$(R)\n'; \
+	printf '  $(B)login$(R)       admin password was printed once at install; set $(B)AAA_ADMIN_PASSWORD$(R) to choose it\n'; \
 	printf '  $(B)help$(R)        make logs · make restart · make update · make check\n\n'
 
 stop: check

@@ -5,7 +5,9 @@
 3. sends a Telegram test message and a test daily report email
 Run from the repo root:  python3 scripts/configure-notifications.py
 
-The relay and bot credentials come from the environment (see .env.example):
+Credentials come from the environment:
+  AAA_ADMIN_USER       admin login name (default: tracker_admin)
+  AAA_ADMIN_PASSWORD   the password printed once by the installer
   TELEGRAM_BOT_TOKEN   from @BotFather
   SMTP_HOST / SMTP_PORT / SMTP_LOGIN / SMTP_PASSWORD, or EMAIL_API_KEY
   REPORT_FROM_EMAIL / REPORT_RECIPIENTS
@@ -17,6 +19,10 @@ import urllib.error
 
 BASE = "http://localhost/backend"
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+# The install rotates the seeded admin account, so the password must come from the
+# environment (or .env) rather than a hardcoded default.
+ADMIN_USER = os.environ.get("AAA_ADMIN_USER", "tracker_admin")
+ADMIN_PASSWORD = os.environ.get("AAA_ADMIN_PASSWORD", "")
 TENANT_EMAIL = {
     "from_name": "AAA Tracker",
     "from_email": os.environ.get("REPORT_FROM_EMAIL", ""),
@@ -39,6 +45,10 @@ def http(method, url, data=None, headers=None):
 def main():
     if not BOT_TOKEN:
         print("ERROR: set TELEGRAM_BOT_TOKEN first — see the docstring.")
+        return
+    if not ADMIN_PASSWORD:
+        print("ERROR: set AAA_ADMIN_PASSWORD (and optionally AAA_ADMIN_USER) — "
+              "it was printed once by the installer.")
         return
 
     # 1. chat id from the bot's updates
@@ -64,7 +74,7 @@ def main():
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
     resp = opener.open(urllib.request.Request(
         f"{BASE}/api/login", method="POST",
-        data=json.dumps({"username": "tracker_admin", "password": "admin"}).encode(),
+        data=json.dumps({"username": ADMIN_USER, "password": ADMIN_PASSWORD}).encode(),
         headers={"Content-Type": "application/json"}), timeout=15)
     resp.read()
 

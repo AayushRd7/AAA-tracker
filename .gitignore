@@ -15,3 +15,7 @@ ssl/*.crt
 
 # Redesign mapping (competitor-facing notes, never committed)
 /REDESIGN-PLAN.md
+
+# Audit research (names competitors; never committed)
+/AUDIT-FINDINGS.md
+/AUDIT-FINDINGS.pdf

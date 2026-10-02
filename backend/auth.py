@@ -13,6 +13,7 @@ import json
 import re
 import time
 import os
+import logging
 
 import bcrypt
 import pyotp
@@ -29,6 +30,8 @@ from tenant_context import current_tenant, api_token_tenant as _api_token_tenant
 from clickHouse import BASE_METRICS, FORMULA_METRIC_KEYS
 
 router = APIRouter()
+
+log = logging.getLogger(__name__)
 
 
 # ====== Admin login IP whitelist (G90) ======
@@ -371,33 +374,14 @@ def revoke_other_sessions(db: Session, username: str, current_token: str) -> int
     return res.rowcount or 0
 
 
-def load_api_token() -> str:
-    """Tenant 1's API token (the credential the Settings page shows).
-
-    Kept for the install-wide default; a *request* is resolved with
-    ``resolve_api_token``, which finds the workspace that owns the presented
-    token. Tokens live in each tenant's own settings document.
-    """
-    try:
-        db = SessionLocal()
-        row = db.execute(text("SELECT value FROM settings "
-                              "WHERE name = 'settings' AND tenant_id = 1")).fetchone()
-        db.close()
-        if row and row[0]:
-            return (json.loads(row[0]).get("apiToken") or "").strip()
-    except Exception:
-        pass
-    return ""
-
-
 def resolve_api_token(provided: str) -> Optional[int]:
     """The tenant whose settings document holds ``provided`` as its apiToken.
 
-    Returns None for an empty/unknown token. One settings row per tenant, so
-    this scans the (small) tenant set; the lowest matching tenant wins when two
-    workspaces somehow share a token. Called by the request middleware, which
-    then runs the whole request in that tenant — a token is therefore a
-    *workspace-scoped* credential, never install-wide.
+    Returns None for an empty/unknown token, and for a token held by more than
+    one workspace. An API token is a *workspace-scoped* credential (never
+    install-wide); a collision cannot be attributed to one tenant, so it is
+    refused with an explicit error log rather than silently resolving to the
+    lowest tenant id.
     """
     provided = (provided or "").strip()
     if not provided:
@@ -413,6 +397,7 @@ def resolve_api_token(provided: str) -> Optional[int]:
     except Exception:
         return None
     match = None
+    collision = False
     for tenant_id, value in rows:
         if not value:
             continue
@@ -422,7 +407,14 @@ def resolve_api_token(provided: str) -> Optional[int]:
             continue
         if token and len(token) == len(provided) \
                 and secrets.compare_digest(token, provided):
-            match = int(tenant_id) if match is None else min(match, int(tenant_id))
+            tid = int(tenant_id)
+            if match is not None and tid != match:
+                collision = True
+            match = tid
+    if collision:
+        log.error("API token collision: the presented token is configured for "
+                  "multiple tenants; refusing to resolve it to a workspace")
+        return None
     return match
 
 

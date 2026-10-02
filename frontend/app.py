@@ -366,8 +366,10 @@ async def ensure_schema():
                          "capi_pixel_sent"):
                 await conn.execute(
                     f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS tenant_id INTEGER DEFAULT 1")
+                # Install-wide schema backfill: legacy rows predate multi-tenancy
+                # and belong to the original workspace. Not a settings read.
                 await conn.execute(
-                    f"UPDATE {_tbl} SET tenant_id = 1 WHERE tenant_id IS NULL")
+                    f"UPDATE {_tbl} SET tenant_id = $1 WHERE tenant_id IS NULL", 1)
                 await conn.execute(
                     f"ALTER TABLE {_tbl} ALTER COLUMN tenant_id SET NOT NULL")
             for _ddl in (
@@ -803,16 +805,25 @@ async def _request_host_tenant(pg, request: Request) -> "int | None":
     tracking plane which workspace a visitor is hitting. Multi-tenancy phase 1
     deliberately does NOT accept a tenant from a query param here: that would be
     a spoofing surface on the public plane.
+
+    The schema only enforces UNIQUE(tenant_id, domain), so two tenants can own
+    the same host string. That is a misconfiguration and cannot be routed
+    unambiguously: fail CLOSED (None → 404) rather than silently picking the
+    lowest tenant and serving the wrong workspace's campaign.
     """
     host = (request.headers.get("host") or "").split(":")[0].strip().lower()
     if not host:
         return None
     try:
         async with pg.acquire() as conn:
-            row = await conn.fetchrow(
+            rows = await conn.fetch(
                 "SELECT tenant_id FROM domains WHERE lower(domain) = $1 "
-                "ORDER BY tenant_id ASC LIMIT 1", host)
-        return int(row["tenant_id"]) if row else None
+                "ORDER BY tenant_id ASC LIMIT 2", host)
+        if len(rows) > 1:
+            log_track(f"⚠ Ambiguous Host '{host}' owned by multiple tenants "
+                      f"— refusing to route (fail closed)")
+            return None
+        return int(rows[0]["tenant_id"]) if rows else None
     except Exception:
         return None
 
@@ -823,8 +834,9 @@ async def _fetch_campaign_by_alias(pg, alias: str, request: Request):
     Known host -> the alias is resolved strictly inside that host's tenant, so
     tenant A can never route traffic to tenant B's campaign (even when both own
     the same alias — aliases are unique per tenant, not globally).
-    Unknown host -> the lowest tenant owning the alias wins, i.e. the
-    single-tenant behaviour this install had before multi-tenancy.
+    Unknown host -> the alias is served only when exactly ONE tenant owns it;
+    an alias shared by two or more tenants is refused (ambiguous). It never
+    falls back to the lowest tenant owning the alias.
     """
     tenant_id = await _request_host_tenant(pg, request)
     async with pg.acquire() as conn:
@@ -832,9 +844,19 @@ async def _fetch_campaign_by_alias(pg, alias: str, request: Request):
             return await conn.fetchrow(
                 "SELECT * FROM campaigns WHERE alias = $1 AND tenant_id = $2",
                 alias, tenant_id)
-        return await conn.fetchrow(
+        # Unknown Host (localhost, a bare IP, a domain not registered yet):
+        # aliases are unique per tenant, so serve the alias only when EXACTLY
+        # ONE tenant owns it. If two tenants share an alias, that is ambiguous
+        # and we refuse rather than shadowing the lowest tenant — but a
+        # single-host / self-hosted install keeps working.
+        rows = await conn.fetch(
             "SELECT * FROM campaigns WHERE alias = $1 "
-            "ORDER BY tenant_id ASC, id ASC LIMIT 1", alias)
+            "ORDER BY tenant_id ASC LIMIT 2", alias)
+        if len(rows) > 1:
+            log_track(f"⚠ Ambiguous alias '{alias}' on an unresolved Host "
+                      f"— refusing to route (fail closed)")
+            return None
+        return rows[0] if rows else None
 
 
 async def get_default_campaign_from_db(domain: str):
@@ -913,7 +935,7 @@ async def save_click_to_clickhouse(meta: dict, campaign_alias: str):
         # G79 privacy: same IP masking as track_event (IPv4 → last octet zeroed,
         # IPv6 → last 16 bits zeroed) — the click-out row must not leak what the
         # visit row masked.
-        if load_privacy_settings().get("anonymize_ip"):
+        if load_privacy_settings(_tenant).get("anonymize_ip"):
             ip_val = row.get("ip")
             if ip_val:
                 try:
@@ -965,11 +987,25 @@ async def campaign_click(
     log_track(f"🔁 New campaign click request {campaign_alias} - {offer_id}")
     pg = request.app.state.pg
 
+    # The Host must resolve to a tenant that owns this alias; an unresolved or
+    # A known Host routes strictly inside its tenant. An unknown Host serves the
+    # alias only when exactly one tenant owns it; an alias shared by several
+    # tenants is ambiguous and not routed (fail closed, 404).
+    tenant_id = await _request_host_tenant(pg, request)
     async with pg.acquire() as conn:
         # 1. Campaign
-        campaign = await conn.fetchrow(
-            "SELECT * FROM campaigns WHERE alias = $1 AND tenant_id = $2",
-            campaign_alias, await _request_host_tenant(pg, request) or 1)
+        if tenant_id is not None:
+            campaign = await conn.fetchrow(
+                "SELECT * FROM campaigns WHERE alias = $1 AND tenant_id = $2",
+                campaign_alias, tenant_id)
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM campaigns WHERE alias = $1 "
+                "ORDER BY tenant_id ASC LIMIT 2", campaign_alias)
+            if len(rows) > 1:
+                log_track(f"⚠ Ambiguous alias '{campaign_alias}' on an unresolved "
+                          f"Host — refusing to route (fail closed)")
+            campaign = rows[0] if len(rows) == 1 else None
         if not campaign:
             log_track(f"❌ CAMPAIGN NOT FOUND request {campaign_alias} - {offer_id}")
             return Response("Campaign not found", status_code=404)
@@ -1057,7 +1093,8 @@ async def campaign_click(
         ip=str(meta_data.get("ip") or ""),
         ua=str(meta_data.get("user_agent") or ""),
         isp=str(meta_data.get("isp") or ""),
-        is_bot=bool(meta_data.get("is_bot")) or bool(getattr(request.state, "bot_marked", None)))
+        is_bot=bool(meta_data.get("is_bot")) or bool(getattr(request.state, "bot_marked", None)),
+        tenant_id=campaign["tenant_id"])
     if getattr(request.state, "honeypot_flagged", False):
         gate_score = 100
     meta_data["fraud_score"] = min(int(gate_score), 100)
@@ -1110,7 +1147,7 @@ async def campaign_click(
 
     # Prefetch/prerender hits (Purpose/Sec-Purpose: prefetch) are still served
     # the redirect but must not inflate click-out stats.
-    prefetch = request_is_prefetch(request)
+    prefetch = request_is_prefetch(request, campaign["tenant_id"])
 
     # 5. Save the click asynchronously — opted-out visitors (G79) and prefetch
     # hits get the redirect but no Postgres/ClickHouse rows and no tracking cookies.
@@ -1411,16 +1448,19 @@ async def find_campaign_for_tracking(c_ref: str, request: Request = None):
     endpoint (/t/collect, /p, /i, /click-api, /simulate) resolves through here.
 
     ``request`` scopes the resolution to the Host domain's tenant (see
-    _fetch_campaign_by_alias); without it the lookup falls back to the lowest
-    tenant owning the ref — the pre-multi-tenancy behaviour.
+    _fetch_campaign_by_alias). ``request is None`` carries no Host and therefore
+    no tenant: it returns None rather than falling back to the lowest tenant
+    owning the ref (the old pre-multi-tenancy behaviour, which could silently
+    serve tenant 1). All current callers pass a request.
     """
+    if request is None:
+        return None
     pg = app.state.pg
-    if request is not None:
-        tenant_id = await _request_host_tenant(pg, request)
-    else:
-        tenant_id = None
-    if tenant_id is not None:
-        async with pg.acquire() as conn:
+    tenant_id = await _request_host_tenant(pg, request)
+    async with pg.acquire() as conn:
+        # isdecimal, not isdigit: "²".isdigit() is True but int("²") raises —
+        # a crafted campaign ref must 404, not 500.
+        if tenant_id is not None:
             if str(c_ref).isdecimal():
                 try:
                     row = await conn.fetchrow(
@@ -1433,20 +1473,23 @@ async def find_campaign_for_tracking(c_ref: str, request: Request = None):
             return await conn.fetchrow(
                 "SELECT * FROM campaigns WHERE alias = $1 AND status = 'active' "
                 "AND tenant_id = $2", str(c_ref), tenant_id)
-    async with pg.acquire() as conn:
-        # isdecimal, not isdigit: "²".isdigit() is True but int("²") raises —
-        # a crafted campaign ref must 404, not 500.
+        # Unknown Host: on a numeric ref the id is globally unambiguous; on an
+        # alias, serve it only when exactly one tenant owns it.
         if str(c_ref).isdecimal():
             try:
-                row = await conn.fetchrow(
-                    "SELECT * FROM campaigns WHERE id = $1 AND status = 'active'", int(c_ref))
+                return await conn.fetchrow(
+                    "SELECT * FROM campaigns WHERE id = $1 AND status = 'active'",
+                    int(c_ref))
             except (TypeError, ValueError):
-                row = None
-            if row:
-                return row
-        return await conn.fetchrow(
+                return None
+        rows = await conn.fetch(
             "SELECT * FROM campaigns WHERE alias = $1 AND status = 'active' "
-            "ORDER BY tenant_id ASC, id ASC LIMIT 1", str(c_ref))
+            "ORDER BY tenant_id ASC LIMIT 2", str(c_ref))
+        if len(rows) > 1:
+            log_track(f"⚠ Ambiguous alias '{c_ref}' on an unresolved Host "
+                      f"— refusing to route (fail closed)")
+            return None
+        return rows[0] if rows else None
 
 
 @app.api_route("/t/collect", methods=["GET", "POST"])
@@ -1466,7 +1509,7 @@ async def direct_collect(request: Request) -> Response:
                             status_code=404, headers=open_cors_headers())
 
     # Same bot rules as the redirect path: block means "serve nothing", mark flags the row
-    rule, blocked = await apply_bot_rules(request)
+    rule, blocked = await apply_bot_rules(request, campaign["tenant_id"])
     if rule:
         request.state.bot_marked = rule.get("type")
     if blocked:
@@ -1582,23 +1625,27 @@ TELEGRAM_STATUS_EMOJI = {
 ALL_STATUSES = ["lead", "sale", "upsale", "rejected", "hold", "trash"]
 
 
-def load_telegram_config() -> dict:
-    """Read the telegram block from the settings row (sync, own connection)."""
+def load_telegram_config(tenant_id) -> dict:
+    """Read a tenant's telegram block from the settings row (sync, own connection).
+
+    ``tenant_id`` None (unresolved request path) reads as not-configured rather
+    than falling back to another workspace's settings.
+    """
+    if tenant_id is None:
+        return {}
     try:
         conn = pg_connect()
         cur = conn.cursor()
-        # settings rows are per tenant; the tracking plane has no request
-        # tenant context, so it reads tenant 1's (this install's) block.
-        # Phase 2 iterates tenants here instead.
+        # settings rows are per tenant; the caller passes the workspace.
         cur.execute("SELECT value FROM settings WHERE name = 'settings' "
-                    "AND tenant_id = 1")
+                    "AND tenant_id = %s", (int(tenant_id),))
         row = cur.fetchone()
         conn.close()
         if row and row[0]:
             cfg = json.loads(row[0])
             return cfg.get("telegram") or {}
     except Exception as e:
-        log_track(f"Telegram config load error: {e}")
+        log_track(f"Telegram config load error (tenant {tenant_id}): {e}")
     return {}
 
 
@@ -1615,8 +1662,8 @@ _settings_cache: dict = {}
 _SETTINGS_READ_FAILED = object()
 
 
-def _read_settings_block(key: str):
-    """Fresh (sync, own connection) read of one block from the settings row.
+def _read_settings_block(key: str, tenant_id: int):
+    """Fresh (sync, own connection) read of one block from a tenant's settings row.
 
     Returns _SETTINGS_READ_FAILED when the read itself errors, so callers can
     fail closed instead of treating the outage as 'no security configured'.
@@ -1624,60 +1671,72 @@ def _read_settings_block(key: str):
     try:
         conn = pg_connect()
         cur = conn.cursor()
-        # settings rows are per tenant; the tracking plane has no request
-        # tenant context, so it reads tenant 1's (this install's) block.
-        # Phase 2 iterates tenants here instead.
+        # settings rows are per tenant; the caller passes the workspace it
+        # already resolved (campaign/conv's tenant, or the request Host's).
         cur.execute("SELECT value FROM settings WHERE name = 'settings' "
-                    "AND tenant_id = 1")
+                    "AND tenant_id = %s", (int(tenant_id),))
         row = cur.fetchone()
         conn.close()
         if row and row[0]:
             return json.loads(row[0]).get(key)
         return None
     except Exception as e:
-        log_track(f"Settings '{key}' load error: {e}")
+        log_track(f"Settings '{key}' load error (tenant {tenant_id}): {e}")
         return _SETTINGS_READ_FAILED
 
 
-def _settings_block(key: str, default=None):
-    """Cached read of a settings-row block (30s TTL).
+def _settings_block(key: str, tenant_id, default=None):
+    """Cached per-tenant read of a settings-row block (30s TTL).
+
+    ``tenant_id`` is required from the caller. ``None`` means the tenant could
+    not be resolved on this request path — treat the block as absent rather
+    than falling back to another workspace's (or tenant 1's) settings.
 
     A failed read is served as the default for this request only and never
     cached — the next hit retries, so a recovered DB is picked up immediately.
     """
     if default is None:
         default = {}
+    if tenant_id is None:
+        return default
+    tid = int(tenant_id)
     now = time.monotonic()
-    hit = _settings_cache.get(key)
+    cache_key = (tid, key)
+    hit = _settings_cache.get(cache_key)
     if hit is not None and now - hit[0] < _SETTINGS_CACHE_TTL:
         return hit[1]
-    value = _read_settings_block(key)
+    value = _read_settings_block(key, tid)
     if value is _SETTINGS_READ_FAILED:
         return default
     if not isinstance(value, type(default)):
         value = default
-    _settings_cache[key] = (now, value)
+    _settings_cache[cache_key] = (now, value)
     return value
 
 
-def load_postback_security() -> dict:
-    """Read the postback_security block (30s TTL cache), failing CLOSED.
+def load_postback_security(tenant_id) -> dict:
+    """Read a tenant's postback_security block (30s TTL cache), failing CLOSED.
 
     A DB read failure returns a sentinel dict that check_postback_access denies
     on, and nothing is cached — a transient outage must never disable postback
     security for the following 30s. A genuinely empty/missing block keeps the
-    configured-open behavior.
+    configured-open behavior. An unresolved tenant (None) reads as a missing
+    block rather than falling back to another workspace's settings.
     """
+    if tenant_id is None:
+        return {}
+    tid = int(tenant_id)
     now = time.monotonic()
-    hit = _settings_cache.get("postback_security")
+    cache_key = (tid, "postback_security")
+    hit = _settings_cache.get(cache_key)
     if hit is not None and now - hit[0] < _SETTINGS_CACHE_TTL:
         return hit[1]
-    value = _read_settings_block("postback_security")
+    value = _read_settings_block("postback_security", tid)
     if value is _SETTINGS_READ_FAILED:
         return {"read_failed": True}
     if not isinstance(value, dict):
         value = {}
-    _settings_cache["postback_security"] = (now, value)
+    _settings_cache[cache_key] = (now, value)
     return value
 
 
@@ -1818,9 +1877,9 @@ _seen_visitors: set = set()
 _SEEN_VISITORS_CAP = 200_000
 
 
-def load_bot_rules() -> dict:
-    """Read the bot_rules block from the settings row (30s TTL cache)."""
-    return _settings_block("bot_rules")
+def load_bot_rules(tenant_id) -> dict:
+    """Read a tenant's bot_rules block from the settings row (30s TTL cache)."""
+    return _settings_block("bot_rules", tenant_id)
 
 
 def visitor_key_for(request: Request) -> str:
@@ -1831,26 +1890,26 @@ def visitor_key_for(request: Request) -> str:
     return hashlib.md5(f"{ip}|{ua}".encode()).hexdigest()
 
 
-def load_custom_statuses() -> list:
-    """Read the custom_statuses array from the settings row (30s TTL cache).
+def load_custom_statuses(tenant_id) -> list:
+    """Read a tenant's custom_statuses array from the settings row (30s TTL cache).
 
     Each entry is {name, payout_default?, color?}; only the normalized name is
     used by the engine.
     """
-    raw = _settings_block("custom_statuses", default=[])
+    raw = _settings_block("custom_statuses", tenant_id, default=[])
     return [s for s in raw
             if isinstance(s, dict) and str(s.get("name") or "").strip()]
 
 
-def load_postback_rules() -> list:
-    """Read the global postback_rules array from the settings row (30s TTL cache).
+def load_postback_rules(tenant_id) -> list:
+    """Read a tenant's postback_rules array from the settings row (30s TTL cache).
 
     G85: an ordered list of {enabled, name, conditions: [{field, operator,
     value, condition?}], action: {type, ...}} evaluated on every inbound /pb
     postback BEFORE the conversion row is written/updated and before fanout.
     Absent/empty = no behavior change.
     """
-    raw = _settings_block("postback_rules", default=[])
+    raw = _settings_block("postback_rules", tenant_id, default=[])
     if not isinstance(raw, list):
         return []
     return [r for r in raw if isinstance(r, dict)]
@@ -1861,13 +1920,13 @@ def normalize_status(status: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(status or "").strip().lower()).strip("_")
 
 
-def valid_conversion_statuses() -> set:
-    """Engine built-ins plus configured custom statuses (all normalized)."""
-    customs = {normalize_status(s.get("name")) for s in load_custom_statuses()}
+def valid_conversion_statuses(tenant_id) -> set:
+    """Engine built-ins plus this tenant's configured custom statuses (normalized)."""
+    customs = {normalize_status(s.get("name")) for s in load_custom_statuses(tenant_id)}
     return set(ALL_STATUSES) | {c for c in customs if c}
 
 
-def conversion_status_mode(status: str) -> str:
+def conversion_status_mode(status: str, tenant_id) -> str:
     """Per-status Mode for conversion recording (settings.custom_statuses).
 
     'new' — when a postback arrives for a click whose current conversion row
@@ -1879,7 +1938,7 @@ def conversion_status_mode(status: str) -> str:
     """
     if status in ALL_STATUSES:
         return "repeated"
-    for entry in load_custom_statuses():
+    for entry in load_custom_statuses(tenant_id):
         if normalize_status(entry.get("name")) == status:
             mode = str(entry.get("mode") or "").strip().lower()
             return "new" if mode == "new" else "repeated"
@@ -1933,15 +1992,15 @@ def match_bot_rule(request: Request, rules: list, visitor_key: str):
     return None
 
 
-async def apply_bot_rules(request: Request):
-    """Evaluate bot rules for an inbound visit.
+async def apply_bot_rules(request: Request, tenant_id):
+    """Evaluate a tenant's bot rules for an inbound visit.
 
     Returns (rule, blocked) — blocked=True means serve 404 without tracking;
     otherwise the rule (if any) marks the click as a bot but tracking continues.
     Rule matching runs in a worker thread with a 2s ceiling so a catastrophic
     user regex can never hang the event loop; on timeout the rules are skipped.
     """
-    cfg = load_bot_rules()
+    cfg = load_bot_rules(tenant_id)
     if not cfg.get("enabled"):
         return None, False
 
@@ -1977,9 +2036,9 @@ BLACKLIST_FIELDS = ("sub_id_1", "sub_id_2", "sub_id_3", "sub_id_4", "sub_id_5",
                     "country", "city", "device_type", "os", "browser", "ip")
 
 
-def load_blacklists() -> list:
-    """Read the blacklists block from the settings row (30s TTL cache)."""
-    raw = _settings_block("blacklists", default=[])
+def load_blacklists(tenant_id) -> list:
+    """Read a tenant's blacklists block from the settings row (30s TTL cache)."""
+    raw = _settings_block("blacklists", tenant_id, default=[])
     return raw if isinstance(raw, list) else []
 
 
@@ -2050,7 +2109,7 @@ def blacklist_action(meta: dict, client_ip: str, lists: list, campaign_id):
     return "mark" if matched_mark else None
 
 
-async def apply_blacklists(request: Request, campaign) -> "str | None":
+async def apply_blacklists(request: Request, campaign, tenant_id) -> "str | None":
     """Evaluate the G44 blacklists for an inbound hit.
 
     Returns "block" (caller serves 404 untracked, like a bot block) or "mark"
@@ -2060,7 +2119,7 @@ async def apply_blacklists(request: Request, campaign) -> "str | None":
     hit. The hit meta (sub_id_1..10, country, os, ...) is built with the same
     enrich_meta used downstream so blacklist values match stored values.
     """
-    lists = load_blacklists()
+    lists = load_blacklists(tenant_id)
     if not lists:
         return None
     campaign_id = campaign["id"] if campaign is not None else None
@@ -2141,16 +2200,16 @@ def _dup_hits_in_window(visitor_key: str) -> int:
 
 
 def compute_fraud_score(*, visitor_key: str, ip: str, ua: str, isp: str,
-                        is_bot: bool) -> tuple[int, bool, list]:
+                        is_bot: bool, tenant_id) -> tuple[int, bool, list]:
     """Heuristic 0-100 fraud score. Returns (score, verified_crawler, reasons).
 
     Signals: +50 bot (ua-parser/rules), +30 empty/generic UA, +20 duplicate
     visitor (process-local 10-min window), +15 hosting/datacenter ISP,
     +25 IP in the user suspicious-range list, +50 crawler-UA spoof (crawler
     claimed but not from a verified crawler net). Cap 100.
-    Both CIDR lists are settings-overridable via settings.fraud.
+    Both CIDR lists are settings-overridable per tenant via settings.fraud.
     """
-    fraud_cfg = _settings_block("fraud")
+    fraud_cfg = _settings_block("fraud", tenant_id)
     verified_cidrs = fraud_cfg.get("verified_cidrs") or VERIFIED_CRAWLER_CIDRS
     suspicious_cidrs = fraud_cfg.get("suspicious_cidrs") or []
     try:
@@ -2242,7 +2301,11 @@ async def evaluate_campaign_shield(request: Request, campaign) -> "str | None":
     referer = request.headers.get("referer", "") or ""
     ua = request.headers.get("user-agent", "") or ""
 
-    fraud_cfg = _settings_block("fraud")
+    try:
+        tenant_id = campaign["tenant_id"] if campaign is not None else None
+    except (TypeError, KeyError):
+        tenant_id = None
+    fraud_cfg = _settings_block("fraud", tenant_id)
     verified_cidrs = fraud_cfg.get("verified_cidrs") or VERIFIED_CRAWLER_CIDRS
     is_verified_crawler = bool(client_ip) and _ip_in_cidrs(client_ip, verified_cidrs)
 
@@ -2321,6 +2384,18 @@ async def apply_tracking_gate(request: Request, label: str, campaign=None) -> Re
     mirrors it via the same evaluate_campaign_shield helper — keep the two
     call sites in sync when adding new gate checks.
     """
+    # The gate reads the workspace's rules/blacklists. Prefer the resolved
+    # campaign's tenant; when the caller has none, fall back to the request
+    # Host (never to tenant 1). Unresolved → rules read as absent (fail closed
+    # for blocking rules would actually be fail-open here; a missing config is
+    # the tenant's configured state).
+    try:
+        tenant_id = int(campaign["tenant_id"]) if campaign is not None else None
+    except (TypeError, KeyError, ValueError):
+        tenant_id = None
+    if tenant_id is None:
+        tenant_id = await _request_host_tenant(app.state.pg, request)
+
     def _gate_campaign_id():
         try:
             return campaign["id"] if campaign is not None else None
@@ -2334,7 +2409,7 @@ async def apply_tracking_gate(request: Request, label: str, campaign=None) -> Re
             None, None, None, None, "blocked", reason, request,
             tenant_id=(campaign["tenant_id"] if campaign is not None else None))
 
-    rule, blocked = await apply_bot_rules(request)
+    rule, blocked = await apply_bot_rules(request, tenant_id)
     if rule:
         request.state.bot_marked = rule.get("type")
         if blocked:
@@ -2358,7 +2433,7 @@ async def apply_tracking_gate(request: Request, label: str, campaign=None) -> Re
 
     # G44 traffic-quality blacklists: "block" → untracked 404 (same as a bot
     # block); "mark" → bot_marked, track_event flags the row is_bot.
-    bl_action = await apply_blacklists(request, campaign)
+    bl_action = await apply_blacklists(request, campaign, tenant_id)
     if bl_action == "block":
         log_track(f"🚫 Blacklist-blocked visit to '{label}'")
         _log_blocked("blacklist")
@@ -2389,10 +2464,11 @@ async def apply_tracking_gate(request: Request, label: str, campaign=None) -> Re
     return None
 
 
-def notify_telegram_conversion(click_id: str, status: str, payout: float, row: dict = None):
+def notify_telegram_conversion(click_id: str, status: str, payout: float, row: dict = None,
+                               tenant_id=None):
     """Send a Telegram message for a conversion (runs in a background task)."""
     try:
-        cfg = load_telegram_config()
+        cfg = load_telegram_config(tenant_id)
         if not cfg.get("enabled"):
             return
         statuses = cfg.get("statuses") or {}
@@ -2429,9 +2505,10 @@ def notify_telegram_conversion(click_id: str, status: str, payout: float, row: d
 
 
 async def notify_telegram_conversion_async(click_id: str, status: str, payout: float,
-                                           row: dict = None):
+                                           row: dict = None, tenant_id=None):
     """Event-loop-safe wrapper: the blocking HTTP call runs in a thread."""
-    await asyncio.to_thread(notify_telegram_conversion, click_id, status, payout, row)
+    await asyncio.to_thread(notify_telegram_conversion, click_id, status, payout, row,
+                            tenant_id)
 
 
 async def click_attribution_from_clickhouse(click_id: str) -> dict:
@@ -2857,7 +2934,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
         everything else (built-ins, Mode='repeated', status upgrades) UPSERTs
         onto the matched row exactly as today.
         """
-        if (conversion_status_mode(status) == "new"
+        if (conversion_status_mode(status, tenant_id_value) == "new"
                 and normalize_status(str(row["status"] or "")) == status):
             return await insert_new_conversion(conn, row["click_id"])
         return await apply_to_row(conn, row)
@@ -2877,7 +2954,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
         Values are captured now (request headers/cookies/body are not readable
         once the response is sent); the task itself runs off the request path.
         """
-        if not load_meta_capi_config().get("enabled"):
+        if not load_meta_capi_config(tenant_id_value).get("enabled"):
             return
         fbc, fbp = meta_click_identifiers(request, row)
         email, phone = meta_customer_identity(identity or {})
@@ -2901,7 +2978,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             "click_id": str(cid),
             "status": status,
             "payout": payout_value,
-            "currency": currency or load_meta_capi_config().get("default_currency") or "USD",
+            "currency": currency or load_meta_capi_config(tenant_id_value).get("default_currency") or "USD",
             "fbc": fbc, "fbp": fbp,
             "client_ip": resolve_client_ip(request),
             "user_agent": request.headers.get("user-agent", "") or "",
@@ -2910,7 +2987,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             "campaign_config": campaign_config,
             "traffic_source_id": traffic_source_id,
             "offer_id": offer_id,
-            "tenant_id": (rowd.get("tenant_id") if row is not None else None) or 1,
+            "tenant_id": int(tenant_id_value),
             "event_time": int(time.time()),
         }
         background_tasks.add_task(send_meta_capi, conv)
@@ -3038,7 +3115,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                         if enriched:
                             background_tasks.add_task(
                                 notify_telegram_conversion_async, vclick, status,
-                                payout_value, dict(enriched))
+                                payout_value, dict(enriched), tenant_id_value)
                             await fanout(conn, enriched, vclick)
                         schedule_ch_sync(vclick)
                         schedule_meta_capi(vclick, enriched)
@@ -3051,7 +3128,8 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
                 is_duplicate = await write_conversion(conn, row)
                 if not is_duplicate:
                     background_tasks.add_task(
-                        notify_telegram_conversion_async, row["click_id"], status, payout_value, dict(row))
+                        notify_telegram_conversion_async, row["click_id"], status, payout_value,
+                        dict(row), tenant_id_value)
                     await fanout(conn, row, row["click_id"])
                     schedule_ch_sync(row["click_id"])
                     schedule_meta_capi(row["click_id"], row)
@@ -3081,7 +3159,7 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
             if enriched:
                 background_tasks.add_task(
                     notify_telegram_conversion_async, click_id, status,
-                    payout_value, dict(enriched))
+                    payout_value, dict(enriched), tenant_id_value)
                 await fanout(conn, enriched, click_id)
             schedule_ch_sync(click_id)
             schedule_meta_capi(click_id, enriched)
@@ -3096,7 +3174,8 @@ async def record_conversion(click_id: str, status: str, payout_value: float, req
         # skipped for duplicate postbacks so chat stays spam-free
         if not is_duplicate:
             background_tasks.add_task(
-                notify_telegram_conversion_async, click_id, status, payout_value, dict(row))
+                notify_telegram_conversion_async, click_id, status, payout_value,
+                dict(row), tenant_id_value)
             await fanout(conn, row, click_id)
             schedule_ch_sync(click_id)
             schedule_meta_capi(click_id, row)
@@ -3200,11 +3279,22 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
     request_url = str(request.url)
     initial_tid = _first_postback_param(raw_params, POSTBACK_TRANSACTION_ALIASES)
 
-    # Tenant of the conversion once it is resolved (record_conversion returns
-    # it). Postbacks logged before that — malformed status/payout, denied
-    # access, an unknown click — carry no resolvable workspace and land in
-    # tenant 1.
-    resolved_tenant = {"id": None}
+    # Tenant of the conversion. A request path has no campaign yet, so resolve
+    # it from the Host domain — never tenant 1. record_conversion may later
+    # resolve a (different) tenant from the click row and updates this then.
+    resolved_tenant = {"id": await _request_host_tenant(request.app.state.pg, request)}
+    if resolved_tenant["id"] is None:
+        # Unknown Host (single-host / self-hosted install, or a domain not added
+        # yet): a click row still knows its tenant, so prefer that. A clickless
+        # postback has nothing to resolve from — fall back to the primary
+        # workspace (tenant 1). Host-scoped routing above is what keeps tenants
+        # apart; only an unresolved Host reaches this fallback.
+        try:
+            _attr = await click_attribution_from_clickhouse(click_id)
+        except Exception:
+            _attr = {}
+        _tid = _attr.get("tenant_id")
+        resolved_tenant["id"] = int(_tid) if _tid is not None else 1
 
     def log_postback(result: str, reason: str, log_status=None, log_payout=None,
                      params=None) -> None:
@@ -3220,7 +3310,7 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
             tenant_id=resolved_tenant["id"])
 
     # Built-ins (lead/sale/upsale/rejected/hold/trash) + configured custom statuses
-    if status not in valid_conversion_statuses():
+    if status not in valid_conversion_statuses(resolved_tenant["id"]):
         log_postback("rejected", "Invalid status")
         raise HTTPException(status_code=400, detail="Invalid status")
 
@@ -3235,7 +3325,7 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
         raise HTTPException(status_code=400, detail="Invalid payout format")
 
     # Postback protection (optional secret key + IP allowlist, from Settings)
-    sec = load_postback_security()
+    sec = load_postback_security(resolved_tenant["id"])
     allowed, deny_reason = check_postback_access(request, sec)
     if not allowed:
         log_track(f"🚫 Postback denied for {click_id}: {deny_reason}")
@@ -3249,7 +3339,8 @@ async def _process_postback(click_id: str, status: str, payout: str, request: Re
     # before fanout; the first matching rule wins and `reject` is terminal.
     rule_data = dict(params)
     rule_data["click_id"] = click_id
-    rule_result = apply_postback_rules(status, payout_value, rule_data, request)
+    rule_result = apply_postback_rules(status, payout_value, rule_data, request,
+                                       resolved_tenant["id"])
     if rule_result["rejected"]:
         log_track(f"🚫 Postback rejected by rule for {click_id}: {rule_result['reason']}")
         log_postback("rule_rejected", rule_result["reason"],
@@ -3360,7 +3451,7 @@ async def conversion_pixel(campaign_alias: str, request: Request, background_tas
         return respond(status_code=400, detail="Missing click_id: pass ?click_id= or set the aaa_cid cookie")
 
     status = normalize_status(request.query_params.get("status") or "lead")
-    if status not in valid_conversion_statuses():
+    if status not in valid_conversion_statuses(campaign["tenant_id"]):
         return respond(status_code=400, detail="Invalid status")
 
     try:
@@ -3387,8 +3478,9 @@ async def domain_page_default_campaign(request: Request) -> Response:
     if campaign is None:
         return Response(content="404 Not Found", status_code=404, media_type="text/html")
 
-    # Same bot-rule + opt-out gate as the alias routes (was missing here)
-    blocked = await apply_tracking_gate(request, host or "default")
+    # Same bot-rule + opt-out gate as the alias routes (was missing here). The
+    # resolved campaign supplies the gate's tenant.
+    blocked = await apply_tracking_gate(request, host or "default", campaign)
     if blocked is not None:
         return blocked
 
@@ -3404,12 +3496,17 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
         if host:
             pg = app.state.pg
             async with pg.acquire() as conn:
-                # domains are per tenant; pick deterministically (lowest tenant)
-                # rather than an arbitrary row when the host name is shared.
-                row = await conn.fetchrow(
+                # domains are per tenant and the schema allows two tenants to
+                # share a host string. That is ambiguous — fail closed (skip the
+                # 404 handler) rather than silently serving the lowest tenant.
+                rows = await conn.fetch(
                     "SELECT * FROM domains WHERE domain = $1 "
-                    "ORDER BY tenant_id ASC LIMIT 1", host)
+                    "ORDER BY tenant_id ASC LIMIT 2", host)
                 log_track("🔁 domain lookup for 404 handling")
+                row = rows[0] if len(rows) == 1 else None
+                if len(rows) > 1:
+                    log_track(f"⚠ Ambiguous domain '{host}' for 404 handling "
+                              f"— refusing (fail closed)")
                 if row and row['handle_404'] == 'handle':
                     log_track('HANDLE 404')
                     return await domain_page_default_campaign(request)
@@ -3934,7 +4031,7 @@ def _postback_rule_payout(action: dict, current: float) -> float:
 
 
 def apply_postback_rules(status: str, payout_value: float, data: dict,
-                         request: Request) -> dict:
+                         request: Request, tenant_id) -> dict:
     """Evaluate the global postback-processing rules (settings.postback_rules).
 
     Runs on every inbound /pb postback BEFORE the conversion row is written and
@@ -3944,7 +4041,7 @@ def apply_postback_rules(status: str, payout_value: float, data: dict,
     stops the evaluation. Returns {"rejected", "reason", "status", "payout"}.
     """
     result = {"rejected": False, "reason": "", "status": status, "payout": payout_value}
-    rules = load_postback_rules()
+    rules = load_postback_rules(tenant_id)
     if not rules:
         return result
 
@@ -3974,7 +4071,7 @@ def apply_postback_rules(status: str, payout_value: float, data: dict,
             new_status = normalize_status(action.get("value"))
             # Only remap to a status the engine accepts — an unknown value would
             # otherwise poison the later INSERT/UPDATE against the status enum.
-            if new_status and new_status in valid_conversion_statuses():
+            if new_status and new_status in valid_conversion_statuses(tenant_id):
                 result["status"] = new_status
                 meta["status"] = new_status
         elif atype == "set_payout":
@@ -4050,12 +4147,12 @@ def _meta_refresh_html(url: str) -> Response:
     return HTMLResponse(html_doc)
 
 
-def hide_referrer_hop_url(request: Request, url: str) -> str:
+def hide_referrer_hop_url(request: Request, url: str, tenant_id) -> str:
     """Secondary referrer-hiding domain: when `tracking.referrer_hiding_domain`
     is set (and differs from the current host), the hide-referrer hop is served
     from that domain instead of the campaign's own host, so the destination
     never sees the campaign domain. Empty/unset = no hop (current behavior)."""
-    hiding = str(load_tracking_settings().get("referrer_hiding_domain") or "").strip()
+    hiding = str(load_tracking_settings(tenant_id).get("referrer_hiding_domain") or "").strip()
     if not hiding:
         return ""
     current_host = (request.headers.get("host") or "").split(":")[0].strip().lower()
@@ -4064,7 +4161,7 @@ def hide_referrer_hop_url(request: Request, url: str) -> str:
     return f"https://{hiding}/__hide_referrer?" + urlencode({"u": url})
 
 
-def meta_refresh_redirect(url: str, request: Request = None) -> Response:
+def meta_refresh_redirect(url: str, request: Request = None, tenant_id=None) -> Response:
     """Redirect via an HTML meta refresh so the browser sends no referrer.
 
     With a configured referrer-hiding domain, the browser is first sent (302)
@@ -4072,7 +4169,7 @@ def meta_refresh_redirect(url: str, request: Request = None) -> Response:
     the offer never sees the campaign's own host in the referrer chain.
     """
     if request is not None:
-        hop = hide_referrer_hop_url(request, url)
+        hop = hide_referrer_hop_url(request, url, tenant_id)
         if hop:
             return RedirectResponse(hop, status_code=302)
     return _meta_refresh_html(url)
@@ -4285,7 +4382,7 @@ async def execute_funnel(campaign, request: Request, config: dict, meta_data: di
 
     if config.get("hide_referrer"):
         def campaign_redirect(url):
-            return meta_refresh_redirect(url, request)
+            return meta_refresh_redirect(url, request, campaign["tenant_id"])
     else:
         def campaign_redirect(url):
             return RedirectResponse(url)
@@ -4485,7 +4582,7 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
     # {_md5}, …) via the shared substitution helper.
     if chosen is None:
         fallback_url = (config.get("fallback_url") or "").strip()
-        global_fallback = (_settings_block("fallback_url", "") or "").strip()
+        global_fallback = (_settings_block("fallback_url", campaign["tenant_id"], "") or "").strip()
         if fallback_url:
             if "{" in fallback_url:
                 fallback_url = fill_postback_template(
@@ -4495,7 +4592,7 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
                 global_fallback, _click_macro_map(campaign, meta_data))
         if fallback_url:
             if config.get("hide_referrer"):
-                response = meta_refresh_redirect(fallback_url, request)
+                response = meta_refresh_redirect(fallback_url, request, campaign["tenant_id"])
             else:
                 response = RedirectResponse(fallback_url)
         else:
@@ -4509,7 +4606,7 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
         # Respect per-campaign "hide referrer" on outbound redirects
         if config.get("hide_referrer"):
             def campaign_redirect(url):
-                return meta_refresh_redirect(url, request)
+                return meta_refresh_redirect(url, request, campaign["tenant_id"])
         else:
             def campaign_redirect(url):
                 return RedirectResponse(url)
@@ -4838,7 +4935,7 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
     """
 
     # Prefetch/prerender hits never count as real visits — no ClickHouse row.
-    if request_is_prefetch(request):
+    if request_is_prefetch(request, campaign["tenant_id"]):
         log_track("🙈 Prefetch hit — skipping track_event row")
         return
 
@@ -4930,7 +5027,8 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
         ip=str(meta_data.get("ip") or ""),
         ua=str(meta_data.get("user_agent") or ""),
         isp=str(meta_data.get("isp") or ""),
-        is_bot=bool(meta_data.get("is_bot")) or bool(getattr(request.state, "bot_marked", None)))
+        is_bot=bool(meta_data.get("is_bot")) or bool(getattr(request.state, "bot_marked", None)),
+        tenant_id=campaign["tenant_id"])
     if getattr(request.state, "honeypot_flagged", False):
         score, verified_crawler, reasons = 100, False, reasons + ["honeypot"]
     if getattr(request.state, "shield_watch", False):
@@ -4949,7 +5047,7 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
     # "Do not assign costs for bot clicks" (default off): a bot-flagged row
     # carries cost 0, so cost aggregations (SUM(cost) in clickHouse.py, no
     # is_bot filter) are unaffected without touching that module.
-    if result_row.get("is_bot") and tracking_skip_bot_costs() and "cost" in result_row:
+    if result_row.get("is_bot") and tracking_skip_bot_costs(campaign["tenant_id"]) and "cost" in result_row:
         result_row["cost"] = 0.0
 
     if click is not None:
@@ -4984,7 +5082,7 @@ async def track_event(campaign, request: Request, click: bool = None, extra_meta
     # G79 privacy: anonymize IPs at rest when settings.privacy.anonymize_ip is on
     # (IPv4 → last octet zeroed, e.g. 1.2.3.4 → 1.2.3.0; IPv6 → last 16 bits
     # zeroed). Default off.
-    if load_privacy_settings().get("anonymize_ip"):
+    if load_privacy_settings(campaign["tenant_id"]).get("anonymize_ip"):
         ip_val = result_row.get("ip")
         if ip_val:
             try:
@@ -5171,33 +5269,33 @@ OPT_OUT_COOKIE = "aaa_optout"
 OPT_OUT_TTL = 10 * 365 * 24 * 3600
 
 
-def load_privacy_settings() -> dict:
-    """Read the privacy block from the settings row (30s TTL cache).
+def load_privacy_settings(tenant_id) -> dict:
+    """Read a tenant's privacy block from the settings row (30s TTL cache).
 
     Shape: {"anonymize_ip": bool} — default off. The settings UI toggle is a
     separate deliverable; the engine only reads this key.
     """
-    return _settings_block("privacy")
+    return _settings_block("privacy", tenant_id)
 
 
 # ─── Tracking-plane toggles (prefetch / bot costs / hiding domain) ──
-def load_tracking_settings() -> dict:
-    """Read the tracking block from the settings row (30s TTL cache).
+def load_tracking_settings(tenant_id) -> dict:
+    """Read a tenant's tracking block from the settings row (30s TTL cache).
 
     Shape (all optional):
       {"prefetch_filter_enabled": bool (default True),
        "skip_bot_costs": bool (default False),
        "referrer_hiding_domain": str (default "")}
     """
-    return _settings_block("tracking")
+    return _settings_block("tracking", tenant_id)
 
 
-def tracking_prefetch_filter_enabled() -> bool:
-    return bool(load_tracking_settings().get("prefetch_filter_enabled", True))
+def tracking_prefetch_filter_enabled(tenant_id) -> bool:
+    return bool(load_tracking_settings(tenant_id).get("prefetch_filter_enabled", True))
 
 
-def tracking_skip_bot_costs() -> bool:
-    return bool(load_tracking_settings().get("skip_bot_costs", False))
+def tracking_skip_bot_costs(tenant_id) -> bool:
+    return bool(load_tracking_settings(tenant_id).get("skip_bot_costs", False))
 
 
 # ─── Meta Conversions API (CAPI) ────────────────────────────────────
@@ -5222,9 +5320,9 @@ META_CAPI_DEFAULTS = {
 }
 
 
-def load_meta_capi_config() -> dict:
-    """Read the meta_capi block, merged over the defaults (30s TTL cache)."""
-    raw = _settings_block("meta_capi", default={})
+def load_meta_capi_config(tenant_id) -> dict:
+    """Read a tenant's meta_capi block, merged over the defaults (30s TTL cache)."""
+    raw = _settings_block("meta_capi", tenant_id, default={})
     cfg = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
            for k, v in META_CAPI_DEFAULTS.items()}
     if isinstance(raw, dict):
@@ -5462,7 +5560,7 @@ async def send_meta_capi(conv: dict):
     config applies. Honors enabled/dry_run and records every outcome — a failure
     never surfaces to the visitor path."""
     try:
-        cfg = load_meta_capi_config()
+        cfg = load_meta_capi_config(conv.get("tenant_id"))
         if not cfg.get("enabled"):
             return
         status = str(conv.get("status") or "")
@@ -5598,14 +5696,14 @@ async def conversion_status_for(visitor_id: str, campaign_id) -> str:
 
 
 # ─── Prefetch-request filtering ─────────────────────────────────────
-def request_is_prefetch(request: Request) -> bool:
+def request_is_prefetch(request: Request, tenant_id) -> bool:
     """True when the hit is a browser prefetch/prerender, not a real visit.
 
     Honors the standard `Purpose: prefetch` / `Sec-Purpose: prefetch` headers
     plus the legacy `X-Purpose` / `X-Moz` variants. Toggle default ON because
     prefetches otherwise inflate visit/click-out stats.
     """
-    if not tracking_prefetch_filter_enabled():
+    if not tracking_prefetch_filter_enabled(tenant_id):
         return False
     for header in ("purpose", "sec-purpose", "x-purpose", "x-moz"):
         value = (request.headers.get(header) or "").lower()
@@ -6042,7 +6140,7 @@ async def impression_tracker(campaign_alias: str, request: Request) -> Response:
         log_track(f"❌ Impression for unknown campaign '{campaign_alias}'")
         return Response(content="Not Found", status_code=404, media_type="text/html")
 
-    rule, blocked = await apply_bot_rules(request)
+    rule, blocked = await apply_bot_rules(request, campaign["tenant_id"])
     if rule:
         request.state.bot_marked = rule.get("type")
     if blocked:
@@ -6108,12 +6206,12 @@ async def click_api(campaign_alias: str, request: Request) -> Response:
         path=f"/click-api/{campaign_alias}", method="POST",
         query_string=synth_query.encode("utf-8"))
 
-    rule, blocked = await apply_bot_rules(synth)
+    rule, blocked = await apply_bot_rules(synth, campaign["tenant_id"])
     if rule:
         synth.state.bot_marked = rule.get("type")
 
     # G44 blacklists mirror of apply_tracking_gate.
-    bl_action = await apply_blacklists(synth, campaign)
+    bl_action = await apply_blacklists(synth, campaign, campaign["tenant_id"])
     if bl_action == "block":
         blocked = True
     elif bl_action == "mark" and not getattr(synth.state, "bot_marked", None):
@@ -6243,7 +6341,7 @@ async def simulate_traffic(campaign_alias: str, request: Request) -> Response:
         )
     )
 
-    bot_cfg = load_bot_rules()
+    bot_cfg = load_bot_rules(campaign["tenant_id"])
     bot_rules = (bot_cfg.get("rules") or []) if bot_cfg.get("enabled") else []
 
     stats = {
@@ -6357,7 +6455,10 @@ async def meta_capi_test(request: Request):
     dry_run on (the default) no HTTP request is made and the built payload is
     returned instead. Uses test_event_code when set."""
     await require_admin(request)
-    cfg = load_meta_capi_config()
+    # Per-tenant config: resolve the workspace from the request Host (never
+    # default to tenant 1). Unresolved reads as not-configured.
+    tenant_id = await _request_host_tenant(request.app.state.pg, request)
+    cfg = load_meta_capi_config(tenant_id)
     send_statuses = cfg.get("send_statuses") or ["sale"]
     status = str(send_statuses[0]) if send_statuses else "sale"
     conv = {

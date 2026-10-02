@@ -16,6 +16,12 @@ Rules enforced here (the server is the authority; the UI mirrors them):
 * a member cannot change their own role (no self-escalation);
 * DELETE removes the membership only — the global user (and their sessions)
   survives;
+* an existing install-global account is only attached when it already belongs
+  to the workspace's hierarchy (its ancestors/descendants); an unrelated
+  account — including a platform operator — is refused (409/403) and must be
+  brought in through the consent-based invitation flow;
+* the names reserved for the platform operator namespace cannot be minted or
+  attached by a workspace admin (see ``app_pages/reserved.py``);
 * the tenant's ``seats`` limit, when set, bounds POST /api/members.
 """
 from typing import Optional
@@ -26,6 +32,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app_pages.reserved import is_reserved_username
 from auth import (TENANT_ROLES, effective_permissions, get_caller, hash_password,
                   membership_for, validate_permission_scopes)
 from db import get_db
@@ -112,6 +119,45 @@ def _membership_row(db: Session, user_id: int, tenant_id: int):
         {"u": int(user_id), "t": int(tenant_id)}).fetchone()
 
 
+def _tenant_family(db: Session, tenant_id: int) -> set:
+    """The target tenant plus its ancestors and descendants (its hierarchy).
+
+    A workspace manager may only attach an existing account that already
+    belongs to this family. A user whose memberships are all in an unrelated
+    workspace is refused: the consent-based invitation flow is the only way
+    into a workspace they do not already belong to."""
+    tid = int(tenant_id)
+    family = {tid}
+    # Ancestors: walk parent_tenant_id upward, stopping on a cycle.
+    current = tid
+    while True:
+        row = db.execute(text("SELECT parent_tenant_id FROM tenants WHERE id = :t"),
+                         {"t": current}).fetchone()
+        if not row or row[0] is None:
+            break
+        parent = int(row[0])
+        if parent in family:
+            break
+        family.add(parent)
+        current = parent
+    # Descendants: recursive CTE; UNION dedupes, so a malformed cycle terminates.
+    rows = db.execute(text(
+        "WITH RECURSIVE tree(id) AS ("
+        "  SELECT id FROM tenants WHERE id = :t"
+        "  UNION"
+        "  SELECT child.id FROM tenants child JOIN tree ON child.parent_tenant_id = tree.id"
+        ") SELECT id FROM tree"),
+        {"t": tid}).fetchall()
+    family.update(int(r[0]) for r in rows)
+    return family
+
+
+def _user_tenant_ids(db: Session, user_id: int) -> set:
+    rows = db.execute(text("SELECT tenant_id FROM tenant_memberships WHERE user_id = :u"),
+                      {"u": int(user_id)}).fetchall()
+    return {int(r[0]) for r in rows}
+
+
 @router.get("")
 @router.get("/")
 def list_members(request: Request, tenant_id: Optional[int] = None,
@@ -195,8 +241,9 @@ def add_member(data: MemberAdd, request: Request, tenant_id: Optional[int] = Non
     username = (data.username or "").strip()
     if not username:
         raise HTTPException(status_code=400, detail="username is required")
-    if username.lower() == "tracker_admin":
-        raise HTTPException(status_code=403, detail="Cannot add the built-in admin account")
+    if is_reserved_username(username):
+        raise HTTPException(status_code=403,
+                            detail="That username is reserved for the platform operator")
 
     seats = db.execute(text("SELECT seats FROM tenants WHERE id = :t"), {"t": tid}).scalar()
     if seats is not None:
@@ -212,6 +259,25 @@ def add_member(data: MemberAdd, request: Request, tenant_id: Optional[int] = Non
         created_user = False
         if user_row:
             user_id = int(user_row[0])
+            if not is_admin:
+                # An existing install-global account must not be attached to an
+                # arbitrary workspace: doing so would be a cross-tenant grant,
+                # and could hand a workspace a platform operator's account.
+                # Only accounts already inside this workspace's hierarchy may
+                # join directly; everyone else must go through the
+                # consent-based invitation flow (app_pages/invitations.py).
+                target_is_admin = db.execute(
+                    text("SELECT is_admin FROM users WHERE id = :u"),
+                    {"u": user_id}).scalar()
+                if target_is_admin:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Cannot add a platform operator account to a workspace")
+                if not (_user_tenant_ids(db, user_id) & _tenant_family(db, tid)):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This account belongs to an unrelated workspace; "
+                               "invite it through the invitation flow instead")
         else:
             if not data.password:
                 raise HTTPException(status_code=400,

@@ -41,6 +41,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app_pages.reserved import is_reserved_username
 from auth import (TENANT_ROLES, caller_role_in_tenant, effective_tenant_role,
                   get_caller, get_session_username, hash_password, is_platform_operator,
                   list_user_memberships, managed_ancestor_role, session_token,
@@ -250,6 +251,9 @@ def create_tenant(data: TenantCreate, request: Request, db: Session = Depends(ge
 
     if data.username:
         username = data.username.strip()
+        if is_reserved_username(username):
+            raise HTTPException(status_code=403,
+                                detail="That username is reserved for the platform operator")
         user_row = db.execute(text("SELECT id FROM users WHERE username = :u"),
                               {"u": username}).fetchone()
         if user_row:

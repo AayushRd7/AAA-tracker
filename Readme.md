@@ -181,12 +181,12 @@ traceback when login returns 500.
 make restart
 ```
 
-### Super admin user login 
+### Super admin user login
 
-```bash
-login tracker_admin 
-password admin 
-```
+The seeded `tracker_admin` account has no usable default password. On the first
+`make install` the installer generates a random password (or uses the
+`AAA_ADMIN_PASSWORD` you set in `.env`) and prints it once — store it then; it is
+not shown again. The tenant-1 API token is generated the same way.
 
 ### Run Locally
 
@@ -199,8 +199,9 @@ By default:
 - Dashboard will be available at `https://localhost/backend`
 
 Opening the bare host (`http://your-server-ip/`) redirects to the dashboard, so you don't
-need to remember the `/backend` path. First login is `tracker_admin` / `admin` — change it
-immediately after signing in.
+need to remember the `/backend` path. The admin password and API token are generated at
+install and printed once — store them then, or set `AAA_ADMIN_PASSWORD` before `make install`
+to pick the password yourself.
 
 Both HTTP and HTTPS installs work: the session cookie is marked `Secure` only when the
 request actually arrived over HTTPS (nginx forwards `X-Forwarded-Proto`), so browsers don't
@@ -261,6 +262,7 @@ secrets). `make install` derives `DOCKER_GID` from the host automatically. The k
 | `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (the backend and the installer read it) |
 | `CLICKHOUSE_HOST/PORT/USER/PASSWORD/DB` | ClickHouse connection (clicks live here) |
 | `JWT_SECRET` | Session signing — generated on first install |
+| `AAA_ADMIN_PASSWORD` / `AAA_ADMIN_USER` | Optional: the password/user the installer rotates the seeded admin account to. Generated and printed once (and recorded in `.env`) when unset |
 | `PUBLIC_BASE_URL` | The public origin, used for the OAuth callback URL and outbound links |
 | `META_APP_ID` / `META_APP_SECRET` | Meta app credentials for the OAuth Connect flow (env, never the UI) |
 | `META_GRAPH_VERSION` | Graph API version (default `v26.0`); a per-workspace setting overrides it |
@@ -284,7 +286,7 @@ creates and exits non-zero on the first failure.
 
 ```bash
 TEST_BASE_URL=https://localhost TEST_INSECURE=1 \
-TEST_USER=tracker_admin TEST_PASS=admin \
+TEST_USER=tracker_admin TEST_PASS=<the password printed at install> \
 python3 backend/tests/api_smoke.py
 ```
 
@@ -292,7 +294,8 @@ Environment variables:
 
 - `TEST_BASE_URL` — base URL of the running instance (default: `http://localhost`).
 - `TEST_INSECURE=1` — skip TLS certificate verification (needed for the self-signed local cert).
-- `TEST_USER` / `TEST_PASS` — login credentials (default: `tracker_admin` / `admin`).
+- `TEST_USER` / `TEST_PASS` — login credentials. The password has no default: use the one
+  printed once at install (also recorded as `AAA_ADMIN_PASSWORD` in `.env`).
 - The Copilot provider round-trip checks need the **instance** (not this command) to point
   `OPENROUTER_BASE_URL` at a bindable mock on the host, e.g. `http://host.docker.internal:18999`; the
   provider endpoint is env-fixed, so without it those checks are skipped and the contract checks still run.

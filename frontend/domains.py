@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import PlainTextResponse
 
 import socket
@@ -7,7 +7,20 @@ from pathlib import Path
 
 import asyncio
 
-router = APIRouter()
+
+async def require_admin_dep(request: Request):
+    """Admin gate for every domains route.
+
+    These endpoints live on the public tracking host (nginx proxies /), so an
+    unauthenticated visitor must never be able to trigger certbot or reload
+    nginx. require_admin lives in app.py, which imports this module — import it
+    lazily at request time to avoid a circular import.
+    """
+    from app import require_admin
+    await require_admin(request)
+
+
+router = APIRouter(dependencies=[Depends(require_admin_dep)])
 
 
 def _resolve(domain: str) -> list:

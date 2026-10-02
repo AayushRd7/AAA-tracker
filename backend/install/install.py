@@ -9,7 +9,9 @@ this on an existing install creates whatever is missing and changes nothing else
 Exits non-zero on failure so callers (make install) notice.
 """
 import argparse
+import json
 import os
+import secrets
 import sys
 
 import psycopg2
@@ -22,6 +24,70 @@ DB_USER = os.getenv("POSTGRES_USER", "user")
 DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "_".join(["password"] * 3))
 
 INIT_SQL_FILE = "/app/install/sql/init.sql"
+
+# The hash init.sql seeds for tracker_admin. It is the legacy md5 of a well-known
+# password, so as long as it is still present the account has never been rotated.
+PLACEHOLDER_PASSWORD_HASH = "5dfc9a6ef90c0908795b917ae279e90a"
+
+
+def _hash_password(plain: str) -> str:
+    """Hash a password exactly the way the app does (bcrypt), when importable."""
+    try:
+        sys.path.insert(0, "/app")
+        from auth import hash_password
+        return hash_password(plain)
+    except Exception:
+        import bcrypt
+        return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
+
+
+def _new_api_token() -> str:
+    """A fresh workspace API token (tenant_settings has the app-wide helper)."""
+    try:
+        sys.path.insert(0, "/app")
+        from tenant_settings import new_api_token
+        return new_api_token()
+    except Exception:
+        return secrets.token_urlsafe(24)
+
+
+def _print_once(label: str, value: str) -> None:
+    print("\n" + "=" * 68)
+    print(f"  {label}: {value}")
+    print("  Store this now; it will not be shown again.")
+    print("=" * 68 + "\n")
+
+
+def rotate_seeded_credentials(cur) -> None:
+    """Replace the seeded placeholder credentials on first install.
+
+    Idempotent and placeholder-guarded: the admin password rotates only while the
+    seeded md5 hash is still in place, and the API token only while it is empty.
+    On a second ``make install`` both are already real and nothing is printed.
+    """
+    cur.execute("SELECT password_hash FROM users WHERE username = 'tracker_admin'")
+    row = cur.fetchone()
+    if row and row[0] == PLACEHOLDER_PASSWORD_HASH:
+        password = os.getenv("AAA_ADMIN_PASSWORD") or secrets.token_urlsafe(16)
+        cur.execute("UPDATE users SET password_hash = %s WHERE username = 'tracker_admin'",
+                    (_hash_password(password),))
+        _print_once("admin password for 'tracker_admin'", password)
+
+    cur.execute("SELECT value FROM settings WHERE name = 'settings' AND tenant_id = 1")
+    row = cur.fetchone()
+    doc = None
+    if row and row[0]:
+        try:
+            doc = json.loads(row[0])
+        except Exception:
+            doc = None
+    if isinstance(doc, dict) and not (doc.get("apiToken") or "").strip():
+        token = _new_api_token()
+        doc["apiToken"] = token
+        cur.execute("UPDATE settings SET value = %s "
+                    "WHERE name = 'settings' AND tenant_id = 1",
+                    (json.dumps(doc),))
+        _print_once("API token (tenant 1)", token)
 
 
 def connect_db():
@@ -91,6 +157,8 @@ def run_postgres_install(recreate: bool):
         ON CONFLICT (user_id, tenant_id) DO NOTHING
     """)
     print("  ▸ memberships: every user belongs to a workspace")
+
+    rotate_seeded_credentials(cur)
 
     cur.close()
     conn.close()

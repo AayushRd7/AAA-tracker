@@ -2265,6 +2265,12 @@ def main():
               "type": 2})
     check("audit: upload landing", r.status_code == 200 and "id" in r.json(), r.text[:150])
     au_landing_id = r.json().get("id") if r.status_code == 200 else None
+    # P0: a crafted site_folder must be refused by validation, never stored and
+    # later rmtree'd outside the landings root.
+    if au_landing_id:
+        r = s.put(f"{BASE}/landing/{au_landing_id}", data={"site_folder": "../evil"})
+        check("landings: traversal site_folder refused (400)", r.status_code == 400,
+              r.text[:120])
     r = s.post(f"{api}/offers/", json={"name": f"Smoke Audit Offer {au_pid}",
                                        "url": "https://example.com/smoke-au-offer?cid={click_id}"})
     check("audit: create offer", r.status_code == 200 and "id" in r.json(), r.text[:150])
@@ -8728,10 +8734,12 @@ print("ESCAPED-OK")
         f"SELECT id FROM conversions_data WHERE id = {int(mt_b_conv)}"))
 
     # ---- tracking plane: Host -> tenant, same alias on both sides ----
+    # An unknown Host with an alias shared by two tenants is ambiguous, so it
+    # must fail closed (404) — never silently shadow the lower tenant (the
+    # pre-P0 behaviour).
     r = requests.get(f"{BASE}/{mt_alias}", verify=not INSECURE, allow_redirects=False)
-    check("isolation: unknown host resolves the lowest tenant's alias (tenant 1)",
-          r.status_code in (301, 302, 307, 308)
-          and "example.com/mt-A" in (r.headers.get("location") or ""),
+    check("isolation: ambiguous alias on an unknown host fails closed (404)",
+          r.status_code == 404,
           f"{r.status_code} {r.headers.get('location', '')}")
     # An explicit click id (the plain redirect records an empty one) so the
     # postback below can reference exactly this click.
@@ -10578,6 +10586,25 @@ print("ESCAPED-OK")
           rc.status_code == 200 and "height: 100%" not in _sg
           and "height:100%" not in _sg,
           _sg[:120])
+
+    # P0: the legacy seeded API token must not be served anywhere.
+    check("settings page: legacy default API token absent",
+          "a1b2c3d4e5f6" not in rp.text, "legacy default token still embedded")
+
+    # P0: domains management endpoints are admin-gated — an unauthenticated
+    # visitor must not be able to trigger certbot or reload nginx.
+    for _p in ("/domain_update_ssl?domain_id=1", "/_reload_nginx"):
+        _ru = requests.get(f"{BASE}{_p}", verify=not INSECURE, allow_redirects=False)
+        check(f"domains: {_p} requires admin (401)", _ru.status_code == 401,
+              str(_ru.status_code))
+
+    # P0: PHP landings run under a hardened interpreter; the config is shipped
+    # and mounted (open_basedir + disabled functions).
+    _phpconf = "php/conf.d/zz-security.ini"
+    check("php: interpreter hardening config present",
+          os.path.exists(_phpconf)
+          and "open_basedir" in open(_phpconf, encoding="utf-8").read(),
+          "php hardening config missing")
 
     r = s.get(f"{api}/settings/")
     check("settings: document + rev returned",

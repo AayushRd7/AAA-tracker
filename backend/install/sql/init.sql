@@ -469,13 +469,15 @@ CREATE INDEX IF NOT EXISTS idx_conversions_status ON conversions_data(status);
 
 
 -- Add initial data
+-- apiToken is intentionally empty; install.py generates one on first install and
+-- prints it once. A non-empty token here would be a guessable default credential.
 INSERT INTO settings (name, value, tenant_id) VALUES
 ('settings', '{
   "domain": "",
   "currency": "USD",
   "timezone": "UTC",
   "autoUpdateReports": true,
-  "apiToken": "a1b2c3d4e5f6",
+  "apiToken": "",
   "enableLogging": false
 }', 1) ON CONFLICT (tenant_id, name) DO NOTHING;
 
@@ -502,11 +504,12 @@ INSERT INTO settings (name, value, tenant_id) VALUES
 
 
 -- Create the initial tracker_admin user
+-- placeholder hash; install.py replaces this with a random password
 INSERT INTO users (username, email, password_hash, is_admin, active)
 VALUES (
     'tracker_admin',
     'admin@example.com',
-    '5dfc9a6ef90c0908795b917ae279e90a', /* akm_ + admin */
+    '5dfc9a6ef90c0908795b917ae279e90a',
     TRUE,
     TRUE
 ) ON CONFLICT (username) DO NOTHING;

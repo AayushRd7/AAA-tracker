@@ -13,8 +13,14 @@ bad()  { printf '  %s%s✗%s %s\n' "$RD" "$B" "$R" "$1"; FAILED=1; }
 warn() { printf '  %s%s!%s %s\n' "$Y" "$B" "$R" "$1"; }
 hdr()  { printf '\n  %s%s%s%s\n' "$B" "$C" "$1" "$R"; }
 FAILED=0
-USER_NAME="${TEST_USER:-tracker_admin}"
-USER_PASS="${TEST_PASS:-admin}"
+
+# The installer rotates the seeded admin account and prints the password once, so
+# read credentials from the environment (or .env) instead of assuming a default.
+if [ -f .env ]; then
+    set +u; set -a; . ./.env 2>/dev/null || true; set +a; set -u
+fi
+USER_NAME="${TEST_USER:-${AAA_ADMIN_USER:-tracker_admin}}"
+USER_PASS="${TEST_PASS:-${AAA_ADMIN_PASSWORD:-}}"
 
 printf '\n  %s%s  AAA TRACKER%s %s·%s %s%sdoctor%s\n' "$B" "$C" "" "$D" "$R" "$B" "" "$R"
 printf '%s  ─────────────────────────────────────────────%s\n' "$D" "$R"
@@ -31,7 +37,7 @@ for c in tracker_postgres tracker_clickhouse tracker_backend tracker_frontend tr
 done
 
 hdr "database (from the backend container)"
-db_line=$(docker exec tracker_backend python3 -c "
+db_line=$(docker exec -e AAA_DOCTOR_USER="$USER_NAME" tracker_backend python3 -c "
 import os, psycopg2
 try:
     c = psycopg2.connect(host=os.getenv('POSTGRES_HOST','tracker_postgres'), port=os.getenv('POSTGRES_PORT','5432'),
@@ -42,7 +48,7 @@ try:
     t = cur.fetchone()[0]
     cur.execute('SELECT count(*) FROM users')
     u = cur.fetchone()[0]
-    cur.execute(\"SELECT count(*) FROM users WHERE username='tracker_admin' AND active\")
+    cur.execute('SELECT count(*) FROM users WHERE username=%s AND active', (os.getenv('AAA_DOCTOR_USER', 'tracker_admin'),))
     a = cur.fetchone()[0]
     print('OK tables=%d users=%d active_admin=%d' % (t, u, a))
 except Exception as e:
@@ -51,7 +57,7 @@ except Exception as e:
 
 case "$db_line" in
     OK*) ok "reachable — ${db_line#OK }"
-         case "$db_line" in *active_admin=0*) bad "no active 'tracker_admin' — run: make install-db" ;; esac ;;
+         case "$db_line" in *active_admin=0*) bad "no active admin user '$USER_NAME' — run: make install-db" ;; esac ;;
     *)   bad "cannot reach Postgres — ${db_line#ERR }" ;;
 esac
 
@@ -110,7 +116,7 @@ probe_login() {
              else
                  ok "$scheme: 200, session cookie issued ($flag)" >&2
              fi ;;
-        401) warn "$scheme: 401 — wrong credentials (default is tracker_admin / admin)" >&2 ;;
+        401) warn "$scheme: 401 — wrong credentials (set AAA_ADMIN_PASSWORD from the install output)" >&2 ;;
         403) warn "$scheme: 403 — blocked; is the login IP whitelist set? ${body}" >&2 ;;
         429) warn "$scheme: 429 — too many attempts, wait a minute" >&2 ;;
         500|502|503|"") bad "$scheme: ${code:-no response} — backend error. ${body}" >&2 ;;

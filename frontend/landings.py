@@ -43,6 +43,12 @@ os.makedirs(LANDINGS_DIR, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'.html', '.php', '.css', '.js', '.jpg', '.jpeg', '.png'}
 
+# Zip-upload caps: reject oversized / zip-bomb archives before extractall().
+ZIP_MAX_ENTRIES = 2000
+ZIP_MAX_ENTRY_BYTES = 50 * 1024 * 1024      # 50 MB per entry
+ZIP_MAX_TOTAL_BYTES = 200 * 1024 * 1024     # 200 MB uncompressed total
+ZIP_MAX_RATIO = 100                          # uncompressed : compressed hard cap
+
 
 # ─── G73 — lander grabber ──────────────────────────────────────────
 FOLDER_NAME_RE = re.compile(r"^[a-z0-9_]{1,250}$")
@@ -63,6 +69,40 @@ def validate_folder_name(folder: str) -> str:
     if folder in (".", "..") or os.sep in folder:
         raise HTTPException(status_code=400, detail="Invalid folder name.")
     return folder
+
+
+def _within(base, target) -> bool:
+    """True only when target resolves inside base.
+
+    Uses realpath + commonpath so a sibling directory whose name merely shares
+    a prefix with base (e.g. base=/app/landings/site, target=/app/landings/site2)
+    is rejected, unlike a plain str.startswith() check."""
+    base_r = os.path.realpath(base)
+    target_r = os.path.realpath(target)
+    try:
+        return os.path.commonpath([base_r, target_r]) == base_r
+    except ValueError:
+        # different drives / mixed absolute-relative — never contained
+        return False
+
+
+def safe_folder_name(folder: str) -> str:
+    """Folder name that cannot escape the landings root.
+
+    Unlike ``validate_folder_name`` (which also enforces a charset for the
+    grabber's generated names), this only enforces the security property: no
+    path separators and no escape from LANDINGS_DIR — so multi-word names with
+    hyphens, dots or capitals stay valid.
+    """
+    f = (folder or "").strip()
+    if not f or f in (".", "..") or "\x00" in f:
+        raise HTTPException(status_code=400, detail="Invalid folder name")
+    if "/" in f or "\\" in f:
+        raise HTTPException(status_code=400,
+                            detail="Folder name must not contain path separators")
+    if not _within(LANDINGS_DIR, landing_path(f)):
+        raise HTTPException(status_code=400, detail="Invalid folder path")
+    return f[:255]
 
 
 def _check_grab_url(url: str, allow_private: bool):
@@ -318,9 +358,34 @@ def save_uploaded_file(file: UploadFile, folder_path: str):
             shutil.copyfileobj(file.file, f)
         try:
             with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
-                base = os.path.realpath(folder_path)
-                for member in zip_ref.infolist():
-                    if not os.path.realpath(os.path.join(folder_path, member.filename)).startswith(base + os.sep):
+                infos = zip_ref.infolist()
+
+                # Bomb / resource caps — checked from central-directory metadata
+                # BEFORE any bytes are written to disk.
+                if len(infos) > ZIP_MAX_ENTRIES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Archive has too many files (max {ZIP_MAX_ENTRIES}).")
+                uncompressed = 0
+                for member in infos:
+                    if member.file_size > ZIP_MAX_ENTRY_BYTES:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Archive contains a single file larger than 50 MB.")
+                    uncompressed += member.file_size
+                if uncompressed > ZIP_MAX_TOTAL_BYTES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Archive expands to more than 200 MB.")
+                compressed = os.path.getsize(temp_zip)
+                if compressed > 0 and uncompressed > compressed * ZIP_MAX_RATIO:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Archive looks like a zip bomb (compression ratio too high).")
+
+                # Zip-slip: every entry must stay inside the landing folder.
+                for member in infos:
+                    if not _within(folder_path, os.path.join(folder_path, member.filename)):
                         raise HTTPException(status_code=400, detail="Archive contains unsafe paths")
                 zip_ref.extractall(folder_path)
         finally:
@@ -362,9 +427,10 @@ async def upload_landing(
     if landing_type == 'local_file' and not file:
         raise HTTPException(status_code=400, detail="File is required for 'local_file' type.")
 
-    site_id = get_next_site_id()
     if not site_folder:
-        site_folder = f"site_{site_id}"
+        site_folder = f"site_{get_next_site_id()}"
+    else:
+        site_folder = safe_folder_name(site_folder)
 
     full_path = landing_path(site_folder)
 
@@ -510,7 +576,7 @@ async def update_landing(
     if name:
         landing.name = name[:255]
     if site_folder:
-        landing.folder = site_folder[:255]
+        landing.folder = safe_folder_name(site_folder)
     if tags is not None:
         landing.tags = tags[:250] if tags else None
     if link is not None:
@@ -527,6 +593,10 @@ async def update_landing(
     if file:
         if landing.type != 'local_file':
             raise HTTPException(status_code=400, detail="Cannot upload file for non-local_file landing")
+
+        # Never rmtree/write outside the landings root
+        if not _within(LANDINGS_DIR, folder_path):
+            raise HTTPException(status_code=400, detail="Invalid folder path")
 
         # Clear the folder before a new upload
         if os.path.exists(folder_path):
@@ -582,8 +652,11 @@ def delete_landing(landing_id: int, db: Session = Depends(get_db)):
 
     folder_path = landing_path(landing.folder)
     # Landing.type is a LandingMood enum — compare the value, not the member
-    if getattr(landing.type, "value", landing.type) == 'local_file' and os.path.exists(folder_path):
-        shutil.rmtree(folder_path)
+    if getattr(landing.type, "value", landing.type) == 'local_file':
+        if not _within(LANDINGS_DIR, folder_path):
+            raise HTTPException(status_code=400, detail="Invalid folder path")
+        if os.path.exists(folder_path):
+            shutil.rmtree(folder_path)
 
     db.delete(landing)
     db.commit()
@@ -600,7 +673,7 @@ def get_landing_folder(db: Session, landing_id: int) -> str:
     folder_path = os.path.abspath(os.path.join(base_dir, landing.folder))
 
     # Guard: the path must stay inside base_dir
-    if not folder_path.startswith(base_dir):
+    if not _within(base_dir, folder_path):
         raise HTTPException(status_code=400, detail="Invalid folder path")
 
     return folder_path
@@ -661,7 +734,7 @@ def get_file(landing_id: int, filename: str, db: Session = Depends(get_db)):
     full_path = base.joinpath(safe_rel_path).resolve()
 
     # protect against escaping the folder
-    if not str(full_path).startswith(str(base.resolve())):
+    if not _within(base, full_path):
         raise HTTPException(status_code=400, detail="Invalid file path")
 
     if not full_path.exists() or not full_path.is_file():
@@ -683,7 +756,7 @@ def save_file(landing_id: int, payload: FileSaveRequest, db: Session = Depends(g
     full_path = base.joinpath(safe_rel_path).resolve()
 
     # Security — the path must stay inside base
-    if not str(full_path).startswith(str(base.resolve())):
+    if not _within(base, full_path):
         raise HTTPException(400, "Invalid file path")
 
     # Make sure the directory exists
@@ -708,7 +781,7 @@ def upload_file(
     save_path = base.joinpath(relative_path).resolve()
 
     # Ensure path is inside base directory
-    if not str(save_path).startswith(str(base)):
+    if not _within(base, save_path):
         raise HTTPException(400, "Invalid path")
 
     ext = save_path.suffix.lower()
@@ -736,7 +809,7 @@ def save_file_plain(
     safe_rel_path = Path(filename).as_posix().lstrip("/")
     full_path = base.joinpath(safe_rel_path).resolve()
 
-    if not str(full_path).startswith(str(base)):
+    if not _within(base, full_path):
         raise HTTPException(400, "Invalid file path")
 
     full_path.parent.mkdir(parents=True, exist_ok=True)
