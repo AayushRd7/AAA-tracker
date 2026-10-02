@@ -336,6 +336,27 @@
                         <div class="caption grey--text mt-1">
                             Defaults: admins have everything; regular users get all non-admin sections with write access. Admin sections (Users, Settings, Domains) are off unless explicitly granted.
                         </div>
+                        <v-divider class="my-3"></v-divider>
+                        <div class="subtitle-2 mb-1 d-flex align-center">
+                            <v-icon small class="mr-1">mdi-eye-off-outline</v-icon>Hidden metrics
+                        </div>
+                        <v-select
+                                v-model="form.permissions.hidden_metrics"
+                                :items="metricOptions"
+                                item-text="label"
+                                item-value="key"
+                                multiple
+                                chips
+                                small-chips
+                                dense
+                                outlined
+                                hide-details
+                                placeholder="No metrics hidden"
+                        ></v-select>
+                        <div class="caption grey--text mt-1">
+                            Removed server-side from every response for this user — breakdowns,
+                            totals, logs and CSV exports alike. Workspace owners are never restricted.
+                        </div>
                     </template>
 
                 </v-card-text>
@@ -609,6 +630,30 @@
                 ],
                 permSections: ['dashboard', 'campaigns', 'landings', 'affiliates', 'offers',
                     'sources', 'reports', 'domains', 'settings', 'users'],
+                // Hideable report metrics with their labels. Mirrors the server's
+                // auth.HIDDEN_METRIC_KEYS; the server re-validates every key, so
+                // a stale entry can only be ignored.
+                metricOptions: [
+                    {key: 'cost', label: 'Cost'},
+                    {key: 'revenue', label: 'Revenue'},
+                    {key: 'profit', label: 'Profit'},
+                    {key: 'roi', label: 'ROI %'},
+                    {key: 'epc', label: 'EPC'},
+                    {key: 'cr', label: 'CR %'},
+                    {key: 'visits', label: 'Visits'},
+                    {key: 'unique_visits', label: 'Unique visits'},
+                    {key: 'clicks', label: 'Clicks'},
+                    {key: 'unique_clicks', label: 'Unique clicks'},
+                    {key: 'leads', label: 'Leads'},
+                    {key: 'conversions', label: 'Conversions'},
+                    {key: 'rejected', label: 'Rejected'},
+                    {key: 'rejected_rate', label: 'Rejected %'},
+                    {key: 'click_through_rate', label: 'CTR %'},
+                    {key: 'bot_clicks', label: 'Bot clicks'},
+                    {key: 'bot_cost', label: 'Bot cost'},
+                    {key: 'human_clicks', label: 'Human clicks'},
+                    {key: 'fraud_score_avg', label: 'Fraud score'},
+                ],
                 form: {
                     id: null,
                     username: '',
@@ -643,6 +688,15 @@
                 return this.membersMeta.caller_role === 'owner'
                     ? ['owner', 'admin', 'editor', 'viewer']
                     : ['admin', 'editor', 'viewer'];
+            },
+        },
+        watch: {
+            // Toggling "Custom" on with no blob yet (Add user, or after a reset)
+            // seeds defaults so the section/metric editors bind to a real object.
+            'form.customPermissions'(enabled) {
+                if (enabled && !this.form.permissions) {
+                    this.form.permissions = this.defaultPermissions();
+                }
             },
         },
         mounted() {
@@ -897,12 +951,21 @@
                 sections.domains = false;
                 sections.settings = false;
                 sections.users = false;
-                return {sections: sections, write: true};
+                return {sections: sections, write: true, hidden_metrics: []};
             },
 
             openEdit(user) {
                 this.isEdit = true;
                 this.dialog = true;
+                // Clone stored permissions so edits don't mutate the list row.
+                // Older blobs predate hidden_metrics, so normalize to an array
+                // the multi-select can bind to.
+                const permissions = user.permissions
+                    ? JSON.parse(JSON.stringify(user.permissions))
+                    : this.defaultPermissions();
+                if (!Array.isArray(permissions.hidden_metrics)) {
+                    permissions.hidden_metrics = [];
+                }
                 this.form = {
                     id: user.id,
                     username: user.username,
@@ -911,9 +974,7 @@
                     confirmPassword: '',
                     active: user.active,
                     customPermissions: !!user.permissions,
-                    permissions: user.permissions
-                        ? JSON.parse(JSON.stringify(user.permissions))
-                        : this.defaultPermissions()
+                    permissions: permissions
                 };
             },
 

@@ -10995,6 +10995,58 @@ print("ESCAPED-OK")
               "grouping_view", "allCustomColumns", "displayRows")), str(rp.status_code))
     s.post(f"{api}/settings/", json={"settings": {"workspace": {"custom_columns": []}}})
 
+    print("== Per-user metric restrictions ==")
+    _hid = {"cost", "revenue", "profit", "roi"}
+    hid_user = f"smoke-hidden-{os.getpid()}"
+    r = s.post(f"{api}/users/", json={
+        "username": hid_user, "password": "smokepass1",
+        "permissions": {"sections": {"dashboard": True, "reports": True}, "write": True,
+                        "hidden_metrics": ["cost", "revenue", "profit", "roi"]}})
+    hid_uid = (r.json() or {}).get("id") if r.status_code == 200 else None
+    check("hidden metrics: restricted user created", bool(hid_uid), r.text[:150])
+    if hid_uid:
+        r = s.patch(f"{api}/users/{hid_uid}", json={
+            "username": hid_user,
+            "permissions": {"sections": {"dashboard": True, "reports": True}, "write": True,
+                            "hidden_metrics": ["not_a_metric"]}})
+        check("hidden metrics: an unknown key is rejected 400",
+              r.status_code == 400, r.text[:150])
+    _users = s.get(f"{api}/users/")
+    _ulist = _users.json() if _users.status_code == 200 else []
+    _ulist = _ulist if isinstance(_ulist, list) else (_ulist.get("users") or [])
+    admin_id = next((u["id"] for u in _ulist if u.get("username") == USER), None)
+    r = s.patch(f"{api}/users/{admin_id}", json={
+        "username": USER, "permissions": {"sections": {}, "write": True,
+                                          "hidden_metrics": ["cost"]}})
+    check("hidden metrics: restricting the workspace owner is refused 400",
+          r.status_code == 400, r.text[:150])
+    hu = requests.Session()
+    hu.verify = not INSECURE
+    r = hu.post(f"{api}/login", json={"username": hid_user, "password": "smokepass1"})
+    check("hidden metrics: the restricted user can log in", r.status_code == 200, r.text[:150])
+    r = hu.post(f"{api}/dashboard/breakdown", json={
+        "dimensions": ["campaign_id"], "date_from": "2020-01-01", "date_to": "2030-01-01"})
+    _body = r.json() if r.status_code == 200 else {}
+    check("hidden metrics: breakdown totals omit them",
+          r.status_code == 200 and not (_hid & set(_body.get("totals") or {})),
+          str(sorted(_body.get("totals") or {}))[:150])
+    _rk = set()
+    for _row in (_body.get("rows") or []):
+        _rk |= set(_row)
+    check("hidden metrics: breakdown rows omit them", not (_hid & _rk), str(sorted(_rk))[:150])
+    r = hu.get(f"{api}/reports/export")
+    _hdr = (r.text.lstrip("\ufeff").splitlines() or [""])[0].split(",") if r.status_code == 200 else []
+    check("hidden metrics: the conversion CSV drops the columns",
+          r.status_code == 200 and not ({"revenue", "profit", "payout"} & set(_hdr)),
+          str(_hdr)[:180])
+    r = s.post(f"{api}/dashboard/breakdown", json={
+        "dimensions": ["campaign_id"], "date_from": "2020-01-01", "date_to": "2030-01-01"})
+    _atot = (r.json() or {}).get("totals") or {}
+    check("hidden metrics: an admin still sees them", _hid <= set(_atot),
+          str(sorted(_atot))[:150])
+    if hid_uid:
+        s.delete(f"{api}/users/{hid_uid}")
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 import json
 
 from clickHouse import get_clickhouse_client, get_report_breakdown
+from auth import request_hidden_metrics, strip_hidden_metrics
 
 router = APIRouter()
 
@@ -135,7 +136,11 @@ def get_campaign_metrics(
     except Exception:
         return {}
     visible = {c.id for c in _owner_scope(request, db, db.query(CampaignORM)).all()}
-    return {row["dimension"]: row for row in rows if int(row["dimension"]) in visible}
+    # The per-campaign metric columns are a report payload too: a caller with
+    # hidden metrics must not receive them here either.
+    hidden = request_hidden_metrics(request, db)
+    return {row["dimension"]: strip_hidden_metrics(row, hidden)
+            for row in rows if int(row["dimension"]) in visible}
 
 
 @router.post("/{campaign_id}/clone", response_model=dict)

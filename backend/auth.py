@@ -24,6 +24,9 @@ from sqlalchemy.exc import IntegrityError
 from models.user import UserORM
 from models.settings import SettingsORM
 from tenant_context import current_tenant, api_token_tenant as _api_token_tenant
+# Aggregate metrics + derived rates a workspace may hide per user. Sourced from
+# the one place the report engine defines them so the two can never drift.
+from clickHouse import BASE_METRICS, FORMULA_METRIC_KEYS
 
 router = APIRouter()
 
@@ -794,6 +797,127 @@ def get_user_permissions(username: Optional[str]) -> dict:
         return effective_permissions(db, username) or denied_permissions()
     finally:
         db.close()
+
+
+# ====== Per-user metric restrictions ======
+# Where the hidden list lives: on the *membership* record
+# (tenant_memberships.permissions), stored as the extra `hidden_metrics` key
+# alongside sections/write. The membership is the right home because phase 2A
+# resolves authority from it (effective_permissions/membership_for), the
+# restriction is scoped to ONE workspace, and resolve_membership_permissions
+# already carries unknown extra keys (like campaigns:'own') through. The
+# users.permissions mirror is written by the same endpoints so the Users editor
+# can render the value, but enforcement never reads it.
+
+# The full set of hideable keys: aggregate metrics + derived rates. Kept in a
+# stable order (base metrics first, then the extras). The Users-page picker in
+# users.html mirrors this set (key + label pairs).
+HIDDEN_METRIC_KEYS = tuple(dict.fromkeys(list(BASE_METRICS) + sorted(FORMULA_METRIC_KEYS)))
+
+HIDDEN_METRICS_MAX = len(HIDDEN_METRIC_KEYS)
+
+# A quantity can also appear under a source-column name: a conversion's `payout`
+# is the same figure as its `revenue`, so hiding revenue must hide payout too or
+# the value leaks through the other column.
+METRIC_KEY_ALIASES = {
+    "revenue": ("payout",),
+}
+
+
+def normalize_hidden_metrics(value) -> list:
+    """Validate a hidden-metrics list: deduped, order-preserving, known metric
+    keys only, capped at HIDDEN_METRICS_MAX. Raises ValueError on anything else
+    so the API can answer with a clear 400. None / [] normalize to []."""
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("hidden_metrics must be a list of metric keys")
+    if len(value) > HIDDEN_METRICS_MAX:
+        raise ValueError(f"hidden_metrics may contain at most {HIDDEN_METRICS_MAX} keys")
+    cleaned = []
+    for raw in value:
+        key = str(raw or "").strip()
+        if key not in HIDDEN_METRIC_KEYS:
+            raise ValueError(f"Unknown metric key: {key!r}")
+        if key not in cleaned:
+            cleaned.append(key)
+    return cleaned
+
+
+def _expand_metric_aliases(keys) -> set:
+    """Hidden keys plus any source-column aliases they cover."""
+    out = set(keys or ())
+    for k in list(out):
+        out.update(METRIC_KEY_ALIASES.get(k, ()))
+    return out
+
+
+def strip_hidden_metrics(row, hidden):
+    """Remove hidden metric keys (and their column aliases) from a dict row.
+    Returns the row so callers can chain; a no-op when nothing is hidden."""
+    if not hidden or not isinstance(row, dict):
+        return row
+    for key in _expand_metric_aliases(hidden):
+        row.pop(key, None)
+    return row
+
+
+def strip_hidden_metrics_rows(rows, hidden):
+    """strip_hidden_metrics over every dict in a list (returns the list)."""
+    if isinstance(rows, list):
+        for row in rows:
+            strip_hidden_metrics(row, hidden)
+    return rows
+
+
+def filter_hidden_fields(fields, hidden):
+    """The subset of an ordered export-field list that is safe to emit —
+    drops hidden metric keys and their aliases. Used by the CSV exports so the
+    header and every row lose the column together."""
+    blocked = _expand_metric_aliases(hidden)
+    return [f for f in fields if f not in blocked]
+
+
+def hidden_metrics_for(db: Session, username: Optional[str],
+                       tenant_id: Optional[int] = None) -> frozenset:
+    """The metric keys hidden from `username` in `tenant_id` (default: the
+    request's current tenant).
+
+    Admins and owners are never restricted: the platform-admin flag and the
+    manager roles (owner/admin) short-circuit to an empty set, so a stored list
+    can never blank out a manager's own numbers. Unknown/stale keys are dropped
+    defensively instead of trusted."""
+    if not username:
+        return frozenset()
+    user = get_user(db, username)
+    if user is not None and user.is_admin:
+        return frozenset()
+    tid = current_tenant() if tenant_id is None else int(tenant_id)
+    if effective_tenant_role(db, username, tid) in MANAGER_ROLES:
+        return frozenset()
+    perms = effective_permissions(db, username, tid)
+    if not perms:
+        return frozenset()
+    raw = perms.get("hidden_metrics")
+    if not raw:
+        return frozenset()
+    return frozenset(
+        str(k).strip() for k in raw if str(k).strip() in HIDDEN_METRIC_KEYS)
+
+
+def request_hidden_metrics(request: Request, db: Optional[Session] = None) -> frozenset:
+    """hidden_metrics_for the current caller. Pass the endpoint's own `db` to
+    avoid a second pool checkout."""
+    username = get_session_username(request)
+    if not username:
+        return frozenset()
+    own = db is None
+    db = db or SessionLocal()
+    try:
+        return hidden_metrics_for(db, username)
+    finally:
+        if own:
+            db.close()
 
 
 def _is_self_service(request: Request) -> bool:

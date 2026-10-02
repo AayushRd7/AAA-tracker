@@ -334,8 +334,12 @@ is genuinely still open. Waves 17–20 turned out to be shipped; see above.
   per first-level group.
 - [x] **`sub_id_6..10`** as report dimensions (41 dimensions total; the chain cap stays at 5).
 - [x] **Invitations and the onboarding checklist** now have UI (members page / dashboard).
-- [ ] Per-resource ACLs beyond `campaigns:'own'`, and per-user metric restrictions (G63).
-  **Still open — the one item from this batch not done.**
+- [x] **Per-user metric restrictions** — a workspace can hide chosen metrics (cost, revenue,
+  profit, ROI…) from a specific user. Enforced server-side across the breakdown, metrics,
+  logs, report lists and CSV exports (a hidden metric is never sent), and ignored for
+  owners/admins.
+- [ ] Per-resource ACLs beyond `campaigns:'own'` (offers / sources / networks / domains).
+  **The one item from this batch still open.**
 - [x] **Tracking-path id validation** — a flow holding a non-numeric id (`lt-caps`) now 404s
   the flow instead of raising `asyncpg.DataError` and killing the worker; guarded by smoke.
 

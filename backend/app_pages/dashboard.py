@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case, text
 from db import get_db
 from models.campaigns import CampaignORM
+from auth import (request_hidden_metrics, strip_hidden_metrics,
+                  strip_hidden_metrics_rows, filter_hidden_fields)
 
 from pydantic import BaseModel
 from typing import Optional, List
@@ -173,7 +175,7 @@ def get_visits(
             return []
         ch = request.state.ch
         rows = get_recent_visits(ch, f)
-        return rows
+        return strip_hidden_metrics_rows(rows, request_hidden_metrics(request, db))
     except HTTPException:
         raise
     except Exception as e:
@@ -193,16 +195,19 @@ def live_clicks(request: Request, after: Optional[str] = None, limit: int = 20,
             raise HTTPException(status_code=400, detail="Invalid 'after' timestamp — expected ISO format")
     try:
         ch = request.state.ch
+        hidden = request_hidden_metrics(request, db)
         limit = min(max(limit, 1), 100)
         scope = _click_scope_campaign_ids(request, db)
         if scope is None:
-            return get_live_clicks(ch, after=after, limit=limit)
+            return strip_hidden_metrics_rows(
+                get_live_clicks(ch, after=after, limit=limit), hidden)
         if not scope:
             return []
         # get_live_clicks has no campaign filter — over-fetch and filter here
         allowed = set(scope)
         rows = get_live_clicks(ch, after=after, limit=min(limit * 5, 500))
-        return [r for r in rows if r.get("campaign_id") in allowed][:limit]
+        return strip_hidden_metrics_rows(
+            [r for r in rows if r.get("campaign_id") in allowed][:limit], hidden)
     except HTTPException:
         raise
     except Exception as e:
@@ -308,11 +313,15 @@ def get_metrics(request: Request, body: MetricsRequest,
     _require_iso_dates(body.date_from, body.date_to)
     try:
         f = body.dict(exclude={"compare"})
+        hidden = request_hidden_metrics(request, db)
         scope = _click_scope_campaign_ids(request, db)
         if not _apply_click_scope(f, scope):
             # campaigns:'own' with no owned campaigns — all-zero series over
             # the same window (an empty campaigns list would mean 'no filter')
-            return {"metrics": _totals_from_series([]), "chart": _series_payload([])}
+            return {
+                "metrics": strip_hidden_metrics(_totals_from_series([]), hidden),
+                "chart": strip_hidden_metrics(_series_payload([]), hidden),
+            }
         filters = Filters(**f)
         ch = request.state.ch
 
@@ -343,6 +352,13 @@ def get_metrics(request: Request, body: MetricsRequest,
                 "chart": _series_payload(prev_series),
             }
 
+        # Strip the caller's hidden metrics (and the chart series keyed by them)
+        # last, so no path above can leak one.
+        strip_hidden_metrics(payload["metrics"], hidden)
+        strip_hidden_metrics(payload["chart"], hidden)
+        if "previous" in payload:
+            strip_hidden_metrics(payload["previous"]["metrics"], hidden)
+            strip_hidden_metrics(payload["previous"]["chart"], hidden)
         return payload
     except HTTPException:
         raise
@@ -373,6 +389,7 @@ def get_breakdown(request: Request, body: ReportRequest, db: Session = Depends(g
 
         _require_iso_dates(body.filters.date_from, body.filters.date_to)
         _require_single_day_for_ip(dimensions, body.filters.date_from, body.filters.date_to)
+        hidden = request_hidden_metrics(request, db)
         filters = body.filters.dict()
         scope = _click_scope_campaign_ids(request, db)
         if not _apply_click_scope(filters, scope):
@@ -383,7 +400,7 @@ def get_breakdown(request: Request, body: ReportRequest, db: Session = Depends(g
                 "date_basis": date_basis,
                 "fallback_note": fallback_note,
                 "rows": [],
-                "totals": sum_rows([]),
+                "totals": strip_hidden_metrics(sum_rows([]), hidden),
             }
         if date_basis == "conversion_date":
             unsupported = [d for d in dimensions if d not in CONVERSION_BASIS_DIMENSIONS]
@@ -440,6 +457,11 @@ def get_breakdown(request: Request, body: ReportRequest, db: Session = Depends(g
                     row["click_through_rate"] = 0.0
                     rows.append(row)
 
+        # Strip hidden keys BEFORE custom metrics are evaluated: a caller- or
+        # workspace-supplied formula that references a hidden metric then reads
+        # it as 0 instead of recomputing the real value.
+        strip_hidden_metrics_rows(rows, hidden)
+
         # Workspace-defined columns come last so, on a name clash, they win —
         # matching the report UI's merge order.
         custom_cols = ([cm.dict() for cm in body.custom_metrics]
@@ -449,6 +471,8 @@ def get_breakdown(request: Request, body: ReportRequest, db: Session = Depends(g
 
         totals = sum_rows([r for r in rows if r["level"] == 1])
         apply_custom_metrics([totals], custom_cols)
+        # sum_rows rebuilds every BASE_METRICS key, so strip them again here.
+        strip_hidden_metrics(totals, hidden)
 
         return {
             "dimension": dimensions[0],           # legacy single-dim key
@@ -472,6 +496,7 @@ def get_click_log_view(request: Request, filters: ClickLogFilters,
                              db: Session = Depends(get_db)):
     try:
         ch = request.state.ch
+        hidden = request_hidden_metrics(request, db)
         f = filters.dict()
         scope = _click_scope_campaign_ids(request, db)
         # Paginated mode is opted into by sending `offset` — the response then
@@ -484,11 +509,12 @@ def get_click_log_view(request: Request, filters: ClickLogFilters,
                 return {"items": [], "total": 0, "limit": limit, "offset": offset}
             rows = get_click_log(ch, f, limit=limit, offset=offset)
             total = get_click_log_total(ch, f)
-            return {"items": rows, "total": total, "limit": limit, "offset": offset}
+            return {"items": strip_hidden_metrics_rows(rows, hidden), "total": total,
+                    "limit": limit, "offset": offset}
         if not _apply_click_scope(f, scope) or not _apply_campaign_tags(f, db):
             return []
         rows = get_click_log(ch, f, limit=min(max(int(filters.limit or 500), 1), 5000))
-        return rows
+        return strip_hidden_metrics_rows(rows, hidden)
     except Exception as e:
         print("dashboard click-log error:", repr(e))
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -517,6 +543,7 @@ def export_click_log(request: Request, filters: ClickLogFilters,
     from fastapi.responses import Response
     try:
         ch = request.state.ch
+        hidden = request_hidden_metrics(request, db)
         f = filters.dict()
         if not _apply_click_scope(f, _click_scope_campaign_ids(request, db)) \
                 or not _apply_campaign_tags(f, db):
@@ -526,11 +553,13 @@ def export_click_log(request: Request, filters: ClickLogFilters,
     except Exception as e:
         print("dashboard click-log export error:", repr(e))
         raise HTTPException(status_code=500, detail="Internal server error")
+    # Header and rows drop the same hidden columns together.
+    fields = filter_hidden_fields(CLICK_LOG_EXPORT_FIELDS, hidden)
     buf = _io.StringIO()
     writer = _csv.writer(buf, lineterminator="\n")
-    writer.writerow(CLICK_LOG_EXPORT_FIELDS)
+    writer.writerow(fields)
     for row in rows:
-        writer.writerow([_csv_safe(row.get(k)) for k in CLICK_LOG_EXPORT_FIELDS])
+        writer.writerow([_csv_safe(row.get(k)) for k in fields])
     return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=click_log.csv"})
 

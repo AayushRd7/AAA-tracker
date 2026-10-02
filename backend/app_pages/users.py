@@ -19,7 +19,8 @@ from db import get_db
 from models.user import UserORM
 from auth import (hash_password, get_caller, verify_password, _hash_backup_code,
                   is_platform_operator, session_token, list_sessions,
-                  revoke_session_prefix, revoke_other_sessions)
+                  revoke_session_prefix, revoke_other_sessions,
+                  normalize_hidden_metrics, caller_role_in_tenant)
 
 router = APIRouter()
 
@@ -93,6 +94,39 @@ def _sync_membership_permissions(db: Session, user_id: int, permissions) -> None
         "WHERE user_id = :u AND tenant_id = :t"),
         {"p": json.dumps(permissions) if permissions is not None else None,
          "u": int(user_id), "t": current_tenant()})
+
+
+def _validated_permissions(permissions, role: Optional[str]):
+    """Copy a permissions blob for storage, validating the `hidden_metrics`
+    list (known metric keys only, deduped, capped). A workspace owner is never
+    metric-restricted, so storing a hidden list for one is refused outright
+    rather than silently ignored. Returns a JSON-ready dict, or None."""
+    if permissions is None:
+        return None
+    if not isinstance(permissions, dict):
+        raise HTTPException(status_code=400, detail="permissions must be an object")
+    perms = dict(permissions)
+    if "hidden_metrics" in perms:
+        try:
+            hidden = normalize_hidden_metrics(perms.get("hidden_metrics"))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if hidden and role == "owner":
+            raise HTTPException(
+                status_code=400,
+                detail="Metric restrictions cannot be applied to a workspace owner")
+        if hidden:
+            perms["hidden_metrics"] = hidden
+        else:
+            # Drop an empty list rather than persist a no-op key.
+            perms.pop("hidden_metrics", None)
+    return perms
+
+
+def _target_role(db: Session, user_obj: UserORM) -> Optional[str]:
+    """The user's role in the request's workspace (None when not a member)."""
+    from tenant_context import current_tenant
+    return caller_role_in_tenant(db, user_obj.username, current_tenant())
 
 
 def _other_active_admins(db: Session, user_obj: UserORM) -> int:
@@ -304,13 +338,17 @@ def create_user(user: UserCreateUpdate, request: Request, db: Session = Depends(
 
     password_hash = hash_password(user.password)
 
+    # A newly created account always joins as editor (is_admin is False), so a
+    # hidden-metrics list here is allowed; the membership below mirrors it.
+    validated_permissions = _validated_permissions(user.permissions, "editor")
+
     new_user = UserORM(
         username=user.username,
         email=user.email,
         password_hash=password_hash,
         is_admin=False,
         active=user.active,
-        permissions=user.permissions,
+        permissions=validated_permissions,
     )
 
     db.add(new_user)
@@ -367,6 +405,14 @@ def update_user(user_id: int, user: UserCreateUpdate, request: Request, db: Sess
         raise HTTPException(status_code=400,
                             detail="Cannot demote the last active admin")
 
+    # Validate the permission blob (incl. hidden_metrics) before any mutation so
+    # a bad metric key is a clean 400 and nothing is half-written.
+    permissions_changed = user.clear_permissions or user.permissions is not None
+    validated_permissions = None
+    if user.permissions is not None:
+        validated_permissions = _validated_permissions(
+            user.permissions, _target_role(db, user_obj))
+
     changes = {}
     if user.email is not None:
         user_obj.email = user.email
@@ -387,10 +433,10 @@ def update_user(user_id: int, user: UserCreateUpdate, request: Request, db: Sess
         user_obj.permissions = None
         changes["permissions"] = "cleared"
     elif user.permissions is not None:
-        user_obj.permissions = user.permissions
-        changes["permissions"] = user.permissions
+        user_obj.permissions = validated_permissions
+        changes["permissions"] = user_obj.permissions
 
-    if user.clear_permissions or user.permissions is not None:
+    if permissions_changed:
         _sync_membership_permissions(db, user_obj.id, user_obj.permissions)
 
     db.commit()

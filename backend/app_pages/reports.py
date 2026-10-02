@@ -8,6 +8,8 @@ from sqlalchemy import text
 from sqlalchemy import func, case
 from db import get_db
 from tenant_context import current_tenant
+from auth import (request_hidden_metrics, strip_hidden_metrics,
+                  strip_hidden_metrics_rows, filter_hidden_fields)
 from models.base import Base, TenantMixin
 from models.settings import SettingsORM
 from models.campaigns import CampaignORM
@@ -169,6 +171,8 @@ def get_conversions(request: Request, limit: int = 100, offset: Optional[int] = 
     if offset is not None:
         rows = rows.offset(offset)
     items = [_conversion_to_dict(row) for row in rows.all()]
+    hidden = request_hidden_metrics(request, db)
+    strip_hidden_metrics_rows(items, hidden)
     if total is not None:
         return {"items": items, "total": total, "limit": limit, "offset": offset}
     return items
@@ -195,11 +199,15 @@ def export_conversions(request: Request, db: Session = Depends(get_db)):
     from fastapi.responses import Response
     query = _build_conversions_query(request, db)
     rows = query.order_by(Conversion.received_at.desc(), Conversion.id.desc()).limit(50000).all()
+    # Header and rows drop the same hidden metric columns together (revenue
+    # also covers its payout alias).
+    fields = filter_hidden_fields(
+        CONVERSION_EXPORT_FIELDS, request_hidden_metrics(request, db))
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
-    writer.writerow(CONVERSION_EXPORT_FIELDS)
+    writer.writerow(fields)
     for conv in rows:
-        writer.writerow([_csv_safe(getattr(conv, k, None)) for k in CONVERSION_EXPORT_FIELDS])
+        writer.writerow([_csv_safe(getattr(conv, k, None)) for k in fields])
     return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=conversions.csv"})
 
@@ -395,6 +403,7 @@ def get_funnel_report(campaign_id: int, request: Request, db: Session = Depends(
     agg_by_step = {int(r["funnel_step"]): r for r in agg_rows}
 
     steps_out = []
+    hidden = request_hidden_metrics(request, db)
     cumulative_conversions = 0
     prev_visits = None
     for i, step in enumerate(steps_cfg):
@@ -421,7 +430,7 @@ def get_funnel_report(campaign_id: int, request: Request, db: Session = Depends(
             "drop_off_pct": None if prev_visits in (None, 0)
                             else round(100 * (prev_visits - visits) / prev_visits, 2),
         }
-        steps_out.append(step_out)
+        steps_out.append(strip_hidden_metrics(step_out, hidden))
         prev_visits = visits
 
     return {"campaign_id": campaign_id, "campaign_name": row["name"],
@@ -745,7 +754,7 @@ def conversions_summary(request: Request, db: Session = Depends(get_db)):
     total = int(total or 0)
     approved = int(approved or 0)
     declined = int(declined or 0)
-    return {
+    result = {
         "total": total,
         "approved": approved,
         "declined": declined,
@@ -754,6 +763,10 @@ def conversions_summary(request: Request, db: Session = Depends(get_db)):
         "approval_rate": round(approved / total * 100, 2) if total else 0.0,
         "decline_rate": round(declined / total * 100, 2) if total else 0.0,
     }
+    # The reconciliation summary carries no hideable metric today, but the
+    # strip keeps the guarantee uniform if a money column is added later.
+    strip_hidden_metrics(result, request_hidden_metrics(request, db))
+    return result
 
 
 @router.delete("/{conversion_id}")
