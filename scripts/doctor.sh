@@ -124,9 +124,18 @@ probe_login() {
     esac
     printf '%s' "$code"
 }
-login_http=$(probe_login http "")
-printf '\n'
-login_https=$(probe_login https "-k")
+if [ -n "$USER_PASS" ]; then
+    login_http=$(probe_login http "")
+    printf '\n'
+    login_https=$(probe_login https "-k")
+else
+    # The installer generates the admin password and prints it once, so with no
+    # credential configured there is nothing to probe — skip rather than report
+    # a misleading "wrong credentials".
+    warn "skipped — set AAA_ADMIN_PASSWORD (printed once at install) to probe login"
+    login_http=""
+    login_https=""
+fi
 
 if [ "$login_http" = "500" ] || [ "$login_https" = "500" ]; then
     hdr "backend traceback (last errors)"
