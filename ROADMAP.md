@@ -183,8 +183,8 @@ sidebar routes under a Logs group** rather than in-page sub-tabs — same data, 
 - [x] **Saved filter presets** — save, apply and reapply a named filter set on every log and
   on Reports.
 - [x] **Funnel templates** — save a campaign's funnel steps and apply them to another.
-- [ ] **Script library** — reusable titled snippets with copy exist, but **injection into
-  landers is not built** (the module documents this as out of scope).
+- [x] **Script library** — reusable titled snippets with copy, and the landing editor can
+  insert a snippet into the open file at the position its description implies.
 
 ## 📊 Wave 19 — Report & table depth ✅ shipped (reconciled 2026-10-02)
 
@@ -317,18 +317,27 @@ is genuinely still open. Waves 17–20 turned out to be shipped; see above.
 - Lazy rDNS resolution (only when a campaign actually filters on `rdns`).
 - Domain-group grants are visibility-level; binding-time enforcement is pending (G84).
 
-**Small, well-scoped gaps found by the audit**
-- **Custom columns** — tables can show/hide built-in columns; defining a new one is not built.
-- **Script library injection** — snippets are copy-only; nothing is injected into a lander.
-- **Conversion health** on the status page — 24h CAPI failure count exists; *last successful
-  postback per source* and row deep-links do not.
-- Show the captured postback **raw URL** and CAPI **response snippet** as log columns.
-- **Health centre incidents** — per-integration / per-domain incident objects (today: flat checks).
-- **Session geo** — IP/device/OS/browser are shown per session; country/city is not.
-- **Grouping-view toggle** in workspace settings.
-- **`sub_id_6..10`** as report dimensions (the SubID chain stops at `sub_id_5`).
-- **Invitations and the onboarding checklist have APIs but no UI.**
-- Per-resource ACLs beyond `campaigns:'own'`, and per-user metric restrictions (G63).
+**Small, well-scoped gaps found by the audit** — *closed 2026-10-02* unless noted
+- [x] **Custom columns** — workspace-defined `{name, formula}` columns over the metric
+  whitelist, validated on save (unknown metric or unevaluable formula → 400) and evaluated
+  by the report builder's formula engine into every breakdown row and its totals.
+- [x] **Script library injection** — the landing editor inserts a saved snippet into the open
+  file at a position derived from its description; landers stay static (no request-time injection).
+- [x] **Conversion health** on the status page — last successful postback per source, with a
+  deep-link to that row in the S2S postbacks log.
+- [x] Postback **raw URL** and CAPI **response snippet** are now columns in their logs.
+- [x] **Health-centre incidents** — derived per-integration, per-domain, delivery and loop
+  incidents with severity buckets and fix deep-links.
+- [x] **Session geo** — country/region/city captured from Cloudflare's headers (spoof-guarded
+  in nginx) and shown per session.
+- [x] **Grouping-view toggle** in workspace settings — the breakdown renders one subtotal row
+  per first-level group.
+- [x] **`sub_id_6..10`** as report dimensions (41 dimensions total; the chain cap stays at 5).
+- [x] **Invitations and the onboarding checklist** now have UI (members page / dashboard).
+- [ ] Per-resource ACLs beyond `campaigns:'own'`, and per-user metric restrictions (G63).
+  **Still open — the one item from this batch not done.**
+- [x] **Tracking-path id validation** — a flow holding a non-numeric id (`lt-caps`) now 404s
+  the flow instead of raising `asyncpg.DataError` and killing the worker; guarded by smoke.
 
 **Not built (product decisions or new surface)**
 - Self-serve signup + a first-campaign wizard (access is invite-only today).
@@ -337,10 +346,6 @@ is genuinely still open. Waves 17–20 turned out to be shipped; see above.
 - Cross-device attribution; offline/phone-sales ingestion.
 - Ecommerce / CRM / call-tracking integrations, offer marketplace, iGaming integrations,
   mobile apps, BI-warehouse export.
-
-**Known defect**
-- The tracking path crashes the frontend worker when a flow holds a non-numeric id
-  (`asyncpg.DataError`, e.g. `lt-caps`) instead of validating the id and returning 404.
 
 **Installer portability** (shipped; recorded for context): `make install` works with either
 the `docker compose` plugin or the legacy `docker-compose` binary (auto-detected, with an

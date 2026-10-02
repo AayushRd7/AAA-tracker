@@ -4305,7 +4305,8 @@ print("ESCAPED-OK")
     op_tg_backup = op_settings_backup.get("telegram") or {}
     op_cur_backup = op_settings_backup.get("currency")
     check("ops-backup: settings report deployment readiness, not credentials",
-          set(op_deployment.keys()) == {"email_configured", "telegram_bot_configured",
+          set(op_deployment.keys()) == {"email_configured", "email_from",
+                                        "telegram_bot_configured",
                                         "telegram_bot_url"}
           and isinstance(op_deployment.get("email_configured"), bool),
           str(op_deployment)[:150])
@@ -10824,6 +10825,175 @@ print("ESCAPED-OK")
         s.delete(f"{api}/campaigns/{att_cid}")
     if att_oid:
         s.delete(f"{api}/offers/{att_oid}")
+
+    # A flow id is operator-authored JSON: it can be a number, a numeric string,
+    # or leftover text from an edit. A non-numeric id used to be handed straight
+    # to asyncpg as a parameter, raising DataError and killing the frontend
+    # worker mid-request. It must 404 the flow instead, and the worker must live.
+    print("== Tracking-path id validation ==")
+    ltc_pid = os.getpid()
+    ltc_alias = f"smoke-ltcaps-{ltc_pid}"
+    ltc_direct_alias = f"smoke-ltcaps-direct-{ltc_pid}"
+    ltc_cids = []
+    for _alias, _schema in ((ltc_alias, "landing_offer"), (ltc_direct_alias, "direct")):
+        r = s.post(f"{api}/campaigns/", json={
+            "name": f"Smoke ltcaps {_schema} {ltc_pid}", "alias": _alias,
+            "type": "campaign", "status": "active", "redirect_mode": "position",
+            "config": {"flows": [{"type": "default", "position": 1, "enabled": True,
+                                  "schema": _schema, "landing": "lt-caps",
+                                  "offer": "lt-caps", "filters": []}],
+                       "postbacks": [], "hide_referrer": False, "fallback_url": ""}})
+        if r.status_code == 200 and (r.json() or {}).get("id"):
+            ltc_cids.append(r.json()["id"])
+    check("flow-id: campaigns with non-numeric flow ids created",
+          len(ltc_cids) == 2, str(ltc_cids))
+    ltc_codes = [
+        requests.get(f"{BASE}/{_alias}", verify=not INSECURE,
+                     allow_redirects=False).status_code
+        for _alias in (ltc_alias, ltc_direct_alias) for _ in range(3)]
+    check("flow-id: a non-numeric flow id 404s (never 500, never a crash)",
+          ltc_codes and all(c == 404 for c in ltc_codes), str(ltc_codes))
+    r = requests.get(f"{api}/status", verify=not INSECURE)
+    check("flow-id: the worker survived the bad flow (status still answering)",
+          r.status_code == 401, str(r.status_code))
+    for _cid in ltc_cids:
+        s.delete(f"{api}/campaigns/{_cid}")
+
+    # The invitations API and the onboarding checklist had no UI; both surfaces now
+    # ship inside existing pages (members page / dashboard).
+    print("== Invitations + onboarding UI ==")
+    rp = s.get(f"{BASE}/backend/users")
+    check("invitations UI: members page ships the invite surface",
+          rp.status_code == 200 and all(m in rp.text for m in (
+              "Pending invitations", "Invite member", "invitableRoles",
+              "/api/invitations/")), "marker missing")
+    rp = s.get(f"{BASE}/backend/dashboard")
+    check("onboarding UI: dashboard ships the setup checklist",
+          rp.status_code == 200 and all(m in rp.text for m in (
+              "onboardingStepsState", "loadOnboarding", "tenants/onboarding")),
+          "marker missing")
+    r = s.get(f"{api}/invitations/")
+    check("invitations: list shape (invitations + caller_role + can_manage)",
+          r.status_code == 200
+          and isinstance(r.json().get("invitations"), list)
+          and bool(r.json().get("caller_role"))
+          and r.json().get("can_manage") is True, r.text[:150])
+    inv_email = f"smoke-invite-{os.getpid()}@example.com"
+    r = s.post(f"{api}/invitations/", json={"email": inv_email, "role": "editor"})
+    inv_id = (r.json() or {}).get("id") if r.status_code == 200 else None
+    check("invitations: create returns a show-once token + accept_url",
+          r.status_code == 200 and bool(inv_id)
+          and bool((r.json() or {}).get("token"))
+          and bool((r.json() or {}).get("accept_url")), r.text[:180])
+    if inv_id:
+        r = s.delete(f"{api}/invitations/{inv_id}")
+        check("invitations: revoke works", r.status_code == 200, r.text[:150])
+    r = s.get(f"{api}/tenants/onboarding")
+    check("onboarding: checklist payload shape",
+          r.status_code == 200 and isinstance(r.json().get("has_team"), bool)
+          and "next_step" in r.json() and isinstance(r.json().get("complete"), bool),
+          r.text[:180])
+
+    print("== Dimensions, log columns, conversion health ==")
+    r = s.get(f"{api}/dashboard/dimensions")
+    dim_keys = [d.get("key") for d in (r.json() or [])] if r.status_code == 200 else []
+    check("dimensions: sub_id_6..sub_id_10 are offered",
+          all(f"sub_id_{i}" in dim_keys for i in range(6, 11)), str(dim_keys)[-160:])
+    r = s.post(f"{api}/dashboard/breakdown", json={
+        "dimensions": ["sub_id_6"], "date_from": "2020-01-01", "date_to": "2030-01-01"})
+    check("dimensions: breakdown accepts sub_id_6", r.status_code == 200, r.text[:150])
+    r = s.get(f"{api}/health")
+    hb = r.json() if r.status_code == 200 else {}
+    check("conversion health: last_success_by_source is a list",
+          r.status_code == 200 and isinstance(hb.get("last_success_by_source"), list),
+          str(sorted(hb.keys()))[:180])
+    rp = s.get(f"{BASE}/backend/logs-postbacks")
+    check("logs: postbacks page ships the Raw URL column",
+          rp.status_code == 200 and "Raw URL" in rp.text, str(rp.status_code))
+    rp = s.get(f"{BASE}/backend/logs-internal-postbacks")
+    check("logs: internal-postbacks page ships the Response column",
+          rp.status_code == 200 and "response_snippet" in rp.text, str(rp.status_code))
+    check("health: incidents list present (derived console)",
+          isinstance(hb.get("incidents"), list), str(sorted(hb.keys()))[:180])
+
+    # --- health incident console ---
+    inc = hb.get("incidents")
+    _sev = ("critical", "warning", "info")
+    check("health incidents: list of well-shaped rows",
+          isinstance(inc, list) and all(
+              isinstance(i, dict)
+              and {"severity", "area", "subject", "detail", "link", "since"} <= set(i)
+              for i in (inc or [])), str((inc or [])[:1])[:200])
+    _sevs = [i.get("severity") for i in (inc or [])]
+    check("health incidents: valid severities, severity-sorted",
+          all(x in _sev for x in _sevs)
+          and _sevs == sorted(_sevs, key=_sev.index), str(_sevs)[:120])
+    _ic = hb.get("incident_counts") or {}
+    check("health incidents: counts tally the list",
+          sum(int(_ic.get(k, 0) or 0) for k in _sev) == len(inc or []), str(_ic)[:120])
+    check("health incidents: names no internal technology",
+          not any(t in json.dumps(inc or []).lower()
+                  for t in ("postgres", "clickhouse", "asyncpg", "uvicorn", "redis")),
+          "stack term leaked")
+    rp = s.get(f"{BASE}/backend/health-center")
+    check("health page: incident console rendered",
+          rp.status_code == 200 and "health-incidents-card" in rp.text, str(rp.status_code))
+
+    # --- session location: Cloudflare header, spoof-guarded ---
+    r = s.get(f"{api}/users/me/sessions")
+    sess = (r.json() or {}).get("sessions") or []
+    check("sessions: every row carries country/region/city",
+          r.status_code == 200 and bool(sess)
+          and all({"country", "region", "city"} <= set(x) for x in sess), r.text[:150])
+    spoof = requests.Session()
+    spoof.verify = not INSECURE
+    r = spoof.post(f"{api}/login", json={"username": USER, "password": PASS},
+                   headers={"CF-IPCountry": "ZZ", "CF-Region": "Hacker Region",
+                            "CF-IPCity": "Hacker City"})
+    check("sessions: login accepted", r.status_code == 200, r.text[:150])
+    r = spoof.get(f"{api}/users/me/sessions")
+    newest = ((r.json() or {}).get("sessions") or [{}])[0] if r.status_code == 200 else {}
+    check("sessions: a forged CF-IPCountry from a non-Cloudflare peer is ignored",
+          not (newest.get("country") or newest.get("region") or newest.get("city")),
+          str({k: newest.get(k) for k in ("country", "region", "city")})[:120])
+
+    # --- script library: placement + editor insert action ---
+    r = s.post(f"{api}/scripts/", json={
+        "title": f"smoke-script-{os.getpid()}", "code": "<script>void 0</script>",
+        "description": "head analytics snippet"})
+    _scr = (r.json() or {}).get("script") or {}
+    scr_id = _scr.get("id") if r.status_code == 200 else None
+    check("scripts: a library item exposes a placement",
+          r.status_code == 200 and _scr.get("placement") in ("head", "body", "cursor"),
+          r.text[:150])
+    if scr_id:
+        s.delete(f"{api}/scripts/{scr_id}")
+    rp = s.get(f"{BASE}/backend/editor")
+    check("scripts: the landing editor ships the insert action",
+          rp.status_code == 200 and "Insert script" in rp.text, str(rp.status_code))
+
+    # --- workspace custom columns + grouped report view ---
+    r = s.post(f"{api}/settings/", json={"settings": {"workspace": {"custom_columns": [
+        {"name": "ZZ Margin", "formula": "revenue - cost"}]}}})
+    check("custom columns: a valid formula saves", r.status_code == 200, r.text[:150])
+    r = s.post(f"{api}/settings/", json={"settings": {"workspace": {"custom_columns": [
+        {"name": "ZZ Bad", "formula": "revenue /"}]}}})
+    check("custom columns: a malformed formula is rejected 400",
+          r.status_code == 400, r.text[:150])
+    r = s.post(f"{api}/settings/", json={"settings": {"workspace": {"custom_columns": [
+        {"name": "ZZ Bad", "formula": "no_such_metric + 1"}]}}})
+    check("custom columns: an unknown metric is rejected 400",
+          r.status_code == 400, r.text[:150])
+    r = s.post(f"{api}/dashboard/breakdown", json={
+        "dimensions": ["campaign_id"], "date_from": "2020-01-01", "date_to": "2030-01-01"})
+    tot = (r.json() or {}).get("totals") or {}
+    check("custom columns: evaluated into the breakdown totals",
+          r.status_code == 200 and "ZZ Margin" in tot, str(sorted(tot.keys()))[-150:])
+    rp = s.get(f"{BASE}/backend/reports")
+    check("reports: grouped-view toggle + custom-column picker present",
+          rp.status_code == 200 and all(m in rp.text for m in (
+              "grouping_view", "allCustomColumns", "displayRows")), str(rp.status_code))
+    s.post(f"{api}/settings/", json={"settings": {"workspace": {"custom_columns": []}}})
 
     print("== Cleanup ==")
     if conv_id:

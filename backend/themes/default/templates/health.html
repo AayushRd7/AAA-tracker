@@ -33,6 +33,60 @@
             </div>
         </v-card>
 
+        <v-card class="pa-4 mb-4" id="health-incidents-card">
+            <v-card-title class="px-0 subtitle-1 font-weight-bold">
+                <v-icon color="primary" class="mr-2">mdi-alert-decagram-outline</v-icon>Incident console
+            </v-card-title>
+
+            <div v-if="incidentRows.length" class="mb-3">
+                <v-chip small label class="mr-2 white--text" color="error">
+                    {{ incidentCounts.critical }} critical
+                </v-chip>
+                <v-chip small label class="mr-2 white--text" color="warning">
+                    {{ incidentCounts.warning }} warning
+                </v-chip>
+                <v-chip small label class="white--text" color="info">
+                    {{ incidentCounts.info }} info
+                </v-chip>
+            </div>
+
+            <template v-if="incidentRows.length">
+                <div v-for="group in incidentGroups" :key="group.severity"
+                     class="mb-3" v-show="group.rows.length">
+                    <div class="caption font-weight-bold text-uppercase mb-1"
+                         :class="'health-sev-' + group.severity">
+                        {{ group.label }} ({{ group.rows.length }})
+                    </div>
+                    <v-list dense class="py-0">
+                        <v-list-item v-for="(inc, i) in group.rows" :key="group.severity + '-' + i"
+                                     class="px-0">
+                            <v-list-item-icon class="mr-2">
+                                <v-icon :color="severityColor(inc.severity)" small>
+                                    {{ severityIcon(inc.severity) }}
+                                </v-icon>
+                            </v-list-item-icon>
+                            <v-list-item-content>
+                                <v-list-item-title>
+                                    {{ inc.subject }}
+                                    <span class="caption grey--text">· {{ inc.area }}</span>
+                                </v-list-item-title>
+                                <v-list-item-subtitle class="caption">
+                                    {{ inc.detail }}
+                                    <span v-if="inc.since"> · since {{ formatTime(inc.since) }}</span>
+                                    · <a :href="inc.link">fix</a>
+                                </v-list-item-subtitle>
+                            </v-list-item-content>
+                        </v-list-item>
+                    </v-list>
+                </div>
+            </template>
+
+            <div v-else class="empty-state">
+                <v-icon color="success">mdi-check-circle-outline</v-icon>
+                <div class="mt-2">No incidents — every check this backend can make is clear.</div>
+            </div>
+        </v-card>
+
         <v-row dense class="mb-2">
             <v-col cols="6" sm="4" md="2" v-for="n in countTiles" :key="n.label">
                 <v-card class="pa-3" outlined>
@@ -121,6 +175,33 @@
                 </v-card>
             </v-col>
         </v-row>
+
+        <v-card class="pa-4 mb-4" id="health-sources-card">
+            <v-card-title class="px-0 subtitle-1 font-weight-bold">
+                <v-icon color="primary" class="mr-2">mdi-call-received</v-icon>Last successful postback per source
+            </v-card-title>
+            <v-data-table
+                    :headers="sourceHeaders"
+                    :items="sourceRows"
+                    dense
+                    hide-default-footer
+                    :items-per-page="-1"
+            >
+                <template v-slot:item.source="{ item }">
+                    <a :href="item.url">{{ item.source }}</a>
+                </template>
+                <template v-slot:no-data>
+                    <div class="empty-state">
+                        <v-icon>mdi-call-missed</v-icon>
+                        <div class="mt-2">No accepted postbacks recorded in the last 30 days</div>
+                    </div>
+                </template>
+            </v-data-table>
+            <div class="caption grey--text mt-2">
+                Each row links to that postback in the S2S postbacks log, filtered by its click id.
+                Only accepted postbacks from the last 30 days are considered.
+            </div>
+        </v-card>
     </v-container>
 </script>
 
@@ -138,11 +219,30 @@
                     {text: 'Last run', value: 'last'},
                     {text: 'State', value: 'stale', sortable: false},
                 ],
+                sourceHeaders: [
+                    {text: 'Source', value: 'source'},
+                    {text: 'Last success', value: 'last'},
+                ],
             };
         },
         computed: {
             attention() {
                 return (this.report && this.report.attention) || [];
+            },
+            incidentRows() {
+                return (this.report && this.report.incidents) || [];
+            },
+            incidentCounts() {
+                const c = (this.report && this.report.incident_counts) || {};
+                return {critical: c.critical || 0, warning: c.warning || 0, info: c.info || 0};
+            },
+            incidentGroups() {
+                const labels = {critical: 'Critical', warning: 'Warning', info: 'Info'};
+                return ['critical', 'warning', 'info'].map(severity => ({
+                    severity: severity,
+                    label: labels[severity],
+                    rows: this.incidentRows.filter(i => i.severity === severity),
+                }));
             },
             verdictColor() {
                 if (!this.report) return 'grey';
@@ -199,6 +299,14 @@
                     };
                 });
             },
+            sourceRows() {
+                const rows = (this.report && this.report.last_success_by_source) || [];
+                return rows.map(r => ({
+                    source: r.source || '—',
+                    last: r.last_success ? this.formatTime(r.last_success) : '—',
+                    url: this.postbackLogUrl(r),
+                }));
+            },
             uptimeText() {
                 const secs = this.report ? Number(this.report.uptime_seconds || 0) : 0;
                 const d = Math.floor(secs / 86400);
@@ -239,6 +347,22 @@
                 const d = new Date(iso);
                 return isNaN(d.getTime()) ? iso : d.toLocaleString();
             },
+            severityColor(severity) {
+                return severity === 'critical' ? 'error'
+                    : (severity === 'warning' ? 'warning' : 'info');
+            },
+            severityIcon(severity) {
+                return severity === 'critical' ? 'mdi-alert-octagon'
+                    : (severity === 'warning' ? 'mdi-alert' : 'mdi-information-outline');
+            },
+            // Deep link into the S2S postbacks log, narrowed to this row's click
+            // id — logs.html seeds its filter state from the query string.
+            postbackLogUrl(row) {
+                const base = '/backend/logs-postbacks';
+                return row && row.click_id
+                    ? base + '?click_id=' + encodeURIComponent(row.click_id)
+                    : base;
+            },
         },
     });
 </script>
@@ -253,5 +377,8 @@
         padding-left: 1.25rem;
         margin-bottom: 0;
     }
+    .health-sev-critical { color: #dc2626; }
+    .health-sev-warning { color: #f59e0b; }
+    .health-sev-info { color: #0ea5e9; }
 </style>
 {% endraw %}

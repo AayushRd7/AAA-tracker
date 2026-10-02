@@ -39,6 +39,13 @@
         font-family: inherit;
     }
 
+    .editor-page .editor-dirty {
+        margin-left: 10px;
+        font-size: var(--fs-12, 12px);
+        color: var(--warning, #b45309);
+        white-space: nowrap;
+    }
+
     /* Stack the file tree above the editor on narrow screens */
     @media (max-width: 960px) {
         .editor-page .row {
@@ -98,11 +105,31 @@
                         {{ selectedFile || 'No file selected' }}
                     </v-card-title>
                     <v-card-text>
-                        <textarea id="code-editor" v-show="selectedFile"></textarea>
+                        <textarea id="code-editor" v-show="selectedFile" v-model="content"></textarea>
                     </v-card-text>
                     <v-card-actions>
+                        <v-menu offset-y :disabled="!selectedFile" max-height="320">
+                            <template v-slot:activator="{ on, attrs }">
+                                <v-btn small text color="primary" :disabled="!selectedFile"
+                                       v-bind="attrs" v-on="on">
+                                    <v-icon small class="mr-1">mdi-code-tags</v-icon>Insert script
+                                </v-btn>
+                            </template>
+                            <v-list dense>
+                                <v-list-item v-if="!scripts.length" disabled>
+                                    <v-list-item-title class="grey--text">No scripts saved yet</v-list-item-title>
+                                </v-list-item>
+                                <v-list-item v-for="s in scripts" :key="s.id" @click="insertScript(s)">
+                                    <v-list-item-content>
+                                        <v-list-item-title>{{ s.title }}</v-list-item-title>
+                                        <v-list-item-subtitle>{{ placementLabel(s.placement) }}</v-list-item-subtitle>
+                                    </v-list-item-content>
+                                </v-list-item>
+                            </v-list>
+                        </v-menu>
+                        <span v-if="dirty" class="editor-dirty">Unsaved changes</span>
                         <v-spacer></v-spacer>
-                        <v-btn color="primary" elevation="0" :disabled="!selectedFile" @click="saveFile">Save</v-btn>
+                        <v-btn color="primary" elevation="0" :disabled="!selectedFile" :loading="saving" @click="saveFile">Save</v-btn>
                     </v-card-actions>
                 </v-card>
             </v-col>
@@ -122,6 +149,9 @@
                 selectedFile: null,
                 content: '',
                 editorInstance: null,
+                scripts: [],
+                dirty: false,
+                saving: false,
             };
         },
         methods: {
@@ -131,6 +161,17 @@
                     .then(data => {
                         this.fileTree = data.children || [];
                     });
+            },
+            loadScripts() {
+                fetch('/backend/api/scripts/', {credentials: 'include'})
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(data => {
+                        this.scripts = data.scripts || [];
+                    })
+                    .catch(err => this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: 'Could not load the script library: ' + sanitizeToastMessage(err.message),
+                    }));
             },
             onSelectFile(paths) {
                 const path = paths[0];
@@ -154,11 +195,12 @@
                 fetch(`/landings_editor/${this.landingId}/file?filename=${encodeURIComponent(path)}`)
                     .then((res) => res.json())
                     .then((data) => {
+                        this.content = data.content;
                         setTimeout(() => {
                             const textarea = document.getElementById('code-editor');
                             if (!textarea) return;
                             if (this.editorInstance) this.editorInstance.toTextArea();
-                            textarea.value = data.content;
+                            textarea.value = this.content;
                             this.editorInstance = CodeMirror.fromTextArea(textarea, {
                                 mode: 'application/x-httpd-php',
                                 lineNumbers: true,
@@ -168,8 +210,57 @@
                                 matchBrackets: true,
                                 autoCloseBrackets: true
                             });
+                            this.editorInstance.on('change', () => { this.dirty = true; });
+                            this.dirty = false;
                         }, 100);
                     });
+            },
+            placementLabel(placement) {
+                if (placement === 'head') return 'Before </head>';
+                if (placement === 'body') return 'Before </body>';
+                return 'At the cursor';
+            },
+            insertScript(item) {
+                if (!this.editorInstance) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Open a file before inserting a script'});
+                    return;
+                }
+                const body = String((item && item.code) || '');
+                if (!body.trim()) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'That script has no code to insert'});
+                    return;
+                }
+                const editor = this.editorInstance;
+                const value = editor.getValue();
+                const placement = (item && item.placement) || 'cursor';
+                const anchor = placement === 'head' ? '</head>'
+                    : (placement === 'body' ? '</body>' : null);
+                // The snippet is editor text, never template markup: it is spliced
+                // into the buffer as a plain string and the operator saves it.
+                const snippet = '\n' + body.replace(/\s+$/, '') + '\n';
+
+                let at = null;
+                let usedAnchor = false;
+                if (anchor) {
+                    const idx = value.toLowerCase().indexOf(anchor.toLowerCase());
+                    if (idx !== -1) {
+                        at = idx;
+                        usedAnchor = true;
+                    }
+                }
+                if (at === null) {
+                    at = editor.indexFromPos(editor.getCursor());
+                }
+                at = Math.max(0, Math.min(at, value.length));
+                editor.replaceRange(snippet, editor.posFromIndex(at));
+                editor.focus();
+                this.content = editor.getValue();
+                this.dirty = true;
+                this.$root.$emit('show-message', {
+                    type: 'success',
+                    text: 'Inserted "' + item.title + '" ' +
+                        (usedAnchor ? 'before ' + anchor : 'at the cursor') + ' — review, then save',
+                });
             },
             saveFile() {
                 if (this.editorInstance) {
@@ -180,6 +271,7 @@
                 payload.set("filename", this.selectedFile);
                 payload.set("content", this.content);
 
+                this.saving = true;
                 fetch(`/landings_editor/${this.landingId}/file-plain`, {
                     method: 'POST',
                     headers: {
@@ -191,9 +283,12 @@
                         throw new Error(t);
                     }))
                     .then(() => {
+                        this.saving = false;
+                        this.dirty = false;
                         this.$root.$emit('show-message', {type: 'success', text: 'File saved!'});
                     })
                     .catch((err) => {
+                        this.saving = false;
                         this.$root.$emit('show-message', {type: 'error', text: `Error: ${err.message}`});
                     });
             },
@@ -244,6 +339,7 @@
             }
             this.landingId = id;
             this.loadTree();
+            this.loadScripts();
         },
     });
 </script>

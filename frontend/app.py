@@ -1013,7 +1013,11 @@ async def campaign_click(
             o_used = await offer_conversions_today(pg, conv_count_cache, overflow_id) if o_cap else 0
             if not o_cap or o_used < int(o_cap):
                 async with pg.acquire() as conn:
-                    overflow = await conn.fetchrow("SELECT * FROM offers WHERE id = $1", int(overflow_id))
+                    overflow_id_int = flow_config_id(overflow_id)
+                    overflow = None
+                    if overflow_id_int is not None:
+                        overflow = await conn.fetchrow("SELECT * FROM offers WHERE id = $1",
+                                                       overflow_id_int)
         if overflow is None:
             return Response("Offer unavailable", status_code=404)
         offer = overflow
@@ -4357,6 +4361,25 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
 MAX_REDIRECT_DEPTH = 3  # redirect_campaign chains deeper than this get a 404/fallback
 
 
+def flow_config_id(value):
+    """Coerce an operator-authored flow id to an int, or None.
+
+    Flow configs are free-form JSON: an id can be a number, a numeric string, or
+    leftover text from an edit ('lt-caps'). Handing a non-numeric value to
+    asyncpg as a parameter raises DataError and kills the worker mid-request, so
+    every id read out of a flow config goes through here — an unparseable one
+    just makes the flow ineligible instead of taking the worker down.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 async def execute_flow_schema(campaign, request: Request, config: dict, meta_data: dict,
                               flow: dict, bound: dict, served: dict, campaign_redirect,
                               depth: int = 0) -> Response:
@@ -4367,8 +4390,12 @@ async def execute_flow_schema(campaign, request: Request, config: dict, meta_dat
 
     # SCHEMA: direct
     if schema == "direct":
-        served["offer"] = flow.get("offer")
-        offer_url = await get_real_offer_url(flow.get("offer"))
+        offer_id = flow_config_id(flow.get("offer"))
+        served["offer"] = offer_id
+        offer_url = await get_real_offer_url(offer_id)
+        if not offer_url:
+            # A missing or unparseable offer id makes the flow ineligible.
+            return render_404_html()
         click_id = meta_data.get("click_id") or generate_click_id()
         if "{click_id}" in offer_url:
             offer_url = offer_url.replace("{click_id}", click_id)
@@ -4385,8 +4412,8 @@ async def execute_flow_schema(campaign, request: Request, config: dict, meta_dat
 
     # SCHEMA: landing → offer
     elif schema == "landing_offer":
-        landing = flow.get("landing")
-        offer_id = flow.get("offer")
+        landing = flow_config_id(flow.get("landing"))
+        offer_id = flow_config_id(flow.get("offer"))
         served["offer"] = offer_id
         served["landing"] = landing
         if landing:
@@ -4403,7 +4430,7 @@ async def execute_flow_schema(campaign, request: Request, config: dict, meta_dat
 
     # SCHEMA: landing only
     elif schema == "landing_only":
-        landing = flow.get("landing")
+        landing = flow_config_id(flow.get("landing"))
         served["landing"] = landing
         if landing:
             async with pg.acquire() as conn:
@@ -4416,10 +4443,14 @@ async def execute_flow_schema(campaign, request: Request, config: dict, meta_dat
     # SCHEMA: multi
     elif schema == "multi":
         # Bound visits keep their originally assigned landing/offer (A/B stability)
-        landing_id = bound.get("landing") if bound else None
-        offer_id = bound.get("offer") if bound else None
-        landings = flow.get("landings") or []
-        offers = flow.get("offers") or []
+        landing_id = flow_config_id(bound.get("landing")) if bound else None
+        offer_id = flow_config_id(bound.get("offer")) if bound else None
+        # Drop unparseable entries so random.choice can never hand a query a
+        # non-numeric id.
+        landings = [v for v in (flow_config_id(i) for i in (flow.get("landings") or []))
+                    if v is not None]
+        offers = [v for v in (flow_config_id(i) for i in (flow.get("offers") or []))
+                  if v is not None]
         # Empty pools make the flow ineligible — never crash on random.choice
         if landing_id is None and landings:
             landing_id = random.choice(landings)
@@ -4456,7 +4487,7 @@ async def execute_flow_schema(campaign, request: Request, config: dict, meta_dat
 
     # SCHEMA: redirect_campaign ++++
     elif schema == "redirect_campaign":
-        campaign_id = flow.get("redirect_campaign")
+        campaign_id = flow_config_id(flow.get("redirect_campaign"))
 
         if campaign_id and depth < MAX_REDIRECT_DEPTH:
             async with pg.acquire() as conn:
@@ -4525,6 +4556,9 @@ def mapped_passthrough_params(config: dict, meta_data: dict) -> dict:
 
 async def get_real_offer_url(offer_id: str, offer_vars: list = None) -> str:
     pg = app.state.pg
+    offer_id = flow_config_id(offer_id)
+    if offer_id is None:
+        return ""
     async with pg.acquire() as conn:
         offer_row = await conn.fetchrow("SELECT * FROM offers WHERE id = $1", offer_id)
         # log_track(f"🔁 offer_row - '{offer_row}'")
@@ -5514,21 +5548,23 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
         flow_indexes[campaign["id"]] = step_index
 
         step = funnel_steps_[step_index]
-        offers = step.get("offers") or []
+        offers = [v for v in (flow_config_id(i) for i in (step.get("offers") or []))
+                  if v is not None]
+        step_landing = flow_config_id(step.get("landing"))
         decision = {"campaign_id": campaign["id"], "bound": bound_f is not None,
                     "funnel": True, "step": step_index, "name": step.get("name"),
                     "schema": step.get("schema") or ("landing_offer" if offers else "landing_only"),
-                    "landing_id": step.get("landing"), "offers": offers,
+                    "landing_id": step_landing, "offers": offers,
                     "landing_url": None, "url": None, "flow_index": step_index,
                     "action": "redirect"}
-        if step.get("landing"):
+        if step_landing:
             async with pg.acquire() as conn:
-                row = await conn.fetchrow("SELECT folder FROM landings WHERE id = $1", step["landing"])
+                row = await conn.fetchrow("SELECT folder FROM landings WHERE id = $1", step_landing)
             if row:
                 decision["landing_url"] = f"/l/{row['folder']}"
                 if decision["schema"] != "landing_only" and offers:
                     decision["url"] = await get_offer_click_url(
-                        campaign['alias'], offers[0], step["landing"],
+                        campaign['alias'], offers[0], step_landing,
                         click_id=click_id or meta_data.get("click_id"),
                         passthrough=mapped_passthrough_params(config, meta_data))
         return decision
@@ -5666,10 +5702,12 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
     # SCHEMA: landing (offer|only|multi) — report the landing + click-out URL
     elif schema in ("landing_offer", "landing_only", "multi"):
         if schema == "multi":
-            m_landing = bound.get("landing") if bound else None
-            m_offer = bound.get("offer") if bound else None
-            m_landings = flow.get("landings") or []
-            m_offers = flow.get("offers") or []
+            m_landing = flow_config_id(bound.get("landing")) if bound else None
+            m_offer = flow_config_id(bound.get("offer")) if bound else None
+            m_landings = [v for v in (flow_config_id(i) for i in (flow.get("landings") or []))
+                          if v is not None]
+            m_offers = [v for v in (flow_config_id(i) for i in (flow.get("offers") or []))
+                        if v is not None]
             if m_landing is None and m_landings:
                 m_landing = random.choice(m_landings)
             if m_offer is None and m_offers:
@@ -5677,6 +5715,8 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
             decision["landing_id"] = m_landing
             decision["offer_id"] = m_offer
             landing_id, offer_id = m_landing, m_offer
+        landing_id = flow_config_id(landing_id)
+        offer_id = flow_config_id(offer_id)
         if landing_id:
             async with pg.acquire() as conn:
                 row = await conn.fetchrow("SELECT * FROM landings WHERE id = $1", landing_id)
@@ -5703,9 +5743,10 @@ async def decide_campaign_flow(campaign, request: Request, click_id: str = None,
     # SCHEMA: redirect_campaign — recurse into the target campaign's decision
     elif schema == "redirect_campaign":
         target = None
-        if flow.get("redirect_campaign") and depth < MAX_REDIRECT_DEPTH:
+        target_campaign_id = flow_config_id(flow.get("redirect_campaign"))
+        if target_campaign_id is not None and depth < MAX_REDIRECT_DEPTH:
             async with pg.acquire() as conn:
-                target = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", flow.get("redirect_campaign"))
+                target = await conn.fetchrow("SELECT * FROM campaigns WHERE id = $1", target_campaign_id)
         if target:
             nested = await decide_campaign_flow(target, request, click_id, depth=depth + 1)
             nested["redirected_from"] = campaign["id"]

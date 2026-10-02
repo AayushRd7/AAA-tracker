@@ -8,6 +8,7 @@ from clickHouse import (
     REPORT_DIMENSIONS,
 )
 from schemas import Filters
+from app_pages.workspace import load_custom_columns
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case, text
 from db import get_db
@@ -439,10 +440,15 @@ def get_breakdown(request: Request, body: ReportRequest, db: Session = Depends(g
                     row["click_through_rate"] = 0.0
                     rows.append(row)
 
-        apply_custom_metrics(rows, [cm.dict() for cm in body.custom_metrics])
+        # Workspace-defined columns come last so, on a name clash, they win —
+        # matching the report UI's merge order.
+        custom_cols = ([cm.dict() for cm in body.custom_metrics]
+                       + load_custom_columns(db))
+
+        apply_custom_metrics(rows, custom_cols)
 
         totals = sum_rows([r for r in rows if r["level"] == 1])
-        apply_custom_metrics([totals], [cm.dict() for cm in body.custom_metrics])
+        apply_custom_metrics([totals], custom_cols)
 
         return {
             "dimension": dimensions[0],           # legacy single-dim key
@@ -596,9 +602,10 @@ def public_shared_report(token: str, request: Request, db: Session = Depends(get
             ch, filters, dimensions,
             sort_by=cfg.get("sortBy"), sort_dir=cfg.get("sortDir") or "desc",
         )
-        apply_custom_metrics(rows, cfg.get("customMetrics") or [])
+        custom_cols = (cfg.get("customMetrics") or []) + load_custom_columns(db)
+        apply_custom_metrics(rows, custom_cols)
         totals = sum_rows([r for r in rows if r["level"] == 1])
-        apply_custom_metrics([totals], cfg.get("customMetrics") or [])
+        apply_custom_metrics([totals], custom_cols)
         return {
             "name": report.get("name"),
             "dimensions": dimensions,

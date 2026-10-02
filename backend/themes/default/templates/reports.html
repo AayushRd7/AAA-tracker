@@ -172,6 +172,15 @@
                                 dense hide-details
                                 class="mt-0 column-menu-check"
                         ></v-checkbox>
+                        <v-checkbox
+                                v-for="c in allCustomColumns"
+                                :key="'rccol-' + c.name"
+                                :input-value="selectedColumns.indexOf(c.name) !== -1"
+                                @change="toggleReportColumn(c.name)"
+                                :label="c.name"
+                                dense hide-details
+                                class="mt-0 column-menu-check"
+                        ></v-checkbox>
                         <v-divider class="my-2"></v-divider>
                         <div class="caption grey--text px-2">Templates</div>
                         <div class="px-2 mt-1">
@@ -302,7 +311,7 @@
         <v-card>
             <v-data-table v-col-resize:reports-breakdown="reportHeaders"
                     :headers="reportHeaders"
-                    :items="visibleRows"
+                    :items="displayRows"
                     dense
                     :items-per-page="25"
                     :footer-props="{ 'items-per-page-options': [15, 25, 50, 100] }"
@@ -311,12 +320,14 @@
             >
                 <template v-slot:item.dimension="{ item }">
                     <div class="dim-cell" :style="{ paddingLeft: ((item.level - 1) * 18) + 'px' }">
-                        <v-btn v-if="hasChildren(item)" icon x-small class="dim-cell__toggle" tabindex="-1"
+                        <v-btn v-if="canToggle(item)" icon x-small class="dim-cell__toggle" tabindex="-1"
                                @click.stop="toggleRow(item)">
                             <v-icon small>{{ isExpanded(item) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
                         </v-btn>
                         <span v-else class="dim-cell__leaf"></span>
-                        <span class="dim-value" role="button" @click="toggleRow(item)">{{ item.value || '(empty)' }}</span>
+                        <span class="dim-value" role="button" @click="onRowClick(item)">{{ item.value || '(empty)' }}</span>
+                        <v-chip v-if="groupingView && item.level === 1" x-small label
+                                class="ml-2 group-chip">subtotal</v-chip>
                         <v-btn
                                 v-if="$root.roleLabel === 'admin' && item.dim === 'offer_id' && isNumericId(item.value) && !offerArchived(item.value)"
                                 icon x-small class="ml-1 offer-pause-btn"
@@ -384,7 +395,7 @@
                 <template v-slot:item.human_clicks="{ item }">
                     <span>{{ $fmtNum(Number(item.human_clicks || 0)) }}</span>
                 </template>
-                <template v-for="cm in customMetrics" v-slot:[customSlot(cm)]="{ item }">
+                <template v-for="cm in allCustomColumns" v-slot:[customSlot(cm)]="{ item }">
                     <span :key="cm.name + '-' + rowKey(item)">{{ formatCustom(item[cm.name]) }}</span>
                 </template>
                 <template v-slot:body.append="{ headers }">
@@ -1002,7 +1013,7 @@
                     </v-row>
                     <div class="caption grey--text mt-3">Sub IDs (optional)</div>
                     <v-row dense>
-                        <v-col v-for="n in 5" :key="'add-sub-' + n" cols="4">
+                        <v-col v-for="n in 10" :key="'add-sub-' + n" cols="4">
                             <v-text-field v-model="addForm['sub_id_' + n]" :label="'Sub ID ' + n"
                                           outlined dense hide-details></v-text-field>
                         </v-col>
@@ -1107,6 +1118,10 @@
                 sortBy: 'visits',
                 sortDir: 'desc',
                 customMetrics: [],
+                // Workspace-defined report columns (Settings → Workspace); they
+                // merge with the per-report ones in allCustomColumns below.
+                workspaceCustomColumns: [],
+                groupingView: false,
                 customMetricDialog: false,
                 newMetricName: '',
                 newMetricFormula: '',
@@ -1140,7 +1155,9 @@
                     cost: '',
                 },
                 dimensionPresets: [
-                    { label: 'SubID chain', icon: 'mdi-numeric', dims: ['sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5'] },
+                    // All ten sub IDs, so the preset accepts them; the builder
+                    // still caps a chain at 5 (MAX_BREAKDOWN_DIMENSIONS).
+                    { label: 'SubID chain', icon: 'mdi-numeric', dims: ['sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5', 'sub_id_6', 'sub_id_7', 'sub_id_8', 'sub_id_9', 'sub_id_10'] },
                     { label: 'Geo chain', icon: 'mdi-earth', dims: ['country', 'region', 'city'] },
                     { label: 'Traffic chain', icon: 'mdi-traffic-light', dims: ['utm_source', 'utm_medium', 'utm_campaign', 'keyword'] },
                     { label: 'Funnel', icon: 'mdi-filter-outline', dims: ['campaign_id', 'offer_id', 'landing_id'] },
@@ -1178,9 +1195,12 @@
                       hint: 'ISO week for trend comparison',
                       dimensions: ['week'], days: 28, sortBy: 'visits',
                       columns: ['visits', 'clicks', 'conversions', 'revenue', 'profit', 'cr', 'roi'] },
+                    // Lists all ten sub IDs; the builder caps the chain at 5
+                    // (MAX_BREAKDOWN_DIMENSIONS), so only sub_id_1..5 apply.
                     { id: 'subid', name: 'Sub-ID chain', icon: 'mdi-numeric',
-                      hint: 'Sub ID 1 → 5 chain for source drill-down',
-                      dimensions: ['sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5'], days: 7, sortBy: 'visits',
+                      hint: 'Sub ID chain for source drill-down',
+                      dimensions: ['sub_id_1', 'sub_id_2', 'sub_id_3', 'sub_id_4', 'sub_id_5',
+                                   'sub_id_6', 'sub_id_7', 'sub_id_8', 'sub_id_9', 'sub_id_10'], days: 7, sortBy: 'visits',
                       columns: ['visits', 'clicks', 'conversions', 'revenue', 'cr', 'epc'] },
                     { id: 'ip', name: 'IP report', icon: 'mdi-ip-network',
                       hint: 'One day, grouped by client IP',
@@ -1215,6 +1235,11 @@
                     { key: 'sub_id_3', label: 'Sub ID 3' },
                     { key: 'sub_id_4', label: 'Sub ID 4' },
                     { key: 'sub_id_5', label: 'Sub ID 5' },
+                    { key: 'sub_id_6', label: 'Sub ID 6' },
+                    { key: 'sub_id_7', label: 'Sub ID 7' },
+                    { key: 'sub_id_8', label: 'Sub ID 8' },
+                    { key: 'sub_id_9', label: 'Sub ID 9' },
+                    { key: 'sub_id_10', label: 'Sub ID 10' },
                     { key: 'isp', label: 'ISP' },
                     { key: 'connection_type', label: 'Connection type' },
                     { key: 'domain', label: 'Domain' },
@@ -1295,6 +1320,7 @@
                     external_id: '',
                     transaction_id: '',
                     sub_id_1: '', sub_id_2: '', sub_id_3: '', sub_id_4: '', sub_id_5: '',
+                    sub_id_6: '', sub_id_7: '', sub_id_8: '', sub_id_9: '', sub_id_10: '',
                 },
                 customStatuses: [],
                 importDialog: false,
@@ -1357,11 +1383,29 @@
             dateRangeText() {
                 return this.dateRange.join(' ~ ');
             },
+            // Workspace columns first, then the ad-hoc per-report metrics; a
+            // repeated name is folded into one column (the workspace one wins).
+            allCustomColumns() {
+                const out = [];
+                const seen = new Set();
+                const push = (list) => (list || []).forEach(c => {
+                    const name = String((c && c.name) || '').trim();
+                    if (!name || seen.has(name)) return;
+                    seen.add(name);
+                    out.push({name: name, formula: (c && c.formula) || ''});
+                });
+                push(this.workspaceCustomColumns);
+                push(this.customMetrics);
+                return out;
+            },
             columnOptions() {
-                return this.reportHeadersBase.map(h => ({ text: h.text, value: h.value }));
+                return [
+                    ...this.reportHeadersBase.map(h => ({ text: h.text, value: h.value })),
+                    ...this.allCustomColumns.map(c => ({ text: c.name, value: c.name })),
+                ];
             },
             customMetricNames() {
-                return this.customMetrics.map(m => m.name);
+                return this.allCustomColumns.map(m => m.name);
             },
             campaignTagOptions() {
                 // Distinct tags across the campaigns the caller can see — the
@@ -1379,7 +1423,8 @@
                 return r ? r.name : '';
             },
             sortOptions() {
-                return [...this.columnOptions, ...this.customMetrics.map(m => ({ text: m.name, value: m.name }))];
+                // columnOptions already carries built-ins + custom columns.
+                return this.columnOptions.slice();
             },
             availableDimensions() {
                 return this.dimensionItems.filter(d => !this.dimensions.includes(d.key));
@@ -1404,6 +1449,26 @@
                     }
                     return true;
                 });
+            },
+            // Grouped view: one first-level subtotal row per group, and expanding
+            // a group reveals every row beneath it at once (rather than the
+            // level-by-level tree of the flat view).
+            displayRows() {
+                if (!this.groupingView) return this.visibleRows;
+                const SEP = '\u001f';
+                const out = [];
+                this.reportRows.filter(r => r.level === 1).forEach(group => {
+                    out.push(group);
+                    const gk = this.rowKey(group);
+                    if (!this.expanded[gk]) return;
+                    this.reportRows.forEach(r => {
+                        if (r.level > 1 && (r.parent_key === gk
+                                || r.parent_key.startsWith(gk + SEP))) {
+                            out.push(r);
+                        }
+                    });
+                });
+                return out;
             },
             logFiltersActive() {
                 const f = this.logFilters;
@@ -1435,10 +1500,17 @@
             this.loadColumnTemplates();
             if (this.$loadWorkspace) {
                 this.$loadWorkspace().then(() => {
-                    const d = (this.$workspace || {}).default_columns || {};
+                    const ws = this.$workspace || {};
+                    const d = ws.default_columns || {};
                     if (Array.isArray(d.reports) && d.reports.length) {
                         this.selectedColumns = d.reports.slice();
                     }
+                    this.workspaceCustomColumns = Array.isArray(ws.custom_columns)
+                        ? ws.custom_columns
+                            .filter(c => c && String(c.name || '').trim())
+                            .map(c => ({name: String(c.name).trim(), formula: c.formula || ''}))
+                        : [];
+                    this.groupingView = ws.grouping_view === true;
                 });
             }
             if (this.$root.roleLabel === 'admin') this.loadOffers();
@@ -1487,6 +1559,15 @@
                 } else {
                     this.expanded = { ...this.expanded, [key]: true };
                 }
+            },
+            // In grouped mode only the first-level group row toggles; child rows
+            // are shown/hidden with their group, so their own chevron is hidden.
+            canToggle(item) {
+                if (!this.hasChildren(item)) return false;
+                return this.groupingView ? item.level === 1 : true;
+            },
+            onRowClick(item) {
+                if (this.canToggle(item)) this.toggleRow(item);
             },
             collapseBelow(dimIdx) {
                 const expanded = {};
@@ -1900,6 +1981,11 @@
             // Row tint: deeper tint the further from break-even (ROI-led,
             // profit as fallback when the dimension has no ROI).
             perfRowClass(item) {
+                const cls = this.perfTintClass(item);
+                const group = (this.groupingView && item.level === 1) ? 'perf-group-row' : '';
+                return [cls, group].filter(Boolean).join(' ');
+            },
+            perfTintClass(item) {
                 const roi = parseFloat(item.roi);
                 const profit = parseFloat(item.profit) || 0;
                 let score = null;
@@ -2129,7 +2215,7 @@
                         campaigns: this.selectedCampaigns,
                     },
                     date_basis: this.dateBasis,
-                    custom_metrics: this.customMetrics,
+                    custom_metrics: this.allCustomColumns,
                     sort_by: this.sortBy,
                     sort_dir: this.sortDir,
                     limit: 1000,
@@ -2490,6 +2576,7 @@
                     status: 'sale', approval: 'pending', payout: '', revenue: '',
                     click_id: '', external_id: '', transaction_id: '',
                     sub_id_1: '', sub_id_2: '', sub_id_3: '', sub_id_4: '', sub_id_5: '',
+                    sub_id_6: '', sub_id_7: '', sub_id_8: '', sub_id_9: '', sub_id_10: '',
                 };
                 this.addDialog = true;
             },
@@ -2502,7 +2589,7 @@
                 this.addSaving = true;
                 this.addError = '';
                 const sub_ids = {};
-                for (let n = 1; n <= 5; n++) {
+                for (let n = 1; n <= 10; n++) {
                     if (f['sub_id_' + n]) sub_ids['sub_id_' + n] = f['sub_id_' + n];
                 }
                 const payload = {
@@ -2658,6 +2745,15 @@
     .cm-formula {
         font-size: var(--fs-12, 12px);
         color: var(--text-secondary);
+    }
+    .group-chip {
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    /* Grouped view: the first-level row is the group subtotal. */
+    .v-data-table tr.perf-group-row > td {
+        font-weight: 600;
+        border-bottom: 2px solid var(--border, #e2e8f0);
     }
     .log-filter-sm {
         max-width: 120px;

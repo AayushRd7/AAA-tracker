@@ -17,6 +17,7 @@ from models.capi_pixels import (
 from email_reports import send_daily_report, send_scheduled_report, schedule_due
 from env_config import (email_configured, resolve_email_config, telegram_bot_token,
                         telegram_bot_url)
+from clickHouse import compile_formula, FORMULA_METRIC_KEYS
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -205,6 +206,76 @@ def _current_settings_rev(db: Session) -> str:
     return _settings_rev(row.value if row else "")
 
 
+# --- user-defined report columns (workspace.custom_columns) -----------------
+# A name plus a formula over the metric whitelist, evaluated by the report
+# builder's safe formula engine. Validated here so an unknown metric or a bad
+# formula is a clear 400 at save time instead of a broken report later.
+MAX_CUSTOM_COLUMNS = 10
+MAX_CUSTOM_COLUMN_NAME_LEN = 40
+MAX_CUSTOM_COLUMN_FORMULA_LEN = 200
+
+
+def _validate_custom_columns(raw) -> list:
+    """Normalise + validate ``workspace.custom_columns``.
+
+    Returns the cleaned ``[{name, formula}]`` list. Raises HTTPException(400)
+    on any invalid entry (empty/duplicate name, empty/oversized formula, an
+    unknown metric or malformed arithmetic — compile_formula rejects both)."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400,
+                            detail="workspace.custom_columns must be a list")
+    if len(raw) > MAX_CUSTOM_COLUMNS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"At most {MAX_CUSTOM_COLUMNS} custom columns are allowed")
+    out, seen = [], set()
+    for i, item in enumerate(raw, 1):
+        if not isinstance(item, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Custom column #{i} must be an object with name and formula")
+        name = str(item.get("name") or "").strip()
+        formula = str(item.get("formula") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400,
+                                detail=f"Custom column #{i}: name is required")
+        if len(name) > MAX_CUSTOM_COLUMN_NAME_LEN:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Custom column '{name[:20]}…': name is too long "
+                       f"(max {MAX_CUSTOM_COLUMN_NAME_LEN})")
+        if name in seen:
+            raise HTTPException(status_code=400,
+                                detail=f"Custom column name '{name}' is duplicated")
+        if not formula:
+            raise HTTPException(status_code=400,
+                                detail=f"Custom column '{name}': formula is required")
+        if len(formula) > MAX_CUSTOM_COLUMN_FORMULA_LEN:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Custom column '{name}': formula is too long "
+                       f"(max {MAX_CUSTOM_COLUMN_FORMULA_LEN})")
+        try:
+            evaluate = compile_formula(formula)
+        except ValueError as e:
+            raise HTTPException(status_code=400,
+                                detail=f"Custom column '{name}': {e}")
+        # Compiling is not enough: 'revenue /' compiles and then fails on every
+        # row, which would leave a permanently empty column. Probe it once against
+        # a zero-valued row so the operator sees the mistake at save time.
+        try:
+            evaluate({m: 0 for m in FORMULA_METRIC_KEYS})
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Custom column '{name}': formula cannot be evaluated ({e})")
+        seen.add(name)
+        out.append({"name": name, "formula": formula})
+    return out
+
+
 # Sentinel distinguishing "the client sent no _base_rev" (a legacy/partial-block
 # save from another page — allowed) from "_base_rev is null" (the client says it
 # never loaded — refused).
@@ -366,6 +437,20 @@ def save_settings(payload: dict, request: Request, db: Session = Depends(get_db)
                 status_code=409,
                 detail="Settings changed since this page loaded — reload the "
                        "page before saving.")
+    # Validate the user-defined report columns before they are written: an
+    # unknown metric or malformed formula must be a clear 400, never stored to
+    # break every later report. Only touched when the caller sends the key, so
+    # a partial workspace save from another page keeps its meaning.
+    _workspace_block = payload.get("settings", {}).get("workspace") \
+        if isinstance(payload.get("settings"), dict) else None
+    if isinstance(_workspace_block, dict):
+        if "custom_columns" in _workspace_block:
+            _workspace_block["custom_columns"] = _validate_custom_columns(
+                _workspace_block["custom_columns"])
+        if "grouping_view" in _workspace_block:
+            # JSON truthiness would turn the string "false" into True; only a
+            # real boolean True enables the grouped view.
+            _workspace_block["grouping_view"] = _workspace_block["grouping_view"] is True
     # Merge top-level keys server-side under a row lock: two rapid saves of
     # different keys must not clobber each other (read-modify-write race).
     for key, val in payload.items():

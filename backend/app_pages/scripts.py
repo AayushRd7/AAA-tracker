@@ -1,8 +1,11 @@
 """Script library — titled tracking/pixel/custom-JS snippets.
 
-Snippets are stored and copied; injection into landers is explicitly out of
-scope. The table is created at backend startup (see ``_ensure_wave18_tables``
-in app.py); the tracking plane never touches it.
+Snippets are stored and copied, and the landing editor can insert one into the
+file the operator has open (see ``pages/editor.html``) — the snippet text is
+placed as a string at a position derived from its ``placement`` and the operator
+saves it through the normal file-save path. Nothing is written to a landing
+behind their back. The table is created at backend startup (see
+``_ensure_wave18_tables`` in app.py); the tracking plane never touches it.
 """
 from typing import Optional
 
@@ -23,9 +26,29 @@ class ScriptIn(BaseModel):
     description: Optional[str] = None
 
 
+def _placement(title: str, description: str, code: str) -> str:
+    """Best-effort insertion point for the landing editor: "head", "body" or
+    "cursor".
+
+    The library has no explicit kind column, so the documented description
+    ("what this snippet is for, and where it goes") decides first — an explicit
+    "body" wins over the generic tracking words — then the snippet's own closing
+    anchors. "cursor" means the editor inserts at the caret. Purely additive:
+    existing consumers ignore the extra key.
+    """
+    hay = f"{title or ''} {description or ''}".lower()
+    code_l = (code or "").lower()
+    if "body" in hay or "</body>" in code_l:
+        return "body"
+    if "head" in hay or "analytics" in hay or "pixel" in hay or "</head>" in code_l:
+        return "head"
+    return "cursor"
+
+
 def _script_public(r) -> dict:
     return {"id": r[0], "title": r[1], "code": r[2], "description": r[3],
-            "created_at": r[4].isoformat() if r[4] else None}
+            "created_at": r[4].isoformat() if r[4] else None,
+            "placement": _placement(r[1], r[3], r[2])}
 
 
 def _get_script(db: Session, script_id: int):

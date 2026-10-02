@@ -236,6 +236,57 @@
                                 </v-btn>
                             </div>
 
+                            <v-divider class="my-4"></v-divider>
+                            <div class="subtitle-2 mb-1">Grouping view</div>
+                            <div class="caption grey--text mb-2">
+                                Render the report breakdown as one subtotal row per first-level
+                                group, expandable to the rows inside it. Off keeps the flat
+                                expandable tree.
+                            </div>
+                            <v-switch
+                                    v-model="settings.workspace.grouping_view"
+                                    label="Grouped report breakdown"
+                                    inset dense hide-details
+                            ></v-switch>
+
+                            <v-divider class="my-4"></v-divider>
+                            <div class="subtitle-2 mb-1">Custom report columns</div>
+                            <div class="caption grey--text mb-2">
+                                Name a formula over the built-in metrics, e.g.
+                                <code>revenue / clicks</code> for EPC or
+                                <code>profit / cost * 100</code> for margin. They appear as
+                                columns in the Reports builder. Metric keys:
+                                <span class="cc-hint">{{ customColumnMetricKeys.join(', ') }}</span>
+                            </div>
+                            <div v-for="(col, i) in settings.workspace.custom_columns" :key="'cc-' + i"
+                                 class="d-flex align-center mb-2">
+                                <v-chip small label class="mr-2">{{ col.name }}</v-chip>
+                                <code class="cc-formula">{{ col.formula }}</code>
+                                <v-spacer></v-spacer>
+                                <v-btn icon x-small color="error" @click="removeCustomColumn(i)">
+                                    <v-icon small>mdi-trash-can-outline</v-icon>
+                                </v-btn>
+                            </div>
+                            <v-row dense>
+                                <v-col cols="4">
+                                    <v-text-field v-model="newCustomColumn.name" label="Name"
+                                                  outlined dense hide-details placeholder="EPC"></v-text-field>
+                                </v-col>
+                                <v-col cols="8">
+                                    <v-text-field v-model="newCustomColumn.formula" label="Formula"
+                                                  outlined dense hide-details placeholder="revenue / clicks"
+                                                  @keyup.enter="addCustomColumn"></v-text-field>
+                                </v-col>
+                            </v-row>
+                            <div v-if="customColumnError" class="caption error--text mt-1">{{ customColumnError }}</div>
+                            <div class="mt-2">
+                                <v-btn small text color="primary"
+                                       :disabled="settings.workspace.custom_columns.length >= 10"
+                                       @click="addCustomColumn">
+                                    <v-icon small class="mr-1">mdi-plus</v-icon>Add column
+                                </v-btn>
+                            </div>
+
                         </v-card-text>
                     </v-card>
                 </v-col>
@@ -965,7 +1016,6 @@
                 >
                     <v-icon small class="mr-1">mdi-delete-alert-outline</v-icon>Delete clicks & conversion history data
                 </v-btn>
-            </v-row>
 
         </v-container>
 
@@ -1053,8 +1103,25 @@
                         divider: 'comma',
                         row_coloring: [],
                         default_columns: {},
+                        // User-defined report columns and the grouped-view flag;
+                        // both are editable only here (Settings → Workspace).
+                        custom_columns: [],
+                        grouping_view: false,
                     },
                 },
+                // Draft inputs for the custom report column form (not persisted
+                // until Add is pressed — the list itself is what gets saved).
+                newCustomColumn: {name: '', formula: ''},
+                customColumnError: '',
+                // The metrics a custom-column formula may reference — the same
+                // whitelist the report builder evaluates against (built-ins
+                // plus derived rates).
+                customColumnMetricKeys: [
+                    'visits', 'unique_visits', 'clicks', 'unique_clicks', 'leads',
+                    'conversions', 'rejected', 'cost', 'revenue', 'profit',
+                    'bot_clicks', 'bot_cost', 'cr', 'epc', 'roi', 'rejected_rate',
+                    'click_through_rate', 'human_clicks', 'fraud_score_avg',
+                ],
                 // Settings-page load gate: Save stays disabled until a load
                 // succeeds, and each save publishes only what changed since the
                 // loaded document (see changedSettingsPayload). settingsRev is
@@ -1223,6 +1290,35 @@
                 this.settings.workspace.row_coloring.push(
                     {column: 'roi', operator: '<', value: 0, color: 'red'});
             },
+            // --- custom report columns (Settings → Workspace) ---
+            addCustomColumn() {
+                const name = (this.newCustomColumn.name || '').trim();
+                const formula = (this.newCustomColumn.formula || '').trim();
+                this.customColumnError = '';
+                const cols = Array.isArray(this.settings.workspace.custom_columns)
+                    ? this.settings.workspace.custom_columns : [];
+                if (!name) { this.customColumnError = 'Name is required'; return; }
+                if (name.length > 40) { this.customColumnError = 'Name is too long (max 40)'; return; }
+                if (!formula) { this.customColumnError = 'Formula is required'; return; }
+                if (formula.length > 200) { this.customColumnError = 'Formula is too long (max 200)'; return; }
+                if (cols.length >= 10) { this.customColumnError = 'At most 10 custom columns are allowed'; return; }
+                if (cols.some(c => c.name === name)) { this.customColumnError = 'Name is already in use'; return; }
+                // Mirror the server grammar: every identifier must be a
+                // whitelisted metric (the server re-validates on save anyway).
+                const allowed = new Set(this.customColumnMetricKeys);
+                const idents = formula.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+                if (idents.some(t => !allowed.has(t))) {
+                    this.customColumnError =
+                        'Formula may only use numbers, metric keys and + - * / ( )';
+                    return;
+                }
+                cols.push({name: name, formula: formula});
+                this.settings.workspace.custom_columns = cols;
+                this.newCustomColumn = {name: '', formula: ''};
+            },
+            removeCustomColumn(i) {
+                this.settings.workspace.custom_columns.splice(i, 1);
+            },
             copyText(text, message) {
                 navigator.clipboard.writeText(text).then(() => {
                     this.$root.$emit("show-message", {type: "success",
@@ -1318,7 +1414,8 @@
                         if (!Array.isArray(this.settings.custom_statuses)) this.settings.custom_statuses = [];
                         this.settings.workspace = Object.assign(
                             {}, {decimals: 2, divider: 'comma', row_coloring: [],
-                                 default_columns: {}},
+                                 default_columns: {}, custom_columns: [],
+                                 grouping_view: false},
                             this.settings.workspace || {});
                         if (!Array.isArray(this.settings.workspace.row_coloring)) {
                             this.settings.workspace.row_coloring = [];
@@ -1326,6 +1423,12 @@
                         if (!this.settings.workspace.default_columns
                             || typeof this.settings.workspace.default_columns !== 'object') {
                             this.settings.workspace.default_columns = {};
+                        }
+                        if (!Array.isArray(this.settings.workspace.custom_columns)) {
+                            this.settings.workspace.custom_columns = [];
+                        }
+                        if (typeof this.settings.workspace.grouping_view !== 'boolean') {
+                            this.settings.workspace.grouping_view = false;
                         }
                         if (data.subIdMapping) this.subIdMapping = data.subIdMapping;
                         // loadMonitorStatus writes settings.monitoring from the
@@ -1699,6 +1802,13 @@
     }
     .row-rule-color {
         max-width: 130px;
+    }
+    .cc-hint {
+        color: var(--text-secondary, #667085);
+    }
+    .cc-formula {
+        font-size: var(--fs-12, 12px);
+        color: var(--text-secondary, #667085);
     }
     .demo-label {
         min-width: 42px;

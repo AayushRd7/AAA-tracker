@@ -141,6 +141,15 @@
                 <template v-slot:item.updated_rows="{ item }"><span>{{ $fmtNum(item.updated_rows) }}</span></template>
                 <template v-slot:item.attempts="{ item }"><span>{{ $fmtNum(item.attempts) }}</span></template>
                 <template v-slot:item.flow_index="{ item }"><span>{{ $fmtNum(item.flow_index) }}</span></template>
+                <!-- Long free-text cells (raw postback URL, CAPI response body)
+                     are clipped to keep rows readable; the full value stays in
+                     the title tooltip. -->
+                <template v-slot:item.url="{ item }">
+                    <span :title="item.url">{{ (item.url || '—').slice(0, 60) }}</span>
+                </template>
+                <template v-slot:item.response_snippet="{ item }">
+                    <span :title="item.response_snippet">{{ (item.response_snippet || '—').slice(0, 48) }}</span>
+                </template>
                 <template v-slot:no-data>
                     <div class="empty-state">
                         <v-icon>mdi-inbox-outline</v-icon>
@@ -264,6 +273,7 @@
                         {text: 'Transaction', value: 'transaction_id'},
                         {text: 'Source IP', value: 'source_ip'},
                         {text: 'Reason', value: 'reason'},
+                        {text: 'Raw URL', value: 'url'},
                     ],
                     'api-postbacks': [
                         {text: 'Time', value: 'created_at'},
@@ -275,6 +285,7 @@
                         {text: 'HTTP', value: 'http_status'},
                         {text: 'Outcome', value: 'outcome'},
                         {text: 'Attempts', value: 'attempts'},
+                        {text: 'Response', value: 'response_snippet'},
                     ],
                     'click-forwarding': [
                         {text: 'Time', value: 'created_at'},
@@ -341,6 +352,7 @@
             },
         },
         mounted() {
+            this.applyUrlFilters();
             this.load();
             this.loadPresets();
             this.loadColumnTemplates();
@@ -369,6 +381,18 @@
                 this.loadPresets();
                 this.loadColumnTemplates();
                 this.load();
+            },
+            // A deep link (e.g. a Health-centre "last success" row) lands on a
+            // Logs route with the row's own filter in the query string; seed the
+            // pinned tab's filter state from it so the table opens pre-narrowed.
+            applyUrlFilters() {
+                const params = new URLSearchParams(window.location.search);
+                const filters = this.filterState[this.activeTab];
+                if (!filters) return;
+                Object.keys(filters).forEach(k => {
+                    const v = params.get(k);
+                    if (v) filters[k] = v;
+                });
             },
             logRowClass(item) {
                 return this.$rowClass(item, this.presetScope);

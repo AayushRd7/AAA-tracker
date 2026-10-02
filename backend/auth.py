@@ -172,6 +172,15 @@ def ensure_sessions_table():
                     "ip VARCHAR(64) DEFAULT ''"))
     db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
                     "user_agent TEXT DEFAULT ''"))
+    # Visitor location, sourced from Cloudflare's CF-* headers (see nginx
+    # pass-through). Nullable on purpose: only Cloudflare-proxied requests carry
+    # it, so a direct/IP-only install simply has no location.
+    db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
+                    "country VARCHAR(8)"))
+    db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
+                    "region VARCHAR(64)"))
+    db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
+                    "city VARCHAR(128)"))
     # Multi-tenancy phase 1 — the tenant this session is currently working in.
     # NULL means "never switched": the resolver treats it as tenant 1.
     db.execute(text("ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS "
@@ -181,17 +190,20 @@ def ensure_sessions_table():
     _sessions_table_ready = True
 
 
-def create_session(username: str, ip: str = "", user_agent: str = "") -> str:
+def create_session(username: str, ip: str = "", user_agent: str = "",
+                   country: Optional[str] = None, region: Optional[str] = None,
+                   city: Optional[str] = None) -> str:
     ensure_sessions_table()
     token = secrets.token_urlsafe(32)
     db = SessionLocal()
     db.execute(text(
         "INSERT INTO auth_sessions (token, username, created_at, last_seen, "
-        "expires_at, ip, user_agent) "
-        "VALUES (:t, :u, now(), now(), :e, :ip, :ua)"),
+        "expires_at, ip, user_agent, country, region, city) "
+        "VALUES (:t, :u, now(), now(), :e, :ip, :ua, :cc, :rg, :ct)"),
         {"t": token, "u": username,
          "e": datetime.utcnow() + timedelta(days=SESSION_TTL_DAYS),
-         "ip": (ip or "")[:64], "ua": (user_agent or "")[:512]})
+         "ip": (ip or "")[:64], "ua": (user_agent or "")[:512],
+         "cc": country, "rg": region, "ct": city})
     db.commit()
     db.close()
     return token
@@ -212,6 +224,38 @@ def session_token(request: Request) -> str:
 
 def user_agent(request: Request) -> str:
     return (request.headers.get("user-agent") or "")[:512]
+
+
+# CF-IPCountry is a 2-letter ISO code; "XX" is Cloudflare's "unknown".
+_COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
+_LOCATION_RE = re.compile(r"^[\w .,'()\-]{1,128}$")
+
+
+def _clean_country(value) -> Optional[str]:
+    cc = (value or "").strip().upper()
+    if not _COUNTRY_RE.match(cc) or cc == "XX":
+        return None
+    return cc
+
+
+def _clean_location(value) -> Optional[str]:
+    v = (value or "").strip()
+    # Only a plausible region/city string is stored; anything else (empty,
+    # over-long, punctuation-heavy) is dropped rather than persisted.
+    return v if _LOCATION_RE.match(v) else None
+
+
+def client_location(request: Request) -> tuple:
+    """(country, region, city) from Cloudflare's CF-* headers, validated.
+
+    nginx forwards these only from a trusted Cloudflare peer (see
+    _realip_cloudflare.conf), so a direct client cannot forge them. Validation
+    here is belt-and-braces: a missing or garbage header yields None and must
+    never break session creation.
+    """
+    return (_clean_country(request.headers.get("cf-ipcountry")),
+            _clean_location(request.headers.get("cf-region")),
+            _clean_location(request.headers.get("cf-ipcity")))
 
 
 def parse_user_agent(ua: str) -> dict:
@@ -282,6 +326,10 @@ def _session_public(row, current_token: str = "") -> dict:
         "last_seen": row[2].isoformat() if row[2] else None,
         "ip": row[3] or "",
         "user_agent": ua,
+        # Additive: older sessions have NULL location, returned as empty strings.
+        "country": row[5] or "",
+        "region": row[6] or "",
+        "city": row[7] or "",
         "current": bool(current_token and token == current_token),
         **parse_user_agent(ua),
     }
@@ -290,7 +338,8 @@ def _session_public(row, current_token: str = "") -> dict:
 def list_sessions(db: Session, username: str, current_token: str = "") -> list:
     """Active (non-revoked, unexpired) sessions for a username, newest first."""
     rows = db.execute(text(
-        "SELECT token, created_at, last_seen, ip, user_agent FROM auth_sessions "
+        "SELECT token, created_at, last_seen, ip, user_agent, "
+        "country, region, city FROM auth_sessions "
         "WHERE username = :u AND revoked = false "
         "AND (expires_at IS NULL OR expires_at >= now()) "
         "ORDER BY created_at DESC NULLS LAST"),
@@ -900,7 +949,9 @@ async def login(request: Request, response: Response, login_data: LoginRequest, 
             SECRET_KEY, algorithm=ALGORITHM)
         return {"requires_totp": True, "totp_token": totp_token}
 
-    token = create_session(user.username, client_ip, user_agent(request))
+    country, region, city = client_location(request)
+    token = create_session(user.username, client_ip, user_agent(request),
+                           country, region, city)
     _login_failures.pop(limit_key, None)
     audit_event(user.username, "login_success", "user", user.username, ip=client_ip)
 
@@ -1016,7 +1067,9 @@ async def login_totp(request: Request, response: Response, data: TotpLoginReques
         audit_event(user.username, "totp_failed", "user", user.username, ip=client_ip)
         raise HTTPException(status_code=401, detail="Invalid code")
 
-    token = create_session(user.username, client_ip, user_agent(request))
+    country, region, city = client_location(request)
+    token = create_session(user.username, client_ip, user_agent(request),
+                           country, region, city)
     _totp_failures.pop(limit_key, None)
     audit_event(user.username, "login_success", "user", user.username, {"totp": True}, client_ip)
 

@@ -111,6 +111,60 @@
             </v-col>
         </v-row>
 
+        <!-- Workspace invitations (phase 3): a single-use, expiring grant of a
+             role in THIS workspace. Managers send them; the raw token/accept URL
+             is shown once, right after creation, and never appears in the list. -->
+        <v-row dense class="mt-4" v-if="canManageMembers">
+            <v-col>
+                <v-card>
+                    <v-card-title class="d-flex align-center">
+                        <v-icon color="primary" class="mr-2">mdi-email-plus-outline</v-icon>
+                        Pending invitations
+                        <v-spacer></v-spacer>
+                        <v-btn color="primary" elevation="0" small @click="openInvite">
+                            <v-icon small class="mr-1">mdi-email-fast-outline</v-icon>
+                            Invite member
+                        </v-btn>
+                    </v-card-title>
+                    <v-card-text>
+                        <div class="caption grey--text mb-2">
+                            Invitations to join this workspace. Each is single-use and expires after
+                            7 days; the invite link is shown once when you send it.
+                        </div>
+                        <v-data-table
+                                :headers="invitationHeaders"
+                                :items="invitations"
+                                dense
+                                :loading="loadingInvitations"
+                                :items-per-page="10"
+                                hide-default-footer
+                        >
+                            <template v-slot:item.invitee="{ item }">
+                                {{ inviteeLabel(item) }}
+                            </template>
+                            <template v-slot:item.role="{ item }">
+                                <span class="status-chip status-chip--neutral">{{ item.role }}</span>
+                            </template>
+                            <template v-slot:item.expires_at="{ item }">
+                                {{ item.expires_at ? $formatDate(item.expires_at) : '—' }}
+                            </template>
+                            <template v-slot:item.actions="{ item }">
+                                <v-btn icon small color="red" @click="revokeInvitation(item)">
+                                    <v-icon small>mdi-email-remove-outline</v-icon>
+                                </v-btn>
+                            </template>
+                            <template v-slot:no-data>
+                                <div class="empty-state">
+                                    <v-icon>mdi-email-check-outline</v-icon>
+                                    <div class="mt-2">No pending invitations</div>
+                                </div>
+                            </template>
+                        </v-data-table>
+                    </v-card-text>
+                </v-card>
+            </v-col>
+        </v-row>
+
         <!-- Add-member dialog: an existing user gains a membership, or a brand
              new user is created with one. -->
         <v-dialog v-model="addMemberDialog" max-width="520">
@@ -134,6 +188,62 @@
                     <v-spacer></v-spacer>
                     <v-btn text @click="addMemberDialog = false">Cancel</v-btn>
                     <v-btn color="primary" elevation="0" @click="saveMember">Add</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <!-- Invite dialog: the role picker mirrors the server's role ceiling
+             (an admin may not invite an owner). The result dialog shows the raw
+             token + accept URL the API returns exactly once. -->
+        <v-dialog v-model="inviteDialog" max-width="520">
+            <v-card>
+                <v-card-title><span class="text-h6">Invite member</span></v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-3">
+                        Send a link that lets someone create an account and join this workspace.
+                        Provide an email, a username, or both.
+                    </div>
+                    <v-text-field label="Email" v-model="inviteForm.email" outlined dense
+                                  placeholder="teammate@example.com"></v-text-field>
+                    <v-text-field label="Username" v-model="inviteForm.username" outlined dense
+                                  hint="Optional if you provide an email"></v-text-field>
+                    <v-select label="Role" :items="invitableRoles" v-model="inviteForm.role"
+                              outlined dense></v-select>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="inviteDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :loading="sendingInvite" @click="sendInvite">
+                        Send invitation
+                    </v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="inviteResultDialog" max-width="560">
+            <v-card>
+                <v-card-title><span class="text-h6">Invitation sent</span></v-card-title>
+                <v-card-text>
+                    <div class="caption grey--text mb-3">
+                        Copy this link and send it to the invitee. It is shown only once —
+                        the invitation is single-use and expires on
+                        {{ inviteResult && inviteResult.expires_at ? $formatDate(inviteResult.expires_at) : '—' }}.
+                    </div>
+                    <v-text-field label="Invitation link"
+                                  :value="inviteResult ? inviteResult.accept_url : ''"
+                                  outlined dense readonly append-icon="mdi-content-copy"
+                                  @click:append="copyInvite(inviteResult.accept_url)"></v-text-field>
+                    <v-text-field label="Token"
+                                  :value="inviteResult ? inviteResult.token : ''"
+                                  outlined dense readonly append-icon="mdi-content-copy"
+                                  @click:append="copyInvite(inviteResult.token)"></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="inviteResultDialog = false">Close</v-btn>
+                    <v-btn color="primary" elevation="0" @click="copyInvite(inviteResult.accept_url)">
+                        Copy link
+                    </v-btn>
                 </v-card-actions>
             </v-card>
         </v-dialog>
@@ -350,6 +460,9 @@
                                 <v-icon small class="mr-1">{{ deviceIcon(item.device) }}</v-icon>{{ item.device }}
                                 <span v-if="item.current" class="status-chip status-chip--success ml-2">This device</span>
                             </template>
+                            <template v-slot:item.location="{ item }">
+                                {{ locationLabel(item) }}
+                            </template>
                             <template v-slot:item.last_seen="{ item }">
                                 {{ item.last_seen ? $formatDate(item.last_seen) : '—' }}
                             </template>
@@ -389,6 +502,9 @@
                     >
                         <template v-slot:item.device="{ item }">
                             <v-icon small class="mr-1">{{ deviceIcon(item.device) }}</v-icon>{{ item.device }}
+                        </template>
+                        <template v-slot:item.location="{ item }">
+                            {{ locationLabel(item) }}
                         </template>
                         <template v-slot:item.last_seen="{ item }">
                             {{ item.last_seen ? $formatDate(item.last_seen) : '—' }}
@@ -451,6 +567,21 @@
                 ],
                 addMemberDialog: false,
                 addForm: {mode: 'existing', username: '', email: '', password: '', role: 'editor'},
+                // Workspace invitations (phase 3)
+                invitations: [],
+                loadingInvitations: false,
+                invitationHeaders: [
+                    {text: 'Invitee', value: 'invitee', sortable: false},
+                    {text: 'Role', value: 'role'},
+                    {text: 'Invited by', value: 'invited_by'},
+                    {text: 'Expires', value: 'expires_at'},
+                    {text: 'Actions', value: 'actions', sortable: false},
+                ],
+                inviteDialog: false,
+                inviteResultDialog: false,
+                inviteResult: null,
+                sendingInvite: false,
+                inviteForm: {email: '', username: '', role: 'editor'},
                 mySessions: [],
                 loadingSessions: false,
                 sessionsDialog: false,
@@ -462,6 +593,7 @@
                     {text: 'OS', value: 'os'},
                     {text: 'Browser', value: 'browser'},
                     {text: 'IP', value: 'ip'},
+                    {text: 'Location', value: 'location'},
                     {text: 'Last seen', value: 'last_seen'},
                     {text: 'Started', value: 'created_at'},
                     {text: 'Actions', value: 'actions', sortable: false},
@@ -471,6 +603,7 @@
                     {text: 'OS', value: 'os'},
                     {text: 'Browser', value: 'browser'},
                     {text: 'IP', value: 'ip'},
+                    {text: 'Location', value: 'location'},
                     {text: 'Last seen', value: 'last_seen'},
                     {text: 'Started', value: 'created_at'},
                 ],
@@ -504,11 +637,19 @@
             canManageMembers() {
                 return !!this.membersMeta.can_manage;
             },
+            // The invitation role ceiling: a caller can never invite above their
+            // own role. Owners may invite owners; admins top out at admin.
+            invitableRoles() {
+                return this.membersMeta.caller_role === 'owner'
+                    ? ['owner', 'admin', 'editor', 'viewer']
+                    : ['admin', 'editor', 'viewer'];
+            },
         },
         mounted() {
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadMe();
             this.loadMembers();
+            this.loadInvitations();
             this.loadMySessions();
             this.$root.$on('load-users', this.loadUsers);
         },
@@ -579,6 +720,87 @@
                     .catch(err => {
                         this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
                     });
+            },
+            loadInvitations() {
+                this.loadingInvitations = true;
+                fetch("/backend/api/invitations/", {credentials: "include"})
+                    .then(res => res.ok ? res.json() : {})
+                    .then(data => {
+                        this.invitations = data.invitations || [];
+                        if (!this.membersMeta.caller_role && data.caller_role) {
+                            this.membersMeta.caller_role = data.caller_role;
+                        }
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.loadingInvitations = false;
+                    });
+            },
+            inviteeLabel(item) {
+                return item.email || item.username || ('#' + item.id);
+            },
+            openInvite() {
+                this.inviteForm = {email: '', username: '', role: 'editor'};
+                this.inviteDialog = true;
+            },
+            sendInvite() {
+                const f = this.inviteForm;
+                if (!f.email && !f.username) {
+                    this.$root.$emit("show-message", {type: "error", text: "An email or a username is required."});
+                    return;
+                }
+                if (!this.invitableRoles.includes(f.role)) {
+                    this.$root.$emit("show-message", {type: "error", text: "Choose an allowed role."});
+                    return;
+                }
+                this.sendingInvite = true;
+                fetch("/backend/api/invitations/", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({email: f.email, username: f.username, role: f.role}),
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(data.detail || "Failed to send invitation");
+                        this.inviteDialog = false;
+                        this.inviteResult = data;
+                        this.inviteResultDialog = true;
+                        this.$root.$emit("show-message", {type: "success", text: "Invitation sent"});
+                        this.loadInvitations();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    })
+                    .finally(() => {
+                        this.sendingInvite = false;
+                    });
+            },
+            async revokeInvitation(item) {
+                const ok = await this.$refs.confirm.open('Revoke invitation',
+                    `Revoke the invitation for ${this.inviteeLabel(item)}? The link stops working immediately.`, 'Revoke');
+                if (!ok) return;
+                fetch(`/backend/api/invitations/${item.id}`, {
+                    method: "DELETE",
+                    credentials: "include"
+                })
+                    .then(async res => {
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(data.detail || "Failed to revoke invitation");
+                        this.$root.$emit("show-message", {type: "success", text: "Invitation revoked"});
+                        this.loadInvitations();
+                    })
+                    .catch(err => {
+                        this.$root.$emit("show-message", {type: "error", text: sanitizeToastMessage(err.message)});
+                    });
+            },
+            copyInvite(text) {
+                if (!text) return;
+                navigator.clipboard.writeText(text)
+                    .then(() => this.$root.$emit("show-message", {type: "success", text: "Copied to clipboard"}))
+                    .catch(() => this.$root.$emit("show-message", {type: "error", text: "Copy failed"}));
             },
             changeRole(member, role) {
                 if (!role || role === member.role) return;
@@ -830,6 +1052,14 @@
                 if (d.includes('bot') || d.includes('cli')) return 'mdi-robot';
                 if (d.includes('desktop')) return 'mdi-monitor';
                 return 'mdi-devices';
+            },
+
+            locationLabel(item) {
+                // Country/region/city come from Cloudflare via nginx; sessions
+                // created before (or not via Cloudflare) have none, so "—".
+                const parts = [item && item.country, item && item.region, item && item.city]
+                    .filter(Boolean);
+                return parts.length ? parts.join(', ') : '—';
             },
 
             loadMySessions() {

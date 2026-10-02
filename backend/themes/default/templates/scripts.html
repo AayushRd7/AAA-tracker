@@ -4,7 +4,7 @@
         <div class="d-flex align-center justify-space-between mb-4 flex-wrap">
             <div>
                 <div class="page-title">Scripts</div>
-                <div class="page-subtitle">Store and copy the tracking scripts, pixels and custom JS snippets you paste into landers</div>
+                <div class="page-subtitle">Store the tracking scripts, pixels and custom JS snippets you insert into landers from the landing editor</div>
             </div>
             <v-btn color="primary" elevation="0" @click="openCreate">
                 <v-icon small class="mr-1">mdi-plus</v-icon>New script
@@ -21,6 +21,9 @@
             >
                 <template v-slot:item.code="{ item }">
                     <code class="script-preview">{{ preview(item.code) }}</code>
+                </template>
+                <template v-slot:item.placement="{ item }">
+                    <span class="script-placement">{{ placementLabel(item.placement) }}</span>
                 </template>
                 <template v-slot:item.actions="{ item }">
                     <v-btn icon small @click="copyScript(item)" title="Copy code">
@@ -49,7 +52,7 @@
                 <v-card-text>
                     <v-text-field label="Title" v-model="form.title" outlined dense required></v-text-field>
                     <v-text-field label="Description" v-model="form.description" outlined dense
-                                  hint="What this snippet is for, and where it goes" persistent-hint></v-text-field>
+                                  hint="What this snippet is for, and where it goes — say “head” or “body” and the editor places it before </head> or </body>" persistent-hint></v-text-field>
                     <v-textarea label="Code" v-model="form.code" outlined dense auto-grow
                                 rows="8" class="mt-4" spellcheck="false"></v-textarea>
                 </v-card-text>
@@ -77,6 +80,7 @@
                 headers: [
                     {text: 'Title', value: 'title'},
                     {text: 'Description', value: 'description'},
+                    {text: 'Goes', value: 'placement'},
                     {text: 'Code', value: 'code', sortable: false},
                     {text: '', value: 'actions', sortable: false, align: 'end'},
                 ],
@@ -106,6 +110,11 @@
             preview(code) {
                 const s = String(code || '').replace(/\s+/g, ' ').trim();
                 return s.length > 90 ? s.slice(0, 90) + '…' : s;
+            },
+            placementLabel(placement) {
+                if (placement === 'head') return 'Before </head>';
+                if (placement === 'body') return 'Before </body>';
+                return 'At the cursor';
             },
             openCreate() {
                 this.form = {id: null, title: '', description: '', code: ''};
@@ -180,6 +189,11 @@
     .script-preview {
         font-size: 12px;
         color: var(--text-secondary);
+    }
+    .script-placement {
+        font-size: 12px;
+        color: var(--text-secondary);
+        white-space: nowrap;
     }
 </style>
 {% endraw %}

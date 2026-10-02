@@ -11,6 +11,43 @@
             </v-btn>
         </div>
 
+        <!-- Onboarding checklist for a new workspace: reads
+             GET /api/tenants/onboarding; dismissible per workspace. -->
+        <v-row dense v-if="showOnboarding">
+            <v-col cols="12">
+                <v-card class="pa-4 onboarding-card">
+                    <div class="d-flex align-center flex-wrap mb-3">
+                        <v-avatar :color="onboarding.complete ? '#16a34a1f' : '#2563eb1f'" size="40" class="mr-3">
+                            <v-icon small :color="onboarding.complete ? '#16a34a' : '#2563eb'">mdi-rocket-launch-outline</v-icon>
+                        </v-avatar>
+                        <div class="font-weight-medium mr-3">
+                            {{ onboarding.complete ? 'Workspace setup complete' : 'Finish setting up your workspace' }}
+                        </div>
+                        <span class="caption grey--text">{{ onboardingDoneCount }} of {{ onboardingSteps.length }} done</span>
+                        <v-spacer></v-spacer>
+                        <v-btn icon small @click="dismissOnboarding" aria-label="Dismiss setup checklist">
+                            <v-icon small>mdi-close</v-icon>
+                        </v-btn>
+                    </div>
+                    <v-progress-linear :value="onboardingProgress" height="4" rounded color="primary" class="mb-3"></v-progress-linear>
+                    <div class="onboarding-list">
+                        <div v-for="step in onboardingStepsState" :key="step.key"
+                             class="onboarding-step d-flex align-center py-1">
+                            <v-icon small class="mr-2" :color="step.done ? 'success' : 'grey'">
+                                {{ step.done ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+                            </v-icon>
+                            <span :class="{'onboarding-done': step.done}">{{ step.label }}</span>
+                            <span class="caption grey--text ml-2 d-none d-sm-inline">{{ step.hint }}</span>
+                            <v-spacer></v-spacer>
+                            <v-btn v-if="!step.done" text x-small color="primary" @click="goToOnboardingStep(step)">
+                                Open<v-icon x-small class="ml-1">mdi-arrow-right</v-icon>
+                            </v-btn>
+                        </div>
+                    </div>
+                </v-card>
+            </v-col>
+        </v-row>
+
         <!-- Stat cards -->
         <v-row dense>
             <v-col v-for="metric in metrics" :key="metric.title" cols="6" sm="4" md="2">
@@ -338,6 +375,17 @@
         warning: '#f59e0b',
     };
 
+    // Onboarding checklist: each key mirrors a boolean in
+    // GET /api/tenants/onboarding, with the section that completes it.
+    const ONBOARDING_STEPS = [
+        {key: 'has_team', label: 'Invite your team', hint: 'Add teammates and set their roles.', icon: 'mdi-account-plus-outline', section: 'users'},
+        {key: 'has_traffic_source', label: 'Add a traffic source', hint: 'Tell the tracker where clicks come from.', icon: 'mdi-database-outline', section: 'sources'},
+        {key: 'has_campaign', label: 'Create a campaign', hint: 'Group offers, landers and sources.', icon: 'mdi-sitemap', section: 'campaigns'},
+        {key: 'has_offer', label: 'Add an offer', hint: 'Define what you are promoting.', icon: 'mdi-tag-outline', section: 'offers'},
+        {key: 'has_domain', label: 'Connect a domain', hint: 'Serve landers from your own domain.', icon: 'mdi-domain', section: 'domains'},
+        {key: 'has_integration', label: 'Set up an integration', hint: 'Send conversions to your ad platforms.', icon: 'mdi-connection', section: 'integrations'},
+    ];
+
     // Toast helper shared by every section (all templates load in one shell):
     // cap length and never surface raw SQL/HTML error bodies.
     function sanitizeToastMessage(msg) {
@@ -364,6 +412,10 @@
                 loading: false,
                 fraudSummary: null,
                 insightsSummary: null,
+                // Onboarding checklist (multi-tenancy phase 1)
+                onboarding: null,
+                onboardingDismissed: false,
+                onboardingSteps: ONBOARDING_STEPS,
                 liveMode: false,
                 liveTimer: null,
                 livePanelOpen: false,
@@ -467,6 +519,21 @@
             dateRangeText() {
                 return this.filters.date_range.join(' ~ ')
             },
+            onboardingStepsState() {
+                const result = this.onboarding || {};
+                return this.onboardingSteps.map(step => ({...step, done: !!result[step.key]}));
+            },
+            onboardingDoneCount() {
+                return this.onboardingStepsState.filter(s => s.done).length;
+            },
+            onboardingProgress() {
+                return this.onboardingSteps.length
+                    ? Math.round(this.onboardingDoneCount / this.onboardingSteps.length * 100)
+                    : 0;
+            },
+            showOnboarding() {
+                return !!this.onboarding && !this.onboardingDismissed;
+            },
             livePayload() {
                 return {
                     campaigns: this.filters.campaigns,
@@ -487,6 +554,7 @@
             this.loadAnnotations();
             this.loadFraudSummary();
             this.loadInsightsSummary();
+            this.loadOnboarding();
             document.addEventListener('visibilitychange', this.onVisibilityChange);
             this.$root.$on('load-dashboard', this.loadData);
         },
@@ -598,6 +666,31 @@
             goToInsights() {
                 window.location.href = '/backend/fraud';
                 try { localStorage.setItem('fraud_tab', 'insights'); } catch (e) {}
+            },
+            // --- onboarding checklist (workspace setup) ---
+            loadOnboarding() {
+                fetch('/backend/api/tenants/onboarding', {credentials: 'include'})
+                    .then(window.fetchJsonFromResponse)
+                    .then(data => {
+                        this.onboarding = data;
+                        let hidden = false;
+                        try {
+                            hidden = localStorage.getItem('aaa_onboarding_dismissed_' + data.tenant_id) === '1';
+                        } catch (e) { /* private mode — the checklist just stays visible */ }
+                        this.onboardingDismissed = hidden;
+                    })
+                    .catch(() => { this.onboarding = null; });
+            },
+            dismissOnboarding() {
+                this.onboardingDismissed = true;
+                if (this.onboarding) {
+                    try {
+                        localStorage.setItem('aaa_onboarding_dismissed_' + this.onboarding.tenant_id, '1');
+                    } catch (e) { /* private mode */ }
+                }
+            },
+            goToOnboardingStep(step) {
+                window.location.href = '/backend/' + step.section;
             },
             // --- G51: live click feed ---
             onVisibilityChange() {
@@ -1030,6 +1123,11 @@
     }
     .section-enter {
         animation: dash-fade-up var(--t-med, 240ms) ease-out;
+    }
+    /* Onboarding checklist */
+    .onboarding-step .onboarding-done {
+        text-decoration: line-through;
+        color: var(--text-secondary, #667085);
     }
     @keyframes dash-fade-up {
         from { opacity: 0; transform: translateY(6px); }
