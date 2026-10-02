@@ -261,8 +261,12 @@
 
                             <v-alert v-if="!deployment.telegram_bot_configured"
                                      type="warning" text dense class="mt-3 mb-0">
-                                Telegram is not set up for this deployment yet, so these
-                                notifications stay off. There is nothing to fill in here.
+                                Telegram is not configured for this deployment yet, so these
+                                notifications stay off. The bot belongs to the whole deployment,
+                                not to this workspace: set <code>TELEGRAM_BOT_TOKEN</code> (and
+                                <code>TELEGRAM_BOT_USERNAME</code> for the bot button) in the
+                                server environment and restart the backend. Only your chat is
+                                chosen here.
                             </v-alert>
                             <template v-else>
                                 <div class="caption grey--text mt-3 mb-1">
@@ -332,8 +336,12 @@
 
                             <v-alert v-if="!deployment.email_configured"
                                      type="warning" text dense class="mt-3 mb-0">
-                                Email delivery is not set up for this deployment yet, so reports
-                                cannot be sent. There is nothing to fill in here.
+                                Email delivery is not configured for this deployment yet, so
+                                reports cannot be sent. The relay belongs to the whole
+                                deployment, not to this workspace: set <code>SMTP_HOST</code>
+                                with <code>SMTP_LOGIN</code> and <code>SMTP_PASSWORD</code>, or
+                                <code>EMAIL_API_KEY</code>, in the server environment and
+                                restart the backend.
                             </v-alert>
                             <div v-else class="caption grey--text mt-3 mb-2">
                                 Delivered by this deployment's mail service — nothing to set up here.
