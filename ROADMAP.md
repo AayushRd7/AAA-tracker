@@ -10,7 +10,7 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 - [x] **2. Sub ID / macro tokens in offers & landings** — full macro set (`{click_id}`, `{sub_id_1..10}`, `{campaign_name}`, `{source}`, `{cost}`…) substituted in offer URLs, lander links, and postback URLs; traffic-source token → sub_id mapping (paramsIdMapping) feeds attribution, and the source's own clickid token now flows through as the click id.
 - [x] **3. % traffic distribution across flows** — weighted-random split implemented and live-verified (70/30 test); position mode = first match wins; forced flows win; fallback URL + hide-referrer added in the same batch.
 - [x] **4. Bot / filter rules** — click-level filtering in Settings: block (404) or mark-as-bot by IP, IP range (CIDR), User-Agent regex, empty referer, duplicate visitor. Live-tested both actions. (VPN/proxy ASN: is_bot/is_using_proxy already detected per-click; rules for those next.)
-- [ ] **5. Cost auto-sync from ad networks** — sources already have `additional_settings` with `taboola_api_key`-style fields; wire actual API pulls (Facebook/Taboola/TikTok) to auto-import spend instead of manual cost per click.
+- [~] **5. Cost auto-sync from ad networks** — **Meta is live**: daily spend/impressions/clicks per campaign (dry-run first, opt-in, driven by the connected OAuth token or a stored token), folded into the tracker's cost so profit and ROI are real. The other networks (Google/TikTok/Snapchat/Taboola/Outbrain/…) are **not built** — each needs its own API module and credentials.
 - [x] **6. S2S postback URL builder per network** — Copy button on each network now fills in the tracker domain and appends the postback security key when enabled.
 
 ## 📊 Reporting & Data
@@ -32,7 +32,7 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 ## ⚙️ Production Hardening
 
 - [x] **17. Remove `--reload` / add uvicorn workers** — `docker-compose.prod.yml` override: uvicorn with 2 workers, no reload, ClickHouse memory cap. Dev compose stays hot-reload. Run with `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`.
-- [x] **18. Automated tests** — `backend/tests/api_smoke.py`: 967-check live suite covering auth/2FA/permissions, campaign CRUD/clone/bulk/CSV, routing rules (filters/stickiness/caps/schedules), tracking plane (direct JS/pixel/impressions/Click API/simulation with visitor profiles), conversion economics (LTV/custom events/clickless/import), reporting depth (28 dimensions, pagination, CSV export), retroactive cost updates, domain groups, fraud/cloaking, flow actions, optimizer, funnels, the security/robustness audit regressions, postback rules/fanout/tokens, and the routing-depth batch. 967/967 passing.
+- [x] **18. Automated tests** — `backend/tests/api_smoke.py`: a live end-to-end suite (~1,700 checks) covering auth/2FA/permissions, multi-tenant isolation, campaign CRUD/clone/bulk/CSV, routing rules (filters/stickiness/caps/schedules), the tracking plane (direct JS/pixel/impressions/Click API/simulation with visitor profiles), conversion economics (LTV/custom events/clickless/import/approval lifecycle), reporting depth (36 dimensions, pagination, CSV export, share links), the logs area, retroactive cost updates, domain groups, fraud/cloaking, flow actions, optimizer, funnels, the security/robustness audit regressions, OAuth connect, CAPI/Meta cost-sync dry runs, and the routing-depth batch. Last full run: **1,710 passed, 0 failed** (2026-10-02).
 - [x] **19. CI** — GitHub Actions: compileall over backend+frontend and compose YAML sanity on push/PR.
 - [ ] **20. HTTPS/Certbot automation check** — Domains page now guides DNS setup (A record / CNAME instructions, per-domain "Check DNS" button) and the cert flow fails fast with a clear message when the domain doesn't route to the server yet; the auto-renewal cron flow itself is still unverified.
 
@@ -53,7 +53,7 @@ Pending features, organized by area. Suggested order: 1 → 3 → 4 (status edit
 
 ## 🗂 Wave 8 — Catalogs, blacklists, status, grabber (2026-09-27)
 
-- [x] **30. Traffic sources catalog** — 187 presets (full RedTrack channel list) with API-integration capability badges (cost update / campaign pause / blacklist placement / pause creative); searchable card-grid picker modal; seeding backfills missing presets on existing installs.
+- [x] **30. Traffic sources catalog** — 187 presets (a full traffic-channel catalog) with API-integration capability badges (cost update / campaign pause / blacklist placement / pause creative); searchable card-grid picker modal; seeding backfills missing presets on existing installs.
 - [x] **31. Affiliate networks catalog** — 125 presets with verticals (Dating, Gambling, Nutra…) as filter chips; brand logos via a server-side favicon proxy with initial-letter fallback; logos also shown in the networks table.
 - [x] **32. Blacklist workflow (G44)** — named blacklists on sub_id_1..10 / country / city / device / os / browser / ip (CIDR ok), global or per-campaign, mark-as-bot or block; managed on the Fraud page; enforced on the redirect path AND the Click API.
 - [x] **33. System status (G78)** — admin System status tab: version, Postgres/ClickHouse health + latency, 24h click/conversion counts, background-loop heartbeats (monitor/rules/optimizer), 15s auto-poll.
@@ -157,41 +157,65 @@ Model: pixels are records in **CAPI Integrations**; a **traffic source (channel)
 - [ ] Meta/Snapchat/TikTok/Pinterest senders; AppLovin + OpenAI once their docs/tokens are confirmed.
 - [ ] Optional 7th: Google Ads (needs a developer token application).
 
-## 🗂 Wave 17 — Logs & observability (queued, high value)
+## 🗂 Wave 17 — Logs & observability ✅ shipped (reconciled 2026-10-02)
 
-Everything here is data we already write; the gap is that there is no surface to audit it.
+Everything here was already written; the audit surface now exists. It shipped as **six
+sidebar routes under a Logs group** rather than in-page sub-tabs — same data, one click apart.
 
-- [ ] **Logs area in the sidebar** with sub-tabs, each filterable + exportable (CSV) and using the standard table chrome:
-  - **Clicks** and **Conversions** (the existing click log / conversion log move here and keep working)
-  - **S2S postbacks** — every inbound postback: ref/click id, status, payout, matched or rejected (incl. rule rejects), source IP, raw URL
-  - **API postbacks** — outbound CAPI delivery: pixel/destination, platform, event name, HTTP status, response, attempt count (backed by the existing `meta_capi_log` / `capi_pixel_sent` tables)
-  - **Click forwarding** — per click: chosen flow, schema, offer, forwarded URL, status (this is the "why did this click go there / why did it not work" view)
-  - **Cost updates** — who changed cost, for which campaign/period, how many rows
-- [ ] **Conversion health** additions to the system status page: last successful postback per source, CAPI failure counts, and links to the offending row.
+- [x] **Six log views**, each filterable and CSV-exportable with the standard table chrome:
+  - **Clicks** and **Conversions** (`logs-clicks`, `logs-conversions`)
+  - **S2S postbacks** — ref/click id, status, payout, transaction id, matched/rejected, source IP
+  - **Internal postbacks** — outbound CAPI delivery: platform, pixel, event, HTTP status, attempts
+  - **Click forwarding** — per click: flow, schema, offer, forwarded URL, status and reason
+  - **Cost updates** — who changed cost, which campaign/period, how many rows
+- [ ] **Conversion health** on the status page — the 24h CAPI failure count is shown;
+  *last successful postback per source* and row deep-links are still missing.
+- [ ] Two captured-but-unshown fields: the postback **raw URL** and the CAPI **response
+  snippet** are in the API and the CSV, but not rendered as table columns.
 
-## 🧰 Wave 18 — Tools grouping + saved filters (queued)
+## 🧰 Wave 18 — Tools grouping + saved filters ✅ shipped (reconciled 2026-10-02)
 
-- [ ] Sidebar **Tools** group holding Domains, Scripts, Conversion tracking, Integrations, Filter presets, Fallback URL, Blacklist bots (pure information-architecture change — no new pages except the two below).
-- [ ] **Global fallback URL** with the full token palette, used when no flow matches or caps/filters block a click (today fallback is per campaign only).
-- [ ] **Saved filter presets** — name a filter set on any log/report and reapply it later.
-- [ ] **Script library** — reusable titled snippets (tracking script, pixel, custom JS) with copy, injected into landers.
-- [ ] **Funnel templates** — save a campaign's funnel steps as a reusable template and apply it to a new campaign.
+- [x] **Tools group** in the sidebar: Domains, Conversion tracking, Scripts, Bot rules,
+  Automatic rules, Filter presets, Fallback, Health centre. (Integrations sits in *Manage*,
+  and bot blacklists live under *Fraud* — there is no separate "Blacklist bots" entry.)
+- [x] **Global fallback URL** with the full token palette, used when no flow matches or a
+  cap/filter blocks the click — the campaign fallback wins, then the global one.
+- [x] **Saved filter presets** — save, apply and reapply a named filter set on every log and
+  on Reports.
+- [x] **Funnel templates** — save a campaign's funnel steps and apply them to another.
+- [ ] **Script library** — reusable titled snippets with copy exist, but **injection into
+  landers is not built** (the module documents this as out of scope).
 
-## 📊 Wave 19 — Report & table depth (queued)
+## 📊 Wave 19 — Report & table depth ✅ shipped (reconciled 2026-10-02)
 
-- [ ] **Column-set templates** (save/load which columns a table shows) + **custom columns**.
-- [ ] **Conditional row colouring** by column value (threshold bands) and **number formatting** (decimal places, thousands divider) as workspace settings.
-- [ ] **Report template gallery** for saved reports, plus an **IP report** mode (single-day, per-IP).
-- [ ] **Conversion status lifecycle** for networks that approve conversions: pending / approved / declined / other, with approval and decline rates as report columns and an approval status per conversion row.
-- [ ] Conversions log: **duplicate-status column**, **deduplicate token**, **bulk status change**, and **manual conversion add** (we have import + single-row edit today).
+- [x] **Column-set templates** (save/load which columns a table shows), per scope.
+- [x] **Conditional row colouring** by column threshold and **number formatting** (decimals,
+  thousands divider) as workspace settings, applied across Logs/Reports/Campaigns.
+- [x] **Report template gallery** (9 built-in presets) and an **IP report** mode
+  (single-day, per-IP, enforced server-side).
+- [x] **Conversion approval lifecycle** — pending / approved / declined / other, with approval
+  and decline rates as columns plus single and bulk approval actions.
+- [x] Conversions log: **duplicate-status column**, **dedupe token**, **bulk status change**
+  and **manual conversion add**.
+- [x] Report builder depth: custom formula metrics, public share links, 5-level dimension
+  drill-down, **36 dimensions**.
+- [ ] **Custom columns** — user-defined columns (beyond showing/hiding built-ins) are not built.
 - [ ] Google Ads offline-conversion export format (blocked on the Ads API token, like G39/G40).
+- [ ] The SubID chain rolls up `sub_id_1`→`sub_id_5`; `sub_id_6..10` exist on the row but are
+  not report dimensions.
 
-## 🔐 Wave 20 — Account & operations (queued)
+## 🔐 Wave 20 — Account & operations — mostly shipped (reconciled 2026-10-02)
 
-- [ ] **Session management** — list active sessions per user (IP, geo, device, OS, browser, last seen) with "log out everywhere" (DB-backed sessions already exist).
-- [ ] **Audit log filters** — by object type, title/id, user and date range in the UI.
-- [ ] **Workspace settings** — decimal places, divider, default table template, grouping-view toggle.
-- [ ] **Health-center style incidents** — see Wave 17's conversion health item.
+- [x] **Session management** — per-user active sessions (IP, device, OS, browser, last seen,
+  started) with revoke-one and "log out everywhere"; operators can inspect another user's
+  devices. **Geo per session is not built.**
+- [x] **Audit log filters** — by user, action, object type, title/id and date range, with CSV
+  export and facet counts.
+- [~] **Workspace settings** — decimal places, thousands divider and per-table default columns
+  are shipped; the **grouping-view toggle is not built**.
+- [ ] **Health-centre incidents** — the health centre is a flat self-check (DB/analytics
+  reachability, row counts, loop heartbeats, 24h CAPI failures). There is no per-integration
+  or per-domain incident object.
 
 
 ## 🏢 Multi-tenancy — SaaS foundation (in progress)
@@ -209,10 +233,10 @@ and its data is backfilled to it, so nothing changes for the existing deployment
 - [x] acceptance gate: 74 isolation assertions in the smoke suite (cross-tenant read/update/delete, same-alias independence, ClickHouse tenant stamping, host→campaign resolution)
 - Also fixed along the way (pre-existing faults the isolation work surfaced): Meta cost-sync and optimizer bound-parameter crashes, a CAPI pixel claim that meant no pixel was ever sent, a cross-tenant read of stored integration connections, and tenant-unaware conversion attribution + retention prune
 
-### Phase 1 — known gaps (carried into phase 2)
-- [ ] per-tenant users/roles/invites (users and `is_admin` are still install-global)
-- [ ] per-tenant settings seeded on tenant creation; per-tenant retention and bind secret
-- [ ] `parent_tenant_id` stored but not traversed (no inherited access/settings yet)
+### Phase 1 — known gaps (carried into phase 2) — reconciled 2026-10-02
+- [~] per-tenant users/roles/invites — **roles and invites are per-tenant**; the **users table is still install-global** (no `tenant_id`), so an account is shared across the workspaces it is a member of
+- [x] per-tenant settings seeded on tenant creation, per-tenant retention and per-tenant bind secret — all shipped
+- [x] `parent_tenant_id` is traversed for access (a manager reaches its descendants; authority flows down only) — roll-up *reporting* is still absent (phase 3)
 - [ ] the four `UPDATE settings … WHERE id` sites rely on a preceding tenant-scoped `SELECT … FOR UPDATE` rather than an inline predicate
 - [ ] a new tenant's campaign is unreachable until one of its domains exists (host-based resolution)
 
@@ -226,14 +250,14 @@ and its data is backfilled to it, so nothing changes for the existing deployment
 - [x] per-tenant bind secret, persisted in that workspace's settings rows
 - [x] background loops iterate tenants (monitor, auto-rules, optimizer, insights, email reports, Meta cost sync) inside a per-tenant context, honouring `tenants.features` and isolating failures
 - [x] API tokens are workspace-scoped: a request resolves the presented token to its tenant and runs there
-- [ ] per-tenant CAPI/Meta connection setup surfaced in the UI
+- [x] per-tenant CAPI/Meta connection setup surfaced in the UI — each workspace connects its own ad account from Integrations; the OAuth **app credentials stay deployment-owned** (env), which is deliberate
 
 ### Phase 3 — onboarding, whitelabel, sub-workspaces (billing deferred)
-- [x] onboarding: invite members into a workspace (single-use, hashed, expiring, role ceiling) + a per-workspace setup checklist — shipped
-- [ ] self-serve signup + a first-campaign wizard on top of invites
-- [~] whitelabel: per-workspace product name, logo, accent colour, login message and host-resolved branding — implemented, awaiting verification
+- [x] onboarding: invite members into a workspace (single-use, hashed, expiring, role ceiling) + a per-workspace setup checklist — API shipped; **neither is surfaced in the UI yet**
+- [ ] self-serve signup + a first-campaign wizard on top of invites — **not built** (there is no `register`/`signup` route; access is invite-only)
+- [x] ~~whitelabel: per-workspace product name, logo, accent colour, login message, host-resolved branding~~ — **dropped by the owner (2026-10-02)**. No code exists; branding is a single static logo and a fixed accent. (An earlier revision of this file claimed it was "implemented, awaiting verification" — that was wrong.)
 - [x] agency sub-workspace management: create nested workspaces, switch a session into any descendant of a workspace you manage, authority flows down the tree only — shipped
-- [ ] roll-up reporting across child workspaces
+- [ ] roll-up reporting across child workspaces — **not built** (reporting is strictly single-tenant; the G58 "roll-up presets" are dimension roll-ups within one workspace)
 - [ ] **billing — deferred on purpose (2026-09-29):** plans, seats, usage metering and invoices stay out until the rest of phase 3 is in place, because the tiers, the limits and whether a payment provider (or manual invoicing) is used are product decisions that have not been made yet. The plan/seats/retention columns and seat enforcement from phase 2 are the foundation it will build on.
 
 ## 🧰 Wave 22 — Production hardening from live-server incidents (2026-09-30)
@@ -275,8 +299,51 @@ Every item here came from a real failure on a running box, with the evidence rec
 
 ## 🔜 Queued — will be completed later
 
-- **Remaining G95 leftovers**: Google Safe Browsing checks (needs an API key) · server-side GeoIP DB (needs a MaxMind license or equivalent) — both implemented as opt-in settings the moment a key/license exists.
-- **Wave 15 — scalability follow-ups** (deferred by design, volume-dependent): legacy flow-schema migration for configs carrying the removed `split` schema, ReplacingMergeTree redesign to replace the per-postback `ALTER UPDATE` mutation, fraud CIDR signals extended to IPv6, lazy rDNS resolution (only when a campaign actually filters on `rdns`).
-- **Follow-ups noted by implementation**: domain-group grants are visibility-level (binding-time enforcement pending — G84); fraud CIDR signals are v4-only (v6 visitors simply never match); true IPv6-through-nginx path untested locally.
-- **Installer portability**: `make install` now works with either the modern `docker compose` plugin or the legacy `docker-compose` binary (auto-detected, with an actionable preflight error and `make check`); `setup.sh` installs the plugin (or the standalone binary as fallback) and detects the distro; CI guards against re-hardcoding the binary and dry-runs the Makefile.
-- **Still blocked on user input**: cost auto-sync (5) and CAPI/conversion upload to Meta/Google — need ad-platform API tokens; certbot auto-renewal verification (20).
+**Reconciled 2026-10-02** — after a code-level audit of every earlier wave, this is what
+is genuinely still open. Waves 17–20 turned out to be shipped; see above.
+
+**Blocked on a key, a licence or a third party**
+- Google Safe Browsing checks (needs an API key) and a server-side GeoIP DB (needs a
+  MaxMind-grade licence) — both become opt-in settings the moment a key exists.
+- Cost sync and conversion upload for platforms beyond **Meta** — each needs its own app
+  and token. Meta is live; Snapchat/TikTok/Pinterest/Google/AppLovin are records marked
+  "coming soon" with no sender.
+- The certbot auto-renewal flow on a live domain is still unverified (20).
+
+**Deferred by design (volume-dependent)**
+- Legacy flow-schema migration for configs carrying the removed `split` schema.
+- ReplacingMergeTree redesign to replace the per-postback `ALTER UPDATE` mutation.
+- Fraud CIDR signals extended to IPv6 (v6 visitors simply never match today).
+- Lazy rDNS resolution (only when a campaign actually filters on `rdns`).
+- Domain-group grants are visibility-level; binding-time enforcement is pending (G84).
+
+**Small, well-scoped gaps found by the audit**
+- **Custom columns** — tables can show/hide built-in columns; defining a new one is not built.
+- **Script library injection** — snippets are copy-only; nothing is injected into a lander.
+- **Conversion health** on the status page — 24h CAPI failure count exists; *last successful
+  postback per source* and row deep-links do not.
+- Show the captured postback **raw URL** and CAPI **response snippet** as log columns.
+- **Health centre incidents** — per-integration / per-domain incident objects (today: flat checks).
+- **Session geo** — IP/device/OS/browser are shown per session; country/city is not.
+- **Grouping-view toggle** in workspace settings.
+- **`sub_id_6..10`** as report dimensions (the SubID chain stops at `sub_id_5`).
+- **Invitations and the onboarding checklist have APIs but no UI.**
+- Per-resource ACLs beyond `campaigns:'own'`, and per-user metric restrictions (G63).
+
+**Not built (product decisions or new surface)**
+- Self-serve signup + a first-campaign wizard (access is invite-only today).
+- Roll-up reporting across a workspace and its children.
+- Multi-currency conversion and geo-specific payout.
+- Cross-device attribution; offline/phone-sales ingestion.
+- Ecommerce / CRM / call-tracking integrations, offer marketplace, iGaming integrations,
+  mobile apps, BI-warehouse export.
+
+**Known defect**
+- The tracking path crashes the frontend worker when a flow holds a non-numeric id
+  (`asyncpg.DataError`, e.g. `lt-caps`) instead of validating the id and returning 404.
+
+**Installer portability** (shipped; recorded for context): `make install` works with either
+the `docker compose` plugin or the legacy `docker-compose` binary (auto-detected, with an
+actionable preflight error and `make check`); `setup.sh` installs the plugin (or the
+standalone binary as fallback) and detects the distro; CI guards against re-hardcoding the
+binary and dry-runs the Makefile.
