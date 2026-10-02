@@ -4,7 +4,7 @@
         <div class="d-flex align-center justify-space-between mb-4">
             <div>
                 <div class="page-title">Settings</div>
-                <div class="page-subtitle">Tracker configuration and postback URLs</div>
+                <div class="page-subtitle">Tracking, reporting, notifications and integrations for this workspace</div>
             </div>
             <div class="d-flex align-center">
                 <v-btn
@@ -53,8 +53,9 @@
                    @click="loadSettings">Reload</v-btn>
         </v-alert>
         <v-container fluid class="px-0 settings-grid">
-
-            <v-row class="mb-2">
+            <div class="settings-section-title">Tracking</div>
+            <div class="settings-section-sub">Where clicks go and how conversions come back.</div>
+            <v-row>
                 <v-col cols="12">
                     <v-card class="pa-4">
                         <v-card-title>Postback URLs</v-card-title>
@@ -86,8 +87,6 @@
                         </v-card-text>
                     </v-card>
                 </v-col>
-            </v-row>
-            <v-row class="mb-2">
                 <v-col cols="12">
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
@@ -124,7 +123,152 @@
                         </v-card-text>
                     </v-card>
                 </v-col>
+                <v-col cols="12" md="6">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-crosshairs-gps</v-icon>
+                            Tracking
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.tracking.prefetch_filter_enabled"
+                                    label="Ignore prefetch requests"
+                                    inset dense hide-details
+                                    hint="Browser prefetch/prerender hits (Purpose: prefetch) still get the redirect but are not counted as visits or click-outs. Default on — prefetches otherwise inflate stats."
+                                    persistent-hint
+                                    class="mb-3"
+                            ></v-switch>
+                            <v-switch
+                                    v-model="settings.tracking.skip_bot_costs"
+                                    label="Do not assign costs for bot clicks"
+                                    inset dense hide-details
+                                    hint="Bot-flagged hits get cost 0 so cost reports are not inflated. Default off — existing behavior is preserved until enabled."
+                                    persistent-hint
+                                    class="mb-3"
+                            ></v-switch>
+                            <v-text-field
+                                    v-model="settings.tracking.referrer_hiding_domain"
+                                    label="Referrer-hiding domain"
+                                    outlined dense hide-details clearable
+                                    placeholder="hide.example.com"
+                                    hint="When a campaign hides the referrer, the meta-refresh hop is served from this domain instead of the campaign host. Leave empty for current behavior."
+                                    persistent-hint
+                                    class="mb-3"
+                            ></v-text-field>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+                <v-col cols="12" md="6">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-shield-lock-outline</v-icon>
+                            Postback security
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.postback_security.enabled"
+                                    label="Require a secret key or IP allowlist for inbound postbacks"
+                                    inset
+                                    dense
+                                    hide-details
+                            ></v-switch>
+
+                            <v-text-field
+                                    label="Secret key"
+                                    v-model="settings.postback_security.secret_key"
+                                    :disabled="!settings.postback_security.enabled"
+                                    :append-icon="showPbSecret ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                                    :type="showPbSecret ? 'text' : 'password'"
+                                    @click:append="showPbSecret = !showPbSecret"
+                                    outlined
+                                    dense
+                                    hint="Networks must pass it as ?key=... or ?secret=... or an X-Postback-Key header. Leave empty to allow the key check."
+                                    persistent-hint
+                            ></v-text-field>
+
+                            <v-textarea
+                                    label="Allowed IPs"
+                                    v-model="settings.postback_security.allowed_ips"
+                                    :disabled="!settings.postback_security.enabled"
+                                    outlined
+                                    dense
+                                    rows="2"
+                                    hint="Comma-separated IPs or CIDR ranges, e.g. 203.0.113.5, 10.0.0.0/8. Leave empty to allow any IP."
+                                    persistent-hint
+                            ></v-textarea>
+
+                            <div class="caption grey--text">
+                                When enabled, inbound postbacks must satisfy every non-empty check. If both stay empty while enabled, postbacks are allowed.
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+                <v-col cols="12" md="6">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-shield-lock-outline</v-icon>
+                            Privacy
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.privacy.anonymize_ip"
+                                    label="Anonymize IP addresses"
+                                    inset
+                                    dense
+                                    hide-details
+                                    hint="The tracking plane masks visitor IPs (last octet zeroed: 203.0.113.55 → 203.0.113.0) before writing analytics rows. Geo detection still works; per-IP drill-down is lost. Applied to new traffic only."
+                                    persistent-hint
+                                    class="mb-3"
+                            ></v-switch>
+                            <div class="caption grey--text">
+                                Visitors can opt out of all tracking entirely via the
+                                <a :href="optoutUrl" target="_blank">{{ optoutUrl }}</a> page — it sets the
+                                <code>aaa_optout</code> cookie and the tracking plane stops writing rows and setting
+                                cookies for that browser.
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+                <v-col cols="12">
+                    <v-card class="pa-4">
+                        <v-card-title>Matching variables (Sub IDs)</v-card-title>
+                        <v-card-text>
+                            <v-row dense v-for="(mapping, index) in subIdMapping" :key="index" align="center">
+                                <v-col cols="3">
+                                    <v-text-field
+                                            :label="mapping.name"
+                                            v-model="mapping.name"
+                                            :readonly="!mapping.editable_name"
+                                            outlined
+                                            dense
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="3">
+                                    <v-text-field
+                                            :label="mapping.parameter"
+                                            v-model="mapping.parameter"
+                                            :readonly="!mapping.editable_name"
+                                            outlined
+                                            dense
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="6">
+                                    <v-text-field
+                                            label="Variable name"
+                                            v-model="mapping.token"
+                                            outlined
+                                            dense
+                                    ></v-text-field>
+                                </v-col>
+                            </v-row>
+
+                        </v-card-text>
+                    </v-card>
+                </v-col>
             </v-row>
+
+            <div class="settings-section-title">Workspace</div>
+            <div class="settings-section-sub">Defaults, reporting currency and attribution for this workspace.</div>
             <v-row>
                 <v-col cols="12" md="6">
                     <v-card class="pa-4">
@@ -289,7 +433,8 @@
 
                         </v-card-text>
                     </v-card>
-
+                </v-col>
+                <v-col cols="12" md="6">
                     <v-card class="pa-4 mt-4" id="fx-rates">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-currency-usd</v-icon>
@@ -418,7 +563,8 @@
                             </div>
                         </v-card-text>
                     </v-card>
-
+                </v-col>
+                <v-col cols="12" md="6">
                     <v-card class="pa-4 mt-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-account-convert</v-icon>
@@ -475,7 +621,84 @@
                         </v-card-text>
                     </v-card>
                 </v-col>
+                <v-col cols="12" md="6">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-tag-plus-outline</v-icon>
+                            Conversion statuses
+                        </v-card-title>
+                        <v-card-text>
+                            <div class="caption grey--text mb-3">
+                                Custom event types accepted on postbacks and imports, in addition to the
+                                built-ins (lead, sale, upsale, rejected, hold, trash). Names are normalized
+                                to lowercase_underscore — "ReGistration Bonus" becomes
+                                <code>registration_bonus</code>.
+                            </div>
 
+                            <div v-for="(cs, i) in settings.custom_statuses" :key="i"
+                                 class="d-flex align-center custom-status-row">
+                                <v-text-field
+                                        v-model="cs.name"
+                                        label="Status name"
+                                        outlined
+                                        dense
+                                        hide-details
+                                        class="mr-3"
+                                ></v-text-field>
+                                <span class="status-chip mr-3" :class="customStatusChipClass(i)">
+                                    {{ slugifyStatus(cs.name) || '…' }}
+                                </span>
+                                <v-btn icon small @click="settings.custom_statuses.splice(i, 1)">
+                                    <v-icon small color="red">mdi-close</v-icon>
+                                </v-btn>
+                            </div>
+
+                            <div class="mt-2">
+                                <v-btn small text color="primary" @click="addCustomStatus">
+                                    <v-icon small class="mr-1">mdi-plus</v-icon>Add status
+                                </v-btn>
+                            </div>
+
+                            <div class="caption grey--text mt-2">
+                                Custom statuses appear in the conversion-log status filter and edit dialog,
+                                and in the postback URL <code>/pb?clickid=…&amp;status=…&amp;payout=…</code>.
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+                <v-col cols="12" md="6">
+                    <v-card class="pa-4">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-database-refresh-outline</v-icon>
+                            Data retention
+                        </v-card-title>
+                        <v-card-text>
+                            <v-switch
+                                    v-model="settings.data_retention.enabled"
+                                    label="Auto-delete tracking data older than a set window"
+                                    inset
+                                    dense
+                                    hide-details
+                            ></v-switch>
+                            <v-text-field
+                                    label="Keep data for (days)"
+                                    v-model.number="settings.data_retention.days"
+                                    :disabled="!settings.data_retention.enabled"
+                                    type="number"
+                                    min="1"
+                                    outlined
+                                    dense
+                                    hint="A daily job prunes clicks_data older than this. Example: 180."
+                                    persistent-hint
+                            ></v-text-field>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+            </v-row>
+
+            <div class="settings-section-title">Notifications</div>
+            <div class="settings-section-sub">Where alerts and scheduled reports are sent.</div>
+            <v-row>
                 <v-col cols="12" md="6">
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
@@ -550,7 +773,6 @@
                         </v-card-text>
                     </v-card>
                 </v-col>
-
                 <v-col cols="12" md="6">
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
@@ -615,168 +837,163 @@
                         </v-card-text>
                     </v-card>
                 </v-col>
+            </v-row>
 
-                <v-col cols="12" md="6">
-                    <v-card class="pa-4">
-                        <v-card-title class="d-flex align-center">
-                            <v-icon color="primary" class="mr-2">mdi-shield-lock-outline</v-icon>
-                            Postback security
-                        </v-card-title>
-                        <v-card-text>
-                            <v-switch
-                                    v-model="settings.postback_security.enabled"
-                                    label="Require a secret key or IP allowlist for inbound postbacks"
-                                    inset
-                                    dense
-                                    hide-details
-                            ></v-switch>
-
-                            <v-text-field
-                                    label="Secret key"
-                                    v-model="settings.postback_security.secret_key"
-                                    :disabled="!settings.postback_security.enabled"
-                                    :append-icon="showPbSecret ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
-                                    :type="showPbSecret ? 'text' : 'password'"
-                                    @click:append="showPbSecret = !showPbSecret"
-                                    outlined
-                                    dense
-                                    hint="Networks must pass it as ?key=... or ?secret=... or an X-Postback-Key header. Leave empty to allow the key check."
-                                    persistent-hint
-                            ></v-text-field>
-
-                            <v-textarea
-                                    label="Allowed IPs"
-                                    v-model="settings.postback_security.allowed_ips"
-                                    :disabled="!settings.postback_security.enabled"
-                                    outlined
-                                    dense
-                                    rows="2"
-                                    hint="Comma-separated IPs or CIDR ranges, e.g. 203.0.113.5, 10.0.0.0/8. Leave empty to allow any IP."
-                                    persistent-hint
-                            ></v-textarea>
-
-                            <div class="caption grey--text">
-                                When enabled, inbound postbacks must satisfy every non-empty check. If both stay empty while enabled, postbacks are allowed.
-                            </div>
-                        </v-card-text>
-                    </v-card>
-                </v-col>
-
-                <v-col cols="12" md="6">
-                    <v-card class="pa-4">
-                        <v-card-title class="d-flex align-center">
-                            <v-icon color="primary" class="mr-2">mdi-database-refresh-outline</v-icon>
-                            Data retention
-                        </v-card-title>
-                        <v-card-text>
-                            <v-switch
-                                    v-model="settings.data_retention.enabled"
-                                    label="Auto-delete tracking data older than a set window"
-                                    inset
-                                    dense
-                                    hide-details
-                            ></v-switch>
-                            <v-text-field
-                                    label="Keep data for (days)"
-                                    v-model.number="settings.data_retention.days"
-                                    :disabled="!settings.data_retention.enabled"
-                                    type="number"
-                                    min="1"
-                                    outlined
-                                    dense
-                                    hint="A daily job prunes clicks_data older than this. Example: 180."
-                                    persistent-hint
-                            ></v-text-field>
-                        </v-card-text>
-                    </v-card>
-                </v-col>
-
-                <!-- Custom conversion statuses block (G19) -->
-                <v-col cols="12" md="6">
-                    <v-card class="pa-4">
-                        <v-card-title class="d-flex align-center">
-                            <v-icon color="primary" class="mr-2">mdi-tag-plus-outline</v-icon>
-                            Conversion statuses
-                        </v-card-title>
-                        <v-card-text>
-                            <div class="caption grey--text mb-3">
-                                Custom event types accepted on postbacks and imports, in addition to the
-                                built-ins (lead, sale, upsale, rejected, hold, trash). Names are normalized
-                                to lowercase_underscore — "ReGistration Bonus" becomes
-                                <code>registration_bonus</code>.
-                            </div>
-
-                            <div v-for="(cs, i) in settings.custom_statuses" :key="i"
-                                 class="d-flex align-center custom-status-row">
-                                <v-text-field
-                                        v-model="cs.name"
-                                        label="Status name"
-                                        outlined
-                                        dense
-                                        hide-details
-                                        class="mr-3"
-                                ></v-text-field>
-                                <span class="status-chip mr-3" :class="customStatusChipClass(i)">
-                                    {{ slugifyStatus(cs.name) || '…' }}
-                                </span>
-                                <v-btn icon small @click="settings.custom_statuses.splice(i, 1)">
-                                    <v-icon small color="red">mdi-close</v-icon>
-                                </v-btn>
-                            </div>
-
-                            <div class="mt-2">
-                                <v-btn small text color="primary" @click="addCustomStatus">
-                                    <v-icon small class="mr-1">mdi-plus</v-icon>Add status
-                                </v-btn>
-                            </div>
-
-                            <div class="caption grey--text mt-2">
-                                Custom statuses appear in the conversion-log status filter and edit dialog,
-                                and in the postback URL <code>/pb?clickid=…&amp;status=…&amp;payout=…</code>.
-                            </div>
-                        </v-card-text>
-                    </v-card>
-                </v-col>
-
-                <!-- Variable mapping block -->
+            <div class="settings-section-title">Integrations</div>
+            <div class="settings-section-sub">Ad-platform sync and the AI assistant.</div>
+            <v-row>
                 <v-col cols="12">
-                    <v-card class="pa-4">
-                        <v-card-title>Matching variables (Sub IDs)</v-card-title>
+                    <v-card class="pa-4" id="meta-ads-cost-sync">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-chart-line</v-icon>
+                            Meta Ads cost sync
+                            <v-spacer></v-spacer>
+                            <v-chip v-if="metaAdsStatus" x-small :color="metaAdsStatus.enabled ? 'green' : 'grey'" dark>
+                                {{ metaAdsStatus.enabled ? 'enabled' : 'disabled' }}
+                            </v-chip>
+                        </v-card-title>
                         <v-card-text>
-                            <v-row dense v-for="(mapping, index) in subIdMapping" :key="index" align="center">
-                                <v-col cols="3">
+                            <div class="caption grey--text mb-2">
+                                Keeps your campaign costs in step with Meta automatically. Connect
+                                Meta and pick your ad accounts under <b>Integrations</b>, then switch
+                                the sync on here — the tracker pulls each day's spend and folds it
+                                into the matching campaign, so reports and ROI line up without any
+                                manual entry. It runs on a schedule, off the tracking path, or on
+                                demand with Sync now.
+                            </div>
+                            <v-switch
+                                    v-model="settings.meta_ads.enabled"
+                                    label="Keep my Meta costs up to date"
+                                    inset dense hide-details
+                            ></v-switch>
+                            <v-switch
+                                    v-model="settings.meta_ads.dry_run"
+                                    label="Test mode — work out the numbers and log them, but don't change any costs yet"
+                                    inset dense hide-details
+                                    :disabled="!settings.meta_ads.enabled"
+                            ></v-switch>
+
+                            <v-alert v-if="!metaAdsSavedAccounts.length"
+                                     type="info" text dense class="mt-3 mb-0">
+                                No ad accounts chosen yet. Connect Meta under Integrations and pick
+                                the accounts to sync.
+                                <a href="/backend/integrations" class="ml-1">Open Integrations</a>
+                            </v-alert>
+                            <div v-else class="caption grey--text mt-3" id="meta-ads-accounts-summary">
+                                <strong>Ad accounts:</strong> {{ metaAdsSavedAccounts.join(', ') }}
+                            </div>
+
+                            <v-row dense class="mt-3">
+                                <v-col cols="12" md="4">
+                                    <v-select
+                                            label="How often"
+                                            :items="metaAdsCadences"
+                                            v-model="settings.meta_ads.cadence"
+                                            :disabled="!settings.meta_ads.enabled"
+                                            outlined dense
+                                    ></v-select>
+                                </v-col>
+                                <v-col cols="12" md="4">
                                     <v-text-field
-                                            :label="mapping.name"
-                                            v-model="mapping.name"
-                                            :readonly="!mapping.editable_name"
-                                            outlined
-                                            dense
+                                            label="Days to look back"
+                                            v-model="settings.meta_ads.backfill_days"
+                                            type="number"
+                                            :disabled="!settings.meta_ads.enabled"
+                                            outlined dense
+                                            hint="Re-checked on each run (0 = yesterday only)"
+                                            persistent-hint
                                     ></v-text-field>
                                 </v-col>
-                                <v-col cols="3">
-                                    <v-text-field
-                                            :label="mapping.parameter"
-                                            v-model="mapping.parameter"
-                                            :readonly="!mapping.editable_name"
-                                            outlined
-                                            dense
-                                    ></v-text-field>
-                                </v-col>
-                                <v-col cols="6">
-                                    <v-text-field
-                                            label="Variable name"
-                                            v-model="mapping.token"
-                                            outlined
-                                            dense
-                                    ></v-text-field>
+                                <v-col cols="12" md="4">
+                                    <v-select
+                                            label="Match campaigns by"
+                                            :items="metaAdsMatchPreferences"
+                                            v-model="settings.meta_ads.match_preference"
+                                            :disabled="!settings.meta_ads.enabled"
+                                            outlined dense
+                                            hint="How Meta campaigns are matched to yours"
+                                            persistent-hint
+                                    ></v-select>
                                 </v-col>
                             </v-row>
 
+                            <div class="d-flex align-center mt-3">
+                                <v-btn small outlined color="primary" :loading="metaAdsSyncing"
+                                       @click="syncMetaAdsNow">
+                                    <v-icon small class="mr-1">mdi-sync</v-icon>Sync now
+                                </v-btn>
+                                <div class="caption grey--text ml-3" v-if="metaAdsStatus">
+                                    Last sync: {{ metaAdsStatus.last_sync_at || 'never' }}
+                                    <span v-if="metaAdsStatus.last_result">
+                                        — {{ metaAdsStatus.last_result.status }}
+                                        (matched {{ metaAdsStatus.last_result.matched || 0 }},
+                                        unmatched {{ metaAdsStatus.last_result.unmatched || 0 }})
+                                    </span>
+                                    <span v-if="metaAdsStatus.last_error" class="red--text">
+                                        — error: {{ metaAdsStatus.last_error }}
+                                    </span>
+                                </div>
+                            </div>
+                            <pre v-if="metaAdsResult" class="caption mt-2">{{ metaAdsResult }}</pre>
                         </v-card-text>
                     </v-card>
                 </v-col>
+                <v-col cols="12">
+                    <v-card class="pa-4" id="copilot-settings">
+                        <v-card-title class="d-flex align-center">
+                            <v-icon color="primary" class="mr-2">mdi-robot-outline</v-icon>
+                            Copilot
+                            <v-spacer></v-spacer>
+                            <v-chip x-small :color="settings.copilot.enabled ? 'green' : 'grey'" dark>
+                                {{ settings.copilot.enabled ? 'enabled' : 'disabled' }}
+                            </v-chip>
+                        </v-card-title>
+                        <v-card-text>
+                            <div class="caption grey--text mb-2">
+                                Powers the Copilot page: a plain-language summary of the account's own
+                                aggregated numbers, plus an operator question box. Each call costs money, so
+                                the page is admin-only. The service that answers is configured for this
+                                deployment and is not chosen here.
+                            </div>
+                            <v-switch
+                                    v-model="settings.copilot.enabled"
+                                    label="Enable Copilot"
+                                    inset dense hide-details
+                            ></v-switch>
+                            <v-row dense class="mt-3">
+                                <v-col cols="12" md="4">
+                                    <v-text-field
+                                            label="Max output tokens"
+                                            v-model.number="settings.copilot.max_tokens"
+                                            type="number"
+                                            :disabled="!settings.copilot.enabled"
+                                            outlined dense
+                                            hint="Hard cap (60-800)"
+                                            persistent-hint
+                                    ></v-text-field>
+                                </v-col>
+                                <v-col cols="12" md="8">
+                                    <v-text-field
+                                            label="Service key (optional)"
+                                            v-model="settings.copilot.api_key"
+                                            :disabled="!settings.copilot.enabled"
+                                            :append-icon="showCopilotKey ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                                            :type="showCopilotKey ? 'text' : 'password'"
+                                            @click:append="showCopilotKey = !showCopilotKey"
+                                            outlined dense
+                                            hint="Leave as-is unless advised — usually set for the whole deployment"
+                                            persistent-hint
+                                    ></v-text-field>
+                                </v-col>
+                            </v-row>
+                        </v-card-text>
+                    </v-card>
+                </v-col>
+            </v-row>
 
-                <!-- G69: flow monitoring -->
+            <div class="settings-section-title">Monitoring</div>
+            <div class="settings-section-sub">Flow health checks.</div>
+            <v-row>
                 <v-col cols="12">
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
@@ -822,74 +1039,12 @@
                         </v-card-text>
                     </v-card>
                 </v-col>
+            </v-row>
 
-                <!-- D1e: privacy -->
-                <v-col cols="12" md="6">
-                    <v-card class="pa-4">
-                        <v-card-title class="d-flex align-center">
-                            <v-icon color="primary" class="mr-2">mdi-shield-lock-outline</v-icon>
-                            Privacy
-                        </v-card-title>
-                        <v-card-text>
-                            <v-switch
-                                    v-model="settings.privacy.anonymize_ip"
-                                    label="Anonymize IP addresses"
-                                    inset
-                                    dense
-                                    hide-details
-                                    hint="The tracking plane masks visitor IPs (last octet zeroed: 203.0.113.55 → 203.0.113.0) before writing analytics rows. Geo detection still works; per-IP drill-down is lost. Applied to new traffic only."
-                                    persistent-hint
-                                    class="mb-3"
-                            ></v-switch>
-                            <div class="caption grey--text">
-                                Visitors can opt out of all tracking entirely via the
-                                <a :href="optoutUrl" target="_blank">{{ optoutUrl }}</a> page — it sets the
-                                <code>aaa_optout</code> cookie and the tracking plane stops writing rows and setting
-                                cookies for that browser.
-                            </div>
-                        </v-card-text>
-                    </v-card>
-                </v-col>
-
-                <!-- Tracking plane toggles -->
-                <v-col cols="12" md="6">
-                    <v-card class="pa-4">
-                        <v-card-title class="d-flex align-center">
-                            <v-icon color="primary" class="mr-2">mdi-crosshairs-gps</v-icon>
-                            Tracking
-                        </v-card-title>
-                        <v-card-text>
-                            <v-switch
-                                    v-model="settings.tracking.prefetch_filter_enabled"
-                                    label="Ignore prefetch requests"
-                                    inset dense hide-details
-                                    hint="Browser prefetch/prerender hits (Purpose: prefetch) still get the redirect but are not counted as visits or click-outs. Default on — prefetches otherwise inflate stats."
-                                    persistent-hint
-                                    class="mb-3"
-                            ></v-switch>
-                            <v-switch
-                                    v-model="settings.tracking.skip_bot_costs"
-                                    label="Do not assign costs for bot clicks"
-                                    inset dense hide-details
-                                    hint="Bot-flagged hits get cost 0 so cost reports are not inflated. Default off — existing behavior is preserved until enabled."
-                                    persistent-hint
-                                    class="mb-3"
-                            ></v-switch>
-                            <v-text-field
-                                    v-model="settings.tracking.referrer_hiding_domain"
-                                    label="Referrer-hiding domain"
-                                    outlined dense hide-details clearable
-                                    placeholder="hide.example.com"
-                                    hint="When a campaign hides the referrer, the meta-refresh hop is served from this domain instead of the campaign host. Leave empty for current behavior."
-                                    persistent-hint
-                                    class="mb-3"
-                            ></v-text-field>
-                        </v-card-text>
-                    </v-card>
-                </v-col>
-
-                <!-- G90: admin login IP whitelist -->
-                <v-col cols="12" md="6">
+            <div class="settings-section-title">Security &amp; audit</div>
+            <div class="settings-section-sub">Login protection and the security trail.</div>
+            <v-row>
+                <v-col cols="12">
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-login-variant</v-icon>
@@ -907,8 +1062,6 @@
                         </v-card-text>
                     </v-card>
                 </v-col>
-
-                <!-- G65: audit log (admin-only) -->
                 <v-col cols="12">
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
@@ -1036,159 +1189,6 @@
                                     <v-icon small>mdi-chevron-right</v-icon>
                                 </v-btn>
                             </div>
-                        </v-card-text>
-                    </v-card>
-                </v-col>
-            </v-row>
-
-            <v-row>
-                <v-col cols="12">
-                    <v-card class="pa-4" id="meta-ads-cost-sync">
-                        <v-card-title class="d-flex align-center">
-                            <v-icon color="primary" class="mr-2">mdi-chart-line</v-icon>
-                            Meta Ads cost sync
-                            <v-spacer></v-spacer>
-                            <v-chip v-if="metaAdsStatus" x-small :color="metaAdsStatus.enabled ? 'green' : 'grey'" dark>
-                                {{ metaAdsStatus.enabled ? 'enabled' : 'disabled' }}
-                            </v-chip>
-                        </v-card-title>
-                        <v-card-text>
-                            <div class="caption grey--text mb-2">
-                                Keeps your campaign costs in step with Meta automatically. Connect
-                                Meta and pick your ad accounts under <b>Integrations</b>, then switch
-                                the sync on here — the tracker pulls each day's spend and folds it
-                                into the matching campaign, so reports and ROI line up without any
-                                manual entry. It runs on a schedule, off the tracking path, or on
-                                demand with Sync now.
-                            </div>
-                            <v-switch
-                                    v-model="settings.meta_ads.enabled"
-                                    label="Keep my Meta costs up to date"
-                                    inset dense hide-details
-                            ></v-switch>
-                            <v-switch
-                                    v-model="settings.meta_ads.dry_run"
-                                    label="Test mode — work out the numbers and log them, but don't change any costs yet"
-                                    inset dense hide-details
-                                    :disabled="!settings.meta_ads.enabled"
-                            ></v-switch>
-
-                            <v-alert v-if="!metaAdsSavedAccounts.length"
-                                     type="info" text dense class="mt-3 mb-0">
-                                No ad accounts chosen yet. Connect Meta under Integrations and pick
-                                the accounts to sync.
-                                <a href="/backend/integrations" class="ml-1">Open Integrations</a>
-                            </v-alert>
-                            <div v-else class="caption grey--text mt-3" id="meta-ads-accounts-summary">
-                                <strong>Ad accounts:</strong> {{ metaAdsSavedAccounts.join(', ') }}
-                            </div>
-
-                            <v-row dense class="mt-3">
-                                <v-col cols="12" md="4">
-                                    <v-select
-                                            label="How often"
-                                            :items="metaAdsCadences"
-                                            v-model="settings.meta_ads.cadence"
-                                            :disabled="!settings.meta_ads.enabled"
-                                            outlined dense
-                                    ></v-select>
-                                </v-col>
-                                <v-col cols="12" md="4">
-                                    <v-text-field
-                                            label="Days to look back"
-                                            v-model="settings.meta_ads.backfill_days"
-                                            type="number"
-                                            :disabled="!settings.meta_ads.enabled"
-                                            outlined dense
-                                            hint="Re-checked on each run (0 = yesterday only)"
-                                            persistent-hint
-                                    ></v-text-field>
-                                </v-col>
-                                <v-col cols="12" md="4">
-                                    <v-select
-                                            label="Match campaigns by"
-                                            :items="metaAdsMatchPreferences"
-                                            v-model="settings.meta_ads.match_preference"
-                                            :disabled="!settings.meta_ads.enabled"
-                                            outlined dense
-                                            hint="How Meta campaigns are matched to yours"
-                                            persistent-hint
-                                    ></v-select>
-                                </v-col>
-                            </v-row>
-
-                            <div class="d-flex align-center mt-3">
-                                <v-btn small outlined color="primary" :loading="metaAdsSyncing"
-                                       @click="syncMetaAdsNow">
-                                    <v-icon small class="mr-1">mdi-sync</v-icon>Sync now
-                                </v-btn>
-                                <div class="caption grey--text ml-3" v-if="metaAdsStatus">
-                                    Last sync: {{ metaAdsStatus.last_sync_at || 'never' }}
-                                    <span v-if="metaAdsStatus.last_result">
-                                        — {{ metaAdsStatus.last_result.status }}
-                                        (matched {{ metaAdsStatus.last_result.matched || 0 }},
-                                        unmatched {{ metaAdsStatus.last_result.unmatched || 0 }})
-                                    </span>
-                                    <span v-if="metaAdsStatus.last_error" class="red--text">
-                                        — error: {{ metaAdsStatus.last_error }}
-                                    </span>
-                                </div>
-                            </div>
-                            <pre v-if="metaAdsResult" class="caption mt-2">{{ metaAdsResult }}</pre>
-                        </v-card-text>
-                    </v-card>
-                </v-col>
-            </v-row>
-
-            <v-row>
-                <v-col cols="12">
-                    <v-card class="pa-4" id="copilot-settings">
-                        <v-card-title class="d-flex align-center">
-                            <v-icon color="primary" class="mr-2">mdi-robot-outline</v-icon>
-                            Copilot
-                            <v-spacer></v-spacer>
-                            <v-chip x-small :color="settings.copilot.enabled ? 'green' : 'grey'" dark>
-                                {{ settings.copilot.enabled ? 'enabled' : 'disabled' }}
-                            </v-chip>
-                        </v-card-title>
-                        <v-card-text>
-                            <div class="caption grey--text mb-2">
-                                Powers the Copilot page: a plain-language summary of the account's own
-                                aggregated numbers, plus an operator question box. Each call costs money, so
-                                the page is admin-only. The service that answers is configured for this
-                                deployment and is not chosen here.
-                            </div>
-                            <v-switch
-                                    v-model="settings.copilot.enabled"
-                                    label="Enable Copilot"
-                                    inset dense hide-details
-                            ></v-switch>
-                            <v-row dense class="mt-3">
-                                <v-col cols="12" md="4">
-                                    <v-text-field
-                                            label="Max output tokens"
-                                            v-model.number="settings.copilot.max_tokens"
-                                            type="number"
-                                            :disabled="!settings.copilot.enabled"
-                                            outlined dense
-                                            hint="Hard cap (60-800)"
-                                            persistent-hint
-                                    ></v-text-field>
-                                </v-col>
-                                <v-col cols="12" md="8">
-                                    <v-text-field
-                                            label="Service key (optional)"
-                                            v-model="settings.copilot.api_key"
-                                            :disabled="!settings.copilot.enabled"
-                                            :append-icon="showCopilotKey ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
-                                            :type="showCopilotKey ? 'text' : 'password'"
-                                            @click:append="showCopilotKey = !showCopilotKey"
-                                            outlined dense
-                                            hint="Leave as-is unless advised — usually set for the whole deployment"
-                                            persistent-hint
-                                    ></v-text-field>
-                                </v-col>
-                            </v-row>
                         </v-card-text>
                     </v-card>
                 </v-col>

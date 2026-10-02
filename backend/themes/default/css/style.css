@@ -1145,6 +1145,21 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 .settings-grid .v-card {
   height: auto;
 }
+/* ---------- Settings page sections ---------- */
+.settings-section-title {
+  font-size: var(--fs-13, 13px);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-secondary);
+  margin: var(--space-6, 24px) 0 var(--space-1, 4px);
+}
+.settings-section-title:first-child { margin-top: 0; }
+.settings-section-sub {
+  font-size: var(--fs-12, 12px);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-3, 12px);
+}
 .code-row {
   flex-wrap: nowrap;
   min-width: 0;
