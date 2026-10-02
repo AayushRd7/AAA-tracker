@@ -46,6 +46,16 @@ def email_api_key(fallback: str = "") -> str:
     return _env("EMAIL_API_KEY", "BREVO_API_KEY", default=fallback)
 
 
+def email_from_address(fallback: str = "") -> str:
+    """The address reports are sent from (the relay's verified sender)."""
+    return _env("EMAIL_FROM_ADDRESS", "EMAIL_FROM", "SMTP_FROM", default=fallback)
+
+
+def email_from_name(fallback: str = "") -> str:
+    """Display name recipients see next to the From address."""
+    return _env("EMAIL_FROM_NAME", default=fallback) or "AAA Tracker"
+
+
 def telegram_bot_token(fallback: str = "") -> str:
     return _env("TELEGRAM_BOT_TOKEN", default=fallback)
 
@@ -71,11 +81,12 @@ def meta_graph_version(fallback: str = "") -> str:
 
 
 def resolve_email_config(cfg: dict) -> dict:
-    """Overlay the deployment's relay credentials onto a tenant email config.
+    """Overlay the deployment's relay credentials and From identity onto a
+    tenant email config.
 
-    Tenant-owned fields (enabled, from_name, from_email, recipients, hour) pass
-    through untouched. The result is only ever used to send — never written
-    back to settings, so an environment secret is not persisted by a save.
+    Tenant-owned fields (enabled, recipients, hour) pass through untouched. The
+    result is only ever used to send — never written back to settings, so an
+    environment value is not persisted by a save.
     """
     out = dict(cfg or {})
     out["smtp_host"] = smtp_host(str(out.get("smtp_host") or ""))
@@ -83,6 +94,8 @@ def resolve_email_config(cfg: dict) -> dict:
     out["smtp_login"] = smtp_login(str(out.get("smtp_login") or ""))
     out["smtp_password"] = smtp_password(str(out.get("smtp_password") or ""))
     out["api_key"] = email_api_key(str(out.get("api_key") or ""))
+    out["from_email"] = email_from_address(str(out.get("from_email") or ""))
+    out["from_name"] = email_from_name(str(out.get("from_name") or ""))
     return out
 
 

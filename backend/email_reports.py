@@ -4,16 +4,14 @@ Tenant-owned configuration lives in the `settings` row under the
 `email_reports` key:
 {
     "enabled": bool,
-    "from_name": "AAA Tracker",
-    "from_email": "...",
     "recipients": "a@x.com, b@y.com",
     "hour": 9,               # UTC hour to send the daily report
     "last_sent": "2026-09-24"  # written back after each send
 }
 
 The relay that actually delivers the mail (SMTP host/port/login/password, or an
-API key) belongs to the deployment and is read from the environment — see
-``env_config``. It is never asked for in the product UI.
+API key) and the From identity belong to the deployment and are read from the
+environment — see ``env_config``. They are never asked for in the product UI.
 """
 import asyncio
 import html

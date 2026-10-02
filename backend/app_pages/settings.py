@@ -15,7 +15,8 @@ from models.capi_pixels import (
     CapiPixelORM, CapiPixelBindingORM, CapiChannelSettingORM,
 )
 from email_reports import send_daily_report, send_scheduled_report, schedule_due
-from env_config import email_configured, telegram_bot_token, telegram_bot_url
+from env_config import (email_configured, resolve_email_config, telegram_bot_token,
+                        telegram_bot_url)
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -224,7 +225,8 @@ _COPILOT_DEPLOYMENT_ONLY = ("base_url", "model")
 # that no longer renders the field cannot wipe it.
 _DEPLOYMENT_ONLY = {
     "telegram": ("bot_token",),
-    "email_reports": ("smtp_host", "smtp_port", "smtp_login", "smtp_password", "api_key"),
+    "email_reports": ("smtp_host", "smtp_port", "smtp_login", "smtp_password",
+                      "api_key", "from_name", "from_email"),
     "meta_ads": ("access_token", "api_version", "graph_base_url"),
     # The Conversions API's Graph endpoint is test-only plumbing, not a tenant
     # choice; the fallback dataset/token above stay the tenant's own.
@@ -274,9 +276,10 @@ def _keep_deployment_keys(stored: dict, merged: dict) -> dict:
 def deployment_status(doc: dict) -> dict:
     """What the deployment has configured, for the Settings page's status lines.
 
-    Reports readiness only — never a credential, host or endpoint. ``doc`` is the
-    stored (unstripped) settings document so a pre-environment installation's
-    saved credentials still count as configured."""
+    Reports readiness, plus the From address recipients will see. It never
+    reports a credential or an endpoint. ``doc`` is the stored (unstripped)
+    settings document so a pre-environment installation's saved credentials
+    still count as configured."""
     doc = doc if isinstance(doc, dict) else {}
     email_block = doc.get("email_reports")
     tg_block = doc.get("telegram")
@@ -284,6 +287,9 @@ def deployment_status(doc: dict) -> dict:
     tg_block = tg_block if isinstance(tg_block, dict) else {}
     return {
         "email_configured": email_configured(email_block),
+        # The From address is not a secret — recipients see it — so the card can
+        # name it instead of offering a field the deployment would ignore.
+        "email_from": (resolve_email_config(email_block).get("from_email") or ""),
         "telegram_bot_configured": bool(telegram_bot_token(tg_block.get("bot_token") or "")),
         "telegram_bot_url": telegram_bot_url(),
     }

@@ -344,27 +344,10 @@
                                 restart the backend.
                             </v-alert>
                             <div v-else class="caption grey--text mt-3 mb-2">
-                                Delivered by this deployment's mail service — nothing to set up here.
+                                Delivered by this deployment's mail service<span
+                                    v-if="deployment.email_from">, sent from
+                                <b>{{ deployment.email_from }}</b></span> — nothing to set up here.
                             </div>
-
-                            <v-row dense>
-                                <v-col cols="6">
-                                    <v-text-field
-                                            label="From name"
-                                            v-model="settings.email_reports.from_name"
-                                            outlined
-                                            dense
-                                    ></v-text-field>
-                                </v-col>
-                                <v-col cols="6">
-                                    <v-text-field
-                                            label="From email"
-                                            v-model="settings.email_reports.from_email"
-                                            outlined
-                                            dense
-                                    ></v-text-field>
-                                </v-col>
-                            </v-row>
 
                             <v-text-field
                                     label="Recipients"
@@ -1013,8 +996,6 @@
                     },
                     email_reports: {
                         enabled: false,
-                        from_name: 'AAA Tracker',
-                        from_email: '',
                         recipients: '',
                         hour: 9,
                     },
@@ -1104,6 +1085,7 @@
                 // credential or endpoint); drives the status lines on the cards.
                 deployment: {
                     email_configured: false,
+                    email_from: '',
                     telegram_bot_configured: false,
                     telegram_bot_url: '',
                 },
@@ -1294,7 +1276,6 @@
                         };
                         const erDefaults = {
                             enabled: false,
-                            from_name: 'AAA Tracker', from_email: '',
                             recipients: '', hour: 9,
                         };
                         const pbDefaults = {
