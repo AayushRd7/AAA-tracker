@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, date
 import os
 import re
+import sys
 
 from clickhouse_connect import get_client
 from typing import List, Optional, Any, Tuple, Dict, Union
@@ -12,9 +13,22 @@ from app_pages import rates as fx_rates
 CLICKHOUSE_HOST = os.environ.get("CLICKHOUSE_HOST", "tracker_clickhouse")
 CLICKHOUSE_PORT = int(os.environ.get("CLICKHOUSE_PORT", "8123"))
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "user")
-# dev-only fallback so imports work without env; the real value comes from .env
-CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD") or "_".join(["password"] * 3)
 CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DB", "default")
+
+# This module is imported at process start (and by docker exec tooling), so the
+# import itself must not raise. When the env var is absent we keep this
+# non-authenticating sentinel instead of inventing a guessable password, and warn.
+# Every real connection path re-checks the environment and refuses (see
+# get_clickhouse_client).
+CLICKHOUSE_PASSWORD_SENTINEL = "__missing_CLICKHOUSE_PASSWORD__"
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD")
+if not CLICKHOUSE_PASSWORD:
+    print(
+        "WARNING: CLICKHOUSE_PASSWORD is not set; using a non-authenticating "
+        "sentinel and refusing to connect until it is configured.",
+        file=sys.stderr,
+    )
+    CLICKHOUSE_PASSWORD = CLICKHOUSE_PASSWORD_SENTINEL
 
 
 # ---------------------------------------------------------------------------
@@ -72,11 +86,17 @@ def normalize_attribution(raw) -> dict:
 
 
 def get_clickhouse_client():
+    password = os.environ.get("CLICKHOUSE_PASSWORD") or CLICKHOUSE_PASSWORD
+    if password == CLICKHOUSE_PASSWORD_SENTINEL:
+        raise RuntimeError(
+            "CLICKHOUSE_PASSWORD is not set; refusing to connect to ClickHouse "
+            "with a fallback credential"
+        )
     return get_client(
         host=CLICKHOUSE_HOST,
         port=CLICKHOUSE_PORT,
         username=CLICKHOUSE_USER,
-        password=CLICKHOUSE_PASSWORD,
+        password=password,
         database=CLICKHOUSE_DB
     )
 

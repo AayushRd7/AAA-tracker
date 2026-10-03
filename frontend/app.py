@@ -53,6 +53,12 @@ CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "user")
 # dev-only fallback so imports work without env; the real value comes from .env
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD") or "_".join(["password"] * 3)
 CLICKHOUSE_DB = os.environ.get("CLICKHOUSE_DB", "default")
+# Conversion-mirror mutations run synchronously by default so a just-recorded
+# conversion is immediately visible to ClickHouse-backed reports. Set to "0" to
+# submit them async/non-blocking (the ALTER returns before the mutation lands,
+# so ClickHouse reports lag the mirror). The full fact-table redesign that
+# removes the need for ALTER entirely is tracked separately.
+CLICKHOUSE_MUTATIONS_SYNC = os.environ.get("CLICKHOUSE_MUTATIONS_SYNC", "1").strip() not in ("0", "false", "False", "no", "")
 
 
 def pg_connect():
@@ -176,6 +182,19 @@ async def ensure_schema():
                 ALTER TABLE offers
                 ADD COLUMN IF NOT EXISTS daily_conversions_cap INTEGER,
                 ADD COLUMN IF NOT EXISTS overflow_offer_id INTEGER
+            """)
+            # Atomic cap reservations (G4 offer daily caps / flow click caps).
+            # A single row per (scope, key, day) is incremented with an
+            # INSERT ... ON CONFLICT ... DO UPDATE, so concurrent bursts cannot
+            # all pass a read-then-decide check seeded from a lagging count.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS cap_counters (
+                    scope TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    day DATE NOT NULL,
+                    n BIGINT NOT NULL DEFAULT 0,
+                    PRIMARY KEY (scope, key, day)
+                )
             """)
             # G33 honeypot decoy hits — visitors that follow the hidden /t/hp
             # link are scrapers/bots and get flagged on their next visit.
@@ -1037,26 +1056,46 @@ async def campaign_click(
         return blocked
     optout = getattr(request.state, "optout", False)
 
-    # G4: daily conversion cap on the click-out route — transparently serve the
-    # overflow offer when the primary is capped, otherwise refuse.
+    # G4: offer daily conversion cap on the click-out route — transparently
+    # serve the overflow offer when the primary is capped, otherwise refuse.
+    #
+    # Enforced with a Postgres atomic counter (cap_counters), not a
+    # read-then-decide check against the conversion count: under a concurrent
+    # burst every request would otherwise read the same pre-cap value and all
+    # pass. Each served click-out reserves a slot; the conversion count is only
+    # the per-day seed for that counter and stays the reporting source of
+    # truth. A reservation that does not get served is rolled back.
     cap_state_cache: dict = {}
     conv_count_cache: dict = {}
+    held_offer_cap = None
+    today = datetime.utcnow().date()
     daily_cap, overflow_id = await offer_cap_state(pg, cap_state_cache, offer["id"])
-    if daily_cap and await offer_conversions_today(pg, conv_count_cache, offer["id"]) >= int(daily_cap):
-        overflow = None
-        if overflow_id:
-            o_cap, _ = await offer_cap_state(pg, cap_state_cache, overflow_id)
-            o_used = await offer_conversions_today(pg, conv_count_cache, overflow_id) if o_cap else 0
-            if not o_cap or o_used < int(o_cap):
-                async with pg.acquire() as conn:
-                    overflow_id_int = flow_config_id(overflow_id)
-                    overflow = None
-                    if overflow_id_int is not None:
-                        overflow = await conn.fetchrow("SELECT * FROM offers WHERE id = $1",
-                                                       overflow_id_int)
-        if overflow is None:
-            return Response("Offer unavailable", status_code=404)
-        offer = overflow
+    if daily_cap:
+        seed = await offer_conversions_today(pg, conv_count_cache, offer["id"])
+        if await reserve_cap_slot(pg, CAP_SCOPE_OFFER_DAILY, offer["id"],
+                                  today, int(daily_cap), seed):
+            held_offer_cap = offer["id"]
+        else:
+            await release_cap_slot(pg, CAP_SCOPE_OFFER_DAILY, offer["id"], today)
+            overflow = None
+            if overflow_id:
+                o_cap, _ = await offer_cap_state(pg, cap_state_cache, overflow_id)
+                overflow_id_int = flow_config_id(overflow_id)
+                if overflow_id_int is not None:
+                    async with pg.acquire() as conn:
+                        overflow = await conn.fetchrow(
+                            "SELECT * FROM offers WHERE id = $1", overflow_id_int)
+                if overflow is not None and o_cap:
+                    o_seed = await offer_conversions_today(pg, conv_count_cache, overflow_id)
+                    if await reserve_cap_slot(pg, CAP_SCOPE_OFFER_DAILY, overflow_id,
+                                              today, int(o_cap), o_seed):
+                        held_offer_cap = overflow_id
+                    else:
+                        await release_cap_slot(pg, CAP_SCOPE_OFFER_DAILY, overflow_id, today)
+                        overflow = None
+            if overflow is None:
+                return Response("Offer unavailable", status_code=404)
+            offer = overflow
 
     # 4. Enrich the meta data via paramsIdMapping
     paramsIdMapping = get_params_id_mapping_from_campaign(campaign)
@@ -1154,59 +1193,67 @@ async def campaign_click(
     if not optout and not prefetch:
         background_tasks.add_task(save_click_to_db, meta_data)
 
-    # 6. Build the final URL
-    offer_url = offer["url"]
-    for key, value in meta_data.items():
-        placeholder = f"{{{key}}}"
-        if placeholder in offer_url:
-            offer_url = offer_url.replace(placeholder, str(value))
-    # G87 extra offer-URL macros: {_md5} (md5 of the click id) and {payout}
-    # (this offer's payout).
-    if "{_md5}" in offer_url:
-        offer_url = offer_url.replace(
-            "{_md5}", hashlib.md5(str(meta_data["click_id"]).encode()).hexdigest())
-    if "{payout}" in offer_url:
-        offer_url = offer_url.replace(
-            "{payout}", str(offer["payout"] if offer["payout"] is not None else ""))
+    # Serving the offer can still fail after the reservation (action/template
+    # resolution, unexpected inputs). Release the cap slot on any exception so
+    # a failed serve never burns one.
+    try:
+        # 6. Build the final URL
+        offer_url = offer["url"]
+        for key, value in meta_data.items():
+            placeholder = f"{{{key}}}"
+            if placeholder in offer_url:
+                offer_url = offer_url.replace(placeholder, str(value))
+        # G87 extra offer-URL macros: {_md5} (md5 of the click id) and {payout}
+        # (this offer's payout).
+        if "{_md5}" in offer_url:
+            offer_url = offer_url.replace(
+                "{_md5}", hashlib.md5(str(meta_data["click_id"]).encode()).hexdigest())
+        if "{payout}" in offer_url:
+            offer_url = offer_url.replace(
+                "{payout}", str(offer["payout"] if offer["payout"] is not None else ""))
 
-    # 2. Always append click_id as ?click_id=...
-    parsed = urlparse(offer_url)
-    query_params = dict(parse_qsl(parsed.query))
-    query_params["click_id"] = meta_data["click_id"]  # required
+        # 2. Always append click_id as ?click_id=...
+        parsed = urlparse(offer_url)
+        query_params = dict(parse_qsl(parsed.query))
+        query_params["click_id"] = meta_data["click_id"]  # required
 
-    # Assemble the final URL
-    offer_url = urlunparse(parsed._replace(query=urlencode(query_params)))
+        # Assemble the final URL
+        offer_url = urlunparse(parsed._replace(query=urlencode(query_params)))
 
-    # 7. ClickHouse click row (click=true) — awaited inline so the row is
-    # observable the moment the redirect returns; failures never block it.
-    # Prefetch hits skip the write (still redirected above).
-    if not optout and not prefetch:
-        await save_click_to_clickhouse(meta_data, campaign_alias)
+        # 7. ClickHouse click row (click=true) — awaited inline so the row is
+        # observable the moment the redirect returns; failures never block it.
+        # Prefetch hits skip the write (still redirected above).
+        if not optout and not prefetch:
+            await save_click_to_clickhouse(meta_data, campaign_alias)
 
-    response = await flow_action_response(
-        offer_url, action_flow, lambda u: RedirectResponse(u))
+        response = await flow_action_response(
+            offer_url, action_flow, lambda u: RedirectResponse(u))
 
-    # G10: a successful click-out advances the funnel — re-issue the binding
-    # cookie with st = min(current + 1, last step), so the NEXT campaign-URL
-    # visit serves the next step. Click-out at the last step keeps st at last.
-    # Only a previously-bound visitor advances; a bare click-out (no cookie)
-    # just redirects without touching funnel state.
-    if funnel_cfg is not None and click_bound is not None and not optout:
-        steps = funnel_cfg.get("steps") or []
-        if steps:
-            cur = meta_data.get("funnel_step") or 0
-            next_step = min(cur + 1, len(steps) - 1)
-            bind_cookie = make_bind_cookie(campaign["id"], 0, offer["id"],
-                                           meta_data.get("landing_id"),
-                                           campaign_routing_hash(click_cfg, click_dmode),
-                                           step=next_step,
-                                           tenant_id=campaign["tenant_id"])
-            if bind_cookie:
-                response.set_cookie(
-                    BIND_COOKIE, bind_cookie,
-                    max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
+        # G10: a successful click-out advances the funnel — re-issue the binding
+        # cookie with st = min(current + 1, last step), so the NEXT campaign-URL
+        # visit serves the next step. Click-out at the last step keeps st at last.
+        # Only a previously-bound visitor advances; a bare click-out (no cookie)
+        # just redirects without touching funnel state.
+        if funnel_cfg is not None and click_bound is not None and not optout:
+            steps = funnel_cfg.get("steps") or []
+            if steps:
+                cur = meta_data.get("funnel_step") or 0
+                next_step = min(cur + 1, len(steps) - 1)
+                bind_cookie = make_bind_cookie(campaign["id"], 0, offer["id"],
+                                               meta_data.get("landing_id"),
+                                               campaign_routing_hash(click_cfg, click_dmode),
+                                               step=next_step,
+                                               tenant_id=campaign["tenant_id"])
+                if bind_cookie:
+                    response.set_cookie(
+                        BIND_COOKIE, bind_cookie,
+                        max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
 
-    return response
+        return response
+    except Exception:
+        if held_offer_cap is not None:
+            await release_cap_slot(pg, CAP_SCOPE_OFFER_DAILY, held_offer_cap, today)
+        raise
 
 
 async def save_click_to_db(meta: dict):
@@ -2648,21 +2695,37 @@ async def visitor_click_attribution(visitor_id: str, tenant_id: int, window_days
 
 
 async def sync_conversion_to_clickhouse(click_id: str):
-    """Best-effort mirror of a conversions_data row onto the CH click row.
+    """Best-effort mirror of a click's conversions onto the CH click row.
 
-    Called in the background after a successful postback write. NOTE: the
-    table is a plain MergeTree ordered by received_at, so the UPDATE below is a
-    heavy full-part mutation — at high volume this should move to a
-    ReplacingMergeTree/AggregatingMergeTree design instead.
+    A click can carry several conversions_data rows (Mode='new' writes one row
+    per fire); mirroring only the latest row under-counted every analytics
+    figure read from ClickHouse. This mirrors the AGGREGATE the one-per-click
+    CH row can hold: the latest status, and revenue/profit summed over all
+    non-rejected/trash rows (the same filter the reports apply). The
+    conversions_data rows remain the source of truth.
+
+    NOTE: the table is a plain MergeTree ordered by received_at, so the UPDATE
+    is a heavy full-part mutation. CLICKHOUSE_MUTATIONS_SYNC=0 submits it
+    async/non-blocking; the full fact-table redesign (ReplacingMergeTree /
+    AggregatingMergeTree, removing the per-conversion ALTER entirely) is a
+    separate migration and is NOT done here.
     """
     try:
         pg = app.state.pg
         async with pg.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT status, revenue, profit, tenant_id FROM conversions_data "
-                "WHERE click_id = $1 ORDER BY received_at DESC LIMIT 1",
-                click_id)
-        if not row:
+            row = await conn.fetchrow("""
+                SELECT
+                    (SELECT status FROM conversions_data WHERE click_id = $1
+                      ORDER BY received_at DESC, id DESC LIMIT 1) AS status,
+                    (SELECT tenant_id FROM conversions_data WHERE click_id = $1
+                      ORDER BY received_at DESC, id DESC LIMIT 1) AS tenant_id,
+                    COALESCE(SUM(revenue) FILTER (
+                        WHERE status NOT IN ('rejected', 'trash')), 0) AS revenue,
+                    COALESCE(SUM(profit) FILTER (
+                        WHERE status NOT IN ('rejected', 'trash')), 0) AS profit
+                FROM conversions_data WHERE click_id = $1
+                """, click_id)
+        if not row or row["status"] is None:
             return
         ch = acquire_ch()
         try:
@@ -2673,12 +2736,12 @@ async def sync_conversion_to_clickhouse(click_id: str):
                 "WHERE click_id = %(cid)s AND tenant_id = %(tenant_id)s",
                 parameters={
                     "status": row["status"] or "",
-                    "revenue": row["revenue"],
-                    "profit": row["profit"],
+                    "revenue": float(row["revenue"] or 0),
+                    "profit": float(row["profit"] or 0),
                     "cid": click_id,
                     "tenant_id": int(row["tenant_id"] or 1),
                 },
-                settings={"mutations_sync": 1})
+                settings={"mutations_sync": 1 if CLICKHOUSE_MUTATIONS_SYNC else 0})
         except Exception:
             release_ch(ch, failed=True)
             raise
@@ -3805,6 +3868,141 @@ async def offer_conversions_today(pg, cache: dict, offer_id) -> int:
     return cache[offer_id]
 
 
+# ─── Atomic cap reservations (G4 offer daily caps + flow click caps) ──
+# A read-then-decide cap check against a lagging count cannot hold under a
+# burst: every concurrent request reads the same pre-cap value and all pass.
+# cap_counters is the authoritative per-(scope, key, day) counter; each served
+# resource increments it atomically (INSERT ... ON CONFLICT ... DO UPDATE) and
+# learns its position in the same statement. The existing counts are only the
+# seed on the first reservation of a bucket and stay the reporting truth.
+CAP_SCOPE_OFFER_DAILY = "offer_daily"
+CAP_SCOPE_FLOW_HOUR = "flow_hour"
+CAP_SCOPE_FLOW_DAY = "flow_day"
+CAP_SCOPE_FLOW_TOTAL = "flow_total"
+# flow_total never rolls over — pinned to a sentinel day for its whole life.
+CAP_EPOCH_DAY = datetime(1970, 1, 1).date()
+
+_CAP_COUNTERS_READY = False
+_CAP_COUNTERS_LOCK = asyncio.Lock()
+
+
+async def ensure_cap_counters(pg) -> None:
+    """Create the cap_counters table once per process (also created at boot)."""
+    global _CAP_COUNTERS_READY
+    if _CAP_COUNTERS_READY:
+        return
+    async with _CAP_COUNTERS_LOCK:
+        if _CAP_COUNTERS_READY:
+            return
+        async with pg.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS cap_counters (
+                    scope TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    day DATE NOT NULL,
+                    n BIGINT NOT NULL DEFAULT 0,
+                    PRIMARY KEY (scope, key, day)
+                )
+            """)
+        _CAP_COUNTERS_READY = True
+
+
+async def reserve_cap_slot(pg, scope: str, key: str, day, limit, seed: int = 0) -> bool:
+    """Atomically reserve one slot for (scope, key, day); True if under `limit`.
+
+    On the first reservation of a bucket the counter is seeded from `seed`
+    (the lagging ClickHouse/conversion count for large history), so the cap
+    counts the whole day, not just what this process has seen. Returns False
+    when the reservation would exceed `limit`; the caller must call
+    release_cap_slot() then, so a rejected burst leaves the counter parked at
+    the cap instead of drifting upward.
+    """
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return True
+    if limit <= 0:
+        return True
+    try:
+        seed = max(int(seed or 0), 0)
+    except (TypeError, ValueError):
+        seed = 0
+    await ensure_cap_counters(pg)
+    async with pg.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO cap_counters (scope, key, day, n)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (scope, key, day)
+            DO UPDATE SET n = cap_counters.n + 1
+            RETURNING n
+            """,
+            str(scope), str(key), day, seed + 1)
+    return int(row["n"]) <= limit
+
+
+async def release_cap_slot(pg, scope: str, key: str, day) -> None:
+    """Roll a reservation back — the capped resource was not served."""
+    try:
+        async with pg.acquire() as conn:
+            await conn.execute(
+                "UPDATE cap_counters SET n = GREATEST(n - 1, 0) "
+                "WHERE scope = $1 AND key = $2 AND day = $3",
+                str(scope), str(key), day)
+    except Exception as e:
+        log_track(f"⚠ cap reservation rollback failed for {scope}:{key}: {e}")
+
+
+def _flow_cap_key(campaign_id, flow_index) -> str:
+    return f"{int(campaign_id)}:{int(flow_index)}"
+
+
+async def reserve_flow_caps(pg, campaign_id, flow_index, caps, counts) -> list:
+    """Atomically reserve every configured flow click cap for one delivery.
+
+    Returns the list of held reservations, or None when a window is already at
+    its cap — in which case every partial reservation is rolled back and the
+    caller must not serve the flow. `counts` (flow_click_counts) is only the
+    per-window seed on the first reservation of a bucket.
+    """
+    caps = caps or {}
+    now = datetime.utcnow()
+    reserved: list = []
+    for cap_key, scope, count_key in (
+            ("per_hour", CAP_SCOPE_FLOW_HOUR, "hour"),
+            ("per_day", CAP_SCOPE_FLOW_DAY, "day"),
+            ("total", CAP_SCOPE_FLOW_TOTAL, "total")):
+        try:
+            limit = int(caps.get(cap_key))
+        except (TypeError, ValueError):
+            limit = 0
+        if limit <= 0:
+            continue
+        key = _flow_cap_key(campaign_id, flow_index)
+        if scope == CAP_SCOPE_FLOW_HOUR:
+            key = f"{key}:{now.strftime('%Y%m%d%H')}"
+            day = now.date()
+        elif scope == CAP_SCOPE_FLOW_TOTAL:
+            day = CAP_EPOCH_DAY
+        else:
+            day = now.date()
+        try:
+            seed = int((counts or {}).get(count_key) or 0)
+        except (TypeError, ValueError):
+            seed = 0
+        if not await reserve_cap_slot(pg, scope, key, day, limit, seed):
+            await release_cap_slot(pg, scope, key, day)
+            await release_flow_caps(pg, reserved)
+            return None
+        reserved.append((scope, key, day))
+    return reserved
+
+
+async def release_flow_caps(pg, reservations) -> None:
+    for scope, key, day in reservations or []:
+        await release_cap_slot(pg, scope, key, day)
+
+
 # ─── Visitor stickiness (A/B binding) ─────────────────────────────
 BIND_COOKIE = "aaa_bind"
 BIND_TTL_SECONDS = 30 * 24 * 3600
@@ -4496,12 +4694,14 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
                 chosen = None
                 chosen_index = -1
     skip_reasons = []
+    # Shared per-request caches — the atomic reservation below reuses the same
+    # cap/conversion reads the eligibility scan performed.
+    cap_state_cache: dict = {}
+    conv_count_cache: dict = {}
+    offer_state_cache: dict = {}
     if chosen is None:
         # Collect eligible flows: enabled + schedule open + caps open + filters passed
         eligible = []
-        cap_state_cache: dict = {}
-        conv_count_cache: dict = {}
-        offer_state_cache: dict = {}
         for idx, flow in enumerate(sorted_flows):
             if not flow or not flow.get("enabled"):
                 skip_reasons.append("disabled")
@@ -4567,6 +4767,35 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
             else:
                 chosen_index, chosen, chosen_override = eligible[0]
 
+    # Atomic enforcement for the FLOW click caps (per_hour/per_day/total) of the
+    # flow actually about to be served. The eligibility scan above is a
+    # best-effort prefilter against a lagging ClickHouse count; the reservation
+    # below is the authority, so a concurrent burst can never all slip through.
+    # HEAD probes (track=False) do not reserve.
+    #
+    # The OFFER daily cap is deliberately NOT reserved here: a campaign hit
+    # only *routes* to the offer (the visitor is redirected onward), and for a
+    # landing/multi flow the offer is not served at all until the click-out.
+    # Reserving here would burn the offer's day on a mere landing view and
+    # refuse the real click-out. The offer cap is reserved where the offer is
+    # actually clicked through — the /c/{alias}/{offer_id} route — and the
+    # read-based overflow swap above still handles the routing decision.
+    held_flow_caps: list = []
+    if chosen is not None and track:
+        _caps = chosen.get("caps") or {}
+        if _caps:
+            _counts = await flow_click_counts(campaign["id"], chosen_index,
+                                              campaign["tenant_id"])
+            held_flow_caps = await reserve_flow_caps(
+                pg, campaign["id"], chosen_index, _caps, _counts)
+            if held_flow_caps is None:
+                # Every partial reservation was already rolled back.
+                log_track(f"🚫 Flow cap hit for campaign {campaign['id']} flow {chosen_index}")
+                skip_reasons.append("cap")
+                chosen = None
+                chosen_override = None
+                chosen_index = -1
+
     # Record the chosen flow index so track_event can tag the ClickHouse row
     # (used by click caps). flow_index 0 = no flow chosen / legacy row.
     flow_indexes = getattr(request.state, "flow_indexes", None)
@@ -4628,6 +4857,13 @@ async def do_campaign_execution(campaign, request: Request, depth: int = 0,
                 response.set_cookie(
                     BIND_COOKIE, bind_cookie,
                     max_age=BIND_TTL_SECONDS, path="/", httponly=True, samesite="lax")
+
+    # Nothing was actually served (e.g. the offer URL resolved empty and the
+    # flow fell back to a 404): give the reserved cap slots back so a failed
+    # serve never burns one.
+    if held_flow_caps and (chosen is None or response.status_code >= 400):
+        await release_flow_caps(pg, held_flow_caps)
+        held_flow_caps = []
 
     # Logs area: record the redirect decision so "why did this click go there /
     # why did it not fire" is answerable after the fact. Only real executions
@@ -6264,9 +6500,13 @@ def _check_admin_token(token: str) -> bool:
     try:
         conn = pg_connect()
         cur = conn.cursor()
+        # Session tokens are stored as sha256(token); also accept a legacy raw
+        # row so a cookie issued before hashing still authenticates.
+        _tok_hash = hashlib.sha256(token.encode()).hexdigest()
         cur.execute(
             "SELECT u.is_admin, s.expires_at, s.revoked FROM auth_sessions s "
-            "JOIN users u ON u.username = s.username WHERE s.token = %s", (token,))
+            "JOIN users u ON u.username = s.username "
+            "WHERE s.token IN (%s, %s)", (_tok_hash, token))
         row = cur.fetchone()
         conn.close()
         if not row or row[2]:

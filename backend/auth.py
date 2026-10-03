@@ -1,13 +1,22 @@
 # app_pages/auth.py
+"""Authentication, DB-backed sessions and workspace API tokens.
+
+Security note on API tokens: a tenant's ``apiToken`` is stored **in plaintext**
+inside its settings document, so anyone who can read the settings row (a DB
+dump, a backup) holds a usable workspace credential. Moving to a stored hash is
+the right end state, but hashing is only possible once the token is displayed
+exactly once at creation/rotation — a show-once UX decision that is deliberately
+out of scope here. ``rotate_api_token`` gives operators a way to replace a token.
+"""
 from fastapi import APIRouter, Request, Response, HTTPException, status, Depends, Header
 from pydantic import BaseModel
 
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 from typing import Optional
-from db import get_db, get_user, SessionLocal
+from db import get_db, get_user, SessionLocal, POSTGRES_PASSWORD
 from hashlib import md5
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import secrets
 import json
 import re
@@ -24,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 
 from models.user import UserORM
 from models.settings import SettingsORM
+from rate_limit import Throttle
 from tenant_context import current_tenant, api_token_tenant as _api_token_tenant
 # Aggregate metrics + derived rates a workspace may hide per user. Sourced from
 # the one place the report engine defines them so the two can never drift.
@@ -85,8 +95,22 @@ def login_ip_allowed(db: Session, client_ip: str) -> tuple[bool, str]:
             continue
     return False, f"Login not allowed from {client_ip} — not in the admin IP whitelist"
 
-# JWT configuration (kept for compatibility; sessions are now DB-backed)
-SECRET_KEY = os.environ.get("JWT_SECRET", "your-super-secret-key-for-jwt")
+# JWT configuration (kept for compatibility; sessions are now DB-backed).
+# A known constant fallback would let anyone who reads the source forge TOTP
+# pre-tokens, so it is gone. When JWT_SECRET is unset we derive a stable,
+# per-deployment secret from POSTGRES_PASSWORD: deterministic across workers
+# (TOTP pre-tokens minted by one worker must verify on another) yet not a
+# value published in the repo. Set JWT_SECRET explicitly in production.
+_JWT_SECRET_ENV = os.environ.get("JWT_SECRET")
+if _JWT_SECRET_ENV:
+    SECRET_KEY = _JWT_SECRET_ENV
+else:
+    SECRET_KEY = hashlib.sha256(
+        ("aaa-jwt:" + (POSTGRES_PASSWORD or "")).encode()).hexdigest()
+    log.warning(
+        "JWT_SECRET is not set — deriving the JWT signing key from "
+        "POSTGRES_PASSWORD. This is stable across workers but weaker than a "
+        "dedicated secret; set JWT_SECRET explicitly.")
 ALGORITHM = "HS256"
 pass_salt = 'akm_'
 
@@ -196,18 +220,55 @@ def ensure_sessions_table():
     _sessions_table_ready = True
 
 
+def _hash_session_token(token: str) -> str:
+    """The value stored in auth_sessions.token for a raw cookie token."""
+    return hashlib.sha256((token or "").encode()).hexdigest()
+
+
+def _fetch_session(db: Session, token: str, columns: str):
+    """Find a session row by its raw cookie token.
+
+    New rows store ``sha256(token)``; a row written before that change still
+    holds the raw token. A hash lookup is tried first, then a legacy plaintext
+    lookup — on a plaintext hit the row is rewritten to the hash
+    (migrate-on-read) so existing sessions survive the transition. ``columns``
+    is a fixed, internal column list, never caller input.
+    """
+    hashed = _hash_session_token(token)
+    row = db.execute(text(f"SELECT {columns} FROM auth_sessions WHERE token = :t"),
+                     {"t": hashed}).fetchone()
+    if row is not None:
+        return row
+    row = db.execute(text(f"SELECT {columns} FROM auth_sessions WHERE token = :t"),
+                     {"t": token}).fetchone()
+    if row is None:
+        return None
+    try:
+        db.execute(text("UPDATE auth_sessions SET token = :h WHERE token = :t"),
+                   {"h": hashed, "t": token})
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return row
+
+
 def create_session(username: str, ip: str = "", user_agent: str = "",
                    country: Optional[str] = None, region: Optional[str] = None,
                    city: Optional[str] = None) -> str:
+    """Create a session and return the RAW token for the cookie; only its
+    sha256 digest is persisted."""
     ensure_sessions_table()
     token = secrets.token_urlsafe(32)
     db = SessionLocal()
     db.execute(text(
         "INSERT INTO auth_sessions (token, username, created_at, last_seen, "
         "expires_at, ip, user_agent, country, region, city) "
-        "VALUES (:t, :u, now(), now(), :e, :ip, :ua, :cc, :rg, :ct)"),
-        {"t": token, "u": username,
-         "e": datetime.utcnow() + timedelta(days=SESSION_TTL_DAYS),
+        "VALUES (:t, :u, now(), now(), now() + make_interval(days => :days), "
+        ":ip, :ua, :cc, :rg, :ct)"),
+        {"t": _hash_session_token(token), "u": username, "days": SESSION_TTL_DAYS,
          "ip": (ip or "")[:64], "ua": (user_agent or "")[:512],
          "cc": country, "rg": region, "ct": city})
     db.commit()
@@ -218,7 +279,9 @@ def create_session(username: str, ip: str = "", user_agent: str = "",
 def revoke_session(token: str):
     ensure_sessions_table()
     db = SessionLocal()
-    db.execute(text("DELETE FROM auth_sessions WHERE token = :t"), {"t": token})
+    # Match either the stored hash or a legacy plaintext row.
+    db.execute(text("DELETE FROM auth_sessions WHERE token = :h OR token = :t"),
+               {"h": _hash_session_token(token), "t": token})
     db.commit()
     db.close()
 
@@ -322,12 +385,24 @@ def parse_user_agent(ua: str) -> dict:
 
 
 def _session_public(row, current_token: str = "") -> dict:
-    """One session row shaped for the UI (never includes the full token)."""
+    """One session row shaped for the UI (never includes the full token).
+
+    The stored token is a sha256 digest, so a session's ``id``/``token_prefix``
+    is the digest's first 12 chars — that is exactly what revoke-by-prefix
+    matches against. The caller's *own* row is the exception: it is labelled
+    with the raw cookie's first 12 chars, which keeps the "use log out to end
+    the current session" guard in the users page working (it compares the id to
+    the cookie prefix). ``current`` also recognises a legacy plaintext row.
+    """
     token = row[0] or ""
     ua = row[4] or ""
+    is_current = bool(current_token and (
+        token == _hash_session_token(current_token) or token == current_token))
+    prefix = (current_token[:12] if is_current and current_token
+              else token[:12])
     return {
-        "id": token[:12],
-        "token_prefix": token[:12],
+        "id": prefix,
+        "token_prefix": prefix,
         "created_at": row[1].isoformat() if row[1] else None,
         "last_seen": row[2].isoformat() if row[2] else None,
         "ip": row[3] or "",
@@ -336,7 +411,7 @@ def _session_public(row, current_token: str = "") -> dict:
         "country": row[5] or "",
         "region": row[6] or "",
         "city": row[7] or "",
-        "current": bool(current_token and token == current_token),
+        "current": is_current,
         **parse_user_agent(ua),
     }
 
@@ -354,7 +429,7 @@ def list_sessions(db: Session, username: str, current_token: str = "") -> list:
 
 
 def revoke_session_prefix(db: Session, username: str, prefix: str) -> int:
-    """Delete the given user's session whose token starts with `prefix`."""
+    """Delete the given user's session whose stored token starts with `prefix`."""
     prefix = (prefix or "").strip()
     if not prefix:
         return 0
@@ -371,56 +446,249 @@ def revoke_session_prefix(db: Session, username: str, prefix: str) -> int:
 
 
 def revoke_other_sessions(db: Session, username: str, current_token: str) -> int:
-    """Delete every session of `username` except the caller's current one."""
+    """Delete every session of `username` except the caller's current one.
+
+    The stored token is a hash, so the caller's raw cookie is hashed before the
+    comparison; a legacy plaintext row is also spared by matching the raw value.
+    """
     res = db.execute(text(
-        "DELETE FROM auth_sessions WHERE username = :u AND token != :t"),
-        {"u": username, "t": current_token or ""})
+        "DELETE FROM auth_sessions WHERE username = :u "
+        "AND token != :h AND token != :t"),
+        {"u": username, "h": _hash_session_token(current_token or ""),
+         "t": current_token or ""})
     db.commit()
     return res.rowcount or 0
+
+
+# ====== Workspace API tokens ======
+# A token lives in its tenant's settings document as ``apiToken``. Resolving a
+# Bearer used to JSON-parse every tenant's settings row on every request; the
+# parsed map is now cached in-process for a short TTL and refreshed on a miss
+# (so a freshly written token is picked up without waiting out the TTL).
+#
+# Optional per-token fields, all additive (absent = today's full-workspace
+# behaviour):
+#   apiTokenScopes         list of section names the token may touch
+#   apiTokenExpiresAt      ISO-8601 instant after which the token is dead
+#   apiTokenHiddenMetrics  metric keys hidden from this token's responses
+_API_TOKEN_CACHE_TTL = 30.0
+_api_token_map: Optional[dict] = None
+_api_token_map_at = 0.0
+
+
+def _bearer_token(authorization: Optional[str]) -> str:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return ""
+
+
+def _parse_api_token_expiry(value) -> Optional[datetime]:
+    """Timezone-aware expiry from an ISO-8601 string (or epoch seconds), or None."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    text_value = str(value).strip()
+    if text_value.endswith("Z"):
+        text_value = text_value[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text_value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _normalize_api_token_scopes(value) -> Optional[list]:
+    """A non-empty list of section names, or None for full-workspace access."""
+    if not isinstance(value, (list, tuple)):
+        return None
+    scopes = [str(s).strip() for s in value if str(s).strip()]
+    return scopes or None
+
+
+def _normalize_api_token_hidden(value) -> frozenset:
+    """Known hidden-metric keys from the settings doc, unknown entries dropped.
+
+    Unlike the membership path (which rejects a bad key outright), a typo in an
+    ops-authored settings doc must not silently widen the token's view: the
+    valid restrictions are kept."""
+    if not isinstance(value, (list, tuple)):
+        return frozenset()
+    out = []
+    for raw in value:
+        key = str(raw or "").strip()
+        if key in HIDDEN_METRIC_KEYS and key not in out:
+            out.append(key)
+    return frozenset(out)
+
+
+def _build_api_token_map() -> dict:
+    """Parse every tenant's apiToken (plus optional scope/expiry fields).
+
+    Returns {token: entry}. A token configured for more than one tenant is
+    ambiguous and deliberately excluded, with an error log. Expired tokens are
+    kept in the map with their expiry so the check stays precise within the
+    cache TTL.
+    """
+    db = SessionLocal()
+    try:
+        rows = db.execute(text(
+            "SELECT tenant_id, value FROM settings WHERE name = 'settings' "
+            "ORDER BY tenant_id ASC")).fetchall()
+    finally:
+        db.close()
+    seen: dict = {}
+    info: dict = {}
+    collisions = set()
+    for tenant_id, value in rows:
+        if not value:
+            continue
+        try:
+            doc = json.loads(value)
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        token = (doc.get("apiToken") or "").strip()
+        if not token:
+            continue
+        tid = int(tenant_id)
+        if token in seen and seen[token] != tid:
+            collisions.add(token)
+        seen[token] = tid
+        info[token] = doc
+    out = {}
+    for token, doc in info.items():
+        if token in collisions:
+            log.error("API token collision: a token is configured for multiple "
+                      "tenants; it will not resolve to any workspace")
+            continue
+        out[token] = {
+            "tenant": int(seen[token]),
+            "scopes": _normalize_api_token_scopes(doc.get("apiTokenScopes")),
+            "hidden": _normalize_api_token_hidden(doc.get("apiTokenHiddenMetrics")),
+            "expires_at": _parse_api_token_expiry(doc.get("apiTokenExpiresAt")),
+        }
+    return out
+
+
+def _refresh_api_token_map() -> dict:
+    """Rebuild and cache the token map. A DB error keeps the previous map."""
+    global _api_token_map, _api_token_map_at
+    try:
+        _api_token_map = _build_api_token_map()
+        _api_token_map_at = time.time()
+    except Exception as e:  # noqa: BLE001 — a bad DB must not 500 the request
+        log.warning("could not refresh API token cache: %s", e)
+        if _api_token_map is None:
+            _api_token_map = {}
+    return _api_token_map
+
+
+def _invalidate_api_token_cache() -> None:
+    global _api_token_map_at
+    _api_token_map_at = 0.0
+
+
+def _match_api_token(provided: str) -> Optional[dict]:
+    """The cache entry for ``provided``, using a constant-time compare.
+
+    The map is short (one entry per workspace), so a linear scan of
+    ``secrets.compare_digest`` calls is cheap and avoids leaking token bytes
+    through a plain dict lookup's early exit. A miss triggers one refresh so a
+    just-created token resolves immediately.
+    """
+    provided = (provided or "").strip()
+    if not provided:
+        return None
+    global _api_token_map
+    if _api_token_map is None or (time.time() - _api_token_map_at) >= _API_TOKEN_CACHE_TTL:
+        _refresh_api_token_map()
+    entry = _find_in_map(_api_token_map, provided)
+    if entry is None:
+        entry = _find_in_map(_refresh_api_token_map(), provided)
+    if entry is None:
+        return None
+    expires_at = entry.get("expires_at")
+    if expires_at is not None and datetime.now(timezone.utc) > expires_at:
+        return None
+    return entry
+
+
+def _find_in_map(token_map: dict, provided: str) -> Optional[dict]:
+    for token, entry in (token_map or {}).items():
+        if token and len(token) == len(provided) \
+                and secrets.compare_digest(token, provided):
+            return entry
+    return None
 
 
 def resolve_api_token(provided: str) -> Optional[int]:
     """The tenant whose settings document holds ``provided`` as its apiToken.
 
-    Returns None for an empty/unknown token, and for a token held by more than
-    one workspace. An API token is a *workspace-scoped* credential (never
-    install-wide); a collision cannot be attributed to one tenant, so it is
-    refused with an explicit error log rather than silently resolving to the
-    lowest tenant id.
+    Returns None for an empty/unknown token, for a token held by more than one
+    workspace, and for a token past its optional ``apiTokenExpiresAt``. An API
+    token is a *workspace-scoped* credential (never install-wide); a collision
+    cannot be attributed to one tenant, so it is refused rather than silently
+    resolving to the lowest tenant id.
     """
-    provided = (provided or "").strip()
-    if not provided:
-        return None
-    try:
-        db = SessionLocal()
+    entry = _match_api_token(provided)
+    return entry["tenant"] if entry else None
+
+
+def api_token_scopes(provided: str) -> Optional[list]:
+    """Section scopes configured on ``provided``, or None for full access.
+
+    An empty/absent ``apiTokenScopes`` list is None, i.e. today's full-workspace
+    token behaviour."""
+    entry = _match_api_token(provided)
+    return entry["scopes"] if entry else None
+
+
+def api_token_hidden_metrics(provided: str) -> frozenset:
+    """Metric keys hidden from ``provided`` (``apiTokenHiddenMetrics``)."""
+    entry = _match_api_token(provided)
+    return entry["hidden"] if entry else frozenset()
+
+
+def rotate_api_token(db: Session, tenant_id: int) -> str:
+    """Mint a fresh ``apiToken`` for ``tenant_id`` and return it (raw).
+
+    Clears the optional apiTokenExpiresAt/Scopes/HiddenMetrics so the new token
+    starts unexpired with full-workspace access. The in-process cache is
+    invalidated so the change is visible immediately. The token is only returned
+    here — it is stored plaintext at rest (see the module docstring)."""
+    tid = int(tenant_id)
+    token = secrets.token_urlsafe(24)
+    row = db.execute(text(
+        "SELECT value FROM settings WHERE name = 'settings' AND tenant_id = :t"),
+        {"t": tid}).fetchone()
+    doc = {}
+    if row and row[0]:
         try:
-            rows = db.execute(text(
-                "SELECT tenant_id, value FROM settings WHERE name = 'settings' "
-                "ORDER BY tenant_id ASC")).fetchall()
-        finally:
-            db.close()
-    except Exception:
-        return None
-    match = None
-    collision = False
-    for tenant_id, value in rows:
-        if not value:
-            continue
-        try:
-            token = (json.loads(value).get("apiToken") or "").strip()
+            parsed = json.loads(row[0])
+            if isinstance(parsed, dict):
+                doc = parsed
         except Exception:
-            continue
-        if token and len(token) == len(provided) \
-                and secrets.compare_digest(token, provided):
-            tid = int(tenant_id)
-            if match is not None and tid != match:
-                collision = True
-            match = tid
-    if collision:
-        log.error("API token collision: the presented token is configured for "
-                  "multiple tenants; refusing to resolve it to a workspace")
-        return None
-    return match
+            doc = {}
+    doc["apiToken"] = token
+    for key in ("apiTokenExpiresAt", "apiTokenScopes", "apiTokenHiddenMetrics"):
+        doc.pop(key, None)
+    if row:
+        db.execute(text("UPDATE settings SET value = :v WHERE name = 'settings' "
+                        "AND tenant_id = :t"), {"v": json.dumps(doc), "t": tid})
+    else:
+        db.execute(text("INSERT INTO settings (name, value, tenant_id) "
+                        "VALUES ('settings', :v, :t)"),
+                   {"v": json.dumps(doc), "t": tid})
+    db.commit()
+    _invalidate_api_token_cache()
+    return token
 
 
 def is_platform_operator(request: Request) -> bool:
@@ -453,14 +721,12 @@ def is_authenticated(request: Request) -> any:
     try:
         ensure_sessions_table()
         db: Session = SessionLocal()
-        row = db.execute(text(
-            "SELECT username, expires_at, revoked, last_seen "
-            "FROM auth_sessions WHERE token = :t"),
-            {"t": token}).fetchone()
-        if not row or row.revoked:
-            db.close()
-            return False
-        if row.expires_at and row.expires_at < datetime.utcnow():
+        row = _fetch_session(
+            db, token,
+            "username, revoked, "
+            "(expires_at IS NOT NULL AND expires_at < now()) AS expired, "
+            "(last_seen IS NULL OR last_seen < now() - interval '60 seconds') AS stale")
+        if not row or row.revoked or row.expired:
             db.close()
             return False
 
@@ -468,10 +734,9 @@ def is_authenticated(request: Request) -> any:
         # the hot auth path stays cheap. Never fatal — a failed touch must not
         # break the request.
         try:
-            if row.last_seen is None or \
-                    (datetime.utcnow() - row.last_seen).total_seconds() > 60:
+            if row.stale:
                 db.execute(text("UPDATE auth_sessions SET last_seen = now() "
-                                "WHERE token = :t"), {"t": token})
+                                "WHERE token = :t"), {"t": _hash_session_token(token)})
                 db.commit()
         except Exception:
             try:
@@ -496,13 +761,12 @@ def get_session_username(request: Request) -> Optional[str]:
     try:
         ensure_sessions_table()
         db: Session = SessionLocal()
-        row = db.execute(text(
-            "SELECT username, expires_at, revoked FROM auth_sessions WHERE token = :t"),
-            {"t": token}).fetchone()
+        row = _fetch_session(
+            db, token,
+            "username, revoked, "
+            "(expires_at IS NOT NULL AND expires_at < now()) AS expired")
         db.close()
-        if not row or row.revoked:
-            return None
-        if row.expires_at and row.expires_at < datetime.utcnow():
+        if not row or row.revoked or row.expired:
             return None
         return row.username
     except Exception:
@@ -524,8 +788,7 @@ def session_tenant_id(token: str) -> Optional[int]:
     try:
         ensure_sessions_table()
         db = SessionLocal()
-        row = db.execute(text("SELECT current_tenant_id FROM auth_sessions WHERE token = :t"),
-                         {"t": token}).fetchone()
+        row = _fetch_session(db, token, "current_tenant_id")
         db.close()
         return int(row[0]) if row and row[0] is not None else None
     except Exception:
@@ -567,12 +830,12 @@ def resolve_session_tenant(token: str) -> tuple[Optional[int], bool]:
         ensure_sessions_table()
         db = SessionLocal()
         try:
-            row = db.execute(text(
-                "SELECT username, expires_at, revoked, current_tenant_id "
-                "FROM auth_sessions WHERE token = :t"), {"t": token}).fetchone()
-            if not row or row.revoked:
-                return None, True
-            if row.expires_at and row.expires_at < datetime.utcnow():
+            row = _fetch_session(
+                db, token,
+                "username, revoked, "
+                "(expires_at IS NOT NULL AND expires_at < now()) AS expired, "
+                "current_tenant_id")
+            if not row or row.revoked or row.expired:
                 return None, True
             memberships = list_user_memberships(db, row.username)
             if not memberships:
@@ -590,7 +853,8 @@ def resolve_session_tenant(token: str) -> tuple[Optional[int], bool]:
                 tenant_id = member_ids[0]
             if stored != tenant_id:
                 db.execute(text("UPDATE auth_sessions SET current_tenant_id = :tid "
-                                "WHERE token = :t"), {"tid": tenant_id, "t": token})
+                                "WHERE token = :t"),
+                           {"tid": tenant_id, "t": _hash_session_token(token)})
                 db.commit()
             return tenant_id, True
         finally:
@@ -602,7 +866,7 @@ def resolve_session_tenant(token: str) -> tuple[Optional[int], bool]:
 
 def set_session_tenant(db: Session, token: str, tenant_id: int) -> None:
     db.execute(text("UPDATE auth_sessions SET current_tenant_id = :tid WHERE token = :t"),
-               {"tid": int(tenant_id), "t": token})
+               {"tid": int(tenant_id), "t": _hash_session_token(token)})
     db.commit()
 
 
@@ -927,7 +1191,13 @@ def hidden_metrics_for(db: Session, username: Optional[str],
 
 def request_hidden_metrics(request: Request, db: Optional[Session] = None) -> frozenset:
     """hidden_metrics_for the current caller. Pass the endpoint's own `db` to
-    avoid a second pool checkout."""
+    avoid a second pool checkout.
+
+    A Bearer API token has no user membership, so its restrictions come from the
+    tenant's optional ``apiTokenHiddenMetrics`` list instead (absent = none)."""
+    if _api_token_tenant() is not None:
+        return api_token_hidden_metrics(
+            _bearer_token(request.headers.get("authorization")))
     username = get_session_username(request)
     if not username:
         return frozenset()
@@ -948,11 +1218,20 @@ def _is_self_service(request: Request) -> bool:
 
 def require_section(section: str):
     """Dependency factory: caller must be authenticated AND, through their
-    membership in the request's tenant, able to read `section`. The Bearer
-    api_token principal is install-wide and skips this gate."""
+    membership in the request's tenant, able to read `section`.
+
+    A Bearer API token acts as an owner of its own workspace, but when the
+    tenant configured ``apiTokenScopes`` the token may only touch the listed
+    sections. An empty/absent scope list keeps the full-workspace behaviour
+    existing tokens rely on."""
     async def checker(request: Request, authorization: Optional[str] = Header(None)):
         principal = require_api_auth(request, authorization)
         if principal == "api_token":
+            scopes = api_token_scopes(_bearer_token(authorization))
+            if scopes and section not in scopes:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"API token is not scoped for section '{section}'")
             return principal
         # Self-service account endpoints (change password, 2FA) are for every user
         if section == "users" and _is_self_service(request):
@@ -966,7 +1245,8 @@ def require_section(section: str):
 
 def require_section_write(section: str):
     """Dependency factory: on top of section read access, the membership needs
-    write=true for mutating methods. The api_token principal is install-wide."""
+    write=true for mutating methods. A scoped Bearer keeps read+write on its
+    listed sections (see ``require_section``); an unscoped one is install-wide."""
     async def checker(request: Request, authorization: Optional[str] = Header(None)):
         principal = await require_section(section)(request, authorization)
         if principal == "api_token":
@@ -1080,31 +1360,23 @@ def request_is_https(request: Request) -> bool:
 
 
 # ====== POST /login ======
-# In-process rate limiter: max 5 failed attempts per IP+username per rolling 60s
+# Max 5 failed attempts per IP+username per rolling 60s, shared across uvicorn
+# workers via the auth_throttle table (rate_limit.Throttle falls back to an
+# in-process dict, with stale-key eviction, if the DB is unreachable).
 LOGIN_MAX_FAILED = 5
 LOGIN_WINDOW_SECONDS = 60
-_login_failures: dict = {}
 # Cap on the (attacker-chosen) failure map; above this we evict stale keys.
 _LOGIN_FAILURES_MAX_KEYS = 10_000
+_login_limiter = Throttle("login", LOGIN_WINDOW_SECONDS, LOGIN_MAX_FAILED,
+                          max_keys=_LOGIN_FAILURES_MAX_KEYS)
 
 
 def _record_failed_login(key: str):
-    now = time.time()
-    cutoff = now - LOGIN_WINDOW_SECONDS
-    attempts = [t for t in _login_failures.get(key, []) if t > cutoff]
-    attempts.append(now)
-    _login_failures[key] = attempts
-    # The key is attacker-chosen (IP:username), so without eviction the map grows
-    # without bound. Once it is large, drop every key with no fresh attempts.
-    if len(_login_failures) > _LOGIN_FAILURES_MAX_KEYS:
-        for stale in [k for k, v in _login_failures.items()
-                      if not any(t > cutoff for t in v)]:
-            _login_failures.pop(stale, None)
+    _login_limiter.record(key)
 
 
 def _login_limited(key: str) -> bool:
-    cutoff = time.time() - LOGIN_WINDOW_SECONDS
-    return len([t for t in _login_failures.get(key, []) if t > cutoff]) >= LOGIN_MAX_FAILED
+    return _login_limiter.limited(key)
 
 
 @router.post("/login")
@@ -1152,7 +1424,7 @@ async def login(request: Request, response: Response, login_data: LoginRequest, 
     country, region, city = client_location(request)
     token = create_session(user.username, client_ip, user_agent(request),
                            country, region, city)
-    _login_failures.pop(limit_key, None)
+    _login_limiter.clear(limit_key)
     audit_event(user.username, "login_success", "user", user.username, ip=client_ip)
 
     # Secure only when the request actually arrived over https, so http installs work.
@@ -1166,7 +1438,8 @@ async def login(request: Request, response: Response, login_data: LoginRequest, 
 TOTP_TOKEN_TTL_MINUTES = 5
 TOTP_MAX_TRIES = 3
 TOTP_WINDOW_SECONDS = 600
-_totp_failures: dict = {}
+# Shared across workers, same as the login limiter.
+_totp_limiter = Throttle("totp", TOTP_WINDOW_SECONDS, TOTP_MAX_TRIES)
 BACKUP_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I
 
 
@@ -1176,16 +1449,11 @@ class TotpLoginRequest(BaseModel):
 
 
 def _record_totp_failure(key: str):
-    now = time.time()
-    cutoff = now - TOTP_WINDOW_SECONDS
-    attempts = [t for t in _totp_failures.get(key, []) if t > cutoff]
-    attempts.append(now)
-    _totp_failures[key] = attempts
+    _totp_limiter.record(key)
 
 
 def _totp_limited(key: str) -> bool:
-    cutoff = time.time() - TOTP_WINDOW_SECONDS
-    return len([t for t in _totp_failures.get(key, []) if t > cutoff]) >= TOTP_MAX_TRIES
+    return _totp_limiter.limited(key)
 
 
 def _hash_backup_code(code: str) -> str:
@@ -1270,7 +1538,7 @@ async def login_totp(request: Request, response: Response, data: TotpLoginReques
     country, region, city = client_location(request)
     token = create_session(user.username, client_ip, user_agent(request),
                            country, region, city)
-    _totp_failures.pop(limit_key, None)
+    _totp_limiter.clear(limit_key)
     audit_event(user.username, "login_success", "user", user.username, {"totp": True}, client_ip)
 
     response.set_cookie(key="session_token", value=token, httponly=True,

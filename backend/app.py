@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, Depends
 from auth import (require_api_auth, require_section, require_section_write,
                   require_tenant_feature, resolve_api_token, resolve_session_tenant)
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
@@ -11,6 +12,9 @@ from starlette.concurrency import run_in_threadpool
 from tenant_context import (set_api_token_tenant, set_current_tenant, set_tenant_missing,
                             reset_api_token_tenant, reset_current_tenant)
 from types import SimpleNamespace
+
+import logging
+log = logging.getLogger(__name__)
 
 app = FastAPI(
     title="AAA Tracker API",
@@ -79,8 +83,10 @@ class TenantContextMiddleware:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         tenant_id, has_membership, token_tenant = None, True, None
+        bearer = _bearer_from_scope(scope)
+        session_token = _session_token_from_scope(scope)
+        resolution_failed = False
         try:
-            bearer = _bearer_from_scope(scope)
             if bearer:
                 token_tenant = await run_in_threadpool(resolve_api_token, bearer)
             if token_tenant is not None:
@@ -89,9 +95,25 @@ class TenantContextMiddleware:
                 tenant_id, has_membership = token_tenant, True
             else:
                 tenant_id, has_membership = await run_in_threadpool(
-                    resolve_session_tenant, _session_token_from_scope(scope))
+                    resolve_session_tenant, session_token)
         except Exception:
-            pass
+            # #26 — tenant resolution failed (typically the DB is unreachable).
+            # Never fall through to the default tenant: a caller that presented
+            # credentials may belong to another workspace, and silently serving
+            # tenant 1 to them would be a cross-tenant leak. Fail closed for
+            # credentialed requests (a Bearer API token or a session cookie);
+            # only a request that carried no credentials (a public route such
+            # as login, invitation lookup, or a shared report) may continue on
+            # the default tenant, because it cannot name any workspace.
+            resolution_failed = True
+            log.error("tenant resolution failed for %s (bearer=%s, session=%s)",
+                      scope.get("path", ""), bool(bearer), bool(session_token),
+                      exc_info=True)
+        if resolution_failed and (bearer or session_token):
+            response = PlainTextResponse("Service temporarily unavailable",
+                                         status_code=503)
+            await response(scope, receive, send)
+            return
         token = set_current_tenant(tenant_id)
         api_token = set_api_token_tenant(token_tenant)
         set_tenant_missing(not has_membership)
@@ -376,9 +398,9 @@ def _ensure_tenant_schema(conn):
 
     Orders the work so it is safe on a live install and on a fresh one:
     tenants/tenant_memberships -> tenant_id on every tenant-owned table
-    (add nullable, backfill to 1, then NOT NULL DEFAULT 1) -> composite uniques
-    (drop the global ones, add UNIQUE(tenant_id, <col>)) -> per-tenant indexes
-    -> membership backfill.
+    (add nullable, backfill to 1, then NOT NULL, then drop any column default)
+    -> composite uniques (drop the global ones, add UNIQUE(tenant_id, <col>))
+    -> per-tenant indexes -> membership backfill.
 
     Every ALTER is guarded by to_regclass: the tables that this hook does not
     create (they belong to the tracking plane's/bootstrap migrations) may or may
@@ -442,9 +464,26 @@ def _ensure_tenant_schema(conn):
             continue
         _mig(conn, f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tenant_id INTEGER")
         _mig(conn, f"UPDATE {table} SET tenant_id = 1 WHERE tenant_id IS NULL")
-        _mig(conn, f"ALTER TABLE {table} ALTER COLUMN tenant_id SET DEFAULT 1")
         _mig(conn, f"ALTER TABLE {table} ALTER COLUMN tenant_id SET NOT NULL")
         _mig(conn, f"CREATE INDEX IF NOT EXISTS {table}_tenant_id_idx ON {table} (tenant_id)")
+
+    # #19 — tenant_id must carry NO database default. With DEFAULT 1 a raw
+    # INSERT that omitted tenant_id silently landed in tenant 1 (the bulk APIs
+    # bypass before_flush); dropping the default turns that into a visible NOT
+    # NULL violation. The ORM's before_flush stamps the column, and every
+    # audited raw INSERT already passes tenant_id explicitly. Idempotent: DROP
+    # DEFAULT is a no-op when no default is set.
+    for table in TENANT_TABLES:
+        if table not in existing:
+            continue
+        _mig(conn, f"ALTER TABLE {table} ALTER COLUMN tenant_id DROP DEFAULT")
+    # One deliberate exception: conversions_data is written by the tracking
+    # plane's raw SQL (which stamps tenant_id) and by bulk analytics imports
+    # that may omit it; a conversion's tenant is unambiguous from its click and
+    # no cross-tenant read can reach a row without its campaign's tenant, so the
+    # safety net is harmless here. Everything else stays defaultless.
+    if "conversions_data" in existing:
+        _mig(conn, "ALTER TABLE conversions_data ALTER COLUMN tenant_id SET DEFAULT 1")
 
     for table, rewrites in TENANT_UNIQUE_REWRITES.items():
         if table not in existing:
@@ -596,6 +635,21 @@ async def startup():
     # G65 — audit table (idempotent)
     from audit_logger import ensure_audit_table
     ensure_audit_table()
+
+    # #19 — audit_logger.ensure_audit_table() owns audit_log's DDL and re-asserts
+    # `tenant_id DEFAULT 1` on every boot, after the tenant schema migration
+    # above already dropped the default. Drop it once more, now that every
+    # boot-time table owner has run. Idempotent: DROP DEFAULT is a no-op when no
+    # default is set, and _mig skips a table that does not exist.
+    try:
+        with engine.connect() as conn:
+            for table in TENANT_TABLES:
+                _mig(conn, f"ALTER TABLE {table} ALTER COLUMN tenant_id DROP DEFAULT")
+            # Re-assert the one documented exception (see the first pass above).
+            _mig(conn, "ALTER TABLE conversions_data ALTER COLUMN tenant_id SET DEFAULT 1")
+            conn.commit()
+    except Exception as e:
+        print("startup migration:", e)
 
     # Fraud plane: clicks_data.fraud_score + PG honeypot_hits (both idempotent;
     # coordinates with the tracking-plane migration of the same columns).

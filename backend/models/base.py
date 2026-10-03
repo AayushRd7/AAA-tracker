@@ -14,7 +14,9 @@ class TenantMixin:
     UPDATE and DELETE, plus a ``before_flush`` hook that stamps ``tenant_id``
     on new rows.
 
-    ``server_default="1"`` keeps direct SQL inserts (the tracking plane, the
-    background loops) landing in tenant 1 instead of failing the NOT NULL.
+    The column deliberately carries **no** SQL default: an INSERT that omits
+    ``tenant_id`` must fail the NOT NULL constraint rather than silently land in
+    tenant 1. Raw SQL callers must pass ``tenant_id`` explicitly (the audited
+    sites all do); the ORM path is stamped by the ``before_flush`` hook above.
     """
-    tenant_id = Column(Integer, nullable=False, server_default="1", index=True)
+    tenant_id = Column(Integer, nullable=False, index=True)

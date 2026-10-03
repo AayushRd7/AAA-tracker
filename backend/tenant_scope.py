@@ -24,8 +24,10 @@ LIMITS — read before extending this module
   ``tenant_id`` when adding new ones. Same for the asyncpg SQL in
   ``frontend/app.py`` (the tracking plane) — it never imports this module.
 * ``session.bulk_insert_mappings`` / ``bulk_save_objects`` bypass
-  ``before_flush``; such rows fall back to the column's ``server_default``
-  (tenant 1). No caller uses the bulk APIs on a tenant-owned table today.
+  ``before_flush``; since the ``tenant_id`` column carries no server default,
+  a bulk INSERT that omits it now fails the NOT NULL constraint instead of
+  silently landing in tenant 1. No caller uses the bulk APIs on a tenant-owned
+  table today.
 * Statements issued with ``execution_options(synchronize_session=False)`` on a
   Core ``update()``/``delete()`` built from a *text* clause are still raw SQL.
 * ``with_loader_criteria`` cannot help with a JOIN to a table whose model does

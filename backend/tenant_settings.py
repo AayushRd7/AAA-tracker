@@ -24,12 +24,15 @@ Raw SQL throughout: ``tenants`` is deliberately install-global (no
 ``TenantMixin``), so the ORM's tenant filter must not apply here.
 """
 import json
+import logging
 import secrets
 
 from sqlalchemy import text
 
 from db import SessionLocal
 from tenant_context import reset_current_tenant, set_current_tenant
+
+log = logging.getLogger(__name__)
 
 # The documented defaults — the exact keys install/sql/init.sql writes for
 # tenant 1's settings row, minus the shared token (each tenant mints its own).
@@ -70,8 +73,7 @@ def seed_tenant_settings(db, tenant_id: int) -> bool:
     return True
 
 
-def list_tenant_ids(active_only: bool = True) -> list:
-    """Every tenant id, ascending. ``active_only`` skips suspended workspaces."""
+def _list_tenant_ids(active_only: bool, raise_on_error: bool) -> list:
     db = SessionLocal()
     try:
         sql = "SELECT id FROM tenants"
@@ -80,9 +82,34 @@ def list_tenant_ids(active_only: bool = True) -> list:
         sql += " ORDER BY id ASC"
         return [int(r[0]) for r in db.execute(text(sql)).fetchall()]
     except Exception:
+        log.exception("tenant_settings: failed to list tenants (active_only=%s)",
+                      active_only)
+        if raise_on_error:
+            raise
         return []
     finally:
         db.close()
+
+
+def list_tenant_ids(active_only: bool = True) -> list:
+    """Every tenant id, ascending. ``active_only`` skips suspended workspaces.
+
+    A DB failure is logged loudly (with the traceback) and reported as an empty
+    list so a caller that cannot handle an exception still gets a value. A
+    sweep that must not silently skip every tenant should use
+    ``list_tenant_ids_or_raise`` instead.
+    """
+    return _list_tenant_ids(active_only, raise_on_error=False)
+
+
+def list_tenant_ids_or_raise(active_only: bool = True) -> list:
+    """Like ``list_tenant_ids`` but propagates a DB failure.
+
+    The background sweeps use this so a transient outage surfaces as a loop
+    error (and leaves the loop heartbeat stale / health signal red) instead of
+    silently enumerating zero tenants and skipping the whole sweep.
+    """
+    return _list_tenant_ids(active_only, raise_on_error=True)
 
 
 def tenant_features(tenant_id: int) -> dict:
@@ -129,14 +156,19 @@ async def for_each_tenant(work) -> None:
 
     The contextvar is set before the per-tenant work and reset after it, so the
     ORM/ClickHouse scoping (and any ``asyncio.to_thread`` hop) sees the right
-    workspace. Exceptions are logged and swallowed: one broken workspace must
-    not stop the others in the same sweep.
+    workspace. A single workspace's failure is logged (with the traceback) and
+    swallowed: one broken workspace must not stop the others in the same sweep.
+
+    Enumerating the tenants uses ``list_tenant_ids_or_raise``: if the registry
+    itself cannot be read, the sweep raises instead of silently running for
+    zero tenants. The loop wrappers log that and retry on their next tick, and
+    the loop heartbeat stays stale so the health signal goes red.
     """
-    for tenant_id in list_tenant_ids():
+    for tenant_id in list_tenant_ids_or_raise():
         token = set_current_tenant(tenant_id)
         try:
             await work(tenant_id)
-        except Exception as e:  # noqa: BLE001 — a sweep must survive one tenant
-            print(f"tenant sweep error (tenant {tenant_id}):", e)
+        except Exception:  # noqa: BLE001 — a sweep must survive one tenant
+            log.exception("tenant sweep error (tenant %s)", tenant_id)
         finally:
             reset_current_tenant(token)

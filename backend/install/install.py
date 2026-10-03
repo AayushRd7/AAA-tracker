@@ -21,7 +21,6 @@ DB_HOST = os.getenv("POSTGRES_HOST", "tracker_postgres")
 DB_PORT = os.getenv("POSTGRES_PORT", "5432")
 DB_NAME = os.getenv("POSTGRES_DB", "db")
 DB_USER = os.getenv("POSTGRES_USER", "user")
-DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "_".join(["password"] * 3))
 
 INIT_SQL_FILE = "/app/install/sql/init.sql"
 
@@ -91,10 +90,16 @@ def rotate_seeded_credentials(cur) -> None:
 
 
 def connect_db():
+    password = os.getenv("POSTGRES_PASSWORD")
+    if not password:
+        raise RuntimeError(
+            "POSTGRES_PASSWORD is not set; refusing to connect to PostgreSQL "
+            "with a fallback credential"
+        )
     return psycopg2.connect(
         dbname=DB_NAME,
         user=DB_USER,
-        password=DB_PASSWORD,
+        password=password,
         host=DB_HOST,
         port=DB_PORT,
     )
@@ -315,11 +320,17 @@ def split_sql_statements(raw_sql: str) -> list:
 
 
 def run_clickhouse_install():
+    password = os.getenv("CLICKHOUSE_PASSWORD")
+    if not password:
+        raise RuntimeError(
+            "CLICKHOUSE_PASSWORD is not set; refusing to connect to ClickHouse "
+            "with a fallback credential"
+        )
     print("  ▸ clickhouse: connecting")
     client = get_client(
         host=os.getenv("CLICKHOUSE_HOST", "tracker_clickhouse"),
         username=os.getenv("CLICKHOUSE_USER", "user"),
-        password=os.getenv("CLICKHOUSE_PASSWORD", "_".join(["password"] * 3)),
+        password=password,
         port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
         secure=False,
     )

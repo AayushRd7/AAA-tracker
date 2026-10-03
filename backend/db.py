@@ -1,4 +1,5 @@
 import os
+import sys
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -16,8 +17,21 @@ POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "tracker_postgres")
 POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5432")
 POSTGRES_DB = os.environ.get("POSTGRES_DB", "db")
 POSTGRES_USER = os.environ.get("POSTGRES_USER", "user")
-# dev-only fallback so imports work without env; the real value comes from .env
-POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD") or "_".join(["password"] * 3)
+
+# The engine is built at import time, so `import db` must not raise (docker exec
+# and the installer both rely on it). When the env var is absent we keep this
+# non-authenticating sentinel rather than inventing a guessable password, and
+# warn; any actual connection then fails authentication instead of succeeding
+# with a default credential.
+POSTGRES_PASSWORD_SENTINEL = "__missing_POSTGRES_PASSWORD__"
+POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD")
+if not POSTGRES_PASSWORD:
+    print(
+        "WARNING: POSTGRES_PASSWORD is not set; using a non-authenticating "
+        "sentinel — database connections will fail until it is configured.",
+        file=sys.stderr,
+    )
+    POSTGRES_PASSWORD = POSTGRES_PASSWORD_SENTINEL
 
 DATABASE_URL = f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 

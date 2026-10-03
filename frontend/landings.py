@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Q
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import Optional
+import hashlib
 import html as html_lib
 import ipaddress
 import re
@@ -60,7 +61,10 @@ def _current_tenant(request) -> int:
     try:
         from app import pg_connect
         conn = pg_connect(); cur = conn.cursor()
-        cur.execute("SELECT current_tenant_id FROM auth_sessions WHERE token = %s", (token,))
+        # Stored tokens are sha256(token); accept a legacy raw row too.
+        _tok_hash = hashlib.sha256(token.encode()).hexdigest()
+        cur.execute("SELECT current_tenant_id FROM auth_sessions "
+                    "WHERE token IN (%s, %s)", (_tok_hash, token))
         row = cur.fetchone(); conn.close()
         return int(row[0]) if row and row[0] is not None else 1
     except Exception:

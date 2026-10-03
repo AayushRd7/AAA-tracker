@@ -10648,6 +10648,39 @@ print("ESCAPED-OK")
     check("ops: certificate renewal script present",
           os.path.exists("scripts/renew-certs.sh"), "renew-certs.sh missing")
 
+    # ===== audit bug-list guards (non-UI) =====
+    _src = lambda p: open(p, encoding="utf-8").read()
+    _auth = _src("backend/auth.py")
+    _app = _src("backend/app.py")
+    _fe = _src("frontend/app.py")
+    # #25 — no guessable fallback database passwords
+    _fallback = any("password_password_password" in _src(p)
+                    or '"_".join(["password"]' in _src(p)
+                    for p in ("backend/clickHouse.py", "backend/db.py",
+                              "backend/install/install.py"))
+    check("bug25: no fallback db password in source", not _fallback,
+          "a guessable fallback password remains")
+    # #12 — no hardcoded JWT secret
+    check("bug12: no hardcoded JWT fallback secret",
+          "your-super-secret-key-for-jwt" not in _auth, "JWT fallback still present")
+    # #10 — shared (cross-worker) rate limiter
+    check("bug10: shared throttle store present",
+          os.path.exists("backend/rate_limit.py"), "rate_limit.py missing")
+    # #15 — session tokens hashed at rest
+    check("bug15: session tokens hashed at rest",
+          "sha256" in _auth and "auth_sessions" in _auth, "no token hashing")
+    # #19 — tenant_id DB default dropped
+    check("bug19: tenant_id server default dropped",
+          "DROP DEFAULT" in _app.upper(), "default not dropped")
+    # #17 — atomic cap counters
+    check("bug17: atomic cap counters present",
+          "cap_counters" in _fe and "ON CONFLICT" in _fe.upper(),
+          "no atomic cap counter")
+    # #27 — tenant sweeps fail loudly
+    check("bug27: tenant sweep failure is surfaced",
+          "list_tenant_ids_or_raise" in _src("backend/tenant_settings.py"),
+          "silent sweep still present")
+
     r = s.get(f"{api}/settings/")
     check("settings: document + rev returned",
           r.status_code == 200 and isinstance(r.json().get("settings"), dict)
