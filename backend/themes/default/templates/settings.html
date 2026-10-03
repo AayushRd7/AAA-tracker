@@ -1736,7 +1736,7 @@
                 fetch("/backend/api/settings/clear-tracking-data", {
                     method: "POST"
                 })
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.$root.$emit("show-message", {type: "success", text: "Tracking data cleared successfully"});
                     })
@@ -2018,8 +2018,7 @@
                         credentials: "include",
                         body: JSON.stringify(doc)
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+                    const data = await window.fetchJsonFromResponse(res);
                     this.$root.$emit("show-message", {type: "success", text: `Settings imported (${data.imported || 0} section(s))`});
                     this.loadSettings();
                 } catch (err) {
@@ -2034,7 +2033,8 @@
                         method: "POST",
                         credentials: "include"
                     });
-                    const data = await res.json();
+                    const data = await window.fetchJsonFromResponse(res)
+                        .catch(e => ({detail: e.message}));
                     if (res.ok && data.status === "ok") {
                         this.$root.$emit("show-message", {type: "success", text: data.message || "Test message sent"});
                     } else {
@@ -2055,7 +2055,8 @@
                         method: "POST",
                         credentials: "include"
                     });
-                    const data = await res.json();
+                    const data = await window.fetchJsonFromResponse(res)
+                        .catch(e => ({detail: e.message}));
                     if (res.ok && data.status === "ok") {
                         this.$root.$emit("show-message", {type: "success", text: data.message || "Test report sent"});
                     } else {
@@ -2069,7 +2070,7 @@
             },
             loadMetaAdsStatus() {
                 fetch("/backend/api/meta-ads/status", {credentials: "include"})
-                    .then(r => r.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.metaAdsStatus = data;
                         // Source of truth for the Integrations picker: the same
@@ -2087,7 +2088,8 @@
                     const res = await fetch("/backend/api/meta-ads/sync", {
                         method: "POST", credentials: "include"
                     });
-                    const data = await res.json();
+                    const data = await window.fetchJsonFromResponse(res)
+                        .catch(e => ({status: 'error', reason: e.message}));
                     this.metaAdsResult = JSON.stringify(data, null, 2);
                     this.loadMetaAdsStatus();
                     const status = data.status || "";
@@ -2130,7 +2132,7 @@
                 params.set('page', page || 1);
                 params.set('page_size', 50);
                 fetch(`/backend/api/audit/?${params.toString()}`, {credentials: 'include'})
-                    .then(r => r.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.auditEntries = data.entries || [];
                         this.auditTotal = data.total || 0;
@@ -2145,7 +2147,7 @@
             },
             loadAuditFacets() {
                 fetch('/backend/api/audit/facets', {credentials: 'include'})
-                    .then(r => r.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         if (Array.isArray(data.entities) && data.entities.length) {
                             this.auditEntityOptions = data.entities;
@@ -2192,8 +2194,7 @@
                 try {
                     const res = await fetch('/backend/api/monitor/check-now', {
                         method: 'POST', credentials: 'include'});
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    const data = await window.fetchJsonFromResponse(res);
                     this.$root.$emit('show-message', {type: 'success',
                         text: `Checked ${data.checked} destination(s) — ${data.dead} dead`});
                     this.loadMonitorStatus();

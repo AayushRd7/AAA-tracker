@@ -475,7 +475,7 @@
                                 <v-divider class="my-4"></v-divider>
                                 <v-row dense align="center">
                                     <v-col cols="12" md="4">
-                                        <v-btn small outlined color="primary" @click="saveFunnelTemplate">
+                                        <v-btn small outlined color="primary" @click="openSaveFunnelTemplate">
                                             <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save as template
                                         </v-btn>
                                     </v-col>
@@ -1751,6 +1751,54 @@
             </v-card>
         </v-dialog>
 
+        <v-dialog v-model="templateNameDialog" persistent max-width="440px">
+            <v-card>
+                <v-card-title class="text-h6">Save funnel template</v-card-title>
+                <v-card-text>
+                    <v-text-field
+                            label="Template name"
+                            v-model="templateName"
+                            outlined
+                            dense
+                            autofocus
+                            @keyup.enter="saveFunnelTemplate"
+                    ></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="templateNameDialog = false">Cancel</v-btn>
+                    <v-btn color="primary" elevation="0" :disabled="!templateName.trim()" @click="saveFunnelTemplate">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <v-dialog v-model="bulkDeleteDialog" persistent max-width="460px">
+            <v-card>
+                <v-card-title class="text-h6">Delete {{ selected.length }} campaigns</v-card-title>
+                <v-card-text>
+                    <p class="mb-3 body-2">
+                        This permanently deletes the campaigns and all of their tracked clicks and
+                        conversions. This cannot be undone.
+                    </p>
+                    <v-text-field
+                            label="Type DELETE to confirm"
+                            v-model="bulkDeleteConfirm"
+                            outlined
+                            dense
+                            autofocus
+                            @keyup.enter="confirmBulkDelete"
+                    ></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="bulkDeleteDialog = false">Cancel</v-btn>
+                    <v-btn color="red" elevation="0"
+                           :disabled="bulkDeleteConfirm.trim().toUpperCase() !== 'DELETE'"
+                           :loading="bulkLoading" @click="confirmBulkDelete">Delete</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
 
         <v-row dense class="mt-4">
             <v-col>
@@ -1777,12 +1825,19 @@
                         <v-btn v-if="selectionHasArchived" small color="success" elevation="0" class="mr-2" :loading="bulkLoading" @click="bulkUnarchive">
                             <v-icon small class="mr-1">mdi-archive-arrow-up-outline</v-icon>Restore
                         </v-btn>
-                        <v-btn small color="red" elevation="0" class="ml-2" :loading="bulkLoading" @click="bulkDelete">
+                        <v-btn small color="red" elevation="0" class="ml-2" :loading="bulkLoading" @click="openBulkDelete">
                             <v-icon small class="mr-1">mdi-trash-can-outline</v-icon>Delete
                         </v-btn>
                         <v-spacer></v-spacer>
                         <v-btn small text @click="selected = []">Clear selection</v-btn>
                     </div>
+                    <v-alert v-if="metricsError" type="error" dense text class="ma-2 mb-0">
+                        <div class="d-flex align-center">
+                            <span>Campaign metrics failed to load — {{ metricsError }}</span>
+                            <v-spacer></v-spacer>
+                            <v-btn small text color="primary" @click="loadCampaignMetrics">Retry</v-btn>
+                        </div>
+                    </v-alert>
                     <div class="campaigns-table-wrap">
                     <v-data-table v-col-resize:campaigns="visibleHeaders" class="campaigns-table"
                             v-model="selected"
@@ -1800,37 +1855,48 @@
                             <span class="clamp-2 campaign-name">{{ item.name }}</span>
                         </template>
                         <template v-slot:item.clicks="{ item }">
-                            {{ (metricsMap[item.id] || {}).clicks != null ? $fmtNum(Number(metricsMap[item.id].clicks)) : '—' }}
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else>{{ (metricsMap[item.id] || {}).clicks != null ? $fmtNum(Number(metricsMap[item.id].clicks)) : '—' }}</span>
                         </template>
                         <template v-slot:item.unique_clicks="{ item }">
-                            {{ (metricsMap[item.id] || {}).unique_clicks != null ? $fmtNum(Number(metricsMap[item.id].unique_clicks)) : '—' }}
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else>{{ (metricsMap[item.id] || {}).unique_clicks != null ? $fmtNum(Number(metricsMap[item.id].unique_clicks)) : '—' }}</span>
                         </template>
                         <template v-slot:item.conversions="{ item }">
-                            {{ (metricsMap[item.id] || {}).conversions != null ? $fmtNum(Number(metricsMap[item.id].conversions)) : '—' }}
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else>{{ (metricsMap[item.id] || {}).conversions != null ? $fmtNum(Number(metricsMap[item.id].conversions)) : '—' }}</span>
                         </template>
                         <template v-slot:item.leads="{ item }">
-                            {{ (metricsMap[item.id] || {}).leads != null ? $fmtNum(Number(metricsMap[item.id].leads)) : '—' }}
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else>{{ (metricsMap[item.id] || {}).leads != null ? $fmtNum(Number(metricsMap[item.id].leads)) : '—' }}</span>
                         </template>
                         <template v-slot:item.cr="{ item }">
-                            {{ (metricsMap[item.id] || {}).cr != null ? $fmtNum(metricsMap[item.id].cr, 'rate') + '%' : '—' }}
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else>{{ (metricsMap[item.id] || {}).cr != null ? $fmtNum(metricsMap[item.id].cr, 'rate') + '%' : '—' }}</span>
                         </template>
                         <template v-slot:item.epc="{ item }">
-                            {{ (metricsMap[item.id] || {}).epc != null ? formatMoney(metricsMap[item.id].epc) : '—' }}
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else>{{ (metricsMap[item.id] || {}).epc != null ? formatMoney(metricsMap[item.id].epc) : '—' }}</span>
                         </template>
                         <template v-slot:item.cpc="{ item }">
-                            {{ (metricsMap[item.id] || {}).cpc != null ? formatMoney(metricsMap[item.id].cpc) : '—' }}
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else>{{ (metricsMap[item.id] || {}).cpc != null ? formatMoney(metricsMap[item.id].cpc) : '—' }}</span>
                         </template>
                         <template v-slot:item.cost="{ item }">
-                            <span :class="signClass(-((metricsMap[item.id] || {}).cost || 0))">{{ formatMoney((metricsMap[item.id] || {}).cost) }}</span>
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else :class="signClass(-((metricsMap[item.id] || {}).cost || 0))">{{ formatMoney((metricsMap[item.id] || {}).cost) }}</span>
                         </template>
                         <template v-slot:item.revenue="{ item }">
-                            <span :class="signClass((metricsMap[item.id] || {}).revenue || 0)">{{ formatMoney((metricsMap[item.id] || {}).revenue) }}</span>
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else :class="signClass((metricsMap[item.id] || {}).revenue || 0)">{{ formatMoney((metricsMap[item.id] || {}).revenue) }}</span>
                         </template>
                         <template v-slot:item.profit="{ item }">
-                            <span class="font-weight-bold" :class="signClass((metricsMap[item.id] || {}).profit || 0)">{{ formatMoney((metricsMap[item.id] || {}).profit) }}</span>
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else class="font-weight-bold" :class="signClass((metricsMap[item.id] || {}).profit || 0)">{{ formatMoney((metricsMap[item.id] || {}).profit) }}</span>
                         </template>
                         <template v-slot:item.roi="{ item }">
-                            <span class="font-weight-bold" :class="signClass((metricsMap[item.id] || {}).roi || 0)">{{ formatPct((metricsMap[item.id] || {}).roi) }}</span>
+                            <v-progress-circular v-if="metricsLoading" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                            <span v-else class="font-weight-bold" :class="signClass((metricsMap[item.id] || {}).roi || 0)">{{ formatPct((metricsMap[item.id] || {}).roi) }}</span>
                         </template>
                         <template v-slot:item.tags="{ item }">
                             <v-chip v-for="t in (item.tags || []).slice(0, 3)" :key="t"
@@ -1866,7 +1932,8 @@
                             <tr v-if="filteredCampaigns.length" class="totals-row">
                                 <td></td>
                                 <td v-for="h in tHeaders" :key="'t-' + h.value" :class="h.align === 'end' ? 'text-end' : ''">
-                                    {{ totalsCell(h.value) }}
+                                    <v-progress-circular v-if="metricsLoading && isMetricColumn(h.value)" indeterminate size="14" width="2" color="primary"></v-progress-circular>
+                                    <template v-else>{{ totalsCell(h.value) }}</template>
                                 </td>
                             </tr>
                         </template>
@@ -2039,8 +2106,12 @@
                 bulkTagInput: [],
                 bulkOwnerDialog: false,
                 bulkOwnerId: null,
+                bulkDeleteDialog: false,
+                bulkDeleteConfirm: '',
                 campaignUsers: [],
                 metricsMap: {},
+                metricsLoading: false,
+                metricsError: '',
                 metricsPeriod: '30d',
                 metricsPeriodItems: [
                     {text: 'Today', value: 'today'},
@@ -2240,6 +2311,8 @@
                 // binds them bare), not inside `form`, or Vue cannot resolve them.
                 funnelTemplates: [],
                 selectedFunnelTemplate: null,
+                templateNameDialog: false,
+                templateName: '',
                 baseParamsIdMapping:[],
                 flowSchemes: ['position', 'weight'],
                 flowActionItems: [
@@ -2501,7 +2574,9 @@
         mounted() {
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             // Out of the box show the dense working set; the Columns picker
-            // reveals the rest. Persisted per browser in localStorage.
+            // reveals the rest. localStorage is the instant per-browser fallback;
+            // the workspace copy (default_columns.campaigns) follows the user to
+            // another machine and wins once it has loaded.
             const defaultHidden = ['domain', 'alias', 'link', 'type', 'redirect_mode', 'leads', 'notes', 'created_at', 'updated_at'];
             try {
                 this.colVisibility = JSON.parse(localStorage.getItem('colv:campaigns')) || {};
@@ -2511,6 +2586,10 @@
             if (!localStorage.getItem('colv:campaigns')) {
                 this.colVisibility = {};
                 defaultHidden.forEach(v => Vue.set(this.colVisibility, v, false));
+            }
+            this._colsSaveTimer = null;
+            if (this.$loadWorkspace) {
+                this.$loadWorkspace().then(() => this.applyWorkspaceCols());
             }
             this.loadCampaigns();
             this.loadFunnelTemplates();
@@ -2529,8 +2608,7 @@
             async loadArchivedIds() {
                 try {
                     const res = await fetch('/backend/api/archive/', {credentials: 'include'});
-                    if (!res.ok) return;
-                    const data = await res.json();
+                    const data = await window.fetchJsonFromResponse(res);
                     this.archivedIds = data.campaigns || [];
                 } catch (e) { /* non-critical */ }
             },
@@ -3217,14 +3295,14 @@
             },
             loadLandings() {
                 return fetch('/landings', {credentials: 'include'})
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.landings = data;
                     });
             },
             loadOffers() {
                 return fetch('/backend/api/offers/', {credentials: 'include'})
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.offers = data;
                     });
@@ -3232,7 +3310,7 @@
 
             loadDomains() {
                 return fetch('/backend/api/domains/', {credentials: 'include'})
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.domains = data;
                     });
@@ -3240,7 +3318,7 @@
 
             loadSources() {
                 return fetch("/backend/api/sources/", {credentials: "include"})
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.sources = data;
                     });
@@ -3305,23 +3383,36 @@
                     .then(data => { this.funnelTemplates = data.templates || []; })
                     .catch(() => { this.funnelTemplates = []; });
             },
+            openSaveFunnelTemplate() {
+                const steps = (this.form.funnel.steps || []).filter(s => s && (s.name || s.landing || (s.offers || []).length));
+                if (!steps.length) {
+                    this.$root.$emit('show-message', {type: 'info', text: 'Add at least one funnel step before saving a template'});
+                    return;
+                }
+                this.templateName = '';
+                this.templateNameDialog = true;
+            },
             saveFunnelTemplate() {
                 const steps = (this.form.funnel.steps || []).filter(s => s && (s.name || s.landing || (s.offers || []).length));
                 if (!steps.length) {
                     this.$root.$emit('show-message', {type: 'info', text: 'Add at least one funnel step before saving a template'});
                     return;
                 }
-                const name = (window.prompt('Template name') || '').trim();
-                if (!name) return;
+                const name = (this.templateName || '').trim();
+                if (!name) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Template name is required.'});
+                    return;
+                }
                 fetch('/backend/api/funnel-templates/', {
                     method: 'POST',
                     credentials: 'include',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({name: name, steps: steps}),
                 })
-                    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.funnelTemplates.push(data.template);
+                        this.templateNameDialog = false;
                         this.$root.$emit('show-message', {type: 'success', text: 'Funnel template saved'});
                     })
                     .catch(err => this.$root.$emit('show-message', {type: 'error', text: 'Template save failed: ' + sanitizeToastMessage(err.message)}));
@@ -3709,7 +3800,7 @@
                 fetch("/backend/api/campaigns/", {
                     credentials: "include"
                 })
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.campaigns = data;
                     })
@@ -3726,7 +3817,12 @@
                 this.loadCampaignMetrics();
             },
             loadCampaignMetrics() {
-                // Live per-campaign stats from the analytics store over the selected period
+                // Live per-campaign stats from the analytics store over the selected period.
+                // Kept separate from loadCampaigns(), so its own loading/error state must
+                // be tracked: the list can render while the metrics request is still in
+                // flight or has failed, and bare dashes would read as "no traffic".
+                this.metricsLoading = true;
+                this.metricsError = '';
                 const now = new Date();
                 const iso = d => d.toISOString().split('T')[0];
                 const daysAgo = n => { const d = new Date(now); d.setDate(d.getDate() - n); return d; };
@@ -3754,10 +3850,10 @@
                 const qs = [];
                 if (from) qs.push('date_from=' + iso(from));
                 if (to) qs.push('date_to=' + iso(to));
-                fetch('/backend/api/campaigns/metrics' + (qs.length ? '?' + qs.join('&') : ''), {
+                return fetch('/backend/api/campaigns/metrics' + (qs.length ? '?' + qs.join('&') : ''), {
                     credentials: 'include'
                 })
-                    .then(res => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         const map = {};
                         Object.keys(data || {}).forEach(id => { map[parseInt(id, 10)] = data[id]; });
@@ -3770,7 +3866,17 @@
                             });
                         });
                     })
-                    .catch(err => console.error('metrics', err));
+                    .catch(err => {
+                        this.metricsError = sanitizeToastMessage(err && err.message);
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: 'Campaign metrics failed to load — ' + this.metricsError
+                                + '. Hit Retry to try again.'
+                        });
+                    })
+                    .finally(() => {
+                        this.metricsLoading = false;
+                    });
             },
             metricsPeriodChanged() {
                 if (this.metricsPeriod === 'custom') {
@@ -3799,12 +3905,58 @@
                 Vue.set(this.colVisibility, value, !!on);
                 this.persistCols();
             },
-            persistCols() {
+            persistColsLocal() {
                 try { localStorage.setItem('colv:campaigns', JSON.stringify(this.colVisibility)); } catch (e) {}
+            },
+            persistCols() {
+                // localStorage is the instant, always-works fallback. The workspace
+                // copy is what follows the user to another machine; it is written
+                // only after the workspace has loaded (a save without the revision
+                // token is refused server-side), debounced so a burst of checkbox
+                // clicks is one request.
+                this.persistColsLocal();
+                if (this._colsSaveTimer) clearTimeout(this._colsSaveTimer);
+                this._colsSaveTimer = setTimeout(() => this.saveWorkspaceCols(), 500);
+            },
+            applyWorkspaceCols() {
+                const ws = this.$workspace || {};
+                const cols = (ws.default_columns || {}).campaigns;
+                if (!Array.isArray(cols) || !cols.length) return;
+                const vis = {};
+                this.headers.forEach(h => { vis[h.value] = cols.indexOf(h.value) !== -1; });
+                this.colVisibility = vis;
+                this.persistColsLocal();
+            },
+            saveWorkspaceCols() {
+                if (!this.$workspaceRev) return;
+                const ws = Object.assign({}, this.$workspace);
+                ws.default_columns = Object.assign({}, ws.default_columns);
+                ws.default_columns.campaigns = this.headers
+                    .filter(h => this.colVisibility[h.value] !== false)
+                    .map(h => h.value);
+                fetch('/backend/api/settings/', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({settings: {workspace: ws}, _base_rev: this.$workspaceRev}),
+                })
+                    .then(window.fetchJsonFromResponse)
+                    .then(data => {
+                        if (data && data.settings_rev) Vue.prototype.$workspaceRev = data.settings_rev;
+                        this.$workspace.default_columns = ws.default_columns;
+                    })
+                    .catch(err => this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: 'Column preference save failed: ' + sanitizeToastMessage(err.message)
+                    }));
             },
             resetCols() {
                 this.colVisibility = {};
                 this.persistCols();
+            },
+            isMetricColumn(value) {
+                return ['clicks', 'unique_clicks', 'conversions', 'leads', 'cr', 'epc', 'cpc',
+                        'cost', 'revenue', 'profit', 'roi'].indexOf(value) !== -1;
             },
             openTagEditor(item) {
                 this.tagEditor = {open: true, id: item.id, name: item.name, tags: [...(item.tags || [])]};
@@ -4032,70 +4184,72 @@
                     });
             },
             async bulkSetStatus(status) {
-                this.bulkLoading = true;
+                // One request for the whole selection. This used to PUT every record
+                // individually — fifty round-trips for fifty rows, and a summary that
+                // could only say "3 failed" without saying which.
                 const targets = this.selected.slice();
-                let done = 0, failed = 0;
-                for (const item of targets) {
-                    try {
-                        const res = await fetch(`/backend/api/campaigns/${item.id}`, {
-                            method: 'PUT',
-                            credentials: 'include',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                name: item.name,
-                                alias: item.alias,
-                                type: item.type,
-                                status: status,
-                                redirect_mode: item.redirect_mode,
-                                traffic_source_id: item.traffic_source_id,
-                                domain_id: item.domain_id,
-                                notes: item.notes,
-                                config: item.config || {}
-                            })
-                        });
-                        if (!res.ok) throw new Error(await res.text());
-                        done++;
-                    } catch (e) {
-                        failed++;
-                    }
+                if (!targets.length) return;
+                this.bulkLoading = true;
+                let done = 0;
+                try {
+                    const res = await fetch('/backend/api/campaigns/bulk', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            ids: targets.map(i => i.id),
+                            action: status === 'active' ? 'enable' : 'pause'
+                        })
+                    });
+                    const data = await window.fetchJsonFromResponse(res);
+                    done = Number(data && data.updated) || targets.length;
+                } catch (err) {
+                    this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: `Could not ${status === 'active' ? 'activate' : 'pause'} campaigns: ${sanitizeToastMessage(err.message)}`
+                    });
+                    this.bulkLoading = false;
+                    return;
+                } finally {
+                    this.bulkLoading = false;
                 }
-                this.bulkLoading = false;
                 this.selected = [];
                 this.loadCampaigns();
                 this.$root.$emit('show-message', {
-                    type: failed ? 'warning' : 'success',
-                    text: `${done} campaign(s) ${status === 'active' ? 'activated' : 'paused'}` + (failed ? `, ${failed} failed` : '')
+                    type: 'success',
+                    text: `${done} campaign(s) ${status === 'active' ? 'activated' : 'paused'}`
                 });
             },
-            async bulkDelete() {
-                const n = this.selected.length;
-                const ok = await this.$refs.confirm.open(
-                    'Delete campaigns',
-                    `Are you sure you want to delete ${n} campaign(s)? All tracked clicks and conversions for them will be permanently deleted too. This cannot be undone.`,
-                    'Delete'
-                );
-                if (!ok) return;
+            openBulkDelete() {
+                this.bulkDeleteConfirm = '';
+                this.bulkDeleteDialog = true;
+            },
+            async confirmBulkDelete() {
+                if ((this.bulkDeleteConfirm || '').trim().toUpperCase() !== 'DELETE') return;
+                const ids = this.selected.map(c => c.id);
+                if (!ids.length) { this.bulkDeleteDialog = false; return; }
+                this.bulkDeleteDialog = false;
                 this.bulkLoading = true;
-                let done = 0, failed = 0;
-                for (const item of this.selected.slice()) {
-                    try {
-                        const res = await fetch(`/backend/api/campaigns/${item.id}`, {
-                            method: 'DELETE',
-                            credentials: 'include'
-                        });
-                        if (!res.ok) throw new Error(await res.text());
-                        done++;
-                    } catch (e) {
-                        failed++;
-                    }
+                try {
+                    const res = await fetch('/backend/api/campaigns/bulk', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids, action: 'delete'})
+                    });
+                    const data = await window.fetchJsonFromResponse(res);
+                    const count = (data && data.updated) || ids.length;
+                    this.selected = [];
+                    this.loadCampaigns();
+                    this.$root.$emit('show-message', {type: 'success', text: `${count} campaign(s) deleted`});
+                } catch (err) {
+                    this.$root.$emit('show-message', {
+                        type: 'error',
+                        text: 'Bulk delete failed: ' + sanitizeToastMessage(err.message)
+                    });
+                } finally {
+                    this.bulkLoading = false;
                 }
-                this.bulkLoading = false;
-                this.selected = [];
-                this.loadCampaigns();
-                this.$root.$emit('show-message', {
-                    type: failed ? 'warning' : 'success',
-                    text: `${done} campaign(s) deleted` + (failed ? `, ${failed} failed` : '')
-                });
             },
             generateAlias(length = 8) {
                 const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -4280,6 +4434,9 @@
 
 <style>
     .bulk-bar {
+        position: sticky;
+        top: 0;
+        z-index: 3;
         background: var(--status-success-bg, #e9f8f0);
         border-bottom: 1px solid var(--border-soft, #e4e9f2);
         border-radius: var(--radius-md, 12px) var(--radius-md, 12px) 0 0;

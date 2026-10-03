@@ -213,7 +213,7 @@
             loadIntegrationAssets(platform) {
                 fetch("/backend/api/integrations/" + platform + "/assets",
                       {credentials: "include"})
-                    .then(r => r.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         if (data && data.counts) {
                             Vue.set(this.integrationAssets, platform, data);
@@ -225,7 +225,7 @@
                 // Source of truth for the picker: the same settings document the
                 // cost sync (Settings) reads.
                 fetch("/backend/api/meta-ads/status", {credentials: "include"})
-                    .then(r => r.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.metaAdsAccountSelection =
                             (data.ad_account_ids || []).map(String);
@@ -239,7 +239,7 @@
             disconnectIntegration(platform) {
                 fetch("/backend/api/integrations/" + platform + "/connection",
                       {method: 'DELETE', credentials: 'include'})
-                    .then(r => r.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(() => {
                         this.$root.$emit("show-message", {type: "success",
                             text: "Disconnected"});
@@ -262,10 +262,7 @@
                         body: JSON.stringify(
                             {ad_account_ids: this.metaAdsAccountSelection})
                     });
-                    const data = await res.json();
-                    if (!res.ok) {
-                        throw new Error(data.detail || ("HTTP " + res.status));
-                    }
+                    const data = await window.fetchJsonFromResponse(res);
                     this.metaAdsAccountSelection = (data.ad_account_ids || []).map(String);
                     this.$root.$emit("show-message", {type: "success",
                         text: "Ad accounts saved (" + (data.count || 0) + ")"});

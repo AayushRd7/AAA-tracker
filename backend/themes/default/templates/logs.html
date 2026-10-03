@@ -158,6 +158,25 @@
                 </template>
             </v-data-table>
         </v-card>
+
+        <!-- Name dialog: shared by "Save filters" and "Save as template" so
+             naming uses the app's own dialog instead of window.prompt. -->
+        <v-dialog v-model="nameDialog.open" max-width="420">
+            <v-card>
+                <v-card-title class="text-h6">{{ nameDialog.title }}</v-card-title>
+                <v-card-text>
+                    <v-text-field v-model="nameDialog.value" :label="nameDialog.label"
+                                  outlined dense autofocus
+                                  @keyup.enter="confirmNameDialog"></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="nameDialog.open = false">Cancel</v-btn>
+                    <v-btn color="primary" :disabled="!nameDialog.value.trim()"
+                           @click="confirmNameDialog">{{ nameDialog.confirmText }}</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
     </v-container>
 </script>
 
@@ -182,6 +201,9 @@
                 dateTo: '',
                 presets: [],
                 selectedPreset: null,
+                // Shared name dialog for saved presets and column templates:
+                // replaces the blocking window.prompt with the app's own styling.
+                nameDialog: {open: false, title: '', label: '', value: '', confirmText: 'Save', mode: null},
                 // Wave 19A: per-tab visible-column selection and saved templates
                 selectedColumnsByTab: {},
                 columnTemplates: [],
@@ -451,9 +473,23 @@
                     .then(data => { this.columnTemplates = data.templates || []; })
                     .catch(() => { this.columnTemplates = []; });
             },
-            saveColumnTemplate() {
-                const name = (window.prompt('Template name') || '').trim();
+            // Naming helper: opens the shared dialog; the actual save runs on
+            // confirm via the mode-specific store method below.
+            openNameDialog(title, label, confirmText, mode) {
+                this.nameDialog = {open: true, title, label, value: '', confirmText, mode};
+            },
+            confirmNameDialog() {
+                const name = (this.nameDialog.value || '').trim();
                 if (!name) return;
+                const mode = this.nameDialog.mode;
+                this.nameDialog.open = false;
+                if (mode === 'preset') this.storePreset(name);
+                else if (mode === 'template') this.storeColumnTemplate(name);
+            },
+            saveColumnTemplate() {
+                this.openNameDialog('Save column template', 'Template name', 'Save', 'template');
+            },
+            storeColumnTemplate(name) {
                 const columns = (this.columnsForScope(this.presetScope)
                     || this.currentHeadersAll.map(h => h.value)).slice();
                 fetch('/backend/api/settings/column-templates', {
@@ -507,8 +543,9 @@
                 this.reload();
             },
             savePreset() {
-                const name = (window.prompt('Preset name') || '').trim();
-                if (!name) return;
+                this.openNameDialog('Save filters', 'Preset name', 'Save', 'preset');
+            },
+            storePreset(name) {
                 const filters = this.baseParams();
                 fetch('/backend/api/filter-presets/', {
                     method: 'POST',

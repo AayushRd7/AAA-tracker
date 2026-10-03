@@ -955,7 +955,7 @@
                     method: "GET",
                     credentials: "include"
                 })
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.users = data;
                     })
@@ -1180,7 +1180,7 @@
             loadMySessions() {
                 this.loadingSessions = true;
                 fetch("/backend/api/users/me/sessions", {credentials: "include"})
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.mySessions = data.sessions || [];
                     })
@@ -1249,7 +1249,7 @@
                 if (!this.sessionsUser) return;
                 this.loadingAdminSessions = true;
                 fetch(`/backend/api/users/${this.sessionsUser.id}/sessions`, {credentials: "include"})
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.adminSessions = data.sessions || [];
                     })

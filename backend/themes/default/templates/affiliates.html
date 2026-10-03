@@ -327,7 +327,7 @@
         methods: {
             loadPresets() {
                 fetch("/backend/api/affiliate-networks/presets", {credentials: "include"})
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.presets = (data && data.presets) || [];
                     })
@@ -393,7 +393,7 @@
                 fetch("/backend/api/affiliate-networks/", {
                     credentials: "include"
                 })
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.affiliateNetworks = data;
                     })

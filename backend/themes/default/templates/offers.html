@@ -853,8 +853,7 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({lines: this.importText})
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    const data = await window.fetchJsonFromResponse(res);
                     this.importResults = data.results || [];
                     this.$root.$emit('show-message', {type: 'success',
                         text: `Import done: ${data.imported} ok, ${data.failed} failed`});
@@ -886,8 +885,7 @@
                         credentials: "include",
                         body: JSON.stringify(this.networkForm)
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || "Failed to create network");
+                    const data = await window.fetchJsonFromResponse(res);
                     this.networkDialog = false;
                     await this.loadAffiliateNetworks();
                     // Select the freshly created network on the offer being edited
@@ -903,7 +901,7 @@
                 fetch("/backend/api/affiliate-networks/", {
                     credentials: "include"
                 })
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.affiliateNetworks = data;
                     })
@@ -921,7 +919,7 @@
                 fetch("/backend/api/offers/", {
                     credentials: "include"
                 })
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.offers = data;
                     })

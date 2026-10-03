@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from db import get_db
 from tenant_context import current_tenant
-from models.campaigns import CampaignORM
+from models.campaigns import CampaignORM, CampaignStatus
 from models.user import UserORM
 from typing import List
 
@@ -40,7 +40,11 @@ class BulkTagsIn(BaseModel):
 
 class BulkIn(BaseModel):
     ids: List[int]
-    action: Literal['tags_add', 'tags_remove', 'archive', 'unarchive', 'delete']
+    # `pause` / `enable` exist so the campaign list's bulk bar can change status in
+    # one request. Without them the client had to issue one PUT per selected row,
+    # which is a long opaque wait on a slow connection and a partial failure.
+    action: Literal['tags_add', 'tags_remove', 'archive', 'unarchive', 'delete',
+                    'pause', 'enable']
     tags: Optional[List[str]] = None
 
 class BulkOwnerIn(BaseModel):
@@ -388,6 +392,13 @@ def bulk_campaigns(data: BulkIn, request: Request, db: Session = Depends(get_db)
             c.archived = False
         db.commit()
         detail = {"bulk": "unarchive", "count": len(campaigns)}
+    elif data.action in ('pause', 'enable'):
+        new_status = CampaignStatus.paused if data.action == 'pause' else CampaignStatus.active
+        for c in campaigns:
+            c.status = new_status
+            c.updated_at = datetime.utcnow()
+        db.commit()
+        detail = {"bulk": data.action, "count": len(campaigns)}
     elif data.action == 'delete':
         ch = request.state.ch
         for c in campaigns:

@@ -242,7 +242,8 @@
                     credentials: 'include',
                     body: JSON.stringify(body),
                 })
-                    .then(r => r.json().then(data => ({ok: r.ok, status: r.status, data: data})))
+                    .then(async r => ({ok: r.ok, status: r.status,
+                        data: await window.fetchJsonFromResponse(r).catch(e => ({detail: e.message}))}))
                     .then(res => {
                         if (!res.ok) throw new Error(res.data.detail || 'HTTP ' + res.status);
                         this.presetDialog = false;

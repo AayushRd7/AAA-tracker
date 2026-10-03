@@ -631,7 +631,8 @@
                              custom_matching: false, conversion_matching: [],
                              payout_customisations: []}, f))
                     });
-                    const data = await res.json();
+                    const data = await window.fetchJsonFromResponse(res)
+                        .catch(e => ({detail: e.message}));
                     if (!res.ok) {
                         this.$root.$emit("show-message", {type: "error",
                             text: sanitizeToastMessage(data.detail || "Could not add the pixel")});
@@ -684,7 +685,7 @@
                 fetch("/backend/api/sources/", {
                     credentials: "include"
                 })
-                    .then(res => res.json())
+                    .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.sources = data;
                     })

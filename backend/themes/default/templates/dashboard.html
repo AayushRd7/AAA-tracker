@@ -545,7 +545,15 @@
                     : 0;
             },
             showOnboarding() {
-                return !!this.onboarding && !this.onboardingDismissed;
+                // Hide once the workspace is fully set up, and honour the
+                // workspace-wide dismissal (stored in the settings document,
+                // so it follows the workspace instead of this browser).
+                // The flag is mirrored into onboardingDismissed when the
+                // workspace loads: the key can be added to $workspace after it
+                // is created, which Vue 2 would not make reactive.
+                return !!this.onboarding
+                    && !this.onboarding.complete
+                    && !this.onboardingDismissed;
             },
             livePayload() {
                 return {
@@ -568,6 +576,15 @@
             this.loadFraudSummary();
             this.loadInsightsSummary();
             this.loadOnboarding();
+            // Mirror the workspace-wide dismissal into a reactive data property.
+            // The shell loads $workspace after this child mounts, and a key it
+            // adds afterwards would not be reactive — so read it once the load
+            // resolves and keep showOnboarding bound to onboardingDismissed.
+            this.$loadWorkspace().then(d => {
+                if (d && d.workspace) {
+                    this.onboardingDismissed = !!d.workspace.onboarding_dismissed;
+                }
+            });
             document.addEventListener('visibilitychange', this.onVisibilityChange);
             this.$root.$on('load-dashboard', this.loadData);
         },
@@ -689,21 +706,34 @@
                     .then(window.fetchJsonFromResponse)
                     .then(data => {
                         this.onboarding = data;
-                        let hidden = false;
-                        try {
-                            hidden = localStorage.getItem('aaa_onboarding_dismissed_' + data.tenant_id) === '1';
-                        } catch (e) { /* private mode — the checklist just stays visible */ }
-                        this.onboardingDismissed = hidden;
                     })
                     .catch(() => { this.onboarding = null; });
             },
             dismissOnboarding() {
+                // Persist the dismissal in the workspace settings block (the same
+                // mechanism the table pages use for default columns), so the
+                // whole workspace stops seeing the card — not just this browser.
                 this.onboardingDismissed = true;
-                if (this.onboarding) {
-                    try {
-                        localStorage.setItem('aaa_onboarding_dismissed_' + this.onboarding.tenant_id, '1');
-                    } catch (e) { /* private mode */ }
-                }
+                this.$set(this.$workspace, 'onboarding_dismissed', true);
+                const ws = Object.assign({}, this.$workspace);
+                fetch('/backend/api/settings/', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({settings: {workspace: ws}, _base_rev: this.$workspaceRev}),
+                })
+                    .then(window.fetchJsonFromResponse)
+                    .then(() => {
+                        if (this.$loadWorkspace) this.$loadWorkspace();
+                    })
+                    .catch(err => {
+                        this.onboardingDismissed = false;
+                        this.$set(this.$workspace, 'onboarding_dismissed', false);
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: 'Could not save the dismissal: ' + sanitizeToastMessage(err.message)
+                        });
+                    });
             },
             goToOnboardingStep(step) {
                 window.location.href = '/backend/' + step.section;

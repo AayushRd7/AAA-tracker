@@ -34,7 +34,7 @@
     <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js" integrity="sha384-6foQBJHuUSRZT7FlYD0AkFDsYH7bowmqBulLZUb8S1qBoEItSgOaXiGkxDn9kSLP" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/vue-apexcharts@1.6.2/dist/vue-apexcharts.min.js" integrity="sha384-qnL07gjeOh/gT8wuQ5lLlhnunZVX/sbfDVsiDH4wWB0/b+VZ0h459IwxDYKHTTMM" crossorigin="anonymous"></script>
 
-    <link href="/backend/backend/css/style.css?v=30" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=37" rel="stylesheet">
 
     <!-- Theme toggle helper: reads localStorage('theme'), exposes window.setTheme(t) -->
     <script>
@@ -431,7 +431,8 @@
             <v-btn icon class="d-lg-none mr-1" @click="drawer = true" aria-label="Open navigation">
                 <v-icon>mdi-menu</v-icon>
             </v-btn>
-            <a class="topbar-brand" href="/backend/dashboard" aria-label="AAA Tracker — go to the dashboard">
+            <a class="topbar-brand" :class="{'topbar-brand--searching': mobileSearch}"
+               href="/backend/dashboard" aria-label="AAA Tracker — go to the dashboard">
                 <img src="/backend/backend/img/logo.svg" alt="" class="brand-logo">
                 <div class="wordmark"><b>AAA</b><i>Tracker</i></div>
             </a>
@@ -464,8 +465,17 @@
                 </v-menu>
             </div>
             <v-spacer></v-spacer>
+            <!-- Below md the real search field is hidden, so a compact icon
+                 button reveals that same field (same query, same results menu —
+                 there is only one search implementation). -->
+            <v-btn icon class="d-md-none topbar-search-toggle" @click="toggleMobileSearch"
+                   :aria-label="mobileSearch ? 'Close search' : 'Search'"
+                   :aria-expanded="mobileSearch ? 'true' : 'false'">
+                <v-icon>{{ mobileSearch ? 'mdi-close' : 'mdi-magnify' }}</v-icon>
+            </v-btn>
             <!-- G75 global search: debounced, grouped, jumps to the section -->
             <v-menu v-model="searchMenu" offset-y bottom nudge-bottom="6"
+                    content-class="topbar-search-menu"
                     :close-on-content-click="false" max-width="440" min-width="380">
                 <template v-slot:activator="{ on, attrs }">
                     <v-text-field
@@ -477,7 +487,7 @@
                             rounded
                             prepend-inner-icon="mdi-magnify"
                             placeholder="Search campaigns, offers, landings…"
-                            class="topbar-search d-none d-md-block"
+                            :class="mobileSearch ? 'topbar-search topbar-search--open' : 'topbar-search d-none d-md-block'"
                             v-bind="attrs"
                             v-on="on"
                             @input="searchInput"
@@ -531,6 +541,13 @@
                     </v-list-item>
                 </v-list>
             </v-menu>
+            <!-- Light/dark toggle: writes the same localStorage('theme') key the
+                 Settings switch and the head helper use, so the two agree. -->
+            <v-btn icon class="ml-1" @click="toggleTheme"
+                   :aria-label="isDarkTheme ? 'Switch to light theme' : 'Switch to dark theme'"
+                   :title="isDarkTheme ? 'Switch to light theme' : 'Switch to dark theme'">
+                <v-icon>{{ isDarkTheme ? 'mdi-weather-sunny' : 'mdi-weather-night' }}</v-icon>
+            </v-btn>
             <v-menu offset-y left>
                 <template v-slot:activator="{ on, attrs }">
                     <v-btn icon v-bind="attrs" v-on="on" class="ml-2" aria-label="Account menu">
@@ -722,6 +739,9 @@
                 // G75 global search state
                 searchQuery: '',
                 searchMenu: false,
+                // Below md the search field is collapsed behind an icon button
+                // until this flips true.
+                mobileSearch: false,
                 searchResults: {groups: {}},
                 searchTimer: null,
                 // Multi-tenancy: the caller's workspaces + the active one.
@@ -791,6 +811,12 @@
             currentTenantName() {
                 const t = this.tenants.find(x => x.tenant_id === this.currentTenantId);
                 return t ? t.name : 'Workspace';
+            },
+            // Sourced from Vuetify's reactive theme flag — the same one the
+            // Settings switch writes — so the top-bar icon tracks that switch
+            // without a page reload.
+            isDarkTheme() {
+                return !!(this.$vuetify && this.$vuetify.theme && this.$vuetify.theme.dark);
             },
             // The group holding the current section — marks that top-bar menu and
             // decides which drawer group is open by default.
@@ -880,9 +906,13 @@
             },
         },
         mounted() {
-            // Display preferences (number formatting / row colouring) apply on
-            // every page, not just the dashboard shell.
-            this.$loadWorkspace();
+            // Display preferences (number formatting / row colouring) drive the
+            // workspace-formatted tables, and every authenticated section renders
+            // through the dashboard shell (the server remaps section routes to
+            // page="dashboard"). The sign-in page has no session, so gating on the
+            // shell's own flag keeps the anonymous page from firing an
+            // authenticated GET /api/workspace/ that would 401 and log noise.
+            if (this.dashboardShell) this.$loadWorkspace();
             // Cmd/Ctrl-K jumps to the global search. If focus is already in a
             // text field (or any editable surface) the browser's own handling
             // wins — the shortcut must never trap the user mid-typing.
@@ -1026,6 +1056,33 @@
                 const groups = this.searchGroups;
                 if (groups.length) {
                     this.searchGo(groups[0].key, groups[0].items[0]);
+                }
+            },
+            // Mobile search button: reveal the existing field and hand it focus
+            // so typing starts immediately; the same menu then shows results.
+            // The menu opens on the next tick, once the field is laid out —
+            // opening it in the same tick makes Vuetify measure a just-revealed
+            // element and drop the results card over the bar instead of under it.
+            toggleMobileSearch() {
+                this.mobileSearch = !this.mobileSearch;
+                if (this.mobileSearch) {
+                    this.$nextTick(() => {
+                        const field = this.$refs.globalSearch;
+                        if (field && field.focus) field.focus();
+                        this.searchMenu = true;
+                    });
+                } else {
+                    this.searchMenu = false;
+                }
+            },
+            // Flip light/dark through the shared helper (localStorage('theme') +
+            // documentElement dataset) and Vuetify's own theme flag, so the rest
+            // of the UI — and the Settings switch — stay in agreement.
+            toggleTheme() {
+                const next = this.isDarkTheme ? 'light' : 'dark';
+                if (window.setTheme) window.setTheme(next);
+                if (this.$vuetify && this.$vuetify.theme) {
+                    this.$vuetify.theme.dark = (next === 'dark');
                 }
             },
             // The global search lives in the dashboard shell's top bar only.

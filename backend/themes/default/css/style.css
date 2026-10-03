@@ -1942,3 +1942,143 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 .settings-dirty-bar .v-icon {
     color: var(--status-warning, #b8770a);
 }
+
+/* ============================================================
+   Responsive pass — narrow viewports
+
+   The app is desktop-first; these rules only make it stop breaking
+   below ~960px. Nothing here changes the desktop layout.
+   ============================================================ */
+
+@media (max-width: 959px) {
+  /* Compact mobile search: the icon button reveals the one real search
+     field in the bar. The brand steps aside so the field has room, and the
+     results menu is capped to the viewport instead of its 380px desktop
+     minimum. */
+  .topbar-brand--searching {
+    display: none !important;
+  }
+  .topbar-search--open {
+    flex: 1 1 auto;
+    max-width: none;
+    margin: 0 var(--space-2);
+  }
+  .topbar-search-menu {
+    min-width: 0 !important;
+    max-width: calc(100vw - 16px) !important;
+  }
+}
+
+@media (max-width: 599px) {
+  /* Reclaim horizontal room: the fluid container's 16px gutter and the card
+     body padding both shrink so content is not squeezed at phone widths. */
+  .v-main .v-container {
+    padding: var(--space-3) !important;
+  }
+  .v-card__title, .v-card-title {
+    padding: 12px 12px 6px !important;
+  }
+  .v-card__text, .v-card-text {
+    padding: 12px !important;
+  }
+  .v-card__actions, .v-card-actions {
+    padding: 8px 12px 12px !important;
+  }
+
+  /* A 420px dialog card cannot fit a 390px screen: cap the sized dialog to
+     the viewport and tighten the overlay gutter so it never overflows. */
+  .v-dialog__content .v-dialog:not(.v-dialog--fullscreen) {
+    margin: 12px;
+    max-width: calc(100vw - 24px) !important;
+  }
+  .v-dialog > .v-card {
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  /* Keep the sticky totals row above the sideways-scrolling cells it covers;
+     the sticky column header already carries its own z-index. */
+  .totals-row td,
+  .perf-totals-row > td {
+    z-index: 3;
+  }
+
+  /* Stop a wide child from widening the page itself.
+     A data table or a curl snippet already sits in a container with
+     `overflow-x: auto`, but the ancestors are flex/grid items with the default
+     `min-width: auto`, so they grow to fit the content and the scroll container
+     never gets a chance to scroll — the whole page slides sideways instead
+     (measured: Reports 411px over, Settings 57px over at 390px). `min-width: 0`
+     on the chain hands the scrolling back to the container that wants it. */
+  .v-application .v-card,
+  .v-application .v-sheet,
+  .v-application .v-card__text,
+  .v-application .v-data-table,
+  .v-application .v-data-table__wrapper,
+  .v-application .row > [class*="col-"] {
+    min-width: 0;
+  }
+  .v-application .v-data-table__wrapper,
+  .v-application .ingest-curl,
+  .v-application pre,
+  .v-application pre > code {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .v-application pre > code { display: block; }
+
+  /* Section-header toolbars. The house pattern is a space-between row holding a
+     button cluster, and that cluster is a flex row with the default
+     `min-width: auto` — so on a phone it refuses to shrink below its buttons and
+     shoves the whole page sideways. Measured at 390px: Reports 411px over
+     ("Click date / Conversion date / Import / Add conversions…") and Settings
+     57px over ("Export / Import / Save settings"). Let both rows wrap instead of
+     overflow. */
+  .v-application .d-flex.justify-space-between {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  /* A section header is [title | toolbar]. Squeezed side by side on a phone the
+     toolbar collapses to a ~36px sliver and its own buttons overflow that sliver,
+     which is what actually pushed the page sideways. Give each half its own
+     full-width line — the standard mobile header stack. */
+  .v-application .d-flex.justify-space-between > * {
+    flex: 1 1 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* …and the same thing one level deeper: a filter bar holding a cluster of
+     checkbox/select rows (Reports → Warehouse export → metric pickers) is a flex
+     row of flex rows, all at the default `min-width: auto`. */
+  .v-application .filter-bar,
+  .v-application .filter-bar > .d-flex,
+  .v-application .filter-bar .d-flex.align-center {
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* Search inputs carry a 200px `min-width`, which is right on a desktop toolbar
+     and wrong once the container is 36px wide — the field simply juts out of it
+     (measured: Campaigns 136px over). Give the field its own full-width line
+     instead of a floor it cannot honour. */
+  .v-application .filter-bar .v-input,
+  .v-application .filter-bar .v-text-field,
+  .v-application .campaign-search,
+  .v-application .offer-search,
+  .v-application .landing-search {
+    min-width: 0 !important;
+    max-width: 100%;
+    flex: 1 1 100%;
+  }
+
+  /* Catch-all. Fixing these one selector at a time was whack-a-mole — a dense
+     analytics toolbar has too many combinations of flex row, fixed-width button
+     and 200px-min-width input to enumerate. At phone width let every flex row
+     wrap and let every flex item shrink; a wrapped toolbar is always better than
+     a page that slides sideways under your thumb. */
+  .v-application .v-main .d-flex { flex-wrap: wrap; }
+  .v-application .v-main .d-flex > * { min-width: 0; }
+}

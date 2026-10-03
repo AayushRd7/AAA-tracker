@@ -295,6 +295,15 @@
             <div v-if="basisNote" class="basis-note mt-2">
                 <v-icon small class="mr-1">mdi-information-outline</v-icon>{{ basisNote }}
             </div>
+            <!-- The breakdown endpoint returns at most reportLimit rows. When
+                 the last run reached that cap the totals are computed over the
+                 returned rows only, so say so instead of truncating silently. -->
+            <v-alert v-if="reportCapped" v-model="reportCapped" type="warning" dense outlined dismissible
+                     class="mt-2">
+                Showing the first {{ reportLimit }} rows — this result was capped, so the totals may be
+                short. Narrow the date range or campaigns, add a filter, or break the report down with
+                fewer dimensions to see every row.
+            </v-alert>
             <!-- Drill breadcrumb: click a segment to collapse everything below it -->
             <div v-if="reportRows.length" class="drill-path mt-3">
                 <span class="builder-label mr-2">Levels</span>
@@ -505,6 +514,25 @@
                     <v-spacer></v-spacer>
                     <v-btn text @click="saveDialog = false">Cancel</v-btn>
                     <v-btn color="primary" :loading="saveLoading" @click="saveReport">Save</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <!-- Name dialog: shared by "Save preset" and "Save as template" so
+             naming uses the app's own dialog instead of window.prompt. -->
+        <v-dialog v-model="nameDialog.open" max-width="420">
+            <v-card>
+                <v-card-title class="text-h6">{{ nameDialog.title }}</v-card-title>
+                <v-card-text>
+                    <v-text-field v-model="nameDialog.value" :label="nameDialog.label"
+                                  outlined dense autofocus
+                                  @keyup.enter="confirmNameDialog"></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn text @click="nameDialog.open = false">Cancel</v-btn>
+                    <v-btn color="primary" :disabled="!nameDialog.value.trim()"
+                           @click="confirmNameDialog">{{ nameDialog.confirmText }}</v-btn>
                 </v-card-actions>
             </v-card>
         </v-dialog>
@@ -1211,6 +1239,9 @@
                 saveDialog: false,
                 saveName: '',
                 saveLoading: false,
+                // Shared name dialog for saved presets and column templates:
+                // replaces the blocking window.prompt with the app's own styling.
+                nameDialog: {open: false, title: '', label: '', value: '', confirmText: 'Save', mode: null},
                 shareDialog: false,
                 shareUrl: '',
                 shareCreatedAt: null,
@@ -1367,6 +1398,11 @@
                     {text: 'Human Clicks', value: 'human_clicks', align: 'end'},
                 ],
                 reportRows: [],
+                // Row cap requested from the breakdown endpoint, and whether
+                // the last run hit it — the notice tells the user the totals
+                // may be short rather than silently truncating.
+                reportLimit: 1000,
+                reportCapped: false,
                 // True once a run has completed (even with zero rows), so the
                 // empty state can tell "never run" apart from "no rows match".
                 reportRan: false,
@@ -1782,9 +1818,23 @@
                 if (f.sortDir) this.sortDir = f.sortDir;
                 this.runReport();
             },
-            saveReportPreset() {
-                const name = (window.prompt('Preset name') || '').trim();
+            // Naming helper: opens the shared dialog; the actual save runs on
+            // confirm via the mode-specific store method below.
+            openNameDialog(title, label, confirmText, mode) {
+                this.nameDialog = {open: true, title, label, value: '', confirmText, mode};
+            },
+            confirmNameDialog() {
+                const name = (this.nameDialog.value || '').trim();
                 if (!name) return;
+                const mode = this.nameDialog.mode;
+                this.nameDialog.open = false;
+                if (mode === 'preset') this.storeReportPreset(name);
+                else if (mode === 'template') this.storeColumnTemplate(name);
+            },
+            saveReportPreset() {
+                this.openNameDialog('Save preset', 'Preset name', 'Save', 'preset');
+            },
+            storeReportPreset(name) {
                 fetch('/backend/api/filter-presets/', {
                     method: 'POST',
                     credentials: 'include',
@@ -2171,8 +2221,9 @@
                     .catch(() => { this.columnTemplates = []; });
             },
             saveColumnTemplate() {
-                const name = (window.prompt('Template name') || '').trim();
-                if (!name) return;
+                this.openNameDialog('Save column template', 'Template name', 'Save', 'template');
+            },
+            storeColumnTemplate(name) {
                 fetch('/backend/api/settings/column-templates', {
                     method: 'PUT',
                     credentials: 'include',
@@ -2349,6 +2400,7 @@
                     return;
                 }
                 this.loading = true;
+                this.reportCapped = false;
                 this.expanded = {};
                 const payload = {
                     dimensions: this.dimensions,
@@ -2361,7 +2413,7 @@
                     custom_metrics: this.allCustomColumns,
                     sort_by: this.sortBy,
                     sort_dir: this.sortDir,
-                    limit: 1000,
+                    limit: this.reportLimit,
                 };
                 fetch('/backend/api/dashboard/breakdown', {
                     method: 'POST',
@@ -2374,6 +2426,7 @@
                         this.reportTotals = data.totals || {};
                         this.basisNote = data.fallback_note || null;
                         this.reportRan = true;
+                        this.reportCapped = this.reportRows.length >= this.reportLimit;
                         if (data.date_basis && data.date_basis !== this.dateBasis) this.dateBasis = data.date_basis;
                         this.loading = false;
                     })
@@ -2583,8 +2636,7 @@
                         credentials: 'include',
                         body: JSON.stringify({lines: this.importText})
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'Import failed');
+                    const data = await window.fetchJsonFromResponse(res);
                     this.importResults = data.results || [];
                     const failed = (data.results || []).filter(r => !r.ok).length;
                     this.$root.$emit("show-message", {
@@ -2680,8 +2732,7 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify(payload)
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'Update failed');
+                    const data = await window.fetchJsonFromResponse(res);
                     this.editDialog = false;
                     this.$root.$emit("show-message", {type: "success", text: 'Conversion updated'});
                     this.loadReports();
@@ -2700,8 +2751,7 @@
                 if (!ok) return;
                 try {
                     const res = await fetch('/backend/api/reports/' + item.id, {method: 'DELETE'});
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'Delete failed');
+                    const data = await window.fetchJsonFromResponse(res);
                     this.$root.$emit("show-message", {type: "success", text: 'Conversion deleted'});
                     this.loadReports();
                 } catch (err) {
@@ -2723,8 +2773,7 @@
                         credentials: 'include',
                         body: JSON.stringify({ids: ids, status: this.bulkStatusValue}),
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'Bulk update failed');
+                    const data = await window.fetchJsonFromResponse(res);
                     this.$root.$emit("show-message", {type: "success",
                         text: 'Status updated on ' + data.updated + ' conversion(s)'});
                     this.convSelected = [];
@@ -2747,8 +2796,7 @@
                         credentials: 'include',
                         body: JSON.stringify({ids: ids, approval: this.bulkApprovalValue}),
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'Bulk update failed');
+                    const data = await window.fetchJsonFromResponse(res);
                     this.$root.$emit("show-message", {type: "success",
                         text: 'Approval updated on ' + data.updated + ' conversion(s)'});
                     this.convSelected = [];
@@ -2800,8 +2848,7 @@
                         credentials: 'include',
                         body: JSON.stringify(payload),
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'Add failed');
+                    const data = await window.fetchJsonFromResponse(res);
                     this.addDialog = false;
                     this.$root.$emit("show-message", {type: "success",
                         text: data.created ? 'Conversion added' : 'Conversion updated (existing id)'});

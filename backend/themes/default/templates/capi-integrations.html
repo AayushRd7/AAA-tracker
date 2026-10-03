@@ -689,7 +689,8 @@
                         headers: {"Content-Type": "application/json"},
                         body: JSON.stringify(body)
                     });
-                    const data = await res.json();
+                    const data = await window.fetchJsonFromResponse(res)
+                        .catch(e => ({detail: e.message}));
                     if (!res.ok) {
                         this.$root.$emit("show-message", {type: "error",
                             text: sanitizeToastMessage(data.detail || "Could not save the pixel")});
@@ -720,7 +721,8 @@
                         method: "POST",
                         credentials: "include"
                     });
-                    const data = await res.json();
+                    const data = await window.fetchJsonFromResponse(res)
+                        .catch(e => ({detail: e.message}));
                     this.metaTestResult = JSON.stringify(data, null, 2);
                     if (res.ok && data.status === "ok") {
                         this.$root.$emit("show-message", {type: "success",

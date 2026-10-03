@@ -357,8 +357,7 @@
                             schedule: this.buildSchedule(),
                         })
                     });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    const data = await window.fetchJsonFromResponse(res);
                     this.ruleDialog = false;
                     this.$root.$emit('show-message', {type: 'success', text: 'Rule created'});
                     this.loadRules();
@@ -419,8 +418,7 @@
                 try {
                     const res = await fetch(`/backend/api/rules/${item.id}/run`, {
                         method: 'POST', credentials: 'include'});
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
+                    const data = await window.fetchJsonFromResponse(res);
                     const conds = (data.conditions || []).map(c =>
                         `${c.metric} ${c.comparator} ${c.value} → ${c.actual == null ? '—' : c.actual}`);
                     this.$root.$emit('show-message', {
