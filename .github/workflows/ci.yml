@@ -32,6 +32,11 @@ jobs:
               import yaml
           except ImportError:
               sys.exit(0)
+          # Compose files use extensions (e.g. !override) that plain YAML does not
+          # know; treat any unknown tag as None so syntax is still validated.
+          # Registered on SafeLoader — the loader safe_load actually uses.
+          yaml.add_multi_constructor(
+              '', lambda loader, suffix, node: None, Loader=yaml.SafeLoader)
           for f in glob.glob('*.yml') + glob.glob('*.yaml') + glob.glob('.github/workflows/*.yml'):
               with open(f) as fh:
                   yaml.safe_load(fh)
