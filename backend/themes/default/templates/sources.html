@@ -217,6 +217,7 @@
                                 outlined dense hide-details
                                 clearable
                                 class="bot-rule-grow"
+                                no-data-text="No CAPI pixels yet — use “Create new pixel” below"
                                 hint="Bind a pixel to this channel so only conversions attributed to it are sent."
                                 persistent-hint
                         ></v-select>
@@ -227,7 +228,7 @@
                                     <v-icon small>mdi-pencil-outline</v-icon>
                                 </v-btn>
                             </template>
-                            <span>Edit pixels in CAPI integrations (Settings)</span>
+                            <span>Edit pixels in CAPI integrations</span>
                         </v-tooltip>
                         <v-tooltip bottom>
                             <template v-slot:activator="{ on, attrs }">
@@ -617,6 +618,13 @@
                 }
             },
             addCapiPixelRow() {
+                // With no pixel records to choose from, an empty row is a dead
+                // end: the picker has nothing in it and clicking Save binds
+                // nothing. Send the operator to the create dialog instead.
+                if (!this.capiPixelOptions.length) {
+                    this.openQuickPixel();
+                    return;
+                }
                 this.capiPixelIds.push(null);
             },
             async saveCapiBinding(sourceId) {
@@ -678,7 +686,9 @@
                 }
             },
             editCapiPixel() {
-                window.location.href = "/backend/settings";
+                // Pixels are configured on the CAPI integrations page, not in
+                // Settings — Settings has no pixel editor.
+                window.location.href = "/backend/capi-integrations";
             },
             async deleteCapiPixel(pixelId) {
                 const id = pixelId || null;
