@@ -6489,10 +6489,13 @@ SIM_BROWSER_POOL = ["Chrome", "Safari", "Firefox", "Edge"]
 SIM_IP_PREFIXES = ["11.22.33.", "44.55.66.", "77.88.99.", "90.12.34."]
 
 
+from permissions import MANAGER_ROLES, allowed  # workspace permission matrix
+
+
 # ─── Admin auth for operational endpoints ──────────────────────────
-# /simulate and /_aaa_tracker_debug live on the public tracking host, so they
-# gate on the backend's session cookie: auth_sessions joined to users, checked
-# for is_admin. Positive lookups are cached 60s.
+# /_aaa_tracker_debug lives on the public tracking host and is platform-only, so
+# it gates on the backend's session cookie: auth_sessions joined to users,
+# checked for is_admin. Positive lookups are cached 60s.
 _admin_auth_cache: dict = {}
 
 
@@ -6533,7 +6536,106 @@ async def is_admin_request(request: Request) -> bool:
 
 async def require_admin(request: Request):
     if not await is_admin_request(request):
-        raise HTTPException(status_code=401, detail="Admin session required")
+        raise HTTPException(status_code=401, detail="Sign-in required")
+
+
+# ─── Workspace auth for operational endpoints ───────────────────────
+# The landings/domains editors, /simulate and the CAPI test are dashboard tools:
+# any member whose membership in the request's workspace grants the section may
+# use them — not only install-global platform operators (the old is_admin check,
+# which locked out workspace admins and every user given the permission). The
+# authority is resolved from tenant_memberships exactly as backend/auth.py does,
+# including owner/admin inheritance from an ancestor workspace.
+#
+# Deliberately NOT cached: a revoked membership or a withdrawn section must stop
+# working on the next request, and these are low-traffic dashboard endpoints —
+# a cached "allowed" would leave a window where a revoked user still reaches the
+# landings editor.
+
+
+def _membership_role(cur, username, tenant_id):
+    """(role, raw_permissions) for `username` in `tenant_id`, or (None, None).
+
+    A direct membership wins at any role; otherwise an owner/admin role
+    inherited from an ANCESTOR workspace applies (access flows down only, and a
+    malformed parent chain cannot loop)."""
+    def _direct(tid):
+        cur.execute(
+            "SELECT m.role, m.permissions FROM tenant_memberships m "
+            "JOIN users u ON u.id = m.user_id "
+            "WHERE u.username = %s AND m.tenant_id = %s", (username, tid))
+        return cur.fetchone()
+
+    row = _direct(int(tenant_id))
+    if row:
+        return (row[0] or "viewer"), (row[1] or {})
+    seen = {int(tenant_id)}
+    current = int(tenant_id)
+    while True:
+        cur.execute("SELECT parent_tenant_id FROM tenants WHERE id = %s", (current,))
+        parent = cur.fetchone()
+        if not parent or parent[0] is None:
+            return None, None
+        current = int(parent[0])
+        if current in seen:
+            return None, None
+        seen.add(current)
+        row = _direct(current)
+        if row and (row[0] or "") in MANAGER_ROLES:
+            return row[0], {}
+
+
+def _section_decision(token: str, section: str, write: bool) -> str:
+    """'allowed' | 'denied' | 'anonymous'. 'anonymous' means there is no usable
+    session, so the caller answers 401 rather than 403."""
+    try:
+        conn = pg_connect()
+        cur = conn.cursor()
+        # Session tokens are stored as sha256(token); also accept a legacy raw
+        # row so a cookie issued before hashing still authenticates.
+        _tok_hash = hashlib.sha256(token.encode()).hexdigest()
+        cur.execute(
+            "SELECT u.username, s.current_tenant_id FROM auth_sessions s "
+            "JOIN users u ON u.username = s.username "
+            "WHERE s.token IN (%s, %s) AND NOT s.revoked "
+            "AND (s.expires_at IS NULL OR s.expires_at > now())",
+            (_tok_hash, token))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return "anonymous"
+        tenant_id = int(row[1]) if row[1] is not None else 1
+        role, raw = _membership_role(cur, row[0], tenant_id)
+        conn.close()
+        if not role:
+            return "denied"
+        return "allowed" if allowed(role, raw, section, write) else "denied"
+    except Exception:
+        return "anonymous"
+
+
+async def is_section_request(request: Request, section: str, write: bool = False) -> bool:
+    token = request.cookies.get("session_token")
+    if not token:
+        return False
+    decision = await asyncio.to_thread(_section_decision, token, section, write)
+    return decision == "allowed"
+
+
+def require_section(section: str, write: bool = False):
+    """Dependency factory: the caller's workspace membership must grant
+    `section` (and the write flag, when asked). 401 with no session at all, 403
+    when the session simply lacks the section — the same split the dashboard
+    API uses."""
+    async def checker(request: Request):
+        token = request.cookies.get("session_token")
+        if not token:
+            raise HTTPException(status_code=401, detail="Sign-in required")
+        if not await is_section_request(request, section, write):
+            raise HTTPException(status_code=403,
+                                detail=f"No access to section '{section}'")
+        return True
+    return checker
 
 
 @app.post("/simulate/{campaign_alias}")
@@ -6544,8 +6646,8 @@ async def simulate_traffic(campaign_alias: str, request: Request) -> Response:
     real; click caps are simulated by counting within the run (no ClickHouse
     queries). Guaranteed side-effect free: no ClickHouse or Postgres writes,
     no redirects served, no postbacks, no Telegram. Use it to test flow logic
-    before sending real traffic. Admin-only."""
-    await require_admin(request)
+    before sending real traffic. Requires the workspace's campaigns permission."""
+    await require_section("campaigns")(request)
     campaign = await find_campaign_for_tracking(campaign_alias, request)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -6694,7 +6796,7 @@ async def meta_capi_test(request: Request):
     Returns the Graph API response inline (endpoint + payload + attempts). With
     dry_run on (the default) no HTTP request is made and the built payload is
     returned instead. Uses test_event_code when set."""
-    await require_admin(request)
+    await require_section("capi-integrations")(request)
     # Per-tenant config: resolve the workspace from the request Host (never
     # default to tenant 1). Unresolved reads as not-configured.
     tenant_id = await _request_host_tenant(request.app.state.pg, request)

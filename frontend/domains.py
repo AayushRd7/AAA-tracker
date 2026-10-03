@@ -9,19 +9,28 @@ from pathlib import Path
 import asyncio
 
 
-async def require_admin_dep(request: Request):
-    """Admin gate for every domains route.
+async def require_domains_read(request: Request):
+    """Read gate for every domains route.
 
     These endpoints live on the public tracking host (nginx proxies /), so an
     unauthenticated visitor must never be able to trigger certbot or reload
-    nginx. require_admin lives in app.py, which imports this module — import it
-    lazily at request time to avoid a circular import.
+    nginx. Any member whose membership grants the ``domains`` section may use
+    them — the section is admin-only by default, so that means owners and admins
+    plus anyone explicitly granted it; the routes with side effects additionally
+    require the write flag. require_section lives in app.py, which imports this
+    module — import it lazily at request time to avoid a circular import.
     """
-    from app import require_admin
-    await require_admin(request)
+    from app import require_section
+    await require_section("domains")(request)
 
 
-router = APIRouter(dependencies=[Depends(require_admin_dep)])
+async def require_domains_write(request: Request):
+    """Write gate for the routes that run certbot or reload nginx."""
+    from app import require_section
+    await require_section("domains", write=True)(request)
+
+
+router = APIRouter(dependencies=[Depends(require_domains_read)])
 
 
 def _resolve(domain: str) -> list:
@@ -49,7 +58,7 @@ def ping():
     return "OK"
 
 
-@router.get("/domain_update_ssl")
+@router.get("/domain_update_ssl", dependencies=[Depends(require_domains_write)])
 async def create_nginx(request: Request, domain_id: int):
     pg = request.app.state.pg
 
@@ -158,7 +167,7 @@ def reload_nginx():
     ])
 
 
-@router.get("/_reload_nginx")
+@router.get("/_reload_nginx", dependencies=[Depends(require_domains_write)])
 def show_logs():
     reload_nginx()
 

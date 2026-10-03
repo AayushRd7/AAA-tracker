@@ -11537,6 +11537,48 @@ print("ESCAPED-OK")
         check("team: a viewer's shell omits the team templates",
               "Add existing user" not in vhtml, "")
 
+        # The tracking-host service (landings/domains editors, /simulate) must
+        # honour the same workspace permissions: it used to require the
+        # install-global platform flag, so a workspace admin got "Admin session
+        # required" from the landings API.
+        r = admin_s.get(f"{BASE}/landings")
+        check("gate: a workspace admin reaches the landings API",
+              r.status_code == 200, str(r.status_code))
+        r = admin_s.delete(f"{BASE}/landing/99999999")
+        check("gate: a workspace admin holds landings write (404 = gate passed)",
+              r.status_code == 404, str(r.status_code))
+        r = admin_s.post(f"{BASE}/simulate/does-not-exist", json={"count": 1})
+        check("gate: /simulate no longer needs the platform flag (404 = gate passed)",
+              r.status_code == 404, str(r.status_code))
+        r = viewer_s.get(f"{BASE}/landings")
+        check("gate: a viewer may read landings", r.status_code == 200, str(r.status_code))
+        r = viewer_s.delete(f"{BASE}/landing/99999999")
+        check("gate: a viewer cannot delete a landing (403)", r.status_code == 403,
+              str(r.status_code))
+        r = requests.get(f"{BASE}/landings", verify=not INSECURE)
+        check("gate: the landings API still refuses an anonymous caller (401)",
+              r.status_code == 401, str(r.status_code))
+
+        # Drift guard: the tracking host restates the backend's permission matrix
+        # (frontend/permissions.py) because it mounts only frontend/.
+        _repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+        def _matrix(rel, name, opener, closer):
+            src = open(os.path.join(_repo, rel)).read()
+            i = src.index(name)
+            j = src.index(opener, i)
+            k = src.index(closer, j)
+            return sorted(re.findall(r'"([a-z][a-z-]*)"', src[j:k]))
+
+        be_sections = _matrix("backend/auth.py", "PERMISSION_SECTIONS", "[", "]")
+        fe_sections = _matrix("frontend/permissions.py", "PERMISSION_SECTIONS", "[", "]")
+        check("gate: the two permission matrices list the same sections",
+              be_sections == fe_sections, str(sorted(set(be_sections) ^ set(fe_sections))))
+        be_admin = _matrix("backend/auth.py", "ADMIN_ONLY_SECTIONS", "{", "}")
+        fe_admin = _matrix("frontend/permissions.py", "ADMIN_ONLY_SECTIONS", "{", "}")
+        check("gate: the two matrices agree on admin-only sections",
+              be_admin == fe_admin, str(sorted(set(be_admin) ^ set(fe_admin))))
+
         # Invitations report whether the emailed link went out (best-effort send).
         r = owner_s.post(f"{api}/invitations/",
                          json={"email": f"ta-invitee-{_ta}@example.com", "role": "editor"})

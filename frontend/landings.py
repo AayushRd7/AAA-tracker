@@ -25,19 +25,27 @@ class FileSaveRequest(BaseModel):
     content: str
 
 
-async def require_admin_dep(request: Request):
-    """Admin gate for every landings-management route.
+async def require_landings_read(request: Request):
+    """Read gate for every landings-management route.
 
     These endpoints live on the public tracking host (nginx proxies /), so an
     unauthenticated visitor must never reach them — DELETE rmtree's landing
-    folders and the editor reads/writes arbitrary files. require_admin lives in
+    folders and the editor reads/writes arbitrary files. Any workspace member
+    whose membership grants the ``landings`` section may read; the mutating
+    routes below additionally require the write flag. require_section lives in
     app.py, which imports this module — import it lazily at request time.
     """
-    from app import require_admin
-    await require_admin(request)
+    from app import require_section
+    await require_section("landings")(request)
 
 
-router = APIRouter(dependencies=[Depends(require_admin_dep)])
+async def require_landings_write(request: Request):
+    """Write gate for the landings routes that create, edit or delete files."""
+    from app import require_section
+    await require_section("landings", write=True)(request)
+
+
+router = APIRouter(dependencies=[Depends(require_landings_read)])
 
 LANDINGS_DIR = "/app/landings"  # path inside the src container
 os.makedirs(LANDINGS_DIR, exist_ok=True)
@@ -286,7 +294,7 @@ class _AssetRewriter(HTMLParser):
         return " ".join("".join(self.title_parts).split())[:255]
 
 
-@router.post("/landing/grab")
+@router.post("/landing/grab", dependencies=[Depends(require_landings_write)])
 def grab_landing(
         request: Request,
         url: str = Form(...),
@@ -456,7 +464,7 @@ def save_uploaded_file(file: UploadFile, folder_path: str):
         raise HTTPException(status_code=400, detail="Unsupported file type. Only .zip, .php, .html allowed.")
 
 
-@router.post("/landing")
+@router.post("/landing", dependencies=[Depends(require_landings_write)])
 async def upload_landing(
         request: Request,
         name: str = Form(...),
@@ -602,7 +610,7 @@ def get_landing(landing_id: int, request: Request, db: Session = Depends(get_db)
     }
 
 
-@router.put("/landing/{landing_id}")
+@router.put("/landing/{landing_id}", dependencies=[Depends(require_landings_write)])
 async def update_landing(
         landing_id: int,
         request: Request,
@@ -675,7 +683,7 @@ async def update_landing(
     }
 
 
-@router.delete("/landing/{landing_id}")
+@router.delete("/landing/{landing_id}", dependencies=[Depends(require_landings_write)])
 def delete_landing(landing_id: int, request: Request, db: Session = Depends(get_db)):
     landing = _scoped_landing(db, landing_id, request)
 
@@ -777,7 +785,7 @@ class FileSaveRequest(BaseModel):
     content: str
 
 
-@router.post("/landings_editor/{landing_id}/file")
+@router.post("/landings_editor/{landing_id}/file", dependencies=[Depends(require_landings_write)])
 def save_file(landing_id: int, payload: FileSaveRequest, request: Request, db: Session = Depends(get_db)):
     base = Path(get_landing_folder(db, landing_id, request))
     safe_rel_path = Path(payload.filename).as_posix().lstrip("/")
@@ -798,7 +806,7 @@ def save_file(landing_id: int, payload: FileSaveRequest, request: Request, db: S
 
 
 
-@router.post("/landings_editor/{landing_id}/upload")
+@router.post("/landings_editor/{landing_id}/upload", dependencies=[Depends(require_landings_write)])
 def upload_file(
     landing_id: int,
     request: Request,
@@ -828,7 +836,7 @@ def upload_file(
 
 
 
-@router.post("/landings_editor/{landing_id}/file-plain")
+@router.post("/landings_editor/{landing_id}/file-plain", dependencies=[Depends(require_landings_write)])
 def save_file_plain(
     landing_id: int,
     request: Request,
