@@ -166,6 +166,10 @@
                         </v-card-actions>
                     </v-card>
                 </v-menu>
+                <span v-if="longRangeWarning" class="caption long-range-hint ml-2">
+                    <v-icon x-small color="warning">mdi-timer-sand</v-icon>
+                    Long range — can take up to a minute
+                </span>
                 <v-select
                         :items="['Hours', 'Days', 'Weeks', 'Months']"
                         label="Granularity"
@@ -518,6 +522,12 @@
         computed: {
             dateRangeText() {
                 return this.filters.date_range.join(' ~ ')
+            },
+            longRangeWarning() {
+                const r = this.filters.date_range || [];
+                if (r.length < 2) return false;
+                const days = Math.round(Math.abs(new Date(r[1]) - new Date(r[0])) / 86400000) + 1;
+                return days > 60;
             },
             onboardingStepsState() {
                 const result = this.onboarding || {};
@@ -894,7 +904,8 @@
             },
             loadData(date) {
                 this.loading = true;
-                this.$root.$emit('show-overlay', 'Crunching your traffic data — big date ranges can take up to a minute, thanks for hanging tight');
+                // No full-screen overlay here: the in-card skeletons and table
+                // loading states carry the wait, so the user can keep reading.
                 this.loadFiltersData();
 
                 const payload = {
@@ -996,10 +1007,13 @@
                         this.applyChartTheme();
                         this.applyChartAnnotations();
                         this.loading = false;
-                        this.$root.$emit('hide-overlay');
-                    }).catch(() => {
+                    }).catch((err) => {
                         this.loading = false;
-                        this.$root.$emit('hide-overlay');
+                        this.$root.$emit('show-message', {
+                            type: 'error',
+                            text: 'Dashboard failed to load — ' + sanitizeToastMessage(err && err.message)
+                                + '. Hit Refresh to retry.'
+                        });
                     });
 
             },

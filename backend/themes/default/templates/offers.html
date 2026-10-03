@@ -350,8 +350,8 @@
                             :items="filteredOffers"
                             dense
                             :loading="loadingOffers"
-                            :items-per-page="10"
-                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            :items-per-page="25"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50, 100] }"
                     >
                         <template v-slot:item.countries="{ item }">
                             {{ (item.countries || []).map(c => c.code).join(', ') }}

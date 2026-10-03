@@ -54,8 +54,8 @@
                                 :items="members"
                                 dense
                                 :loading="loadingMembers"
-                                :items-per-page="10"
-                                :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                                :items-per-page="25"
+                                :footer-props="{ 'items-per-page-options': [10, 25, 50, 100] }"
                         >
                             <template v-slot:item.role="{ item }">
                                 <v-select v-if="canManageMembers && item.role !== 'owner'"
@@ -408,8 +408,8 @@
                             :items="users"
                             dense
                             :loading="loadingUsers"
-                            :items-per-page="10"
-                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            :items-per-page="25"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50, 100] }"
                     >
 
                         <template v-slot:item.active="{ item }">

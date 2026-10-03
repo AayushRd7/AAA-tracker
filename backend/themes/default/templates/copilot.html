@@ -226,9 +226,9 @@
                     { label: 'Visits', value: this.$fmtNum(Number(t.visits || 0)) },
                     { label: 'Clicks', value: this.$fmtNum(Number(t.clicks || 0)) },
                     { label: 'Conversions', value: this.$fmtNum(Number(t.conversions || 0)) },
-                    { label: 'Cost', value: '$' + this.$fmtNum(Number(t.cost || 0)) },
-                    { label: 'Revenue', value: '$' + this.$fmtNum(Number(t.revenue || 0)) },
-                    { label: 'Profit', value: '$' + this.$fmtNum(Number(t.profit || 0)) },
+                    { label: 'Cost', value: '$' + this.$fmtNum(Number(t.cost || 0), 'money') },
+                    { label: 'Revenue', value: '$' + this.$fmtNum(Number(t.revenue || 0), 'money') },
+                    { label: 'Profit', value: '$' + this.$fmtNum(Number(t.profit || 0), 'money') },
                     { label: 'ROAS', value: t.roas == null ? '—' : Number(t.roas).toFixed(2) + 'x' },
                 ];
             },

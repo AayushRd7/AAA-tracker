@@ -373,6 +373,17 @@ body,
   border-radius: var(--card-radius) !important;
 }
 
+/* Vuetify ships .v-data-table__wrapper with `overflow: auto hidden`, which
+   makes it a horizontal scroll container that never scrolls vertically — so
+   `position: sticky` on the header (and the totals row) has no scrollport to
+   stick to and never engages. Give it a viewport-bounded height and vertical
+   scrolling so the header stays put while the rows scroll under it; the
+   horizontal scrollbar for wide / resized columns is untouched. */
+.v-data-table > .v-data-table__wrapper {
+  max-height: 72vh;
+  overflow-y: auto;
+}
+
 .v-data-table > .v-data-table__wrapper > table > thead > tr > th {
   font-size: var(--fs-11) !important;
   letter-spacing: 0.07em;
@@ -382,6 +393,12 @@ body,
   white-space: nowrap;
   background: var(--surface);
   border-bottom: 1px solid var(--border-soft) !important;
+  /* Keep column labels visible while scrolling a long table. sticky also
+     establishes the containing block the absolute .col-drag-handle needs,
+     so the later `position: relative` on thead th is overridden harmlessly. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .v-data-table > .v-data-table__wrapper > table > tbody > tr {
@@ -656,7 +673,6 @@ pre {
 /* ---------- Color helpers (legacy) ---------- */
 
 .red { color: #d93a3a; }
-.green { color: var(--accent); }
 .blue { color: var(--status-info); }
 
 /* ---------- Editor page ---------- */

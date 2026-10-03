@@ -307,11 +307,11 @@
             },
             formatMoney(v) {
                 const n = parseFloat(v) || 0;
-                return '$' + this.$fmtNum(n);
+                return '$' + this.$fmtNum(n, 'money');
             },
             formatPct(v) {
                 const n = parseFloat(v) || 0;
-                return this.$fmtNum(n) + '%';
+                return this.$fmtNum(n, 'rate') + '%';
             },
         },
     });

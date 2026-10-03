@@ -1781,8 +1781,8 @@
                             show-select
                             item-key="id"
                             :item-class="rowClass"
-                            :items-per-page="10"
-                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            :items-per-page="25"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50, 100] }"
                             :loading="loading"
                             dense
                     >
@@ -1802,7 +1802,7 @@
                             {{ (metricsMap[item.id] || {}).leads != null ? $fmtNum(Number(metricsMap[item.id].leads)) : '—' }}
                         </template>
                         <template v-slot:item.cr="{ item }">
-                            {{ (metricsMap[item.id] || {}).cr != null ? $fmtNum(metricsMap[item.id].cr) + '%' : '—' }}
+                            {{ (metricsMap[item.id] || {}).cr != null ? $fmtNum(metricsMap[item.id].cr, 'rate') + '%' : '—' }}
                         </template>
                         <template v-slot:item.epc="{ item }">
                             {{ (metricsMap[item.id] || {}).epc != null ? formatMoney(metricsMap[item.id].epc) : '—' }}
@@ -3878,7 +3878,7 @@
                     case 'unique_clicks': return this.$fmtNum(t.unique_clicks);
                     case 'leads': return this.$fmtNum(t.leads);
                     case 'conversions': return this.$fmtNum(t.conversions);
-                    case 'cr': return this.$fmtNum(t.cr) + '%';
+                    case 'cr': return this.$fmtNum(t.cr, 'rate') + '%';
                     case 'epc': return this.formatMoney(t.epc);
                     case 'cpc': return this.formatMoney(t.cpc);
                     case 'cost': return this.formatMoney(t.cost);
@@ -3914,11 +3914,11 @@
             },
             formatMoney(v) {
                 const n = parseFloat(v) || 0;
-                return '$' + this.$fmtNum(n);
+                return '$' + this.$fmtNum(n, 'money');
             },
             formatPct(v) {
                 const n = parseFloat(v) || 0;
-                return (n > 0 ? '+' : '') + this.$fmtNum(n) + '%';
+                return (n > 0 ? '+' : '') + this.$fmtNum(n, 'rate') + '%';
             },
             async deleteCampaign(item) {
                 const ok = await this.$refs.confirm.open(

@@ -135,9 +135,9 @@
                     <span class="status-chip" :class="resultChipClass(item.status)">{{ item.status }}</span>
                 </template>
                 <!-- Wave 19A: workspace number formatting on numeric cells -->
-                <template v-slot:item.payout="{ item }"><span>{{ $fmtNum(item.payout) }}</span></template>
-                <template v-slot:item.revenue="{ item }"><span>{{ $fmtNum(item.revenue) }}</span></template>
-                <template v-slot:item.cost="{ item }"><span>{{ $fmtNum(item.cost) }}</span></template>
+                <template v-slot:item.payout="{ item }"><span>{{ $fmtNum(item.payout, 'money') }}</span></template>
+                <template v-slot:item.revenue="{ item }"><span>{{ $fmtNum(item.revenue, 'money') }}</span></template>
+                <template v-slot:item.cost="{ item }"><span>{{ $fmtNum(item.cost, 'money') }}</span></template>
                 <template v-slot:item.updated_rows="{ item }"><span>{{ $fmtNum(item.updated_rows) }}</span></template>
                 <template v-slot:item.attempts="{ item }"><span>{{ $fmtNum(item.attempts) }}</span></template>
                 <template v-slot:item.flow_index="{ item }"><span>{{ $fmtNum(item.flow_index) }}</span></template>

@@ -357,8 +357,8 @@
                             :items="sources"
                             dense
                             :loading="loadingSources"
-                            :items-per-page="10"
-                            :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
+                            :items-per-page="25"
+                            :footer-props="{ 'items-per-page-options': [10, 25, 50, 100] }"
                     >
                         <template v-slot:item.name="{ item }">
                             <div class="aff-name-cell">

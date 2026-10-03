@@ -70,7 +70,7 @@
                                 class="range-field"
                         ></v-text-field>
                     </template>
-                    <v-date-picker v-model="dateRange" range @input="dateMenu = false"></v-date-picker>
+                    <v-date-picker v-model="dateRange" range :first-day-of-week="1" @input="dateMenu = false"></v-date-picker>
                 </v-menu>
                 <v-select
                         :items="campaigns"
@@ -1143,7 +1143,7 @@
                     <template v-slot:item.cr="{ item }">{{ pct(item.cr) }}</template>
                     <template v-slot:item.cumulative_cr="{ item }">{{ pct(item.cumulative_cr) }}</template>
                     <template v-slot:item.drop_off_pct="{ item }">
-                        {{ item.drop_off_pct == null ? '—' : $fmtNum(item.drop_off_pct) + '%' }}
+                        {{ item.drop_off_pct == null ? '—' : $fmtNum(item.drop_off_pct, 'rate') + '%' }}
                     </template>
                 </v-data-table>
             </v-card>
@@ -2108,11 +2108,11 @@
             },
             formatMoney(v) {
                 const n = parseFloat(v) || 0;
-                return '$' + this.$fmtNum(n);
+                return '$' + this.$fmtNum(n, 'money');
             },
             formatPct(v) {
                 const n = parseFloat(v) || 0;
-                return this.$fmtNum(n) + '%';
+                return this.$fmtNum(n, 'rate') + '%';
             },
             // Wave 19A: shared conditional row colouring on the log/conversion
             // tables (the breakdown table keeps its perf win/loss tinting).
@@ -2195,6 +2195,11 @@
                         {type: 'error', text: 'Save failed: ' + sanitizeToastMessage(err.message)}));
             },
             formatEpc(v) {
+                // EPC keeps its own precision rather than the shared money
+                // formatter: it is earnings per *click*, so it is routinely
+                // sub-cent, and two decimals would round a real $0.0031 to
+                // $0.00 — a row that earns money reading as a row that earns
+                // nothing is worse than a few extra digits.
                 const n = parseFloat(v) || 0;
                 return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 5, maximumFractionDigits: 5});
             },
