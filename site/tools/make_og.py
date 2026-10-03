@@ -8,7 +8,7 @@ alongside the pages. Re-run after changing a page headline:
     python3 site/tools/make_og.py
 
 Rendering uses headless Google Chrome so the cards pick up the site's real
-typefaces (Schibsted Grotesk, IBM Plex Mono) from site/assets/fonts. Chrome must
+typefaces (Inter, IBM Plex Mono) from site/assets/fonts. Chrome must
 be installed; on macOS it is found in /Applications, elsewhere set the CHROME
 environment variable to the binary. Pillow is only used to assemble favicon.ico
 from the rendered PNGs.
@@ -56,13 +56,13 @@ MARK = """<svg viewBox="0 0 32 32" fill="none" aria-hidden="true" style="width:4
 </svg>"""
 
 OG_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8"><style>
-@font-face{font-family:'Schibsted Grotesk';font-style:normal;font-weight:400 800;
-  src:url(FONTS/schibsted-grotesk-normal-400-800-latin.woff2) format('woff2');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:400 800;
+  src:url(FONTS/inter-latin.woff2) format('woff2');}
 @font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;
   src:url(FONTS/ibm-plex-mono-normal-500-latin.woff2) format('woff2');}
 *{box-sizing:border-box;margin:0}
 body{width:1200px;height:630px;background:#ffffff;color:#3a4252;
-  font-family:'Schibsted Grotesk',system-ui,sans-serif;padding:64px 72px;position:relative;overflow:hidden;
+  font-family:'Inter',system-ui,sans-serif;padding:64px 72px;position:relative;overflow:hidden;
   display:flex;flex-direction:column}
 .glow{position:absolute;left:50%;top:-380px;transform:translateX(-50%);width:1300px;height:820px;
   background:radial-gradient(48% 46% at 50% 50%,rgba(31,75,240,.17) 0%,rgba(31,75,240,.06) 44%,rgba(31,75,240,0) 72%)}

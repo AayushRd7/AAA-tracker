@@ -23,7 +23,7 @@ Two typefaces carry it:
 
 | Role | Face | Used for |
 |------|------|----------|
-| Display / UI | **Schibsted Grotesk** (variable 400–800) | `h1`, `h2`, nav, buttons, body, card titles |
+| Display / UI | **Inter** (variable 400–800) | `h1`, `h2`, nav, buttons, body, card titles |
 | Data / labels | **IBM Plex Mono** (400/500/600) | eyebrows, table headers, KPIs, click ids, figures, footers |
 
 There is no third face and no serif. Anything that is a number, an identifier or a label
@@ -285,7 +285,10 @@ a chart arrow, and a lighter dark section count (three per page maximum).
 site/assets/css/site.css        the whole system (~1.09k lines, token-driven)
 site/assets/js/site.js          nav, sticky header shrink, reveal, counters, meters, tabs,
                                 expanding bands, form
-site/assets/fonts/              Schibsted Grotesk + IBM Plex Mono (bundled woff2)
+site/assets/fonts/              Inter + IBM Plex Mono (bundled woff2)
+backend/themes/default/css/     the same system applied to the product; the token block at
+                                the top of style.css mirrors these values, and the same two
+                                faces are bundled under css/fonts/
 site/assets/img/brands/         26 real brand SVGs (Simple Icons) for the logo wall
 site/assets/img/logo-mark.svg   the mark; favicon.svg / logo.svg derive from it
 site/tools/make_og.py           regenerates the 8 OG cards + all icons
