@@ -18,6 +18,19 @@
             </v-col>
         </v-row>
 
+        <div class="filter-bar align-center mb-3">
+            <v-text-field
+                    v-model="sourceSearch"
+                    label="Search sources"
+                    prepend-inner-icon="mdi-magnify"
+                    outlined
+                    dense
+                    hide-details
+                    clearable
+                    class="source-search"
+            ></v-text-field>
+        </div>
+
         <v-dialog v-model="dialog" persistent>
             <v-card class="dialog-lg dialog-flex">
                 <v-card-title>
@@ -356,7 +369,7 @@
                             v-model="selected"
                             show-select
                             :headers="headers"
-                            :items="sources"
+                            :items="filteredSources"
                             dense
                             :loading="loadingSources"
                             :items-per-page="25"
@@ -407,7 +420,14 @@
                         </template>
 
                         <template v-slot:no-data>
-                            <div class="empty-state">
+                            <div class="empty-state" v-if="sourceSearch">
+                                <v-icon>mdi-filter-off-outline</v-icon>
+                                <div class="mt-2">No sources match your search</div>
+                                <v-btn small color="primary" elevation="0" class="mt-3" @click="sourceSearch = ''">
+                                    Clear search
+                                </v-btn>
+                            </div>
+                            <div class="empty-state" v-else>
                                 <v-icon>mdi-database-outline</v-icon>
                                 <div class="mt-2">No traffic sources yet — add your first one</div>
                                 <v-btn small color="primary" elevation="0" class="mt-3" @click="openCreate">
@@ -435,6 +455,7 @@
                 catalogDialog: false,
                 catalogSearch: '',
                 catalogFilter: 'all',
+                sourceSearch: '',
                 presets: [],
                 loadingPresets: false,
                 capLabels: {
@@ -486,9 +507,18 @@
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadSources();
             this.loadPresets();
-            this.$root.$on('load-sources', this.loadSources);
+            this.$root.$on('load-sources', (focus) => {
+                if (focus) this.applySearchFocus(focus);
+                this.loadSources();
+            });
         },
         computed: {
+            // The saved-sources list (main table), not the catalog dialog.
+            filteredSources() {
+                const q = (this.sourceSearch || '').trim().toLowerCase();
+                if (!q) return this.sources;
+                return this.sources.filter(s => (s.name || '').toLowerCase().includes(q));
+            },
             presetByName() {
                 const map = {};
                 this.presets.forEach(p => { map[p.name] = p; });
@@ -679,6 +709,11 @@
             },
             toAdditionalSettingsList(obj) {
                 return Object.entries(obj || {}).map(([key, value]) => ({key, value}));
+            },
+            // Global-search hit: pre-fill the list search so this source is the
+            // only row. Clearing the field restores the full list.
+            applySearchFocus(focus) {
+                this.sourceSearch = focus.name || '';
             },
             loadSources() {
                 this.loadingSources = true;

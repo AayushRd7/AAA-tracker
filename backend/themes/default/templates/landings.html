@@ -287,6 +287,11 @@
             },
         },
         methods: {
+            // Global-search hit: pre-fill the list search so this landing is the
+            // only row. Clearing the field restores the full list.
+            applySearchFocus(focus) {
+                this.landingSearch = focus.name || '';
+            },
             loadLandings() {
                 this.loadingLandings = true;
                 fetch('/landings', {
@@ -546,7 +551,10 @@
         mounted() {
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadLandings();
-            this.$root.$on('load-landings', this.loadLandings);
+            this.$root.$on('load-landings', (focus) => {
+                if (focus) this.applySearchFocus(focus);
+                this.loadLandings();
+            });
         },
     });
 </script>

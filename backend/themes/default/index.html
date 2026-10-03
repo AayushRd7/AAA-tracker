@@ -1046,7 +1046,11 @@
                 const nav = this.navItems.find(i => i.key === section);
                 if (nav && this.canReadSection(nav)) {
                     this.activeSection = section;
-                    this.$emit('load-' + section);
+                    // Carry the focused hit through the existing load signal so
+                    // the section can narrow its list to that record. Listeners
+                    // that expect no argument simply ignore the extra payload.
+                    this.$emit('load-' + section,
+                               item ? {group: group, id: item.id, name: item.name} : null);
                 } else {
                     this.$root.$emit('show-message', {type: 'info', text: 'No access to the "' + section + '" section'});
                 }

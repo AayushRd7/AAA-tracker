@@ -18,6 +18,19 @@
             </v-col>
         </v-row>
 
+        <div class="filter-bar align-center mb-3">
+            <v-text-field
+                    v-model="networkSearch"
+                    label="Search networks"
+                    prepend-inner-icon="mdi-magnify"
+                    outlined
+                    dense
+                    hide-details
+                    clearable
+                    class="network-search"
+            ></v-text-field>
+        </div>
+
         <v-dialog v-model="dialog" persistent>
             <v-card class="dialog-md">
                 <v-card-title>
@@ -149,7 +162,7 @@
                             v-model="selected"
                             show-select
                             :headers="headers"
-                            :items="affiliateNetworks"
+                            :items="filteredAffiliateNetworks"
                             dense
                             :loading="loading"
                             :items-per-page="25"
@@ -231,7 +244,14 @@
                         </template>
 
                         <template v-slot:no-data>
-                            <div class="empty-state">
+                            <div class="empty-state" v-if="networkSearch">
+                                <v-icon>mdi-filter-off-outline</v-icon>
+                                <div class="mt-2">No networks match your search</div>
+                                <v-btn small color="primary" elevation="0" class="mt-3" @click="networkSearch = ''">
+                                    Clear search
+                                </v-btn>
+                            </div>
+                            <div class="empty-state" v-else>
                                 <v-icon>mdi-cash-multiple</v-icon>
                                 <div class="mt-2">No affiliate networks yet — add your first one</div>
                                 <v-btn small color="primary" elevation="0" class="mt-3" @click="openCreate">
@@ -266,6 +286,7 @@
                 catalogOpen: false,
                 catalogSearch: '',
                 catalogVertical: '',
+                networkSearch: '',
                 headers: [
                     {text: 'Name', value: 'name'},
                     {text: 'Offer Parameters', value: 'offer_parameters'},
@@ -292,10 +313,19 @@
                     this.postbackKey = sec.enabled ? (sec.secret_key || '') : '';
                 })
                 .catch(() => {});
-            this.$root.$on('load-affiliates', this.loadAffiliateNetworks);
+            this.$root.$on('load-affiliates', (focus) => {
+                if (focus) this.applySearchFocus(focus);
+                this.loadAffiliateNetworks();
+            });
             this.loadPresets();
         },
         computed: {
+            // The saved networks list (main table), not the catalog dialog.
+            filteredAffiliateNetworks() {
+                const q = (this.networkSearch || '').trim().toLowerCase();
+                if (!q) return this.affiliateNetworks;
+                return this.affiliateNetworks.filter(n => (n.name || '').toLowerCase().includes(q));
+            },
             presetNames() {
                 return this.presets.map(p => p.name);
             },
@@ -388,6 +418,11 @@
                     });
             },
 
+            // Global-search hit: pre-fill the list search so this network is the
+            // only row. Clearing the field restores the full list.
+            applySearchFocus(focus) {
+                this.networkSearch = focus.name || '';
+            },
             loadAffiliateNetworks() {
                 this.loading = true;
                 fetch("/backend/api/affiliate-networks/", {

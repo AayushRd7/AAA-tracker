@@ -627,7 +627,10 @@
             this.$vuetify.theme.dark = (document.documentElement.dataset.theme === 'dark');
             this.loadOffers();
             this.loadArchivedIds();
-            this.$root.$on('load-offers', this.loadOffers);
+            this.$root.$on('load-offers', (focus) => {
+                if (focus) this.applySearchFocus(focus);
+                this.loadOffers();
+            });
         },
         methods: {
             async loadCapiPixels() {
@@ -912,6 +915,13 @@
                             text: "Failed to load affiliate networks"
                         });
                     });
+            },
+            // Global-search hit: pre-fill the list search so this offer is the
+            // only row, and show archived rows so an archived offer cannot be
+            // filtered out. Clearing the field restores the full list.
+            applySearchFocus(focus) {
+                this.offerSearch = focus.name || '';
+                this.showArchived = true;
             },
             loadOffers() {
                 this.loadAffiliateNetworks();

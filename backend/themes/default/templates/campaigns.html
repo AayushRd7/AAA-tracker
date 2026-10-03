@@ -2593,7 +2593,10 @@
             }
             this.loadCampaigns();
             this.loadFunnelTemplates();
-            this.$root.$on('load-campaigns', this.loadCampaigns);
+            this.$root.$on('load-campaigns', (focus) => {
+                if (focus) this.applySearchFocus(focus);
+                this.loadCampaigns();
+            });
             this.generateTrackingScript();
             this.loadSettings();
         },
@@ -3792,6 +3795,15 @@
                 this.platformCampaignStatus = null;
                 this.platformAdsetBusy = {};
 
+            },
+            // Global-search hit: narrow the list to this one record. Clear the
+            // other list filters (tags, archived) so the row cannot be filtered
+            // out, and pre-fill the existing search field — clearing it restores
+            // the full list.
+            applySearchFocus(focus) {
+                this.campaignSearch = focus.name || '';
+                this.tagFilter = [];
+                this.showArchived = true;
             },
             loadCampaigns() {
                 this.loading = true;

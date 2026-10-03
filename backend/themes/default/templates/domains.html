@@ -34,6 +34,19 @@
             own server as before.
         </v-alert>
 
+        <div class="filter-bar align-center mb-3">
+            <v-text-field
+                    v-model="domainSearch"
+                    label="Search domains"
+                    prepend-inner-icon="mdi-magnify"
+                    outlined
+                    dense
+                    hide-details
+                    clearable
+                    class="domain-search"
+            ></v-text-field>
+        </div>
+
 
         <v-dialog v-model="dialog" persistent>
             <v-card class="dialog-md dialog-flex">
@@ -102,7 +115,7 @@
                 <v-card>
                     <v-data-table v-col-resize:domains="headers"
                             :headers="headers"
-                            :items="domains"
+                            :items="filteredDomains"
                             :loading="loadingDomains"
                             dense
                             :items-per-page="10"
@@ -188,7 +201,12 @@
                         </template>
 
                         <template v-slot:no-data>
-                            <div class="empty-state">
+                            <div class="empty-state" v-if="domainSearch">
+                                <v-icon>mdi-filter-off-outline</v-icon>
+                                <div class="mt-2">No domains match your search</div>
+                                <v-btn small text color="primary" class="mt-2" @click="domainSearch = ''">Clear search</v-btn>
+                            </div>
+                            <div class="empty-state" v-else>
                                 <v-icon>mdi-inbox-outline</v-icon>
                                 <div class="mt-2">No data yet</div>
                             </div>
@@ -351,6 +369,7 @@
                 newDomain: '',
                 loadingDomains: false,
                 domains: [],
+                domainSearch: '',
                 campaigns: [],
                 serverIp: '',
                 dnsResults: {},
@@ -394,9 +413,26 @@
             this.loadServerInfo();
             this.loadGroups();
             this.loadSslExpiry();
-            this.$root.$on('load-domains', this.loadDomains);
+            this.$root.$on('load-domains', (focus) => {
+                if (focus) this.applySearchFocus(focus);
+                this.loadDomains();
+            });
+        },
+        computed: {
+            filteredDomains() {
+                const q = (this.domainSearch || '').trim().toLowerCase();
+                if (!q) return this.domains;
+                return this.domains.filter(d =>
+                    (d.domain || '').toLowerCase().includes(q)
+                    || (d.group_name || '').toLowerCase().includes(q));
+            },
         },
         methods: {
+            // Global-search hit: pre-fill the list search so this domain is the
+            // only row. Clearing the field restores the full list.
+            applySearchFocus(focus) {
+                this.domainSearch = focus.name || '';
+            },
             domainName(id) {
                 const d = (this.domains || []).find(x => String(x.id) === String(id));
                 return d ? d.domain : ('#' + id);
