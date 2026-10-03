@@ -126,7 +126,11 @@ figures; every number in a table or KPI uses it.
   corner radius and the mark's scale (1 → 0.86). The backdrop fades in with the same
   variable; the shell's own border and shadow do the separating, so there is never a
   hard rule across the page. On ≤980px the links collapse into a bordered panel under
-  the bar; the toggle is 40×40 with a 44px hit area.
+  the bar. The toggle is a true 44×44 tap target, sits **last** on small screens (logo → action →
+  toggle), and carries a 24px glyph whose bars are 3.4→20.6 in a 24-unit box at 2.1 stroke — the
+  first version rendered a 13px-wide, 1.6px-thin glyph and read as a speck. It has **no**
+  `margin-left: auto`: `.header-actions` already has one, and two auto margins split the free
+  space, which stranded the toggle in the middle of the bar rather than at its right edge.
 - **`.btn`** — pill. `--primary` (cobalt, cobalt shadow) · `--ghost` (white + hairline) ·
   `--dark` (ink, for use on the blue band) · `--onink` (translucent, on dark) ·
   `--quiet` (text only). `--sm`, `--lg`, `--block` are modifiers.
