@@ -109,7 +109,7 @@
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
                     >
                         <template v-slot:item.domain="{ item }">
-                            <a v-if="item.domain" :href="'https://'+item.domain" target="_blank">
+                            <a v-if="item.domain" :href="'https://'+item.domain" target="_blank" rel="noopener">
                                 https://{{ item.domain }}
                             </a>
                         </template>

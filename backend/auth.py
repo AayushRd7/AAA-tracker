@@ -358,9 +358,14 @@ def revoke_session_prefix(db: Session, username: str, prefix: str) -> int:
     prefix = (prefix or "").strip()
     if not prefix:
         return 0
+    # Escape LIKE metacharacters: a prefix of "%" would otherwise wipe every
+    # session the user has, not just the one that starts with "%".
+    escaped = (prefix.replace("\\", "\\\\")
+                     .replace("%", "\\%")
+                     .replace("_", "\\_"))
     res = db.execute(text(
-        "DELETE FROM auth_sessions WHERE username = :u AND token LIKE :p"),
-        {"u": username, "p": prefix + "%"})
+        "DELETE FROM auth_sessions WHERE username = :u AND token LIKE :p ESCAPE '\\'"),
+        {"u": username, "p": escaped + "%"})
     db.commit()
     return res.rowcount or 0
 
@@ -1079,6 +1084,8 @@ def request_is_https(request: Request) -> bool:
 LOGIN_MAX_FAILED = 5
 LOGIN_WINDOW_SECONDS = 60
 _login_failures: dict = {}
+# Cap on the (attacker-chosen) failure map; above this we evict stale keys.
+_LOGIN_FAILURES_MAX_KEYS = 10_000
 
 
 def _record_failed_login(key: str):
@@ -1087,6 +1094,12 @@ def _record_failed_login(key: str):
     attempts = [t for t in _login_failures.get(key, []) if t > cutoff]
     attempts.append(now)
     _login_failures[key] = attempts
+    # The key is attacker-chosen (IP:username), so without eviction the map grows
+    # without bound. Once it is large, drop every key with no fresh attempts.
+    if len(_login_failures) > _LOGIN_FAILURES_MAX_KEYS:
+        for stale in [k for k, v in _login_failures.items()
+                      if not any(t > cutoff for t in v)]:
+            _login_failures.pop(stale, None)
 
 
 def _login_limited(key: str) -> bool:
@@ -1118,7 +1131,9 @@ async def login(request: Request, response: Response, login_data: LoginRequest, 
         _record_failed_login(limit_key)
         audit_event(login_data.username, "login_failed", "user", login_data.username,
                     {"reason": "bad_password"}, client_ip)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials 2")
+        # Same message as the unknown-user branch: a distinct one is an oracle
+        # that tells an attacker which usernames exist.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     # Transparent upgrade from the legacy md5 hash to bcrypt
     if not is_bcrypt_hash(user.password_hash or ""):

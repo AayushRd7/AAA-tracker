@@ -23,6 +23,8 @@
 - [Tech Stack](#tech-stack)
 - [Getting Started](#getting-started)
 - [Running the Project](#running-the-project)
+- [Backup & disaster recovery](#-backup--disaster-recovery)
+- [Health-gated rollout](#-health-gated-rollout-opt-in)
 - [Project Structure](#project-structure)
 - [Environment Variables](#environment-variables)
 - [Development Scripts](#development-scripts)
@@ -109,6 +111,103 @@ make update          # pull + recreate, once the checkout is clean
 
 A failed install never reports success: `install.py` exits non-zero, so `make` stops instead of
 claiming the database was initialised when it was not.
+
+---
+
+## 🗄️ Backup & disaster recovery
+
+All durable state lives in two databases: **Postgres** (workspaces, campaigns, conversions,
+settings) and **ClickHouse** (clicks). `make backup` dumps both into a timestamped directory;
+the TLS certificates are re-issued by certbot and are not part of the backup.
+
+```bash
+make backup                        # Postgres + ClickHouse + manifest
+make restore DIR=backups/<stamp>   # DESTRUCTIVE: restore that run into this stack
+make restore FORCE=1               # allow restoring over a non-empty database
+make backup-cron                   # install the daily /etc/cron.d/aaa-tracker-backup entry
+```
+
+Each run lands under `${BACKUP_DIR:-./backups}/<UTC-timestamp>/`:
+
+```text
+<UTC-timestamp>/
+├── postgres.dump        # pg_dump -Fc (custom format, restored with pg_restore)
+├── clickhouse/          # BACKUP DATABASE ... TO File(...) archive(s)
+│   └── clickhouse-<stamp>.zip
+└── manifest.txt         # app git SHA, DB versions, dump sizes
+```
+
+**Configuration** (see `.env.example`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BACKUP_DIR` | `./backups` | Output root. Each run gets its own timestamped subdirectory. |
+| `BACKUP_KEEP` | `7` | Runs to keep; older runs are pruned after a successful backup. |
+| `BACKUP_S3_BUCKET` | empty | Optional off-box copy. When set, `aws s3 cp` uploads each run to `s3://$BACKUP_S3_BUCKET/<stamp>/` (needs the AWS CLI and bucket credentials). Empty keeps backups local. |
+
+`make backup-cron` installs a daily root cron entry (`23 2 * * *`) that runs
+`scripts/backup.sh`; it is idempotent and only rewrites `/etc/cron.d/aaa-tracker-backup`
+when the script path is missing from it. Keep the backup directory out of git — a
+`postgres.dump` is a full copy of the database.
+
+**ClickHouse caveat.** This stack does not configure a ClickHouse `backups` disk, so the
+`Disk(…)` backup engine is unavailable (`backups.allowed_disk is not set`). The script
+therefore uses the `File` engine, writes a zip inside the container and copies it out. If
+the ClickHouse backup fails, the script says so loudly and still produces the Postgres
+dump and manifest — ClickHouse clicks will be missing from that run, so check the output.
+
+**Restore is destructive.** `make restore` overwrites the databases and refuses to run
+against a stack that already holds tables unless `FORCE=1` is set. It is built for a
+fresh/empty stack (e.g. after `make reset && make install` recreated the schema). After a
+restore, run `make restart` so the app reconnects.
+
+### Key escrow — the one secret a backup does NOT contain
+
+Stored ad-platform OAuth tokens are encrypted with the Fernet key in
+`INTEGRATIONS_ENCRYPTION_KEY`. The in-app settings export deliberately nulls secrets, and
+`make backup` does **not** copy this key. A restored database is useless without it: every
+stored token becomes unrecoverable.
+
+Print it once and store it **outside this server** (password manager or secrets vault):
+
+```bash
+make show-integration-key
+```
+
+---
+
+## 🚀 Health-gated rollout (opt-in)
+
+The default deploy path is unchanged: `make update` still pulls and recreates the stack
+from **bind-mounted source**. If you want built images with no source mounts and a rollout
+that does not drop tracking traffic, use the opt-in profile.
+
+```bash
+make rollout      # build images; recreate backend, then frontend, each health-gated; reload nginx
+make rollback     # retag + recreate the images saved before the last rollout
+```
+
+`make rollout` uses `docker-compose.images.yml` (composed with the base and
+`docker-compose.prod.yml`):
+
+```bash
+docker compose --compatibility \
+  -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml up -d
+```
+
+- It recreates the built `backend` image first and waits for its container healthcheck to
+  pass, then the `frontend`, then reloads nginx (`nginx -s reload`) instead of recreating
+  it — so in-flight tracking requests are not dropped.
+- On failure it stops and tells you to run `make rollback`, which re-tags the images saved
+  into `.rollout/` before the rollout and recreates the two app containers from them.
+- The image profile drops the `./backend:/app` and `./frontend:/app` source mounts but
+  keeps the certificate/config mounts those services still need. It uses Compose's
+  `!override` volume tag; the older `!reset []` form would also drop the cert mounts, and
+  both need a recent Compose. `docker compose -f docker-compose.yml -f docker-compose.prod.yml
+  -f docker-compose.images.yml config >/dev/null` is the quick compatibility check.
+
+Because the images have no source mounts, a code change reaches the container only via
+`make rollout` (rebuild + recreate) — not by editing a file on disk.
 
 ### Troubleshooting
 
@@ -308,8 +407,18 @@ Two other checks sit next to it:
   the seeded schema and the socket proxy is reachable).
 - `make check-ci` — parses the workflow files; a YAML typo there stops every CI run from even starting.
 
-CI (`.github/workflows/ci.yml`) runs a compile/guard job plus a **fresh-install job** that installs the
-whole stack from empty volumes on a clean runner, runs `make doctor` and then the end-to-end assertions.
+CI (`.github/workflows/ci.yml`) has three jobs:
+
+- **compile / guards** — on every push and PR: Python compile, YAML + Makefile guards, shell syntax, the
+  install-SQL idempotency checks, and a Python dependency vulnerability scan (`pip-audit` over
+  `backend/requirements.txt` and `backend/install/requirements.txt`).
+- **fresh-install** — on every push and PR: installs the whole stack from empty volumes on a clean runner,
+  runs `make doctor` and then the end-to-end assertions.
+- **api-smoke** — **nightly** (`schedule`) and on `workflow_dispatch`: installs the stack from empty volumes
+  and runs the full live API suite (`backend/tests/api_smoke.py`) against it. It reads `AAA_ADMIN_PASSWORD`
+  and `CLICKHOUSE_PASSWORD` back from the generated `.env`, so it logs in as the install's real admin. The
+  suite takes ~14 minutes, which is why it is not run on every push. The same suite can still be run locally
+  against a dev server with the command above.
 
 ## 🩹 Security & bug-fix log
 

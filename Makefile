@@ -2,6 +2,10 @@
 # older installs ship the standalone `docker-compose` binary. Detect once.
 COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; else echo "docker-compose"; fi)
 
+# Opt-in image-based production profile (built images, no source bind mounts).
+# The default `make update` path is UNCHANGED and still runs bind-mounted source.
+IMAGES := -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml
+
 # ── presentation ────────────────────────────────────────────────────────────
 # Colour is switched off automatically when output is not a terminal (pipes, CI).
 ifeq ($(shell [ -t 1 ] && echo tty),tty)
@@ -29,7 +33,7 @@ SCHEME ?= http
 .PHONY: banner check check-ci env preclean reset summary doctor install install-db install-db-fresh \
         install-local install-no-sll install-http install-prod-domain generate-local-cert \
         certificate stop start restart update logs reload-nginx seed-demo-data start-http \
-        restart-nginx clear-logs
+        restart-nginx clear-logs backup restore backup-cron show-integration-key rollout rollback
 
 banner:
 	@printf '\n$(B)$(C)  AAA TRACKER$(R) $(D)·$(R) $(B)setup$(R)\n'
@@ -252,6 +256,118 @@ update: banner check env preclean
 	@$(call step,pulling the latest code)
 	@git pull
 	@$(MAKE) --no-print-directory restart
+
+# ── backups ─────────────────────────────────────────────────────────────────
+# Timestamped Postgres + ClickHouse dumps under ${BACKUP_DIR:-./backups}/<UTC>/
+# (postgres.dump, clickhouse/*.zip, manifest.txt), pruned to the last
+# ${BACKUP_KEEP:-7}. Optional off-box copy when BACKUP_S3_BUCKET is set.
+backup: check
+	@bash scripts/backup.sh
+
+# DESTRUCTIVE: restores a backup dir (newest when DIR is omitted) into this
+# stack. Refuses a non-empty database unless FORCE=1.
+#   make restore DIR=backups/20261003T031115Z
+#   make restore FORCE=1
+restore: check
+	@bash scripts/restore.sh $(DIR)
+
+# Idempotently install a daily root cron entry that runs scripts/backup.sh.
+# Re-running only rewrites the file if the path is missing from it.
+backup-cron: check
+	@chmod +x scripts/backup.sh
+	@CRON_FILE=/etc/cron.d/aaa-tracker-backup; \
+	CRON_LINE="23 2 * * * root $(CURDIR)/scripts/backup.sh >> /var/log/aaa-tracker-backup.log 2>&1"; \
+	if [ ! -f "$$CRON_FILE" ] || ! grep -qF "$(CURDIR)/scripts/backup.sh" "$$CRON_FILE"; then \
+		printf 'SHELL=/bin/bash\n# Managed by AAA Tracker - daily database backup (make backup).\n%s\n' "$$CRON_LINE" \
+			| sudo tee "$$CRON_FILE" >/dev/null; \
+		sudo chmod 644 "$$CRON_FILE"; \
+		printf '  $(G)$(B)✓$(R) daily backup cron installed (%s)\n' "$$CRON_FILE"; \
+	else \
+		printf '  $(C)$(B)▸$(R) daily backup cron already current (%s)\n' "$$CRON_FILE"; \
+	fi
+
+# Prints the Fernet key that encrypts stored ad-platform tokens. It is NOT in
+# any backup: store it OUTSIDE this server. Losing it makes every stored token
+# unrecoverable.
+show-integration-key:
+	@key="$$(grep -E '^INTEGRATIONS_ENCRYPTION_KEY=' .env 2>/dev/null | head -n1 | cut -d= -f2-)"; \
+	if [ -z "$$key" ]; then \
+		printf '\n  $(Y)$(B)!$(R) INTEGRATIONS_ENCRYPTION_KEY is empty in .env\n'; \
+		printf '    no token can be stored or decrypted until it is set.\n\n'; exit 1; \
+	fi; \
+	printf '\n  $(Y)$(B)!$(R) SECRET — this key is NOT included in backups.\n'; \
+	printf '    Store it OUTSIDE this server (password manager / secrets vault).\n'; \
+	printf '    Without it every stored ad-platform token is unrecoverable.\n\n'; \
+	printf '  INTEGRATIONS_ENCRYPTION_KEY=%s\n\n' "$$key"
+
+# ── health-gated rollout / rollback (opt-in) ────────────────────────────────
+# Recreates built images one service at a time, waiting for each container to
+# pass its healthcheck before touching the next, then reloads nginx instead of
+# recreating it — so in-flight tracking traffic is not dropped. On failure run
+# `make rollback`, which retags the images saved before the rollout.
+rollout: banner check
+	$(call step,building images)
+	@$(COMPOSE) $(IMAGES) build backend frontend nginx
+	@mkdir -p .rollout
+	$(call step,saving current images for rollback)
+	@for svc in backend frontend; do \
+		c="tracker_$$svc"; \
+		if docker inspect "$$c" >/dev/null 2>&1; then \
+			docker inspect -f '{{.Config.Image}}' "$$c" > ".rollout/$$svc.image"; \
+			docker inspect -f '{{.Image}}' "$$c" > ".rollout/$$svc.id"; \
+			printf '      saved %s (%s)\n' "$$svc" "$$(cat .rollout/$$svc.id)"; \
+		fi; \
+	done
+	$(call step,backend: recreate + health gate)
+	@$(COMPOSE) $(IMAGES) up -d --no-deps --force-recreate backend
+	@i=0; while [ $$i -lt 45 ]; do \
+		s=$$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' tracker_backend 2>/dev/null || echo missing); \
+		[ "$$s" = healthy ] && break; \
+		if [ "$$s" = unhealthy ]; then \
+			printf '  $(Y)$(B)!$(R) backend is unhealthy — run $(B)make rollback$(R)\n'; exit 1; \
+		fi; \
+		i=$$((i+1)); sleep 2; \
+	done; \
+	if [ "$$i" -ge 45 ]; then \
+		printf '  $(Y)$(B)!$(R) backend did not become healthy in time — run $(B)make rollback$(R)\n'; exit 1; \
+	fi; \
+	printf '      backend healthy\n'
+	$(call step,frontend: recreate + health gate)
+	@$(COMPOSE) $(IMAGES) up -d --no-deps --force-recreate frontend
+	@i=0; while [ $$i -lt 45 ]; do \
+		s=$$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' tracker_frontend 2>/dev/null || echo missing); \
+		[ "$$s" = healthy ] && break; \
+		if [ "$$s" = unhealthy ]; then \
+			printf '  $(Y)$(B)!$(R) frontend is unhealthy — run $(B)make rollback$(R)\n'; exit 1; \
+		fi; \
+		i=$$((i+1)); sleep 2; \
+	done; \
+	if [ "$$i" -ge 45 ]; then \
+		printf '  $(Y)$(B)!$(R) frontend did not become healthy in time — run $(B)make rollback$(R)\n'; exit 1; \
+	fi; \
+	printf '      frontend healthy\n'
+	$(call step,nginx: test + reload)
+	@docker exec tracker_nginx nginx -t >/dev/null && docker exec tracker_nginx nginx -s reload
+	@printf '\n  $(G)$(B)✓$(R) rollout complete — verify with: make doctor\n\n'
+
+# Retags the images saved by the last `make rollout` and recreates backend and
+# frontend from them, then reloads nginx. No-op if .rollout/ is empty.
+rollback: banner check
+	@if [ ! -f .rollout/backend.id ] && [ ! -f .rollout/frontend.id ]; then \
+		printf '  $(Y)$(B)!$(R) no saved images in .rollout — nothing to roll back to\n'; exit 1; \
+	fi
+	$(call step,restoring previous images)
+	@for svc in backend frontend; do \
+		[ -f ".rollout/$$svc.id" ] || continue; \
+		img=$$(cat ".rollout/$$svc.id"); name=$$(cat ".rollout/$$svc.image"); \
+		case "$$name" in *:*) target="$$name";; *) target="$$name:latest";; esac; \
+		docker tag "$$img" "$$target"; \
+		printf '      %s -> %s\n' "$$target" "$$img"; \
+	done
+	$(call step,recreating with previous images)
+	@$(COMPOSE) $(IMAGES) up -d --no-deps --force-recreate backend frontend
+	@docker exec tracker_nginx nginx -s reload
+	@printf '\n  $(G)$(B)✓$(R) rolled back — verify with: make doctor\n\n'
 
 doctor: check
 	@bash scripts/doctor.sh

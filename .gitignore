@@ -19,3 +19,9 @@ ssl/*.crt
 # Audit research (names competitors; never committed)
 /AUDIT-FINDINGS.md
 /AUDIT-FINDINGS.pdf
+/DESIGN-AUDIT.md
+/DESIGN-AUDIT.pdf
+
+# Local database backups / rollout state (never committed)
+/backups/
+/.rollout/

@@ -72,7 +72,7 @@ COMPOSE="$(compose_cmd)"
 ok "using: $COMPOSE"
 
 step "[3/8] git + make + openssl"
-pkg_install git make openssl >/dev/null 2>&1 || true
+pkg_install git make openssl cron >/dev/null 2>&1 || true
 
 step "[4/8] fetching the project"
 mkdir -p "$APP_DIR"
@@ -123,6 +123,24 @@ if [ -n "$DOMAIN" ]; then
 else
     step "[8/8] HTTP only"
     warn "no domain given — running on HTTP with a self-signed cert"
+fi
+
+step "certificate renewal"
+# certbot renew runs twice a day, shortly after 03:00 and 15:00 UTC, with up to
+# an hour of jitter so a fleet of installs does not hit Let's Encrypt together.
+# The script is idempotent: certbot only renews certs within 30 days of expiry.
+chmod +x "$APP_DIR/scripts/renew-certs.sh" 2>/dev/null || true
+sudo systemctl enable --now cron >/dev/null 2>&1 \
+    || sudo systemctl enable --now crond >/dev/null 2>&1 || true
+CRON_FILE=/etc/cron.d/aaa-tracker-certrenew
+CRON_LINE="17 3,15 * * * root sleep \$((RANDOM \\% 3600)); $APP_DIR/scripts/renew-certs.sh >> /var/log/aaa-tracker-certrenew.log 2>&1"
+if [ ! -f "$CRON_FILE" ] || ! grep -qF "$APP_DIR/scripts/renew-certs.sh" "$CRON_FILE"; then
+    printf 'SHELL=/bin/bash\n# Managed by AAA Tracker setup.sh - renew TLS certificates twice daily (with jitter).\n%s\n' "$CRON_LINE" \
+        | sudo tee "$CRON_FILE" >/dev/null
+    sudo chmod 644 "$CRON_FILE"
+    ok "renewal cron installed ($CRON_FILE)"
+else
+    ok "renewal cron already current"
 fi
 
 printf '\n  %s%slogin%s       admin password + API token were generated at install and printed once\n' "$B" "$R" ""

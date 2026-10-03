@@ -10606,6 +10606,48 @@ print("ESCAPED-OK")
           and "open_basedir" in open(_phpconf, encoding="utf-8").read(),
           "php hardening config missing")
 
+    # ===== P1 operational hardening =====
+    # P1.1 — one worker runs the loops (advisory-lock leader election).
+    check("ops: loop leader election shipped",
+          os.path.exists("backend/leader.py")
+          and "pg_try_advisory_lock" in open("backend/leader.py", encoding="utf-8").read(),
+          "leader module missing")
+    # P1.3 — metrics endpoint exists and is admin-gated.
+    _rm = requests.get(f"{api}/metrics", verify=not INSECURE)
+    check("ops: /api/metrics requires auth", _rm.status_code == 401, str(_rm.status_code))
+    _rm = s.get(f"{api}/metrics")
+    check("ops: /api/metrics renders for an admin",
+          _rm.status_code == 200 and "aaa_up" in _rm.text, _rm.text[:120])
+    # P1.9 — no user-enumeration oracle: the wrong-password and unknown-user
+    # branches share one message.
+    _ru = requests.post(f"{api}/login", verify=not INSECURE,
+                        json={"username": f"nouser-{os.getpid()}", "password": "x"})
+    check("ops: login does not reveal whether a user exists",
+          _ru.status_code == 401 and (_ru.json() or {}).get("detail") == "Invalid credentials",
+          _ru.text[:120])
+    check("ops: the enumeration-branch message is gone",
+          "Invalid credentials 2" not in open("backend/auth.py", encoding="utf-8").read(),
+          "enumeration message still present")
+    # P1.10 — edge security headers.
+    _rh = requests.get(f"{BASE}/", verify=not INSECURE, allow_redirects=False)
+    _hl = {k.lower(): v for k, v in _rh.headers.items()}
+    check("ops: HSTS + anti-clickjacking headers present",
+          "strict-transport-security" in _hl and "x-frame-options" in _hl,
+          str(sorted(_hl.keys()))[:160])
+    # P1.6 — CDN assets pinned with SRI, runtime minifier gone.
+    _idx = open("backend/themes/default/index.html", encoding="utf-8").read()
+    _cdn = [ln for ln in _idx.splitlines() if "cdn.jsdelivr.net" in ln]
+    check("ops: every CDN asset is pinned with SRI",
+          bool(_cdn) and all("integrity=" in ln for ln in _cdn)
+          and "apexcharts\"" not in _idx,
+          f"{len(_cdn)} cdn lines")
+    check("ops: runtime minifier removed",
+          "terser" not in _idx.lower(),
+          "terser still referenced")
+    # P1.12 — renewal automation shipped.
+    check("ops: certificate renewal script present",
+          os.path.exists("scripts/renew-certs.sh"), "renew-certs.sh missing")
+
     r = s.get(f"{api}/settings/")
     check("settings: document + rev returned",
           r.status_code == 200 and isinstance(r.json().get("settings"), dict)

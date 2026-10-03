@@ -50,6 +50,61 @@ ZIP_MAX_TOTAL_BYTES = 200 * 1024 * 1024     # 200 MB uncompressed total
 ZIP_MAX_RATIO = 100                          # uncompressed : compressed hard cap
 
 
+def _current_tenant(request) -> int:
+    """Workspace the admin session acts in (auth_sessions.current_tenant_id).
+    Landings belong to a workspace, so list/create are scoped to it. Falls back
+    to the primary workspace (1)."""
+    token = request.cookies.get("session_token") if request else None
+    if not token:
+        return 1
+    try:
+        from app import pg_connect
+        conn = pg_connect(); cur = conn.cursor()
+        cur.execute("SELECT current_tenant_id FROM auth_sessions WHERE token = %s", (token,))
+        row = cur.fetchone(); conn.close()
+        return int(row[0]) if row and row[0] is not None else 1
+    except Exception:
+        return 1
+
+
+def _scoped_landing(db: Session, landing_id: int, request) -> Landing:
+    """Fetch a landing by id, scoped to the caller's workspace.
+
+    Returns 404 (not 403) for a landing that belongs to another workspace so the
+    id's existence is never revealed to a tenant that does not own it."""
+    landing = db.query(Landing).filter(Landing.id == landing_id).first()
+    if not landing or landing.tenant_id != _current_tenant(request):
+        raise HTTPException(status_code=404, detail="Landing not found")
+    return landing
+
+
+def _landing_integrity_error(e: IntegrityError) -> HTTPException:
+    """Map a landings unique violation to the same 400 'already exists'
+    semantics across deployments.
+
+    The DB uniques are composite per workspace — ``(tenant_id, folder)`` and
+    ``(tenant_id, name)`` — so the constraint names are
+    ``landings_tenant_folder_key`` / ``landings_tenant_name_key`` on current
+    schemas, while older single-tenant schemas used ``landings_folder_key`` /
+    ``landings_name_key``. Match either, and fall back to the generic unique
+    violation (SQLSTATE 23505) so a renamed constraint still reads as a
+    user-facing conflict rather than a 500."""
+    msg = str(getattr(e, "orig", e))
+    if 'landings_tenant_folder_key' in msg or 'landings_folder_key' in msg:
+        return HTTPException(status_code=400,
+                             detail="A landing with this folder already exists.")
+    if 'landings_tenant_name_key' in msg or 'landings_name_key' in msg:
+        return HTTPException(status_code=400,
+                             detail="A landing with this name already exists.")
+    pgcode = getattr(getattr(e, "orig", None), "pgcode", None)
+    if pgcode == "23505" or 'duplicate key value' in msg or 'unique constraint' in msg:
+        return HTTPException(
+            status_code=400,
+            detail="A landing with this folder or name already exists.")
+    return HTTPException(status_code=500, detail="Database error: " + msg)
+
+
+
 # ─── G73 — lander grabber ──────────────────────────────────────────
 FOLDER_NAME_RE = re.compile(r"^[a-z0-9_]{1,250}$")
 GRAB_MAX_BYTES = 3 * 1024 * 1024          # 3 MB page cap
@@ -229,6 +284,7 @@ class _AssetRewriter(HTMLParser):
 
 @router.post("/landing/grab")
 def grab_landing(
+        request: Request,
         url: str = Form(...),
         folder: str = Form(...),
         allow_private: bool = Form(False),
@@ -309,7 +365,8 @@ def grab_landing(
         name=title,
         link=url[:255],
         type='local_file',
-        created_at=datetime.utcnow()
+        created_at=datetime.utcnow(),
+        tenant_id=_current_tenant(request)
     )
     db.add(landing)
     try:
@@ -318,13 +375,7 @@ def grab_landing(
     except IntegrityError as e:
         db.rollback()
         shutil.rmtree(folder_path, ignore_errors=True)
-        if 'landings_folder_key' in str(e.orig):
-            raise HTTPException(status_code=400,
-                                detail="A landing with this folder already exists.")
-        if 'landings_name_key' in str(e.orig):
-            raise HTTPException(status_code=400,
-                                detail="A landing with this name already exists.")
-        raise HTTPException(status_code=500, detail="Database error: " + str(e.orig))
+        raise _landing_integrity_error(e)
 
     return {
         "status": "ok",
@@ -403,6 +454,7 @@ def save_uploaded_file(file: UploadFile, folder_path: str):
 
 @router.post("/landing")
 async def upload_landing(
+        request: Request,
         name: str = Form(...),
         site_folder: str = Form(...),
         type: int = Form(...),  # now an int
@@ -444,7 +496,8 @@ async def upload_landing(
         link=link.strip()[:255] if link and link.strip() else None,
         type=landing_type,
         tags=tags[:250] if tags else None,
-        created_at=datetime.utcnow()
+        created_at=datetime.utcnow(),
+        tenant_id=_current_tenant(request)
     )
     db.add(landing)
 
@@ -453,21 +506,7 @@ async def upload_landing(
         db.refresh(landing)
     except IntegrityError as e:
         db.rollback()
-
-        if 'landings_folder_key' in str(e.orig):
-            raise HTTPException(
-                status_code=400,
-                detail="A landing with this folder already exists."
-            )
-        if 'landings_name_key' in str(e.orig):
-            raise HTTPException(
-                status_code=400,
-                detail="A landing with this name already exists."
-            )
-        raise HTTPException(
-            status_code=500,
-            detail="Database error: " + str(e.orig)
-        )
+        raise _landing_integrity_error(e)
 
     return {
         "status": "ok",
@@ -477,8 +516,11 @@ async def upload_landing(
     }
 
 
-def get_landing_metrics(ch) -> dict:
-    """Real per-landing metrics from ClickHouse, keyed by landing id (str)."""
+def get_landing_metrics(ch, tenant_id: int = 1) -> dict:
+    """Real per-landing metrics from ClickHouse, keyed by landing id (str).
+
+    Scoped to one workspace: clicks_data carries tenant_id, and an unfiltered
+    aggregate would add every tenant's numbers onto this tenant's landings."""
     metrics = {}
     try:
         result = ch.query("""
@@ -489,8 +531,9 @@ def get_landing_metrics(ch) -> dict:
                 sumOrNull(toFloat64(cost)) AS cost,
                 sumOrNull(toFloat64(revenue)) AS revenue
             FROM clicks_data
+            WHERE tenant_id = %(tid)s
             GROUP BY landing_key
-        """)
+        """, parameters={"tid": int(tenant_id)})
         for key, clicks, conversions, cost, revenue in result.result_rows:
             cost = float(cost or 0)
             revenue = float(revenue or 0)
@@ -507,8 +550,9 @@ def get_landing_metrics(ch) -> dict:
 
 
 @router.get("/landings")
-def list_landings(db: Session = Depends(get_db)):
-    landings = db.query(Landing).all()
+def list_landings(request: Request, db: Session = Depends(get_db)):
+    tenant = _current_tenant(request)
+    landings = db.query(Landing).filter(Landing.tenant_id == tenant).all()
     metrics = {}
     try:
         from clickhouse_connect import get_client  # same container as the tracking plane
@@ -520,7 +564,7 @@ def list_landings(db: Session = Depends(get_db)):
             database=os.environ.get("CLICKHOUSE_DB", "default")
         )
         try:
-            metrics = get_landing_metrics(ch)
+            metrics = get_landing_metrics(ch, tenant)
         finally:
             ch.close()
     except Exception as e:
@@ -541,10 +585,8 @@ def list_landings(db: Session = Depends(get_db)):
 
 
 @router.get("/landing/{landing_id}")
-def get_landing(landing_id: int, db: Session = Depends(get_db)):
-    landing = db.query(Landing).filter(Landing.id == landing_id).first()
-    if not landing:
-        raise HTTPException(status_code=404, detail="Landing not found")
+def get_landing(landing_id: int, request: Request, db: Session = Depends(get_db)):
+    landing = _scoped_landing(db, landing_id, request)
     return {
         "id": landing.id,
         "folder": landing.folder,
@@ -559,6 +601,7 @@ def get_landing(landing_id: int, db: Session = Depends(get_db)):
 @router.put("/landing/{landing_id}")
 async def update_landing(
         landing_id: int,
+        request: Request,
         name: Optional[str] = Form(None),
         site_folder: Optional[str] = Form(None),
         tags: Optional[str] = Form(None),
@@ -569,9 +612,7 @@ async def update_landing(
 ):
     type_mapping = {0: 'link', 1: 'mirror', 2: 'local_file'}
 
-    landing = db.query(Landing).filter(Landing.id == landing_id).first()
-    if not landing:
-        raise HTTPException(status_code=404, detail="Landing not found")
+    landing = _scoped_landing(db, landing_id, request)
 
     if name:
         landing.name = name[:255]
@@ -616,21 +657,7 @@ async def update_landing(
         db.refresh(landing)
     except IntegrityError as e:
         db.rollback()
-
-        if 'landings_folder_key' in str(e.orig):
-            raise HTTPException(
-                status_code=400,
-                detail="A landing with this folder already exists."
-            )
-        if 'landings_name_key' in str(e.orig):
-            raise HTTPException(
-                status_code=400,
-                detail="A landing with this name already exists."
-            )
-        raise HTTPException(
-            status_code=500,
-            detail="Database error: " + str(e.orig)
-        )
+        raise _landing_integrity_error(e)
 
     return {
         "status": "updated",
@@ -645,10 +672,8 @@ async def update_landing(
 
 
 @router.delete("/landing/{landing_id}")
-def delete_landing(landing_id: int, db: Session = Depends(get_db)):
-    landing = db.query(Landing).filter(Landing.id == landing_id).first()
-    if not landing:
-        raise HTTPException(status_code=404, detail="Landing not found")
+def delete_landing(landing_id: int, request: Request, db: Session = Depends(get_db)):
+    landing = _scoped_landing(db, landing_id, request)
 
     folder_path = landing_path(landing.folder)
     # Landing.type is a LandingMood enum — compare the value, not the member
@@ -664,9 +689,9 @@ def delete_landing(landing_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted", "id": landing_id}
 
 
-def get_landing_folder(db: Session, landing_id: int) -> str:
-    landing = db.query(Landing).filter(Landing.id == landing_id).first()
-    if not landing or not landing.folder:
+def get_landing_folder(db: Session, landing_id: int, request: Request) -> str:
+    landing = _scoped_landing(db, landing_id, request)
+    if not landing.folder:
         raise HTTPException(status_code=404, detail="Landing folder not found")
 
     base_dir = "/app/landings"
@@ -705,8 +730,8 @@ def build_tree(base: Path, current: Path):
 
 
 @router.get("/landings_editor/{landing_id}/tree")
-def get_file_tree(landing_id: int, db: Session = Depends(get_db)):
-    base = Path(get_landing_folder(db, landing_id))
+def get_file_tree(landing_id: int, request: Request, db: Session = Depends(get_db)):
+    base = Path(get_landing_folder(db, landing_id, request))
     if not base.exists():
         raise HTTPException(404, "Landing folder not found")
 
@@ -715,8 +740,8 @@ def get_file_tree(landing_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/landings_editor/{landing_id}/files")
-def list_all_files(landing_id: int, db: Session = Depends(get_db)):
-    base = Path(get_landing_folder(db, landing_id))
+def list_all_files(landing_id: int, request: Request, db: Session = Depends(get_db)):
+    base = Path(get_landing_folder(db, landing_id, request))
     tree = {
         "name": base.name,
         "path": "",
@@ -728,8 +753,8 @@ def list_all_files(landing_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/landings_editor/{landing_id}/file")
-def get_file(landing_id: int, filename: str, db: Session = Depends(get_db)):
-    base = Path(get_landing_folder(db, landing_id))
+def get_file(landing_id: int, filename: str, request: Request, db: Session = Depends(get_db)):
+    base = Path(get_landing_folder(db, landing_id, request))
     safe_rel_path = Path(filename).as_posix().lstrip("/")
     full_path = base.joinpath(safe_rel_path).resolve()
 
@@ -749,8 +774,8 @@ class FileSaveRequest(BaseModel):
 
 
 @router.post("/landings_editor/{landing_id}/file")
-def save_file(landing_id: int, payload: FileSaveRequest, db: Session = Depends(get_db)):
-    base = Path(get_landing_folder(db, landing_id))
+def save_file(landing_id: int, payload: FileSaveRequest, request: Request, db: Session = Depends(get_db)):
+    base = Path(get_landing_folder(db, landing_id, request))
     safe_rel_path = Path(payload.filename).as_posix().lstrip("/")
 
     full_path = base.joinpath(safe_rel_path).resolve()
@@ -772,11 +797,12 @@ def save_file(landing_id: int, payload: FileSaveRequest, db: Session = Depends(g
 @router.post("/landings_editor/{landing_id}/upload")
 def upload_file(
     landing_id: int,
+    request: Request,
     path: str = Query(..., description="Relative path to save file (e.g. subdir/image.png)"),
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    base = Path(get_landing_folder(db, landing_id))
+    base = Path(get_landing_folder(db, landing_id, request))
     relative_path = Path(path).as_posix().lstrip("/")
     save_path = base.joinpath(relative_path).resolve()
 
@@ -801,11 +827,12 @@ def upload_file(
 @router.post("/landings_editor/{landing_id}/file-plain")
 def save_file_plain(
     landing_id: int,
+    request: Request,
     filename: str = Form(...),
     content: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    base = Path(get_landing_folder(db, landing_id))
+    base = Path(get_landing_folder(db, landing_id, request))
     safe_rel_path = Path(filename).as_posix().lstrip("/")
     full_path = base.joinpath(safe_rel_path).resolve()
 

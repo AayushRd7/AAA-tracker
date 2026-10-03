@@ -19,3 +19,4 @@ class Landing(Base):
     type = Column(Enum(LandingMood), nullable=False)
     tags = Column(String(255), nullable=True)
     created_at = Column(DateTime)
+    tenant_id = Column(Integer, nullable=False, default=1)

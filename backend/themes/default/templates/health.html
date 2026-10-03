@@ -28,7 +28,7 @@
             <ul v-if="attention.length" class="mt-3 health-attention">
                 <li v-for="(a, i) in attention" :key="i">{{ a }}</li>
             </ul>
-            <div v-else class="caption grey--text mt-2">
+            <div v-else-if="!incidentRows.length" class="caption grey--text mt-2">
                 No problems detected from the backend's vantage point.
             </div>
         </v-card>
@@ -236,6 +236,12 @@
                 const c = (this.report && this.report.incident_counts) || {};
                 return {critical: c.critical || 0, warning: c.warning || 0, info: c.info || 0};
             },
+            // The verdict banner must agree with the incident console below it:
+            // any recorded incident (not just the server's coarse verdict)
+            // means this is not "all clear".
+            hasProblems() {
+                return this.attention.length > 0 || this.incidentRows.length > 0;
+            },
             incidentGroups() {
                 const labels = {critical: 'Critical', warning: 'Warning', info: 'Info'};
                 return ['critical', 'warning', 'info'].map(severity => ({
@@ -246,15 +252,15 @@
             },
             verdictColor() {
                 if (!this.report) return 'grey';
-                return this.report.verdict === 'attention' ? 'warning' : 'success';
+                return (this.report.verdict === 'attention' || this.hasProblems) ? 'warning' : 'success';
             },
             verdictIcon() {
                 if (!this.report) return 'mdi-heart-pulse';
-                return this.report.verdict === 'attention' ? 'mdi-alert-circle-outline' : 'mdi-check-circle-outline';
+                return (this.report.verdict === 'attention' || this.hasProblems) ? 'mdi-alert-circle-outline' : 'mdi-check-circle-outline';
             },
             verdictHeadline() {
                 if (!this.report) return 'Reading the backend…';
-                return this.report.verdict === 'attention'
+                return (this.report.verdict === 'attention' || this.hasProblems)
                     ? 'Attention needed'
                     : 'All clear';
             },

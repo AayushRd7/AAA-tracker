@@ -41,7 +41,7 @@ for path in "${PATHS[@]}"; do
   # A 404 is fine (route exists but the request is incomplete); what must never
   # happen is the marketing site's own pages being returned.
   if grep -q '<!doctype html>' /tmp/_route_body 2>/dev/null \
-     && grep -qi 'aaa tracer' /tmp/_route_body 2>/dev/null \
+     && grep -qi 'aaa tracker' /tmp/_route_body 2>/dev/null \
      && [[ "$body" == "404" ]]; then
     echo "  FAIL  $path -> $body (served the marketing site)"
     fail=1

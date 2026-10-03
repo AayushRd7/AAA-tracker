@@ -12,25 +12,23 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet" integrity="sha384-scpQJqXbp/4O66QYGm9hiZWcHYBwPwFE/4BPPc63T0ziKqrQVOIwWnSsEIjNuH3e" crossorigin="anonymous">
 
     <!-- Vuetify CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/vuetify@2.7.2/dist/vuetify.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@2.7.2/dist/vuetify.min.css" rel="stylesheet" integrity="sha384-ONH1CWjvIRdf5RdKuI73tonuNYnQBvnjoICVWq7GygDHHhZHceaa6hKrBUTgVhMa" crossorigin="anonymous">
 
-    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.css" integrity="sha384-GSJP6bR4yv1SbLGhL+ntxb4LDi6RC5j8eM8OAh5lwPYdvj9cflIWJiFZdAFr2gyP" crossorigin="anonymous">
 
     <!-- Vue 2 -->
-    <script src="https://cdn.jsdelivr.net/npm/vue@2.7.16/dist/vue.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.7.16/dist/vue.min.js" integrity="sha384-YVYXhPGIH/Gmcr0W5Rin4PcpcsG1a4pcdUUod1CnbDEJut7XiUaJtSlNKeRLJBPk" crossorigin="anonymous"></script>
 
     <!-- Vuetify JS -->
-    <script src="https://cdn.jsdelivr.net/npm/vuetify@2.7.2/dist/vuetify.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vuetify@2.7.2/dist/vuetify.min.js" integrity="sha384-v0DsREYE0kGmcPxTCJtQiuwcLtbFAnY9O1i41mEGm0IfAqjo0U82MJTz9hRzllOJ" crossorigin="anonymous"></script>
 
-    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.js" integrity="sha384-HV48j9xMNfX80v1dhiML90VeD4a38xrehnBK+dNSSe8P4fija/zP36u52q7TpB6O" crossorigin="anonymous"></script>
     <!-- ApexCharts -->
-    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
-    <script src="https://cdn.jsdelivr.net/npm/vue-apexcharts"></script>
-
-    <script src="https://cdn.jsdelivr.net/npm/terser@5.30.2/dist/bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js" integrity="sha384-6foQBJHuUSRZT7FlYD0AkFDsYH7bowmqBulLZUb8S1qBoEItSgOaXiGkxDn9kSLP" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue-apexcharts@1.6.2/dist/vue-apexcharts.min.js" integrity="sha384-qnL07gjeOh/gT8wuQ5lLlhnunZVX/sbfDVsiDH4wWB0/b+VZ0h459IwxDYKHTTMM" crossorigin="anonymous"></script>
 
     <link href="/backend/backend/css/style.css?v=26" rel="stylesheet">
 
@@ -53,16 +51,6 @@
 </head>
 <body>
 {% raw %}
-    <script type="application/javascript">
-        async function minifyScript(code) {
-              const result = await Terser.minify(code, {
-                compress: true,
-                mangle: true,
-              });
-              return result.code;
-            }
-    </script>
-
 <div id="overlay">
   <div class="spinner"></div>
     <div class="overlay_message" id="overlay_message">Loading...</div>
@@ -903,9 +891,22 @@
             if (!initial || !this.canReadSection(initial)) {
                 this.activeSection = 'dashboard';
             }
-            // A bare /backend/dashboard URL restores the last visited section;
-            // a section-specific URL (/backend/campaigns) already set it via Jinja.
-            if (window.location.pathname.replace(/\/+$/, '') === '/backend/dashboard') {
+            // A deep link wins over the remembered section: an explicit path
+            // (/backend/campaigns) or an in-page anchor (#users) is what the
+            // user asked for. Only the bare shell entry restores the last
+            // visited section, so /backend/dashboard bookmarks no longer land
+            // on whatever section happened to be open last.
+            const pathKey = window.location.pathname
+                .replace(/^\/backend\/?/, '').replace(/\/+$/, '');
+            const hashKey = (window.location.hash || '')
+                .replace(/^#\/?/, '').replace(/\/+$/, '');
+            const explicitKey = [hashKey, pathKey].find(
+                key => key && key !== 'index.html' && this.navItems.some(i => i.key === key));
+            const shellEntry = window.location.pathname.replace(/\/+$/, '');
+            if (explicitKey) {
+                const item = this.navItems.find(i => i.key === explicitKey);
+                this.activeSection = (item && this.canReadSection(item)) ? explicitKey : 'dashboard';
+            } else if (shellEntry === '/backend' || shellEntry === '/backend/index.html') {
                 let saved = localStorage.getItem('dashboard_tab');
                 if (saved === 'about') { saved = 'documentation'; }
                 if (saved != null && saved !== '') {

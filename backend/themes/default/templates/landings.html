@@ -152,13 +152,13 @@
                             {{ $formatDate(item.created_at) }}
                         </template>
                         <template v-slot:item.folder="{ item }">
-                            <a v-if="item.folder" :href="'/l/' + item.folder" target="_blank">
+                            <a v-if="item.folder" :href="'/l/' + item.folder" target="_blank" rel="noopener">
                                 {{ item.folder }}
                             </a>
                         </template>
                         <template v-slot:item.link="{ item }">
 
-                            <a v-if="item.link" :href="item.link" target="_blank">
+                            <a v-if="item.link" :href="item.link" target="_blank" rel="noopener">
                                 {{ item.link }}
                             </a>
                         </template>
@@ -173,7 +173,7 @@
                             </v-tooltip>
                             <v-tooltip bottom v-if="item.type === 'local_file'">
                                 <template v-slot:activator="{ on, attrs }">
-                                    <a :href="'/backend/editor?landing='+item.id" target="_blank">
+                                    <a :href="'/backend/editor?landing='+item.id" target="_blank" rel="noopener">
                                         <v-btn icon small color="info" v-bind="attrs" v-on="on">
                                             <v-icon small>mdi-code-tags</v-icon>
                                         </v-btn>

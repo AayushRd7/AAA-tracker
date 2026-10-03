@@ -14,10 +14,30 @@ Priority legend
 Size: **S** ≈ ≤1 day · **M** ≈ 2–4 days · **L** ≈ 1–2 weeks · **XL** ≈ multi-week/multi-month.
 Refs point at `AUDIT-FINDINGS.md` sections and the real code locations.
 
-**P0 status (all shipped, 2026-10-02):** P0.1 P0.2 P0.3 P0.4 P0.5 P0.7 P0.8 **done and verified**;
-P0.6 is the **first slice only** (the cross-tenant membership hijack is closed and the
-operator namespace is reserved). The full users→tenant migration (per-tenant usernames,
-tenant-aware login, session re-key) remains open — see the P0.6 row.
+**P0 status (2026-10-03):** P0.1 P0.2 P0.3 P0.4 P0.5 P0.7 P0.8 **done and verified** (full suite
+1807 passed / 0 failed; deployed). P0.6 is the **first slice only** — the cross-tenant
+membership hijack is closed and the operator namespace is reserved, but the full
+users→tenant migration (per-tenant usernames, tenant-aware login, session re-key) is open.
+**P0.9** (landings list had no tenant filter) is now **done** — the list, the metrics
+aggregation and every id-based landing route are tenant-scoped.
+
+**P1 status (2026-10-03):** shipped and verified — P1.1 (advisory-lock loop leader), P1.2
+(backup/restore + key escrow + cron), P1.4 (opt-in image deploys + health-gated `rollout`/
+`rollback`), P1.5 (nightly CI suite + guard typo + pip-audit), P1.6 (pinned/minified assets
+with SRI, runtime Terser removed), P1.8 (truncation surfaced in the API), P1.10 (nginx
+security headers + edge rate limits), P1.11 (deps pinned, brand-string typo, `noopener`),
+P1.12 (cert renewal automation), P1.13 (health banner, deep-link). **Partial:** P1.3 ships
+`GET /api/metrics` (uptime, pool, loop lag, per-tenant usage) but durable counters +
+structured JSON logs remain; P1.9 fixed the login enumeration oracle, the `LIKE`-wildcard
+session revoke and the unbounded failure map, but token-at-rest hashing/scopes and the
+`JWT_SECRET` fallback remain. **Not started:** P1.7 (ClickHouse tenancy reshape) is an XL
+migration that changes every report query and needs a planned cutover.
+
+**P2 / P3 (not started — most need external input or are non-code):** billing/self-serve
+need Stripe keys and a pricing decision; the ad-platform loop needs Google/TikTok developer
+credentials; SOC 2 needs an auditor; the pilot needs real traffic; Vue 2→3 and the
+users→tenant migration are multi-week. No engineering blocker for the rest — say which to
+start.
 
 ---
 
@@ -33,6 +53,7 @@ tenant-aware login, session re-key) remains open — see the P0.6 row.
 | P0.6 | CRITICAL | **Make users tenant-scoped.** Usernames are install-global; a workspace admin can create global accounts and pull any global user into their workspace (cross-tenant escalation). | `models/user.py:11-12`; `app_pages/members.py:205-218`. §3.4, §10.2 | The deepest migration in the list: migrate `users`, `auth_sessions`, `api_tokens`, 2FA state, permissions and every `username → tenant` resolution (auth, members, invitations, audit, tracking plane). Split *platform operator* from *workspace owner* while in here. | XL | P0.2 |
 | P0.7 | HIGH | **Fix the broken-by-default prod nginx vhost.** Per-domain vhosts are silently ignored in prod; catch-all serves the wrong cert; cert issuance is circular. | `nginx/nginx.prod.conf:24,29-30` (missing `include /var/www/nginx/domains/*.conf;`, hardcoded cert path); `setup.sh:95-100`. §4 #8 | Add the domains include to prod; parameterise the cert path; make `make certificate` work with nginx up (self-signed bootstrap → real cert → reload). | S | — |
 | P0.8 | HIGH | **Stop `chmod -R 0777` on the whole app dir** (exposes `.env` and the TLS key); drop the `curl \| sudo sh` Docker install. | `setup.sh:84,41`. §4 #9 | Tighten to the specific dirs that need write (landings), keep `.env` and `ssl/` restricted. | S | — |
+| P0.9 | HIGH | **Tenant-filter the landings list.** `list_landings` does `db.query(Landing).all()` with no tenant filter and aggregates ClickHouse metrics, so one workspace sees every tenant's landings — a cross-tenant leak. Missed in the first P0 pass. | `frontend/landings.py` `list_landings`. §4 #7 | Filter by the caller's tenant (the table is per `(tenant_id, folder)`); scope the metric aggregation to the same ids. | S | — |
 
 ---
 

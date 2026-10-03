@@ -234,6 +234,9 @@ def get_conversions(request: Request, limit: int = 100, offset: Optional[int] = 
         meta = fx_rates.fx_meta(store)
         if meta:
             out["fx"] = meta
+        truncation = _attribution_truncation(request)
+        if truncation:
+            out.update(truncation)
         return out
     return items
 
@@ -276,8 +279,11 @@ def export_conversions(request: Request, db: Session = Depends(get_db)):
     for conv in rows:
         writer.writerow([_csv_safe(_conversion_export_value(conv, k, store))
                          for k in fields])
+    headers = {"Content-Disposition": "attachment; filename=conversions.csv"}
+    if _attribution_truncation(request):
+        headers["X-Attribution-Truncated"] = "true"
     return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=conversions.csv"})
+                    headers=headers)
 
 
 def _conversion_export_value(conv: "Conversion", key: str, store: Optional[dict]):
@@ -377,11 +383,17 @@ def _build_conversions_query(request: Request, db: Session):
                 )
             ids = [row[0] for row in res.result_rows if row and row[0]]
             if len(ids) > CONVERSION_CLICK_WINDOW_ID_CAP:
-                print(f"CONVERSIONS CLICK WINDOW CAPPED: click window "
-                      f"{date_from}..{date_to} has more than "
-                      f"{CONVERSION_CLICK_WINDOW_ID_CAP} visitor ids — "
-                      f"click_date attribution is truncated; narrow the date range")
+                warning = (f"Click window {date_from}..{date_to} has more than "
+                           f"{CONVERSION_CLICK_WINDOW_ID_CAP} visitor ids; "
+                           f"click_date attribution was truncated — narrow the "
+                           f"date range for exact numbers")
+                print(f"CONVERSIONS CLICK WINDOW CAPPED: {warning}")
                 ids = ids[:CONVERSION_CLICK_WINDOW_ID_CAP]
+                # Surface the truncation to the caller (flag on the list/summary
+                # payload, header on the CSV export) instead of returning
+                # silently-partial numbers.
+                request.state.attribution_truncated = True
+                request.state.attribution_warning = warning
             visitor_ids_in_window = set(ids)
         except Exception as e:
             # Never silently empty the list: log loudly and fall back to the
@@ -439,6 +451,20 @@ def _build_conversions_query(request: Request, db: Session):
             ))
 
     return query
+
+
+def _attribution_truncation(request: Request) -> Optional[dict]:
+    """Response fields describing a capped click_date visitor-id lookup.
+
+    ``_build_conversions_query`` sets the flag on ``request.state`` when the
+    ClickHouse id lookup hit CONVERSION_CLICK_WINDOW_ID_CAP; consumers merge
+    these fields so a client can distinguish exact from partial attribution.
+    Returns None on the normal (untruncated) path."""
+    if getattr(request.state, "attribution_truncated", False):
+        return {"truncated": True,
+                "warning": getattr(request.state, "attribution_warning",
+                                   "click_date attribution was truncated")}
+    return None
 
 
 @router.get("/funnel/{campaign_id}")
@@ -1097,6 +1123,9 @@ def conversions_summary(request: Request, db: Session = Depends(get_db)):
     # The reconciliation summary carries no hideable metric today, but the
     # strip keeps the guarantee uniform if a money column is added later.
     strip_hidden_metrics(result, request_hidden_metrics(request, db))
+    truncation = _attribution_truncation(request)
+    if truncation:
+        result.update(truncation)
     return result
 
 

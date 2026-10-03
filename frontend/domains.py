@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import PlainTextResponse
 
+import os
 import socket
 import subprocess
 from pathlib import Path
@@ -119,14 +120,20 @@ async def request_ssl_letsencrypt(domain: str) -> bool:
     try:
         email = f"admin@{domain}"
 
-        result = subprocess.run([
+        certbot_args = [
             "certbot", "certonly", "--webroot",
             "-w", "/var/www/certbot",  # webroot for the ACME challenge
             "-d", domain,
             "--agree-tos",
             "--email", email,
             "--non-interactive"
-        ], check=True)
+        ]
+        # Forward the staging flag so a DNS flake while testing uses the staging
+        # CA instead of burning production Let's Encrypt rate limits.
+        if os.environ.get("CERTBOT_STAGING", "").strip().lower() in ("1", "true", "yes", "on"):
+            certbot_args.append("--staging")
+
+        result = subprocess.run(certbot_args, check=True)
 
         cert_path = Path(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
 

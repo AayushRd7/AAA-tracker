@@ -610,7 +610,16 @@ async def startup():
         except Exception:
             pass
 
+    # Background loops run in ONE worker: with uvicorn --workers N, every other
+    # worker would otherwise run its own copy (double alerts/emails, and a
+    # concurrent optimizer read-modify-write). A Postgres advisory lock elects
+    # the leader; a worker that cannot take it skips the loops entirely and a
+    # restarted worker takes over when the leader's connection drops.
     import asyncio
+    import leader
+    if not leader.acquire("background_loops"):
+        print("Background loops: another worker holds the leader lock — skipping here.")
+        return
     from email_reports import email_report_loop
     asyncio.create_task(email_report_loop())
     # G69 + G70 — monitoring and auto-rules loops (15 min each, staggered)
@@ -780,6 +789,10 @@ app.include_router(search_router, prefix="/api/search", tags=["Search"],
 # G78: system status — admin-only section, like audit/monitoring.
 from app_pages.status import router as status_router
 app.include_router(status_router, prefix="/api/status", tags=["Status"],
+                   dependencies=[Depends(require_section("settings"))])
+# Prometheus metrics — same admin plane (uptime, pool, loop lag, per-tenant use).
+from app_pages.metrics import router as metrics_router
+app.include_router(metrics_router, prefix="/api/metrics", tags=["Metrics"],
                    dependencies=[Depends(require_section("settings"))])
 # Health centre — a richer, self-contained read for the in-app health page
 # (row counts, loop heartbeats incl. insights, uptime, recent send failures).

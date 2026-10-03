@@ -1,0 +1,46 @@
+# Opt-in image-based production profile — run built images with NO source bind
+# mounts. Use it explicitly; the default `make update` / compose invocation is
+# unchanged and still runs bind-mounted source.
+#
+#   docker compose --compatibility \
+#     -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml up -d
+#
+# or, origin of the health-gated path:
+#
+#   make rollout      # build + recreate backend, then frontend, health-gated
+#   make rollback     # retag + recreate from the images saved before the rollout
+#
+# Only the two app services carry their source as a bind mount, so only they
+# need an override. The cert/domain/config mounts they also use (frontend issues
+# certs, backend reads the letsencrypt + nginx-domain layout) are kept.
+#
+# Volume merge note: Compose's `!reset []` clears the whole list, which would
+# also drop those required cert/config mounts, so `!override` is used instead to
+# replace the base list with exactly what the image-based services need. Both
+# tags require a recent Compose (2.24+ for `!reset`, 2.30+ for `!override`); the
+# version pinned in this deployment supports both. `docker compose config` is
+# the quick check — it fails to parse on an older Compose.
+services:
+  backend:
+    volumes: !override
+      - ./certbot-var:/var/www/certbot
+      - ./letsencrypt:/etc/letsencrypt
+      - ./nginx:/var/www/nginx
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  frontend:
+    volumes: !override
+      - ./certbot-var:/var/www/certbot
+      - ./letsencrypt:/etc/letsencrypt
+      - ./nginx:/var/www/nginx
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/t.js', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+      start_period: 20s

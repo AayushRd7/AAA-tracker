@@ -1866,7 +1866,7 @@
                         </template>
 
                         <template v-slot:item.link="{ item }">
-                            <a :href="'https://' + domainsMap[item.domain_id] + '/' + item.alias" target="_blank">https://{{ domainsMap[item.domain_id] }}/{{ item.alias }}</a>
+                            <a :href="'https://' + domainsMap[item.domain_id] + '/' + item.alias" target="_blank" rel="noopener">https://{{ domainsMap[item.domain_id] }}/{{ item.alias }}</a>
                         </template>
 
                         <template v-slot:item.status="{ item }">
@@ -2685,7 +2685,7 @@
             simColor(idx) {
                 return this.simPalette[parseInt(idx, 10) % this.simPalette.length];
             },
-            loadSettings() { // todo: make it global
+            loadSettings() {
                 // Reset the postback-rules gate: Save is disabled until the
                 // settings document loads, so a failed load cannot publish [].
                 this.postbackRulesLoaded = false;
@@ -3158,8 +3158,7 @@
                                 }
                               };
                             })();`
-                        let result_script = await minifyScript(raw_script_result);
-                        this.trackingScript = `<script async>` + result_script + `<\/script>`;
+                        this.trackingScript = `<script async>` + raw_script_result + `<\/script>`;
                         break;
                     case 'php':
                         this.trackingScript = `<?php include('https://cdn.example.com/tracking.php'); ?>`;

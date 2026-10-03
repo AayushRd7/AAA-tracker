@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The live API suite (~1,800 checks, ~14 min) is too long for every push, so it
+  # runs nightly and on demand instead of on push.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 jobs:
   compile:
@@ -141,13 +146,77 @@ jobs:
         # A typo here stops every run from starting, and no job reports it.
         run: make check-ci
 
-      # Live smoke tests need the full stack running — run them locally or
-      # against your dev server:
-      #   TEST_BASE_URL=https://localhost TEST_INSECURE=1 TEST_USER=... TEST_PASS=... \
-      #   python backend/tests/api_smoke.py
+      - name: Dependency vulnerability scan (pip-audit)
+        # NON-BLOCKING on purpose: the current pins already carry advisories
+        # (cryptography 44.0.0, and ecdsa pulled in by python-jose), and clearing
+        # them means bumping backend/requirements.txt — a separate change. Keeping
+        # this informational avoids red-lining every push while still surfacing the
+        # report; tighten it to blocking once the pins are raised. Image scanning
+        # (trivy) is a worthwhile follow-up, but it needs a built image and a CVE DB
+        # on the runner; auditing the requirement pins covers Python dependencies.
+        continue-on-error: true
+        run: |
+          python -m pip install --quiet pip-audit
+          pip-audit -r backend/requirements.txt -r backend/install/requirements.txt
+
+  api-smoke:
+    name: Live API suite (nightly)
+    # Push/PR runs are covered by the compile+guard and fresh-install jobs; this
+    # suite takes ~14 minutes, so it only runs on the nightly schedule and when
+    # triggered by hand.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android 2>/dev/null || true
+          docker image prune -af >/dev/null 2>&1 || true
+
+      - name: Install the whole stack from empty volumes
+        run: make install
+
+      - name: Host dependencies for the suite
+        # api_smoke.py runs on the runner (not in a container): it needs requests
+        # for HTTP and pyotp for the 2FA checks. Everything else is stdlib.
+        run: python3 -m pip install --quiet requests pyotp
+
+      - name: Live API smoke suite
+        # `make install` generates the admin password (and the ClickHouse password)
+        # into .env. Read them back rather than sourcing the whole file: values like
+        # EMAIL_FROM_NAME="AAA Tracker" contain an unquoted space, which a literal
+        # `source .env` would try to execute as a command under `bash -e`.
+        run: |
+          set -u
+          TEST_PASS="$(grep -E '^AAA_ADMIN_PASSWORD=' .env | cut -d= -f2-)"
+          TEST_CH_USER="$(grep -E '^CLICKHOUSE_USER=' .env | cut -d= -f2- || true)"
+          TEST_CH_PASS="$(grep -E '^CLICKHOUSE_PASSWORD=' .env | cut -d= -f2-)"
+          : "${TEST_CH_USER:=user}"
+          test -n "$TEST_PASS" || { echo "AAA_ADMIN_PASSWORD missing from .env"; exit 1; }
+          TEST_BASE_URL=https://localhost TEST_INSECURE=1 \
+          TEST_USER=tracker_admin TEST_PASS="$TEST_PASS" \
+          TEST_CH_USER="$TEST_CH_USER" TEST_CH_PASS="$TEST_CH_PASS" \
+          python3 backend/tests/api_smoke.py
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down --volumes --remove-orphans || true
 
   fresh-install:
     name: Fresh install end-to-end (empty volumes)
+    # Skipped on the nightly schedule: the api-smoke job installs from empty
+    # volumes too, so its run already covers this ground.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
