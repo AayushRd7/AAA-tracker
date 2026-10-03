@@ -119,6 +119,42 @@
     document.querySelectorAll('.meter__fill[data-meter]').forEach(fillMeter);
   }
 
+  /* ---- hero demo video ----
+     Nineteen seconds of muted footage on a loop. It must not start for anyone
+     who has asked for reduced motion, and it needs a working pause control:
+     WCAG 2.2.2 covers motion that begins on its own and runs past five seconds,
+     and a muted autoplay video shows no browser controls to stop it. */
+  document.querySelectorAll('[data-demo-video]').forEach(function (v) {
+    var wrap = v.closest('.hero-demo');
+    var btn = wrap && wrap.querySelector('[data-demo-toggle]');
+
+    if (reduced) {
+      v.removeAttribute('autoplay');
+      v.pause();
+    } else if (v.paused) {
+      var started = v.play();
+      // Autoplay can still be refused; the poster then just stays put.
+      if (started && started.catch) started.catch(function () {});
+    }
+
+    if (!btn) return;
+    var sync = function () {
+      var playing = !v.paused && !v.ended;
+      btn.setAttribute('aria-pressed', playing ? 'false' : 'true');
+      btn.setAttribute('aria-label', playing ? 'Pause the demo video' : 'Play the demo video');
+    };
+    btn.addEventListener('click', function () {
+      if (v.paused) {
+        var again = v.play();
+        if (again && again.catch) again.catch(function () {});
+      } else {
+        v.pause();
+      }
+    });
+    ['play', 'pause', 'ended'].forEach(function (ev) { v.addEventListener(ev, sync); });
+    sync();
+  });
+
   /* ---- tabs ---- */
   document.querySelectorAll('[data-tabs]').forEach(function (root) {
     var btns = Array.prototype.slice.call(root.querySelectorAll('.tabs__btn'));

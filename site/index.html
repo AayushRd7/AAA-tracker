@@ -31,7 +31,7 @@
 <meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
 <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/fonts/fonts.css?v=2">
-<link rel="stylesheet" href="/assets/css/site.css?v=5">
+<link rel="stylesheet" href="/assets/css/site.css?v=7">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -172,93 +172,26 @@
       </p>
     </div>
 
-    <!-- product shot -->
-    <div class="shot reveal" role="img" aria-label="AAA Tracker campaign report showing clicks, conversions, revenue, cost, profit, ROI and CPA per campaign, with a fraud-risk column">
-      <div class="shot__bar">
-        <span class="shot__dots" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="shot__url">app.aaatracker.website/reports/campaigns</span>
-        <span class="shot__tag">Sample data</span>
+    <!-- hero demo — the product, moving, in place of the static report mockup.
+         The footage carries its own chrome, so it is not wrapped in `.shot`.
+         `role="img"` sits on the media wrapper, not the figure, so the pause
+         control inside stays reachable by assistive tech. -->
+    <figure class="hero-demo reveal">
+      <div class="hero-demo__media" role="img"
+           aria-label="AAA Tracker in use: a click is routed to an offer, the reports screen breaks performance down by dimension, a live click is scored for fraud, and the revenue and profit ledger closes.">
+        <video class="hero-demo__video" data-demo-video
+               poster="/assets/video/demo-poster.jpg"
+               width="1920" height="1080"
+               muted loop playsinline autoplay preload="metadata">
+          <source src="/assets/video/demo-16x9.mp4" type="video/mp4">
+        </video>
       </div>
-      <div class="shot__body">
-        <div class="app">
-          <aside class="app__side" aria-hidden="true">
-            <div class="app__who">
-              <svg class="mark" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8.6" fill="#1F4BF0"/><path d="M16 9 L8.8 24.2" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/><path d="M16 9 L23.2 24.2" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/><circle cx="16" cy="9" r="2.6" fill="#fff"/></svg>
-              <span><b>northbeam-co</b><span>Production</span></span>
-            </div>
-            <div class="app__navitem is-on">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V11M10 20V4M16 20v-6M22 20H2"/></svg>
-              Reports
-            </div>
-            <div class="app__navitem">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18"/></svg>
-              Campaigns
-            </div>
-            <div class="app__navitem">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M8.6 6H15a3.4 3.4 0 013.4 3.4v6.2"/></svg>
-              Flows
-            </div>
-            <div class="app__navitem">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7.5 9h9M7.5 13h6"/></svg>
-              Offers
-            </div>
-            <div class="app__navitem">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5h16v12H4z"/><path d="M8 21h8"/></svg>
-              Landers
-            </div>
-            <div class="app__navgroup">Data</div>
-            <div class="app__navitem">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v6c0 4.4-2.9 7.4-7 9-4.1-1.6-7-4.6-7-9V6z"/></svg>
-              Anti-fraud
-            </div>
-            <div class="app__navitem">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-              Logs
-            </div>
-            <div class="app__navitem">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M21 12h-2.5M5.5 12H3M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8M18.4 18.4l-1.8-1.8M7.4 7.4L5.6 5.6"/></svg>
-              Settings
-            </div>
-          </aside>
-          <div class="app__main">
-            <div class="app__top">
-              <span class="app__search">Search campaigns, offers, traffic sources…</span>
-              <span class="app__chip app__chip--on">Today</span>
-              <span class="app__chip">Group by: campaign</span>
-            </div>
-            <div class="app__filters">
-              <span class="app__chip app__chip--on">All sources</span>
-              <span class="app__chip">US · DE · UK</span>
-              <span class="app__chip">Non-bot</span>
-              <span class="app__chip">Fraud &lt; 40</span>
-            </div>
-            <div class="app__kpis">
-              <div class="app__kpi"><small>Clicks</small><b class="num">18,402</b></div>
-              <div class="app__kpi"><small>Conversions</small><b class="num">714</b></div>
-              <div class="app__kpi"><small>Revenue</small><b class="num">$42,351</b></div>
-              <div class="app__kpi"><small>Profit</small><b class="num">$14,810</b></div>
-            </div>
-            <div class="app__scroll">
-              <table class="app__table">
-                <thead>
-                  <tr><th>Campaign</th><th>Risk</th><th class="r">Revenue</th><th class="r">Cost</th><th class="r">Profit</th><th class="r">ROI</th><th class="r">CPA</th></tr>
-                </thead>
-                <tbody>
-                  <tr><td class="name">Meta — Weight Loss · Lookalike 2%</td><td><span class="risk">Safe</span></td><td class="r">$8,910.20</td><td class="r">$6,120.00</td><td class="r">$2,790.20</td><td class="r"><span class="delta delta--up">+45.6%</span></td><td class="r">$40.26</td></tr>
-                  <tr><td class="name">Google — Solar Quotes · Exact</td><td><span class="risk">Safe</span></td><td class="r">$7,340.60</td><td class="r">$4,980.00</td><td class="r">$2,360.60</td><td class="r"><span class="delta delta--up">+47.4%</span></td><td class="r">$42.20</td></tr>
-                  <tr><td class="name">TikTok — Skin Bundle · UGC v4</td><td><span class="risk risk--warn">Watch</span></td><td class="r">$7,118.30</td><td class="r">$4,380.00</td><td class="r">$2,738.30</td><td class="r"><span class="delta delta--up">+62.5%</span></td><td class="r">$36.95</td></tr>
-                  <tr><td class="name">Meta — Life Insurance · Retargeting</td><td><span class="risk">Safe</span></td><td class="r">$6,480.90</td><td class="r">$4,120.00</td><td class="r">$2,360.90</td><td class="r"><span class="delta delta--up">+57.3%</span></td><td class="r">$37.80</td></tr>
-                  <tr><td class="name">TikTok — Keto Gummies · Spark Ads</td><td><span class="risk">Safe</span></td><td class="r">$6,380.75</td><td class="r">$3,925.10</td><td class="r">$2,455.65</td><td class="r"><span class="delta delta--up">+62.6%</span></td><td class="r">$33.26</td></tr>
-                  <tr><td class="name">Taboola — Medicare Advantage · US</td><td><span class="risk">Safe</span></td><td class="r">$6,120.00</td><td class="r">$4,015.75</td><td class="r">$2,104.25</td><td class="r"><span class="delta delta--up">+52.4%</span></td><td class="r">$40.63</td></tr>
-                  <tr><td class="name">Meta — ACA Health · Retargeting</td><td><span class="risk risk--bad">Blocked</span></td><td class="r">$0.00</td><td class="r">$0.00</td><td class="r">$0.00</td><td class="r"><span class="delta">—</span></td><td class="r">—</td></tr>
-                  <tr class="lead-row"><td>Total · 714 conversions</td><td></td><td class="r">$42,350.75</td><td class="r">$27,540.85</td><td class="r">$14,809.90</td><td class="r">+53.8%</td><td class="r">$38.57</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+      <button class="hero-demo__toggle" type="button" data-demo-toggle
+              aria-label="Pause the demo video" aria-pressed="false">
+        <svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4.5" width="4" height="15" rx="1.3"/><rect x="14" y="4.5" width="4" height="15" rx="1.3"/></svg>
+        <svg class="ico-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.5 4.6 L18.5 12 L7.5 19.4 Z"/></svg>
+      </button>
+    </figure>
   </div>
 </section>
 
@@ -829,6 +762,6 @@
   </div>
 </footer>
 
-<script src="/assets/js/site.js" defer></script>
+<script src="/assets/js/site.js?v=1" defer></script>
 </body>
 </html>

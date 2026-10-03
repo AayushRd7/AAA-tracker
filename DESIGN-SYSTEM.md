@@ -141,10 +141,14 @@ figures; every number in a table or KPI uses it.
   `prefers-reduced-motion`.
 - **`.shot`** — the product frame: 1px border, `--r-xl`, `--sh-3`, browser chrome bar
   (`__bar` with red/amber/green dots, a mono URL, and a `Sample data` tag).
-- **`.app`** — the product itself rebuilt in markup: `.app__side` (workspace, nav),
-  `.app__top` (search + filters), `.app__filters`, `.app__kpis` (4-up), `.app__table`.
-  Rows carry `.risk`, `.delta--up/down`, and a `.lead-row` total. This is the single
-  strongest anti-generic device on the site — show the product, don't describe it.
+- **`.hero-demo`** — the product, moving. The hero plays a 19-second product film
+  (`site/assets/video/`, 1920×1080, ~2.4 MB, with a poster) where a static mockup used to
+  sit. It is deliberately **not** wrapped in `.shot`: the footage carries its own window
+  chrome and would be framed twice. It autoplays muted and looped, but **never** under
+  `prefers-reduced-motion`, and it ships an explicit pause control because WCAG 2.2.2
+  covers motion that starts on its own and runs past five seconds — a muted autoplay
+  video shows no browser controls to stop it. This is the single strongest anti-generic
+  device on the site — show the product, don't describe it.
 - **`.band`** — a tinted rounded panel. `--dark` (ink with cobalt/violet corner glow),
   `--blue` (cobalt with a white radial sheen), `--flush` (deeper padding). Never two
   dark bands in a row.
@@ -256,7 +260,7 @@ These are binding, not stylistic:
 
 1. **No fabricated social proof.** There are no testimonials, no customer logos and no
    star ratings on this site, because there are no customers to quote yet. The proof on
-   the page is product proof: the app mockup and the uptime card.
+   the page is product proof: the demo film and the uptime card.
    When real quotes exist, build the section — the space is designed for it.
 2. **Sample data is labelled.** Every mockup frame that shows invented numbers carries a
    `Sample data` tag in its chrome.
