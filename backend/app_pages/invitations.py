@@ -6,6 +6,13 @@ accept URL) and never stored: only its SHA-256 hash lives in
 ``tenant_invitations.token_hash``, so a database dump cannot be replayed as a
 credential and no list/lookup response can leak it.
 
+When the invitee has an email, creation also emails the accept link through the
+deployment's relay (best-effort: a missing relay or a failed send never fails
+the invitation — the response reports ``email_sent`` and the UI falls back to
+"copy the link"). The link opens the sign-in page, which resolves the token via
+the public ``GET /lookup`` and lets the invitee set a username/password before
+``POST /accept`` mints the account and membership.
+
 Rules enforced here (the server is the authority; the UI mirrors them):
 
 * creating, listing and revoking invitations needs **owner or admin in the
@@ -33,6 +40,7 @@ Still deliberately out of scope: billing, white-label branding and per-tenant
 user accounts (users stay install-global rows; only the membership is scoped).
 """
 import hashlib
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta
@@ -52,6 +60,7 @@ from tenant_context import (api_token_tenant, current_tenant, reset_current_tena
                             set_current_tenant)
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 VALID_ROLES = set(TENANT_ROLES)
 MANAGER_ROLES = {"owner", "admin"}
@@ -105,6 +114,40 @@ def _accept_url(request: Request, token: str) -> str:
         host = (request.headers.get("host") or request.url.netloc or "").strip()
     root = (request.scope.get("root_path") or "").rstrip("/") or "/backend"
     return f"{proto}://{host}{root}{query}"
+
+
+def _send_invitation_email(invitation: dict) -> bool:
+    """Email the accept link to the invitee. Best-effort by design: a relay that
+    is not configured, or a send that fails, must never fail the invitation — the
+    API still returns the link and reports ``email_sent`` so the UI can fall back
+    to "copy the link"."""
+    recipient = (invitation.get("email") or "").strip()
+    if not recipient:
+        return False
+    try:
+        from email_reports import send_email
+        from env_config import account_email_from_address, email_configured, resolve_email_config
+        cfg = resolve_email_config({})
+        if not email_configured(cfg):
+            return False
+        workspace = invitation.get("workspace_name") or "your workspace"
+        inviter = invitation.get("invited_by") or "A teammate"
+        accept_url = invitation.get("accept_url") or ""
+        subject = f"You're invited to {workspace} on AAA Tracker"
+        html = (
+            f"<p>{inviter} invited you to join <b>{workspace}</b> on AAA Tracker "
+            f"as <b>{invitation.get('role') or 'a member'}</b>.</p>"
+            f"<p><a href=\"{accept_url}\">Accept the invitation</a> to set your "
+            "password and sign in.</p>"
+            f"<p style=\"color:#666;font-size:12px\">This link is single-use and "
+            "expires in 7 days. If you were not expecting it, you can ignore this email.</p>"
+        )
+        send_email(cfg, subject, html, [recipient],
+                   from_email=account_email_from_address())
+        return True
+    except Exception:
+        log.warning("invitation email to %s failed", recipient, exc_info=True)
+        return False
 
 
 def _authority(request: Request, db: Session) -> tuple:
@@ -231,16 +274,23 @@ def create_invitation(data: InvitationCreate, request: Request,
         {"t": tenant_id, "e": email or None, "u": username or None, "r": invited_role,
          "h": token_hash, "by": caller or "api_token", "x": expires_at}).scalar()
     db.commit()
+    accept_url = _accept_url(request, token)
+    workspace_name = db.execute(text("SELECT name FROM tenants WHERE id = :t"),
+                                {"t": tenant_id}).scalar()
+    email_sent = _send_invitation_email({
+        "email": email, "workspace_name": workspace_name, "invited_by": caller,
+        "accept_url": accept_url, "role": invited_role})
     # The audit detail never carries the token.
     audit_event(caller or "api_token", "invitation_created", "tenant_invitation",
                 str(invitation_id),
                 {"tenant_id": int(tenant_id), "email": email or None,
-                 "username": username or None, "role": invited_role},
+                 "username": username or None, "role": invited_role,
+                 "email_sent": email_sent},
                 request.client.host if request.client else "")
     return {"message": "Invitation created", "id": int(invitation_id),
             "tenant_id": int(tenant_id), "email": email or None,
             "username": username or None, "role": invited_role, "token": token,
-            "accept_url": _accept_url(request, token),
+            "accept_url": accept_url, "email_sent": email_sent,
             "expires_at": expires_at.isoformat()}
 
 

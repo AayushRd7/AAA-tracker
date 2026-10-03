@@ -4,13 +4,7 @@
         <v-row align="center" class="mb-4">
             <v-col>
                 <div class="page-title">Users</div>
-                <div class="page-subtitle">Workspace members and platform users</div>
-            </v-col>
-            <v-col class="d-flex justify-end" cols="auto">
-                <v-btn v-if="isPlatformAdmin" color="primary" elevation="0" @click="openCreate">
-                    <v-icon small class="mr-1">mdi-plus</v-icon>
-                    Add user
-                </v-btn>
+                <div class="page-subtitle">Workspace members, invitations and platform accounts</div>
             </v-col>
         </v-row>
 
@@ -25,9 +19,14 @@
                         <span class="caption grey--text ml-2">({{ membersMeta.plan }} plan)</span>
                         <v-spacer></v-spacer>
                         <v-btn color="primary" elevation="0" small
+                               :disabled="!canManageMembers" @click="openInvite">
+                            <v-icon small class="mr-1">mdi-email-fast-outline</v-icon>
+                            Invite member
+                        </v-btn>
+                        <v-btn text small class="ml-1"
                                :disabled="!canManageMembers" @click="openAddMember">
                             <v-icon small class="mr-1">mdi-account-plus-outline</v-icon>
-                            Add member
+                            Add existing user
                         </v-btn>
                     </v-card-title>
                     <v-card-text>
@@ -122,11 +121,6 @@
                     <v-card-title class="d-flex align-center">
                         <v-icon color="primary" class="mr-2">mdi-email-plus-outline</v-icon>
                         Pending invitations
-                        <v-spacer></v-spacer>
-                        <v-btn color="primary" elevation="0" small @click="openInvite">
-                            <v-icon small class="mr-1">mdi-email-fast-outline</v-icon>
-                            Invite member
-                        </v-btn>
                     </v-card-title>
                     <v-card-text>
                         <div class="caption grey--text mb-2">
@@ -168,22 +162,18 @@
             </v-col>
         </v-row>
 
-        <!-- Add-member dialog: an existing user gains a membership, or a brand
-             new user is created with one. -->
+        <!-- Add-existing-user dialog: an account that already exists gains a
+             membership. Bringing in someone new is the Invite member flow. -->
         <v-dialog v-model="addMemberDialog" max-width="520">
             <v-card>
-                <v-card-title><span class="text-h6">Add workspace member</span></v-card-title>
+                <v-card-title><span class="text-h6">Add existing user</span></v-card-title>
                 <v-card-text>
-                    <v-btn-toggle v-model="addForm.mode" mandatory dense class="mb-4">
-                        <v-btn small value="existing">Existing user</v-btn>
-                        <v-btn small value="new">New user</v-btn>
-                    </v-btn-toggle>
+                    <div class="caption grey--text mb-3">
+                        Add an account that already exists to this workspace. To bring in a new
+                        person, use <b>Invite member</b> — they receive an email link and set
+                        their own password.
+                    </div>
                     <v-text-field label="Username" v-model="addForm.username" outlined dense></v-text-field>
-                    <template v-if="addForm.mode === 'new'">
-                        <v-text-field label="Email" v-model="addForm.email" outlined dense></v-text-field>
-                        <v-text-field label="Password" v-model="addForm.password" type="password"
-                                      outlined dense></v-text-field>
-                    </template>
                     <v-select label="Role" :items="assignableRoles" v-model="addForm.role"
                               outlined dense></v-select>
                 </v-card-text>
@@ -203,8 +193,8 @@
                 <v-card-title><span class="text-h6">Invite member</span></v-card-title>
                 <v-card-text>
                     <div class="caption grey--text mb-3">
-                        Send a link that lets someone create an account and join this workspace.
-                        Provide an email, a username, or both.
+                        We email the invitee a link that lets them create an account and join
+                        this workspace. Provide an email, a username, or both.
                     </div>
                     <v-text-field label="Email" v-model="inviteForm.email" outlined dense
                                   placeholder="teammate@example.com"></v-text-field>
@@ -227,10 +217,16 @@
             <v-card>
                 <v-card-title><span class="text-h6">Invitation sent</span></v-card-title>
                 <v-card-text>
+                    <v-alert v-if="inviteResult && inviteResult.email_sent" type="success" text dense class="mb-3">
+                        Emailed to <b>{{ inviteResult.email }}</b>. You can also copy the link below.
+                    </v-alert>
+                    <v-alert v-else-if="inviteResult && inviteResult.email" type="warning" text dense class="mb-3">
+                        The email could not be sent — copy the link below and pass it on.
+                    </v-alert>
                     <div class="caption grey--text mb-3">
-                        Copy this link and send it to the invitee. It is shown only once —
-                        the invitation is single-use and expires on
-                        {{ inviteResult && inviteResult.expires_at ? $formatDate(inviteResult.expires_at) : '—' }}.
+                        The invitation is single-use, expires on
+                        {{ inviteResult && inviteResult.expires_at ? $formatDate(inviteResult.expires_at) : '—' }},
+                        and the link is shown only once — copy it if the email did not arrive.
                     </div>
                     <v-text-field label="Invitation link"
                                   :value="inviteResult ? inviteResult.accept_url : ''"
@@ -405,7 +401,18 @@
                     <v-card-title class="d-flex align-center">
                         <v-icon color="primary" class="mr-2">mdi-account-supervisor-outline</v-icon>
                         Platform users
+                        <v-spacer></v-spacer>
+                        <v-btn color="primary" elevation="0" small @click="openCreate">
+                            <v-icon small class="mr-1">mdi-plus</v-icon>
+                            Add platform user
+                        </v-btn>
                     </v-card-title>
+                    <v-card-text class="pb-0">
+                        <div class="caption grey--text">
+                            Install-wide accounts, managed by platform operators. Workspace
+                            members live in the card above.
+                        </div>
+                    </v-card-text>
                     <v-data-table v-col-resize:users="headers"
                             :headers="headers"
                             :items="users"
@@ -617,7 +624,7 @@
                     {text: 'Actions', value: 'actions', sortable: false},
                 ],
                 addMemberDialog: false,
-                addForm: {mode: 'existing', username: '', email: '', password: '', role: 'editor'},
+                addForm: {username: '', role: 'editor'},
                 // Workspace invitations (phase 3)
                 invitations: [],
                 loadingInvitations: false,
@@ -778,7 +785,7 @@
                     });
             },
             openAddMember() {
-                this.addForm = {mode: 'existing', username: '', email: '', password: '', role: 'editor'};
+                this.addForm = {username: '', role: 'editor'};
                 this.addMemberDialog = true;
             },
             saveMember() {
@@ -787,15 +794,7 @@
                     this.$root.$emit("show-message", {type: "error", text: "Username is required."});
                     return;
                 }
-                if (f.mode === 'new' && !f.password) {
-                    this.$root.$emit("show-message", {type: "error", text: "Password is required for a new user."});
-                    return;
-                }
                 const payload = {username: f.username, role: f.role};
-                if (f.mode === 'new') {
-                    payload.email = f.email;
-                    payload.password = f.password;
-                }
                 fetch("/backend/api/members/", {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
@@ -860,7 +859,8 @@
                         this.inviteDialog = false;
                         this.inviteResult = data;
                         this.inviteResultDialog = true;
-                        this.$root.$emit("show-message", {type: "success", text: "Invitation sent"});
+                        this.$root.$emit("show-message", {type: "success",
+                            text: data.email_sent ? "Invitation emailed" : "Invitation sent"});
                         this.loadInvitations();
                     })
                     .catch(err => {

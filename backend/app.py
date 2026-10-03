@@ -963,13 +963,39 @@ async def serve_page(request: Request, page: Optional[str] = None):
                 page = "dashboard"
     if page not in ALLOWED_PAGES or not user_type:
         page = "auth"  # Or a 404 could be returned instead
-    if user_type and perms is None:
+    username = None
+    if user_type:
         from auth import get_session_username
-        perms = get_user_permissions(get_session_username(request))
+        username = get_session_username(request)
+        if perms is None:
+            perms = get_user_permissions(username)
     page_file = f"pages/{page}.html"
     # Workspace feature flags drive a couple of nav entries (Optimizer) so the
     # shell does not offer a section the workspace has switched off.
     tenant_features = {}
+    # The shell's management plane is governed by the caller's role in THIS
+    # workspace — never by the install-global users.is_admin flag. Someone added
+    # as a workspace admin must get the management nav and templates their
+    # membership grants; the platform flag is a separate, wider plane and is
+    # labelled as such rather than being conflated with the workspace role.
+    role = None
+    if user_type and username:
+        from auth import effective_tenant_role
+        from db import SessionLocal
+        from tenant_context import current_tenant
+        try:
+            _db = SessionLocal()
+            try:
+                role = effective_tenant_role(_db, username, current_tenant())
+            finally:
+                _db.close()
+        except Exception:
+            role = None
+    can_manage_workspace = bool(user_type == "admin" or role in ("owner", "admin"))
+    role_label = {"owner": "Owner", "admin": "Admin",
+                  "editor": "Editor", "viewer": "Viewer"}.get(role or "", "User")
+    if user_type == "admin":
+        role_label = "Platform operator" if not role else f"{role_label} · platform"
     if user_type:
         from tenant_context import current_tenant
         from tenant_settings import tenant_features as _tenant_features
@@ -982,5 +1008,8 @@ async def serve_page(request: Request, page: Optional[str] = None):
         "initial_section": section or "dashboard",
         "permissions": perms if user_type else None,
         "tenant_features": tenant_features,
+        "role_label": role_label if user_type else "",
+        "can_manage_workspace": can_manage_workspace,
+        "is_platform_operator": user_type == "admin",
         "page_component": '<'+page+'-page-component></'+page+'-page-component>',
     })

@@ -56,6 +56,13 @@ def email_from_name(fallback: str = "") -> str:
     return _env("EMAIL_FROM_NAME", default=fallback) or "AAA Tracker"
 
 
+def account_email_from_address(fallback: str = "") -> str:
+    """From address for account emails (invitations, password resets), which are
+    not tenant reports. Falls back to the reports sender when unset, so a
+    deployment that verified only one address keeps working unchanged."""
+    return _env("ACCOUNT_EMAIL_FROM", "EMAIL_ACCOUNT_FROM", default=fallback)
+
+
 def telegram_bot_token(fallback: str = "") -> str:
     return _env("TELEGRAM_BOT_TOKEN", default=fallback)
 

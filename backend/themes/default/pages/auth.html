@@ -1,70 +1,156 @@
+{% raw %}
 <script type="text/x-template" id="auth-page-template">
   <v-row align="center" justify="center" style="min-height: 100vh;">
     <v-col cols="12" sm="8" md="4">
       <div class="text-center mb-4">
         <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo brand-logo--lg mx-auto">
         <div class="wordmark wordmark--lg mt-3"><b>AAA</b><i>Tracker</i></div>
-        <div class="page-subtitle">Sign in to your account</div>
+        <div class="page-subtitle">{{ subtitle }}</div>
       </div>
       <v-card class="pa-6" elevation="2">
-        <v-form @submit.prevent="submit">
-          <template v-if="!totpRequired">
-            <v-text-field
-              label="Username"
-              v-model="username"
-              prepend-inner-icon="mdi-account-outline"
-              outlined
-              dense
-              required
-            ></v-text-field>
 
-            <v-text-field
-              label="Password"
-              v-model="password"
-              :type="showPassword ? 'text' : 'password'"
-              prepend-inner-icon="mdi-lock-outline"
-              :append-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
-              @click:append="showPassword = !showPassword"
-              outlined
-              dense
-              required
-            ></v-text-field>
-          </template>
-
-          <template v-else>
-            <div class="d-flex align-center mb-3">
-              <v-icon color="primary" class="mr-2">mdi-shield-key-outline</v-icon>
-              <div>
-                <div class="subtitle-1 font-weight-medium">Two-factor authentication</div>
-                <div class="caption grey--text">Enter the 6-digit code from your authenticator app — or a one-time backup code.</div>
+        <!-- ---- Accept an invitation (arrived from an emailed link) ---- -->
+        <template v-if="mode === 'invite'">
+          <div class="d-flex align-center mb-3">
+            <v-icon color="primary" class="mr-2">mdi-email-fast-outline</v-icon>
+            <div>
+              <div class="subtitle-1 font-weight-medium">Join {{ inviteInfo.workspace_name }}</div>
+              <div class="caption grey--text">
+                You have been invited as <b>{{ inviteInfo.role }}</b>. Choose a username and
+                password to create your account.
               </div>
             </div>
-            <v-text-field
-              label="Code or backup code"
-              v-model="totpCode"
-              prepend-inner-icon="mdi-shield-key-outline"
-              outlined
-              dense
-              maxlength="8"
-              autocomplete="one-time-code"
-              hint="6-digit authenticator code, or an 8-character backup code"
-              persistent-hint
-              @keyup.enter="submit"
-            ></v-text-field>
-            <div class="d-flex justify-end mt-2">
-              <v-btn small text @click="backToPassword">
-                <v-icon small class="mr-1">mdi-arrow-left</v-icon>Back to password
-              </v-btn>
-            </div>
-          </template>
+          </div>
+          <v-text-field label="Username" v-model="inviteForm.username" outlined dense
+                        prepend-inner-icon="mdi-account-outline"></v-text-field>
+          <v-text-field label="Email" v-model="inviteForm.email" outlined dense
+                        prepend-inner-icon="mdi-email-outline"></v-text-field>
+          <v-text-field label="Password" v-model="inviteForm.password" outlined dense
+                        :type="showPassword ? 'text' : 'password'"
+                        prepend-inner-icon="mdi-lock-outline"
+                        :append-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
+                        @click:append="showPassword = !showPassword"
+                        hint="At least 8 characters" persistent-hint></v-text-field>
+          <v-btn color="primary" class="mt-4" block elevation="0" large
+                 :loading="loading" @click="acceptInvite">
+            Create account &amp; sign in
+          </v-btn>
+          <div class="text-center mt-3">
+            <a href="/backend/auth" class="caption">Back to sign in</a>
+          </div>
+        </template>
 
-          <v-btn v-if="!totpRequired" color="primary" class="mt-2" block elevation="0" large type="submit" :loading="loading">
-            Login
+        <!-- ---- Choose a new password (arrived from a reset link) ---- -->
+        <template v-else-if="mode === 'reset'">
+          <div class="d-flex align-center mb-3">
+            <v-icon color="primary" class="mr-2">mdi-lock-reset</v-icon>
+            <div>
+              <div class="subtitle-1 font-weight-medium">Choose a new password</div>
+              <div class="caption grey--text">Your other sessions will be signed out.</div>
+            </div>
+          </div>
+          <v-text-field label="New password" v-model="resetForm.password" outlined dense
+                        :type="showPassword ? 'text' : 'password'"
+                        prepend-inner-icon="mdi-lock-outline"
+                        :append-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
+                        @click:append="showPassword = !showPassword"
+                        hint="At least 8 characters" persistent-hint></v-text-field>
+          <v-text-field label="Confirm password" v-model="resetForm.confirm" outlined dense
+                        type="password" prepend-inner-icon="mdi-lock-check-outline"></v-text-field>
+          <v-btn color="primary" class="mt-2" block elevation="0" large
+                 :loading="loading" @click="submitReset">
+            Set new password
           </v-btn>
-          <v-btn v-else color="primary" class="mt-4" block elevation="0" large :loading="loading" @click="submit">
-            Verify &amp; sign in
+          <div class="text-center mt-3">
+            <a href="/backend/auth" class="caption">Back to sign in</a>
+          </div>
+        </template>
+
+        <!-- ---- Ask for a reset link ---- -->
+        <template v-else-if="mode === 'reset-request'">
+          <div class="d-flex align-center mb-3">
+            <v-icon color="primary" class="mr-2">mdi-help-circle-outline</v-icon>
+            <div>
+              <div class="subtitle-1 font-weight-medium">Reset your password</div>
+              <div class="caption grey--text">We will email you a link to choose a new one.</div>
+            </div>
+          </div>
+          <v-text-field label="Username or email" v-model="forgotForm.ident" outlined dense
+                        prepend-inner-icon="mdi-account-question-outline"
+                        @keyup.enter="requestReset"></v-text-field>
+          <v-btn color="primary" class="mt-2" block elevation="0" large
+                 :loading="loading" @click="requestReset">
+            Email me a reset link
           </v-btn>
-        </v-form>
+          <div class="text-center mt-3">
+            <a href="#" class="caption" @click.prevent="mode = 'login'">Back to sign in</a>
+          </div>
+        </template>
+
+        <!-- ---- Sign in / two-factor ---- -->
+        <template v-else>
+          <v-form @submit.prevent="submit">
+            <template v-if="!totpRequired">
+              <v-text-field
+                label="Username"
+                v-model="username"
+                prepend-inner-icon="mdi-account-outline"
+                outlined
+                dense
+                required
+              ></v-text-field>
+
+              <v-text-field
+                label="Password"
+                v-model="password"
+                :type="showPassword ? 'text' : 'password'"
+                prepend-inner-icon="mdi-lock-outline"
+                :append-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
+                @click:append="showPassword = !showPassword"
+                outlined
+                dense
+                required
+              ></v-text-field>
+            </template>
+
+            <template v-else>
+              <div class="d-flex align-center mb-3">
+                <v-icon color="primary" class="mr-2">mdi-shield-key-outline</v-icon>
+                <div>
+                  <div class="subtitle-1 font-weight-medium">Two-factor authentication</div>
+                  <div class="caption grey--text">Enter the 6-digit code from your authenticator app — or a one-time backup code.</div>
+                </div>
+              </div>
+              <v-text-field
+                label="Code or backup code"
+                v-model="totpCode"
+                prepend-inner-icon="mdi-shield-key-outline"
+                outlined
+                dense
+                maxlength="8"
+                autocomplete="one-time-code"
+                hint="6-digit authenticator code, or an 8-character backup code"
+                persistent-hint
+                @keyup.enter="submit"
+              ></v-text-field>
+              <div class="d-flex justify-end mt-2">
+                <v-btn small text @click="backToPassword">
+                  <v-icon small class="mr-1">mdi-arrow-left</v-icon>Back to password
+                </v-btn>
+              </div>
+            </template>
+
+            <v-btn v-if="!totpRequired" color="primary" class="mt-2" block elevation="0" large type="submit" :loading="loading">
+              Login
+            </v-btn>
+            <v-btn v-else color="primary" class="mt-4" block elevation="0" large :loading="loading" @click="submit">
+              Verify &amp; sign in
+            </v-btn>
+          </v-form>
+          <div class="text-center mt-3" v-if="!totpRequired">
+            <a href="#" class="caption" @click.prevent="mode = 'reset-request'">Forgot password?</a>
+          </div>
+        </template>
       </v-card>
     </v-col>
   </v-row>
@@ -78,6 +164,8 @@ Vue.component('auth-page-component', {
   template: '#auth-page-template',
   data() {
     return {
+      // login | totp | invite | reset | reset-request
+      mode: 'login',
       username: '',
       password: '',
       showPassword: false,
@@ -86,14 +174,169 @@ Vue.component('auth-page-component', {
       totpRequired: false,
       totpToken: '',
       totpCode: '',
+      // Invitation acceptance (arrived via /auth?invite=<token>)
+      inviteToken: '',
+      inviteInfo: {workspace_name: '', role: '', email: '', username: ''},
+      inviteForm: {username: '', email: '', password: ''},
+      // Password reset (arrived via /auth?reset=<token>, or self-service request)
+      resetToken: '',
+      resetForm: {password: '', confirm: ''},
+      forgotForm: {ident: ''},
     };
   },
+  computed: {
+    subtitle() {
+      return {
+        'invite': 'You have been invited',
+        'reset': 'Choose a new password',
+        'reset-request': 'Reset your password',
+      }[this.mode] || 'Sign in to your account';
+    },
+  },
+  mounted() {
+    const params = new URLSearchParams(window.location.search);
+    const invite = params.get('invite');
+    const reset = params.get('reset');
+    if (invite) {
+      this.beginInvite(invite);
+    } else if (reset) {
+      this.resetToken = reset;
+      this.mode = 'reset';
+    }
+  },
   methods: {
+    toast(type, text) {
+      this.$root.$emit('show-message', {type: type, text: text});
+    },
     backToPassword() {
       this.totpRequired = false;
       this.totpToken = '';
       this.totpCode = '';
       this.password = '';
+    },
+    async signIn(username, password) {
+      const response = await fetch('/backend/api/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: username, password: password}),
+        credentials: 'include'
+      });
+      if (!response.ok) {
+        window.location.href = '/backend/auth';
+        return;
+      }
+      const data = await response.json();
+      if (data.requires_totp) {
+        // Fresh account — send them to the login form to complete 2FA.
+        window.location.href = '/backend/auth';
+        return;
+      }
+      window.location.href = '/backend/dashboard';
+    },
+    async beginInvite(token) {
+      this.loading = true;
+      try {
+        const response = await fetch('/backend/api/invitations/lookup?token=' + encodeURIComponent(token));
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.detail || 'This invitation is no longer valid.');
+        }
+        this.inviteToken = token;
+        this.inviteInfo = data;
+        this.inviteForm.username = data.username || '';
+        this.inviteForm.email = data.email || '';
+        this.mode = 'invite';
+      } catch (error) {
+        this.toast('error', error.message || 'This invitation is no longer valid.');
+      } finally {
+        this.loading = false;
+      }
+    },
+    async acceptInvite() {
+      const f = this.inviteForm;
+      if (!f.username) {
+        this.toast('error', 'Choose a username.');
+        return;
+      }
+      if (!f.password || f.password.length < 8) {
+        this.toast('error', 'Choose a password of at least 8 characters.');
+        return;
+      }
+      this.loading = true;
+      try {
+        const response = await fetch('/backend/api/invitations/accept', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          credentials: 'include',
+          body: JSON.stringify({
+            token: this.inviteToken,
+            username: f.username,
+            email: f.email,
+            password: f.password
+          })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.detail || 'Could not accept the invitation.');
+        }
+        await this.signIn(f.username, f.password);
+      } catch (error) {
+        this.toast('error', error.message || 'Could not accept the invitation.');
+      } finally {
+        this.loading = false;
+      }
+    },
+    async requestReset() {
+      const ident = (this.forgotForm.ident || '').trim();
+      if (!ident) {
+        this.toast('error', 'Enter your username or email.');
+        return;
+      }
+      this.loading = true;
+      try {
+        const response = await fetch('/backend/api/forgot-password', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email: ident, username: ident})
+        });
+        await response.json().catch(() => ({}));
+        this.toast('success', 'If that account exists, a reset link is on its way.');
+        this.mode = 'login';
+      } catch (error) {
+        this.toast('error', 'Could not send the reset email — try again.');
+      } finally {
+        this.loading = false;
+      }
+    },
+    async submitReset() {
+      if (!this.resetForm.password || this.resetForm.password.length < 8) {
+        this.toast('error', 'Choose a password of at least 8 characters.');
+        return;
+      }
+      if (this.resetForm.password !== this.resetForm.confirm) {
+        this.toast('error', 'The two passwords do not match.');
+        return;
+      }
+      this.loading = true;
+      try {
+        const response = await fetch('/backend/api/reset-password', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({token: this.resetToken, password: this.resetForm.password})
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.detail || 'This reset link is invalid or has expired.');
+        }
+        this.toast('success', 'Password updated — sign in with your new password.');
+        this.resetToken = '';
+        this.resetForm = {password: '', confirm: ''};
+        this.mode = 'login';
+      } catch (error) {
+        this.toast('error', error.message || 'This reset link is invalid or has expired.');
+      } finally {
+        this.loading = false;
+      }
     },
     async submit() {
       this.loading = true;
@@ -156,3 +399,5 @@ Vue.component('auth-page-component', {
   }
 });
 </script>
+
+{% endraw %}

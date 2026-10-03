@@ -34,7 +34,7 @@
     <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js" integrity="sha384-6foQBJHuUSRZT7FlYD0AkFDsYH7bowmqBulLZUb8S1qBoEItSgOaXiGkxDn9kSLP" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/vue-apexcharts@1.6.2/dist/vue-apexcharts.min.js" integrity="sha384-qnL07gjeOh/gT8wuQ5lLlhnunZVX/sbfDVsiDH4wWB0/b+VZ0h459IwxDYKHTTMM" crossorigin="anonymous"></script>
 
-    <link href="/backend/backend/css/style.css?v=37" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=38" rel="stylesheet">
 
     <!-- Theme toggle helper: reads localStorage('theme'), exposes window.setTheme(t) -->
     <script>
@@ -359,7 +359,7 @@
     {% include "templates/sources.html" %}
     {% include "templates/filter-presets.html" %}
     {% include "templates/funnels.html" %}
-    {% if is_authenticated_user_type == 'admin' %}
+    {% if can_manage_workspace %}
         {% include "templates/users.html" %}
         {% include "templates/settings.html" %}
         {% include "templates/integrations.html" %}
@@ -754,7 +754,13 @@
                 // entry (and the API refuses the capability server-side).
                 tenantFeatures: {{ (tenant_features if tenant_features else {}) | tojson }},
                 dashboardShell: {{ 'true' if page == 'dashboard' and is_authenticated_user_type else 'false' }},
-                roleLabel: '{{ is_authenticated_user_type if is_authenticated_user_type else "" }}',
+                // The install-global operator flag and the current workspace's
+                // management capability are deliberately separate: the first
+                // governs the platform plane (install-wide user accounts), the
+                // second the workspace plane (members, invitations, settings).
+                isPlatformAdmin: {{ 'true' if is_platform_operator else 'false' }},
+                canManage: {{ 'true' if can_manage_workspace else 'false' }},
+                roleLabel: '{{ role_label if role_label else "" }}',
                 // `group` is presentation only — it drives the sidebar's small
                 // uppercase section headers. Section keys, permissions, routing
                 // and mounts are unchanged; an item without a group renders flat.
@@ -825,10 +831,10 @@
                 return (item && item.group) || null;
             },
             visibleNavItems() {
-                const isAdmin = this.roleLabel === 'admin';
+                const isAdmin = this.canManage;
                 return this.navItems.filter(i =>
                     (!i.admin || isAdmin)
-                    && (isAdmin || this.userPerms.sections[i.key] !== false)
+                    && (isAdmin || this.userPerms.sections[this.permSection(i.key)] !== false)
                     && !(i.feature && this.tenantFeatures[i.feature] === false));
             },
             // Sidebar grouping: consecutive visible items that share a `group`
@@ -1012,8 +1018,14 @@
                 });
             },
             canReadSection(item) {
-                if (item.admin && this.roleLabel !== 'admin') return false;
-                return this.roleLabel === 'admin' || this.userPerms.sections[item.key] !== false;
+                if (item.admin && !this.canManage) return false;
+                return this.canManage || this.userPerms.sections[this.permSection(item.key)] !== false;
+            },
+            // Logs render under six nav keys but share ONE "logs" capability, so
+            // the permission lookup maps them back before consulting the map.
+            permSection(key) {
+                const k = String(key || '');
+                return k.indexOf('logs-') === 0 ? 'logs' : k;
             },
             // --- G75 global search ---
             searchInput() {

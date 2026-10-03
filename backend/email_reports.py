@@ -229,11 +229,14 @@ def build_daily_report_html(ch, db, day: datetime) -> str:
 </html>"""
 
 
-def send_email(cfg: dict, subject: str, html: str, recipients) -> None:
+def send_email(cfg: dict, subject: str, html: str, recipients,
+               from_email: str = None) -> None:
     # The relay credentials come from the deployment's environment; anything
     # stored in settings is only a fallback for an older installation.
     cfg = resolve_email_config(cfg)
-    sender_email = cfg.get("from_email") or cfg.get("smtp_login")
+    # Account mail (invitations, password resets) may name its own sender; every
+    # other caller keeps the reports sender.
+    sender_email = (from_email or "").strip() or cfg.get("from_email") or cfg.get("smtp_login")
     sender_name = cfg.get("from_name") or "AAA Tracker"
 
     # HTTP API path (preferred when a key is set — not subject to SMTP IP restrictions)

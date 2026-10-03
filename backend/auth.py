@@ -1573,3 +1573,159 @@ async def auth_status(request: Request):
     if is_authenticated(request):
         return {"authenticated": True}
     return {"authenticated": False}
+
+
+# ====== Password reset ======
+# The raw token is generated at request time and handed to nobody: only its
+# SHA-256 hash is stored (mirrors tenant_invitations), so a database dump cannot
+# be replayed as a credential. `forgot-password` answers identically whether or
+# not the account exists, so it cannot be used to enumerate accounts. A reset
+# spends every outstanding token for that user and revokes their sessions.
+_resets_table_ready = False
+RESET_TTL_MINUTES = 60
+
+
+def ensure_password_resets_table():
+    global _resets_table_ready
+    if _resets_table_ready:
+        return
+    db = SessionLocal()
+    db.execute(text("""
+        CREATE TABLE IF NOT EXISTS password_resets (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            expires_at TIMESTAMP NOT NULL,
+            used_at TIMESTAMP
+        )
+    """))
+    db.execute(text("CREATE INDEX IF NOT EXISTS password_resets_hash_idx "
+                    "ON password_resets (token_hash)"))
+    db.commit()
+    db.close()
+    _resets_table_ready = True
+
+
+def _hash_reset_token(token: str) -> str:
+    return hashlib.sha256((token or "").encode()).hexdigest()
+
+
+def _reset_url(request: Request, token: str) -> str:
+    """The sign-in page carrying the reset token — same origin resolution as the
+    invitation accept URL (configured public origin, else the proxied request)."""
+    query = f"/auth?reset={token}"
+    base = (os.environ.get("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    if base:
+        return f"{base}/backend{query}"
+    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if not proto:
+        proto = request.url.scheme
+    host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+    if not host:
+        host = (request.headers.get("host") or request.url.netloc or "").strip()
+    root = (request.scope.get("root_path") or "").rstrip("/") or "/backend"
+    return f"{proto}://{host}{root}{query}"
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: Optional[str] = None
+    username: Optional[str] = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
+
+
+@router.post("/forgot-password")
+def forgot_password(data: ForgotPasswordRequest, request: Request):
+    """PUBLIC. Always answers the same way, whether or not the account exists."""
+    ensure_password_resets_table()
+    ident = (data.email or data.username or "").strip()
+    generic = {"ok": True,
+               "message": "If that account exists, a reset link has been sent."}
+    if not ident:
+        return generic
+    db = SessionLocal()
+    reset_token = None
+    recipient = None
+    try:
+        row = db.execute(text(
+            "SELECT id, username, email FROM users WHERE "
+            "(lower(coalesce(email, '')) = lower(:i)) OR (username = :i) LIMIT 1"),
+            {"i": ident}).fetchone()
+        if row and row[2] and row[2].strip():
+            reset_token = secrets.token_urlsafe(32)
+            recipient = row[2].strip()
+            db.execute(text(
+                "INSERT INTO password_resets (user_id, token_hash, expires_at) "
+                "VALUES (:u, :h, now() + make_interval(mins => :m))"),
+                {"u": int(row[0]), "h": _hash_reset_token(reset_token),
+                 "m": RESET_TTL_MINUTES})
+            db.commit()
+    except Exception:
+        log.warning("password reset request failed", exc_info=True)
+        return generic
+    finally:
+        db.close()
+    if reset_token and recipient:
+        try:
+            from email_reports import send_email
+            from env_config import (account_email_from_address, email_configured,
+                                    resolve_email_config)
+            cfg = resolve_email_config({})
+            if email_configured(cfg):
+                link = _reset_url(request, reset_token)
+                send_email(
+                    cfg, "Reset your AAA Tracker password",
+                    "<p>Use the link below to choose a new password. It expires in "
+                    f"{RESET_TTL_MINUTES} minutes and can be used once.</p>"
+                    f'<p><a href="{link}">Reset my password</a></p>'
+                    '<p style="color:#666;font-size:12px">If you did not request this, '
+                    "you can safely ignore this email.</p>",
+                    [recipient],
+                    from_email=account_email_from_address())
+        except Exception:
+            log.warning("password reset email failed", exc_info=True)
+    return generic
+
+
+@router.post("/reset-password")
+def reset_password(data: ResetPasswordRequest):
+    """PUBLIC. Consume a reset token and set a new password."""
+    ensure_password_resets_table()
+    token = (data.token or "").strip()
+    password = data.password or ""
+    if not token:
+        raise HTTPException(status_code=400, detail="token is required")
+    if len(password) < 8:
+        raise HTTPException(status_code=400,
+                            detail="Password must be at least 8 characters")
+    db = SessionLocal()
+    try:
+        row = db.execute(text(
+            "SELECT id, user_id FROM password_resets WHERE token_hash = :h "
+            "AND used_at IS NULL AND expires_at > now()"),
+            {"h": _hash_reset_token(token)}).fetchone()
+        if not row:
+            raise HTTPException(status_code=410,
+                                detail="This reset link is invalid or has expired")
+        user_id = int(row[1])
+        db.execute(text("UPDATE users SET password_hash = :p WHERE id = :u"),
+                   {"p": hash_password(password), "u": user_id})
+        # Spend every outstanding reset for this user, not just the one presented.
+        db.execute(text("UPDATE password_resets SET used_at = now() "
+                        "WHERE user_id = :u AND used_at IS NULL"), {"u": user_id})
+        # A password change invalidates every existing session for the account.
+        try:
+            ensure_sessions_table()
+            db.execute(text(
+                "UPDATE auth_sessions SET revoked = true WHERE username = "
+                "(SELECT username FROM users WHERE id = :u)"), {"u": user_id})
+        except Exception:
+            log.warning("could not revoke sessions after password reset", exc_info=True)
+        db.commit()
+    finally:
+        db.close()
+    return {"ok": True, "message": "Password updated — you can sign in now."}

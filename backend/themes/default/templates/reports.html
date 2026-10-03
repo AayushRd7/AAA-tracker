@@ -268,7 +268,7 @@
                 </v-btn>
                 <v-spacer></v-spacer>
                 <v-btn
-                        v-if="$root.roleLabel === 'admin'"
+                        v-if="$root.canManage"
                         outlined
                         elevation="0"
                         class="mr-2"
@@ -383,7 +383,7 @@
                         <v-chip v-if="groupingView && item.level === 1" x-small label
                                 class="ml-2 group-chip">subtotal</v-chip>
                         <v-btn
-                                v-if="$root.roleLabel === 'admin' && item.dim === 'offer_id' && isNumericId(item.value) && !offerArchived(item.value)"
+                                v-if="$root.canManage && item.dim === 'offer_id' && isNumericId(item.value) && !offerArchived(item.value)"
                                 icon x-small class="ml-1 offer-pause-btn"
                                 :title="offerPaused(item.value) ? 'Resume offer' : 'Pause offer'"
                                 @click.stop="toggleOfferPause(item)"
@@ -1682,7 +1682,7 @@
                     this.groupingView = ws.grouping_view === true;
                 });
             }
-            if (this.$root.roleLabel === 'admin') this.loadOffers();
+            if (this.$root.canManage) this.loadOffers();
             this.$root.$on('load-reports', (focus) => {
                 if (focus) this.applySearchFocus(focus);
                 this.loadCampaigns();

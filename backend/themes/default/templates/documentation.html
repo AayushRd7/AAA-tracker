@@ -4,7 +4,7 @@
         <div class="page-title">Documentation</div>
         <div class="page-subtitle mb-3">AAA Tracker help, reference and system status</div>
 
-        {% endraw %}{% if is_authenticated_user_type == 'admin' %}{% raw %}
+        {% endraw %}{% if can_manage_workspace %}{% raw %}
         <v-tabs v-model="tabAbout" class="doc-tabs mb-4">
             <v-tab><v-icon small left>mdi-book-open-variant</v-icon>Documentation</v-tab>
             <v-tab><v-icon small left>mdi-pulse</v-icon>System status</v-tab>
@@ -1038,8 +1038,6 @@
                             <p>Auto-delete tracking data older than a chosen number of days (daily prune).</p>
                             <h3 class="doc-h3">Custom statuses</h3>
                             <p>Define extra conversion statuses (name + color) that postbacks may then use alongside the six built-ins.</p>
-                            <h3 class="doc-h3">Matching variables (Sub IDs)</h3>
-                            <p>The variable-name mapping used when parsing incoming parameters — which token fills which SubID slot.</p>
                             <h3 class="doc-h3">Monitoring</h3>
                             <p>Flow health checks: enable to have the monitor probe flow URLs every 15 minutes and (optionally) <b>auto-disable flows after 3 consecutive failures</b>; includes a "Check now" button and status board.</p>
                             <h3 class="doc-h3">Privacy</h3>
@@ -1150,7 +1148,7 @@
             </v-tab-item>
 
             <!-- ===================== SYSTEM STATUS (admin) ===================== -->
-            {% endraw %}{% if is_authenticated_user_type == 'admin' %}{% raw %}
+            {% endraw %}{% if can_manage_workspace %}{% raw %}
             <v-tab-item>
                 <div class="doc-status">
                     <div v-if="status" class="mt-2">
@@ -1258,7 +1256,7 @@
                 this.applyDocFilter();
                 this.setupScrollSpy();
             });
-            if (this.$root.roleLabel === 'admin') {
+            if (this.$root.canManage) {
                 this.loadStatus();
                 this.statusTimer = setInterval(this.loadStatus, 15000);
             }
@@ -1280,7 +1278,7 @@
         },
         methods: {
             loadStatus() {
-                if (this.$root.roleLabel !== 'admin') return;
+                if (!this.$root.canManage) return;
                 fetch('/backend/api/status', {credentials: 'include'})
                     .then(res => {
                         if (!res.ok) throw new Error('HTTP ' + res.status);

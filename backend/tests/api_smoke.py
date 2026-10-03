@@ -11483,6 +11483,124 @@ print("ESCAPED-OK")
     if _g11_off:
         s.delete(f"{api}/offers/{_g11_off}")
 
+    # ===== Team access & credential self-service =====
+    # The management shell is keyed off the caller's role in THIS workspace, not
+    # the install-global users.is_admin flag: someone added as a workspace admin
+    # must receive the management nav/templates, and a viewer must not. This is
+    # the regression the team page was reported for.
+    print("== Team access & password self-service ==")
+    _ta = os.getpid()
+    _ta_tid = None
+    _ta_users = []
+    try:
+        from hashlib import sha256 as _ta_sha
+        r = s.post(f"{api}/tenants/", json={
+            "name": f"Team Access {_ta}", "slug": f"team-access-{_ta}",
+            "username": f"ta-owner-{_ta}", "password": "smokepass1",
+            "email": f"ta-owner-{_ta}@example.com", "role": "owner"})
+        _ta_tid = (r.json() or {}).get("tenant_id")
+        check("team: workspace provisioned", r.status_code == 200 and bool(_ta_tid),
+              r.text[:160])
+
+        def _ta_login(u, p="smokepass1"):
+            sess = requests.Session()
+            sess.verify = not INSECURE
+            rr = sess.post(f"{api}/login", json={"username": u, "password": p})
+            return sess, rr
+
+        owner_s, _ = _ta_login(f"ta-owner-{_ta}")
+        r = owner_s.post(f"{api}/members/", json={
+            "username": f"ta-admin-{_ta}", "email": f"ta-admin-{_ta}@example.com",
+            "password": "smokepass1", "role": "admin"})
+        check("team: workspace admin created", r.status_code == 200, r.text[:160])
+        _ta_users.append(f"ta-admin-{_ta}")
+        r = owner_s.post(f"{api}/members/", json={
+            "username": f"ta-viewer-{_ta}", "email": f"ta-viewer-{_ta}@example.com",
+            "password": "smokepass1", "role": "viewer"})
+        check("team: workspace viewer created", r.status_code == 200, r.text[:160])
+        _ta_users.append(f"ta-viewer-{_ta}")
+
+        admin_s, _ = _ta_login(f"ta-admin-{_ta}")
+        html = admin_s.get(f"{BASE}/backend/users").text
+        check("team: a workspace admin gets the management shell (canManage true)",
+              "canManage: true" in html, "")
+        check("team: the account menu shows the workspace role, not the platform flag",
+              "roleLabel: 'Admin'" in html, "")
+        check("team: the team controls reach a workspace admin",
+              "Add existing user" in html and "Invite member" in html, "")
+        check("team: a workspace admin is not a platform operator in the shell",
+              "isPlatformAdmin: false" in html, "")
+        viewer_s, _ = _ta_login(f"ta-viewer-{_ta}")
+        vhtml = viewer_s.get(f"{BASE}/backend/users").text
+        check("team: a viewer gets no management shell (canManage false)",
+              "canManage: false" in vhtml, "")
+        check("team: a viewer's shell omits the team templates",
+              "Add existing user" not in vhtml, "")
+
+        # Invitations report whether the emailed link went out (best-effort send).
+        r = owner_s.post(f"{api}/invitations/",
+                         json={"email": f"ta-invitee-{_ta}@example.com", "role": "editor"})
+        inv = r.json() if r.status_code == 200 else {}
+        check("team: invitation creation reports the email outcome",
+              r.status_code == 200 and "email_sent" in inv, r.text[:160])
+        if inv.get("id"):
+            owner_s.delete(f"{api}/invitations/{inv['id']}")
+
+        # Password reset: a generic request (no enumeration) and a single-use token.
+        r_known = requests.post(f"{api}/forgot-password",
+                                json={"email": f"ta-admin-{_ta}@example.com"},
+                                verify=not INSECURE)
+        r_unknown = requests.post(f"{api}/forgot-password",
+                                  json={"email": f"nobody-{_ta}@example.invalid"},
+                                  verify=not INSECURE)
+        check("reset: forgot-password answers 200 for a known account",
+              r_known.status_code == 200, r_known.text[:140])
+        check("reset: unknown account answers identically (no enumeration)",
+              r_unknown.status_code == 200 and r_unknown.json() == r_known.json(),
+              r_unknown.text[:140])
+        check("reset: a reset row is stored for the known account",
+              pg_scalar("SELECT count(*) FROM password_resets pr JOIN users u "
+                        f"ON u.id = pr.user_id WHERE u.username = 'ta-admin-{_ta}'") == "1", "")
+        _tok = f"team-reset-{_ta}"
+        pg_exec("INSERT INTO password_resets (user_id, token_hash, expires_at) "
+                f"SELECT id, '{_ta_sha(_tok.encode()).hexdigest()}', "
+                f"now() + interval '30 minutes' FROM users WHERE username = 'ta-admin-{_ta}'")
+        r = requests.post(f"{api}/reset-password",
+                          json={"token": _tok, "password": "brandnewpw9"},
+                          verify=not INSECURE)
+        check("reset: a valid token sets the new password", r.status_code == 200, r.text[:160])
+        r = requests.post(f"{api}/reset-password",
+                          json={"token": _tok, "password": "anotherpw99"},
+                          verify=not INSECURE)
+        check("reset: the token is single-use (replay is 410)", r.status_code == 410,
+              str(r.status_code))
+        r = requests.post(f"{api}/reset-password",
+                          json={"token": "nope", "password": "short"}, verify=not INSECURE)
+        check("reset: a too-short password is refused (400)", r.status_code == 400,
+              str(r.status_code))
+        _, rr = _ta_login(f"ta-admin-{_ta}", "brandnewpw9")
+        check("reset: the new password signs in", rr.status_code == 200, rr.text[:120])
+        _, rr2 = _ta_login(f"ta-admin-{_ta}", "smokepass1")
+        check("reset: the old password no longer works", rr2.status_code != 200,
+              str(rr2.status_code))
+    finally:
+        for _u in _ta_users + [f"ta-owner-{_ta}"]:
+            try:
+                pg_exec("DELETE FROM tenant_memberships WHERE user_id = "
+                        f"(SELECT id FROM users WHERE username = '{_u}')")
+                pg_exec(f"DELETE FROM auth_sessions WHERE username = '{_u}'")
+                pg_exec("DELETE FROM password_resets WHERE user_id = "
+                        f"(SELECT id FROM users WHERE username = '{_u}')")
+                pg_exec(f"DELETE FROM users WHERE username = '{_u}'")
+            except Exception:
+                pass
+        if _ta_tid is not None:
+            try:
+                pg_exec(f"DELETE FROM tenant_invitations WHERE tenant_id = {int(_ta_tid)}")
+                pg_exec(f"DELETE FROM tenants WHERE id = {int(_ta_tid)}")
+            except Exception:
+                pass
+
     print("== Cleanup ==")
     if conv_id:
         r = s.delete(f"{api}/reports/{conv_id}")

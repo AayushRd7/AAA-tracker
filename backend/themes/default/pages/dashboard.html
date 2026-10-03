@@ -44,7 +44,7 @@
             <funnels-component></funnels-component>
         </div>
 
-        {% if is_authenticated_user_type == 'admin' %}
+        {% if can_manage_workspace %}
         <div v-show="$root.activeSection === 'domains'">
             <domains-component></domains-component>
         </div>
