@@ -1,4 +1,4 @@
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-blue)
 ![Vue.js](https://img.shields.io/badge/Vue-2.x-green)
@@ -37,7 +37,7 @@
 
 ## 📖 About the Project
 
-AAA Tracker is a free, open-source traffic tracker:
+AAA Tracker is a source-available traffic tracker you can self-host:
 
 - **Backend:** FastAPI — a high-performance asynchronous API server.
 - **Frontend:** Vue 2 + Vuetify — a Material Design UI framework for Vue.js.
@@ -471,8 +471,10 @@ long versions):
 
 ## 📜 License
 
-This project is licensed under the MIT License.  
-See the [LICENSE](LICENSE) file for more details.
+AAA Tracker is proprietary software. All rights reserved — it is made available
+only under a separate written agreement, and no right to copy, modify, distribute
+or resell it is granted by access to the source.  
+See the [LICENSE](LICENSE) file for the full terms.
 
 ---
 

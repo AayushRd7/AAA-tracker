@@ -117,7 +117,7 @@ PAGES = {
     "og-pricing": (
         "Pricing",
         'One meter. No add-on <span class="ac">store</span>',
-        "Self-host free forever (MIT), or hosted from $0. Cost sync and CAPI on every paid plan.",
+        "Self-host free forever (source-available), or hosted from $0. Cost sync and CAPI on every paid plan.",
     ),
     "og-security": (
         "Security &amp; anti-fraud",
@@ -132,7 +132,7 @@ PAGES = {
     "og-start": (
         "Start free",
         'Two ways to start. <span class="ac">Both&nbsp;free</span>',
-        "Clone the MIT-licensed tracker and run it yourself, or start on the hosted free tier.",
+        "Clone the source-available tracker and run it yourself, or start on the hosted free tier.",
     ),
     "og-contact": (
         "Contact",

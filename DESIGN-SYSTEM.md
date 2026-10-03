@@ -252,7 +252,7 @@ These are binding, not stylistic:
 
 1. **No fabricated social proof.** There are no testimonials, no customer logos and no
    star ratings on this site, because there are no customers to quote yet. The proof on
-   the page is product proof: the app mockup, the uptime card and the MIT licence.
+   the page is product proof: the app mockup, the uptime card and the source-available licence.
    When real quotes exist, build the section — the space is designed for it.
 2. **Sample data is labelled.** Every mockup frame that shows invented numbers carries a
    `Sample data` tag in its chrome.

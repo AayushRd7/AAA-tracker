@@ -1,21 +1,25 @@
-MIT License
+AAA Tracker — Proprietary License
+Copyright (c) 2025-2026 AAA Tracker (aaadigital.marketing). All rights reserved.
 
-Copyright (c) 2025 - aaadigital.marketing
+This software, its source code, documentation and design are proprietary and
+confidential. They are made available only to authorised customers, partners and
+personnel under a separate written agreement, and may not be copied, modified,
+distributed, sublicensed, published or used to create derivative works except as
+that agreement expressly permits.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+No licence or right is granted by implication, estoppel or otherwise. Access to
+the source — whether through a private repository, a container image, an on-premise
+deployment or any other channel — does not transfer ownership and does not grant
+any right to redistribute or resell.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The name "AAA Tracker" and its logos are trademarks of the copyright holder and
+may not be used without prior written permission.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For commercial licensing, contact the copyright holder.
