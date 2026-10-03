@@ -25,7 +25,11 @@
                 </v-btn>
                 <input ref="importFile" type="file" accept="application/json,.json" style="display:none"
                        @change="onImportFileChosen">
+                <!-- Hidden while there are unsaved edits: the sticky dirty bar
+                     below carries its own Save/Discard, so showing both would put
+                     two identical Save buttons on screen at once. -->
                 <v-btn
+                        v-if="!settingsDirty"
                         color="primary"
                         elevation="0"
                         :disabled="!settingsLoaded"
@@ -52,25 +56,37 @@
             <v-btn v-if="settingsLoadError" text small color="primary" class="ml-2"
                    @click="loadSettings">Reload</v-btn>
         </v-alert>
-        <!-- Dirty-state guard: the Save button sits at the very top of a long
-             page, so an unsaved edit is easy to walk away from. This bar only
-             appears while there is something to save and never changes what a
-             save does (see saveSettings / changedSettingsPayload). -->
-        <div v-if="settingsDirty" class="settings-dirty-bar" role="status">
-            <v-icon small class="mr-2">mdi-content-save-alert-outline</v-icon>
-            <span class="settings-dirty-text">
-                {{ changedSectionCount }} unsaved
-                {{ changedSectionCount === 1 ? 'section' : 'sections' }}
-            </span>
-            <v-spacer></v-spacer>
-            <v-btn text small class="mr-1" @click="discardSettings">Discard</v-btn>
-            <v-btn color="primary" elevation="0" small
-                   :loading="savingSettings" @click="saveSettings(false)">
-                <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save
-            </v-btn>
+        <!-- Section nav + dirty-state guard, pinned together under the app bar.
+             The nav gives a way to jump between the six settings sections (the
+             page runs ~2,200 lines, so the Save button at the top is otherwise
+             stranded far from the last section). The dirty bar only appears
+             while there is something to save and never changes what a save does
+             (see saveSettings / changedSettingsPayload). -->
+        <div class="settings-sticky-top">
+            <nav class="settings-nav" aria-label="Settings sections">
+                <a href="#settings-tracking">Tracking</a>
+                <a href="#settings-workspace">Workspace</a>
+                <a href="#settings-notifications">Notifications</a>
+                <a href="#settings-integrations">Integrations</a>
+                <a href="#settings-monitoring">Monitoring</a>
+                <a href="#settings-security">Security &amp; audit</a>
+            </nav>
+            <div v-if="settingsDirty" class="settings-dirty-bar" role="status">
+                <v-icon small class="mr-2">mdi-content-save-alert-outline</v-icon>
+                <span class="settings-dirty-text">
+                    {{ changedSectionCount }} unsaved
+                    {{ changedSectionCount === 1 ? 'section' : 'sections' }}
+                </span>
+                <v-spacer></v-spacer>
+                <v-btn text small class="mr-1" @click="discardSettings">Discard</v-btn>
+                <v-btn color="primary" elevation="0" small
+                       :loading="savingSettings" @click="saveSettings(false)">
+                    <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save
+                </v-btn>
+            </div>
         </div>
         <v-container fluid class="px-0 settings-grid">
-            <div class="settings-section-title">Tracking</div>
+            <div class="settings-section-title" id="settings-tracking">Tracking</div>
             <div class="settings-section-sub">Where clicks go and how conversions come back.</div>
             <v-row>
                 <v-col cols="12">
@@ -220,7 +236,7 @@
                         </v-card-text>
                     </v-card>
                 </v-col>
-                <v-col cols="12" md="6">
+                <v-col cols="12">
                     <v-card class="pa-4">
                         <v-card-title class="d-flex align-center">
                             <v-icon color="primary" class="mr-2">mdi-shield-lock-outline</v-icon>
@@ -246,48 +262,12 @@
                         </v-card-text>
                     </v-card>
                 </v-col>
-                <v-col cols="12">
-                    <v-card class="pa-4">
-                        <v-card-title>Matching variables (Sub IDs)</v-card-title>
-                        <v-card-text>
-                            <v-row dense v-for="(mapping, index) in subIdMapping" :key="index" align="center">
-                                <v-col cols="3">
-                                    <v-text-field
-                                            :label="mapping.name"
-                                            v-model="mapping.name"
-                                            :readonly="!mapping.editable_name"
-                                            outlined
-                                            dense
-                                    ></v-text-field>
-                                </v-col>
-                                <v-col cols="3">
-                                    <v-text-field
-                                            :label="mapping.parameter"
-                                            v-model="mapping.parameter"
-                                            :readonly="!mapping.editable_name"
-                                            outlined
-                                            dense
-                                    ></v-text-field>
-                                </v-col>
-                                <v-col cols="6">
-                                    <v-text-field
-                                            label="Variable name"
-                                            v-model="mapping.token"
-                                            outlined
-                                            dense
-                                    ></v-text-field>
-                                </v-col>
-                            </v-row>
-
-                        </v-card-text>
-                    </v-card>
-                </v-col>
             </v-row>
 
-            <div class="settings-section-title">Workspace</div>
+            <div class="settings-section-title" id="settings-workspace">Workspace</div>
             <div class="settings-section-sub">Defaults, reporting currency and attribution for this workspace.</div>
             <v-row>
-                <v-col cols="12" md="6">
+                <v-col cols="12">
                     <v-card class="pa-4">
                         <v-card-title>General settings</v-card-title>
                         <v-card-text>
@@ -713,7 +693,7 @@
                 </v-col>
             </v-row>
 
-            <div class="settings-section-title">Notifications</div>
+            <div class="settings-section-title" id="settings-notifications">Notifications</div>
             <div class="settings-section-sub">Where alerts and scheduled reports are sent.</div>
             <v-row>
                 <v-col cols="12" md="6">
@@ -856,7 +836,7 @@
                 </v-col>
             </v-row>
 
-            <div class="settings-section-title">Integrations</div>
+            <div class="settings-section-title" id="settings-integrations">Integrations</div>
             <div class="settings-section-sub">Ad-platform sync and the AI assistant.</div>
             <v-row>
                 <v-col cols="12">
@@ -1008,7 +988,7 @@
                 </v-col>
             </v-row>
 
-            <div class="settings-section-title">Monitoring</div>
+            <div class="settings-section-title" id="settings-monitoring">Monitoring</div>
             <div class="settings-section-sub">Flow health checks.</div>
             <v-row>
                 <v-col cols="12">
@@ -1058,7 +1038,7 @@
                 </v-col>
             </v-row>
 
-            <div class="settings-section-title">Security &amp; audit</div>
+            <div class="settings-section-title" id="settings-security">Security &amp; audit</div>
             <div class="settings-section-sub">Login protection and the security trail.</div>
             <v-row>
                 <v-col cols="12">
@@ -1346,7 +1326,6 @@
                 savingSettings: false,
                 settingsRev: null,
                 settingsSnapshot: null,
-                subIdMappingSnapshot: null,
                 dividerOptions: [
                     {text: 'Comma — 1,234.50', value: 'comma'},
                     {text: 'Space — 1 234.50', value: 'space'},
@@ -1398,8 +1377,6 @@
                     {text: 'Meta campaign ID', value: 'ad_platform_campaign_id'},
                     {text: 'Campaign name', value: 'name'},
                     {text: 'Tracking ID (UTM / sub-id)', value: 'tracking_id'},
-                ],
-                subIdMapping: [
                 ],
                 currencies: ['USD', 'EUR', 'GBP', 'JPY'],
                 // --- multi-currency reporting (Settings → Multi-currency) ---
@@ -1499,16 +1476,13 @@
               // Dirty-state guard inputs. `settingsDirty` drives the sticky bar
               // and the beforeunload prompt; both reuse the exact payload the
               // save would send, so the count can never disagree with what a
-              // save writes. `subIdMapping` is a separate whole-block write, so
-              // it counts as one extra changed section.
+              // save writes.
               settingsDirty() {
                 return this.settingsLoaded
-                    && (Object.keys(this.changedSettingsPayload()).length > 0
-                        || this.subIdMappingChanged());
+                    && Object.keys(this.changedSettingsPayload()).length > 0;
               },
               changedSectionCount() {
-                return Object.keys(this.changedSettingsPayload()).length
-                    + (this.subIdMappingChanged() ? 1 : 0);
+                return Object.keys(this.changedSettingsPayload()).length;
               },
               // The saved list the cost sync reads — mirrored read-only in the
               // cost-sync card so accounts are picked in exactly one place.
@@ -1851,7 +1825,6 @@
                                 this.settings.attribution[k] === true;
                         });
                         this.attributionCustomWindow = ![1, 7, 30, 90].includes(attrDays);
-                        if (data.subIdMapping) this.subIdMapping = data.subIdMapping;
                         // loadMonitorStatus writes settings.monitoring from the
                         // server, so snapshot only after it settles.
                         return this.loadMonitorStatus();
@@ -1859,7 +1832,6 @@
                     .then(() => {
                         this.settingsRev = loadedRev;
                         this.settingsSnapshot = JSON.parse(JSON.stringify(this.settings));
-                        this.subIdMappingSnapshot = JSON.parse(JSON.stringify(this.subIdMapping));
                         this.settingsLoaded = true;
                     })
                     .catch((err) => {
@@ -1907,10 +1879,6 @@
                 }
                 return out;
             },
-            subIdMappingChanged() {
-                return !this.deepEqual(this.subIdMapping,
-                                       this.subIdMappingSnapshot || []);
-            },
             saveSettings(silent) {
                 if (!this.settingsLoaded) {
                     // No load, no save: this is what stops a page that never
@@ -1929,9 +1897,6 @@
                     // document this page loaded.
                     _base_rev: this.settingsRev
                 };
-                // A sub-ID mapping save is a whole-block write, so only send it
-                // when the operator edited it.
-                if (this.subIdMappingChanged()) payload.subIdMapping = this.subIdMapping;
                 this.savingSettings = true;
                 return fetch("/backend/api/settings/", {
                     method: "POST",
@@ -1946,7 +1911,6 @@
                     .then((data) => {
                         if (data.settings_rev) this.settingsRev = data.settings_rev;
                         this.settingsSnapshot = JSON.parse(JSON.stringify(this.settings));
-                        this.subIdMappingSnapshot = JSON.parse(JSON.stringify(this.subIdMapping));
                         if (this.$loadWorkspace) this.$loadWorkspace();
                         if (!silent) {
                             this.$root.$emit("show-message", {type: "success", text: "Settings saved"});
@@ -1964,7 +1928,6 @@
             discardSettings() {
                 if (!this.settingsSnapshot) return;
                 this.settings = JSON.parse(JSON.stringify(this.settingsSnapshot));
-                this.subIdMapping = JSON.parse(JSON.stringify(this.subIdMappingSnapshot || []));
                 this.$root.$emit("show-message", {type: "info", text: "Unsaved changes discarded"});
             },
             onBeforeUnload(e) {
