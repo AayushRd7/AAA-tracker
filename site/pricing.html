@@ -3,31 +3,35 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pricing — Start Free During Early Access | AAA Tracker</title>
-<meta name="description" content="AAA Tracker is free while we onboard design partners: full routing, conversion tracking, cost sync and anti-fraud, with no per-event metering.">
+<script>document.documentElement.className+=' js'</script>
+<title>Pricing — Free self-hosted, hosted from $0 | AAA Tracker</title>
+<meta name="description" content="Self-host free forever under the MIT licence, or run it hosted: Free $0/50K tracked events, Starter $49/500K, Growth $149/3M, Scale $499/20M. One meter, no add-on store, no auto-billed overages.">
 <link rel="canonical" href="https://aaatracker.website/pricing">
 <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
-<meta name="theme-color" content="#0a101c">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
 <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/assets/img/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="AAA Tracker">
-<meta property="og:title" content="Start free. Scale when the numbers say so.">
-<meta property="og:description" content="Free during early access. No per-event surprises, no feature paywalls on the tracking you need to run a campaign properly.">
+<meta property="og:title" content="One meter. No add-on store.">
+<meta property="og:description" content="Self-host free forever (MIT), or hosted from $0. Cost sync and CAPI included on every paid plan.">
 <meta property="og:url" content="https://aaatracker.website/pricing">
 <meta property="og:image" content="https://aaatracker.website/assets/img/og/og-pricing.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Start free. Scale when the numbers say so.">
-<meta name="twitter:description" content="Free during early access, no per-event metering.">
+<meta name="twitter:title" content="One meter. No add-on store.">
+<meta name="twitter:description" content="Self-host free forever (MIT), or hosted from $0. Cost sync and CAPI included on every paid plan.">
 <meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-pricing.png">
-<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/fonts/inter.css">
-<link rel="stylesheet" href="/assets/css/site.css?v=1">
+<link rel="preload" href="/assets/fonts/schibsted-grotesk-normal-400-800-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css">
+<link rel="stylesheet" href="/assets/css/site.css?v=3">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -39,13 +43,29 @@
         { "@type": "ListItem", "position": 2, "name": "Pricing", "item": "https://aaatracker.website/pricing" }
       ]
     },
-    { "@type": "WebPage", "url": "https://aaatracker.website/pricing", "name": "Pricing", "isPartOf": { "@id": "https://aaatracker.website/#website" } },
     {
       "@type": "FAQPage",
       "mainEntity": [
-        { "@type": "Question", "name": "How much does AAA Tracker cost?", "acceptedAnswer": { "@type": "Answer", "text": "AAA Tracker is free while we onboard design partners. Usage-based plans arrive with self-serve billing; there is no per-event metering today." } },
-        { "@type": "Question", "name": "Is there a limit on clicks or events?", "acceptedAnswer": { "@type": "Answer", "text": "No. The platform does not meter or charge per click, conversion or postback during early access." } },
-        { "@type": "Question", "name": "What do I need to get started?", "acceptedAnswer": { "@type": "Answer", "text": "A traffic source, an offer and a campaign. We onboard you personally and wire the postback with your network." } }
+        {
+          "@type": "Question",
+          "name": "How much does AAA Tracker cost?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Self-hosted is free forever under the MIT licence. Hosted plans: Free $0 per month for 50,000 tracked events, Starter $49 for 500,000, Growth $149 for 3 million, Scale $499 for 20 million, and Enterprise on custom terms." }
+        },
+        {
+          "@type": "Question",
+          "name": "What counts as a tracked event?",
+          "acceptedAnswer": { "@type": "Answer", "text": "One meter: a visit, a click or a conversion counts as one tracked event. Cost sync calls, postback retries and report reads are never metered." }
+        },
+        {
+          "@type": "Question",
+          "name": "What happens if I go over my plan?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Tracking never stops. We email you, and any upgrade is prorated from the day you moved — there is no automatic overage charge." }
+        },
+        {
+          "@type": "Question",
+          "name": "Are cost sync and conversion APIs extra?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. Ad-platform cost sync and server-side conversion APIs are included on every paid plan." }
+        }
       ]
     }
   ]
@@ -57,184 +77,350 @@
 
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="/" aria-label="AAA Tracker home">
-      <img src="/assets/img/logo-mark.svg" alt="" width="32" height="32">
-      <span>AAA&nbsp;<b>TRACKER</b></span>
-    </a>
-    <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-    </button>
-    <nav class="site-nav" id="site-nav" aria-label="Primary">
-      <a href="/features">Features</a>
-      <a href="/integrations">Integrations</a>
-      <a href="/security">Security</a>
-      <a href="/pricing" aria-current="page">Pricing</a>
-      <a href="/about">About</a>
-    </nav>
-    <div class="header-actions">
-      <a class="btn btn-ghost btn-sm" href="/backend/">Log in</a>
-      <a class="btn btn-primary btn-sm" href="/contact">Book a walkthrough</a>
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing" aria-current="page">Pricing</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free</a>
+      </div>
     </div>
   </div>
 </header>
 
 <main id="main">
 
-  <section class="page-hero">
-    <div class="wrap">
-      <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>/</span>Pricing</nav>
-      <span class="eyebrow">Pricing</span>
-      <h1>Start free. Scale when the numbers say so.</h1>
-      <p class="lead">AAA Tracker is free while we onboard design partners. Routing, conversion
-      tracking, cost sync and anti-fraud are all switched on from the first campaign — and
-      nothing here meters your clicks, conversions or postbacks.</p>
-    </div>
-  </section>
-
-  <section class="tight">
-    <div class="wrap">
-      <div class="grid grid-3">
-        <div class="card reveal">
-          <span class="card-num">Early access</span>
-          <h3>Starter</h3>
-          <p>For a single buyer or a first offer: one workspace with campaigns, offers, landers,
-          postbacks, reports and logs.</p>
-          <p class="mono" style="margin-top:16px;color:var(--accent)">Included in early access</p>
-          <div class="btn-row" style="margin-top:22px">
-            <a class="btn btn-primary btn-sm" href="/contact">Book a walkthrough</a>
-          </div>
-        </div>
-        <div class="card reveal">
-          <span class="card-num">Early access</span>
-          <h3>Pro</h3>
-          <p>For a team running serious spend: everything in Starter plus ad-platform cost sync,
-          server-side conversion APIs, the optimizer, rules, scheduled reports and the Copilot.</p>
-          <p class="mono" style="margin-top:16px;color:var(--accent)">Included in early access</p>
-          <div class="btn-row" style="margin-top:22px">
-            <a class="btn btn-primary btn-sm" href="/contact">Book a walkthrough</a>
-          </div>
-        </div>
-        <div class="card reveal">
-          <span class="card-num">Early access</span>
-          <h3>Agency</h3>
-          <p>For teams running many clients: everything in Pro plus multiple workspaces, roles and
-          section-level permissions, domain groups, and priority onboarding.</p>
-          <p class="mono" style="margin-top:16px;color:var(--accent)">Included in early access</p>
-          <div class="btn-row" style="margin-top:22px">
-            <a class="btn btn-primary btn-sm" href="/contact">Book a walkthrough</a>
-          </div>
-        </div>
+<!-- ══ hero ═══════════════════════════════════════════════════════════ -->
+<section class="page-hero">
+  <div class="wrap">
+    <div class="page-hero__inner">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Pricing</span>
+      <h1 class="h1">One meter. No add-on store.</h1>
+      <p class="lead">Run it yourself for free, forever. Or let us host it and pay for tracked events — one meter, cost sync and server-side conversion APIs included on every paid plan, and never a bill you didn’t approve.</p>
+      <div class="btn-row mt-6">
+        <a class="btn btn--primary btn--lg" href="/start">Start free
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn--ghost btn--lg" href="/contact">Book a walkthrough</a>
       </div>
-      <p class="reveal" style="margin-top:26px;color:var(--muted);font-size:0.9rem">We have not
-      published prices yet. While billing is being built, every plan below is the same deal:
-      full capability, no charge, no metering. When usage-based plans and self-serve billing
-      arrive, existing early-access workspaces get advance notice and keep their data.</p>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap split">
-      <div class="reveal">
-        <span class="eyebrow">Every plan</span>
-        <h2>What's included in every plan.</h2>
-        <p>Capability is not gated on the tier you pick. Whether you are running one offer or
-        fifty client accounts, the routing engine and the reporting underneath it are the same.</p>
-      </div>
-      <div class="reveal">
-        <ul class="checklist">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Workspace isolation</b> — every click, conversion and report is scoped to your workspace.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Unlimited campaigns, offers and landers</b> — no tiers by volume.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>30+ routing filters</b> with AND/OR groups, caps, dayparting and fallbacks.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Postbacks with de-duplication</b> — retried sales never post twice.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Reports and logs</b> — breakdowns, saved views and the raw records to debug a discrepancy.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Anti-fraud scoring</b> — a fraud score on every click, plus bot filtering and shields.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>No per-event metering</b> — clicks, conversions and postbacks are not counted or billed.</span></li>
-        </ul>
+      <div class="btn-row mt-4">
+        <span class="tag">Self-hosted $0 · MIT</span>
+        <span class="tag">Free hosted tier</span>
+        <span class="tag">Tracking never pauses</span>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section>
-    <div class="wrap split reverse">
-      <div class="reveal">
-        <span class="eyebrow">The fine print, up front</span>
-        <h2>What we don't do.</h2>
-        <p>Tracking is the one piece of your stack you cannot afford to be surprised by. These
-        are the billing behaviours we have deliberately left out.</p>
-      </div>
-      <div class="reveal">
-        <ul class="checklist">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>No per-click or per-conversion billing</b> — a good month does not cost more because it worked.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>No feature paywall on the routing engine</b> — filters, caps and fallbacks are core, not an upgrade.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>No charge for seats while you evaluate</b> — bring the people who need to see the numbers.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>No lock-in on your own data</b> — export it or delete it on demand, whenever you want.</span></li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap" style="max-width:900px">
-      <div class="section-head reveal">
-        <span class="eyebrow">Questions</span>
-        <h2>What buyers ask about pricing.</h2>
-      </div>
-      <div class="faq reveal">
-        <details open>
-          <summary>How much does it cost?</summary>
-          <p>Nothing right now. AAA Tracker is free while we onboard design partners, with the
-          full platform switched on. We have not published prices yet because billing is not
-          live — when usage-based plans and self-serve billing arrive, you will see them here
-          before anything changes for an existing workspace.</p>
-        </details>
-        <details>
-          <summary>Is there a limit on clicks or events?</summary>
-          <p>No. There is no click ceiling, conversion ceiling or postback ceiling during early
-          access. The platform does not meter or charge per click, conversion or postback, so a
-          campaign that scales does not quietly move you into a bigger bill.</p>
-        </details>
-        <details>
-          <summary>What happens when billing launches?</summary>
-          <p>Existing early-access workspaces get advance notice before any paid plan applies,
-          and they keep their data. Nothing is deleted, and nothing is retroactively charged.
-          You will be able to decide with the numbers in front of you.</p>
-        </details>
-        <details>
-          <summary>Can I bring my own domain?</summary>
-          <p>Yes. Tracking links can run on your own domain, and domains can be grouped so each
-          client or brand keeps its own. Your ad platform sees your domain, not ours.</p>
-        </details>
-        <details>
-          <summary>How do I migrate from a spreadsheet or another tracker?</summary>
-          <p>Start with one live campaign. We onboard you personally — source, offer, campaign
-          and postback — and you can compare what AAA Tracker records against your current
-          numbers before moving anything else across.</p>
-        </details>
-        <details>
-          <summary>How do I get help?</summary>
-          <p>You talk to the people who build the product. During early access that is a direct
-          line, not a ticket queue. <a href="/contact" style="color:var(--accent)">Book a
-          walkthrough</a> and we will set the first campaign up with you.</p>
-        </details>
-      </div>
-    </div>
-  </section>
-
-  <section class="tight" style="padding-bottom:96px">
-    <div class="wrap">
-      <div class="cta-band reveal">
+<!-- ══ self-host ══════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="band reveal">
+      <div class="split">
         <div>
-          <h2>See it on your own campaign, at no cost.</h2>
-          <p>Send us a live campaign and we will wire it up with you — source, offer, postback
-          and cost sync — then compare the numbers to what your ad platform reports.</p>
+          <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>The wedge</span>
+          <h2 class="h2 mt-4">Self-host it for $0 — the code is yours.</h2>
+          <p class="lead mt-4">AAA Tracker is MIT-licensed and runs on your own server: your database, your clickstream, your uptime. In a market where every rival is cloud-only and metered, this is the tracker you can still take home.</p>
+          <div class="btn-row mt-6">
+            <a class="btn btn--primary" href="https://github.com/AayushRd7/AAA-tracker" rel="noopener">Get the code</a>
+            <a class="btn btn--ghost" href="/start">Install guide</a>
+          </div>
         </div>
-        <div class="btn-row">
-          <a class="btn btn-primary" href="/contact">Book a walkthrough</a>
-          <a class="btn btn-ghost" href="/features">See the features</a>
+        <div class="stack">
+          <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+            <span class="card__ico card__ico--p"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+            <span><b class="h4">MIT-licensed</b><p class="small muted" style="margin-top:4px">Free forever, and the code is yours.</p></span>
+          </div>
+          <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+            <span class="card__ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18"/></svg></span>
+            <span><b class="h4">Your server</b><p class="small muted" style="margin-top:4px">Runs on your own server, not ours.</p></span>
+          </div>
+          <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+            <span class="card__ico card__ico--v"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/></svg></span>
+            <span><b class="h4">Your database</b><p class="small muted" style="margin-top:4px">Your database, your clickstream.</p></span>
+          </div>
+          <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+            <span class="card__ico card__ico--w"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 18V9M10 18V4M16 18v-7M22 18H2"/></svg></span>
+            <span><b class="h4">Your uptime</b><p class="small muted" style="margin-top:4px">Your uptime. Take it home whenever you like.</p></span>
+          </div>
         </div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
+
+<!-- ══ hosted plans ═══════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="section-head section-head--center reveal">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Hosted plans</span>
+      <h2 class="h2">Pay for what you track.</h2>
+      <p>A tracked event is a visit, a click or a conversion — one meter. Cost sync calls, postback retries, report reads and seats are not metered. Prices in USD, billed monthly.</p>
+    </div>
+
+    <div class="plans plans--five mt-8">
+      <div class="plan reveal">
+        <span class="tag plan__tag">Free</span>
+        <div class="plan__price"><b>$0</b><span>/ month</span></div>
+        <span class="plan__quota">50,000 tracked events / mo</span>
+        <p class="plan__blurb">The full tracker, one workspace, no credit card. For the campaign you’re testing before you commit.</p>
+        <ul class="plan__list">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>The full tracker</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>One workspace</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>No credit card</li>
+        </ul>
+        <a class="btn btn--ghost btn--block mt-5" href="/start">Start free</a>
+      </div>
+
+      <div class="plan reveal" data-d="1">
+        <span class="tag plan__tag">Starter</span>
+        <div class="plan__price"><b>$49</b><span>/ month</span></div>
+        <span class="plan__quota">500,000 tracked events / mo</span>
+        <p class="plan__blurb">For a single buyer or a first offer: one workspace with campaigns, offers, landers, postbacks and reports.</p>
+        <ul class="plan__list">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span><b>Everything tracked</b> — routing, splits, funnels, caps, dayparting</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span><b>Cost sync + CAPI</b> included, not an add-on</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span><b>Anti-fraud</b> scoring and bot filtering</span></li>
+        </ul>
+        <a class="btn btn--ghost btn--block mt-5" href="/contact">Request access</a>
+      </div>
+
+      <div class="plan plan--featured reveal" data-d="2">
+        <span class="tag tag--brand plan__tag">Most teams</span>
+        <div class="plan__price"><b>$149</b><span>/ month</span></div>
+        <span class="plan__quota">3,000,000 tracked events / mo</span>
+        <p class="plan__blurb">For a team running serious spend: rules, the optimizer, scheduled reports and the Copilot.</p>
+        <ul class="plan__list">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span><b>Everything in Starter</b>, unlimited seats</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span><b>Rules + optimizer</b> — auto-balance weights every 15 min</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span><b>Copilot &amp; scheduled email</b> reporting</span></li>
+        </ul>
+        <a class="btn btn--primary btn--block mt-5" href="/contact">Request access</a>
+      </div>
+
+      <div class="plan reveal" data-d="3">
+        <span class="tag plan__tag">Scale</span>
+        <div class="plan__price"><b>$499</b><span>/ month</span></div>
+        <span class="plan__quota">20,000,000 tracked events / mo</span>
+        <p class="plan__blurb">For volume and agencies: multiple workspaces, roles with section-level permissions, domain groups.</p>
+        <ul class="plan__list">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span><b>Everything in Growth</b> across workspaces</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span><b>Roles &amp; permissions</b>, audit trail, domain groups</span></li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span><b>Priority onboarding</b> and migration help</span></li>
+        </ul>
+        <a class="btn btn--ghost btn--block mt-5" href="/contact">Request access</a>
+      </div>
+
+      <div class="plan reveal" data-d="1">
+        <span class="tag plan__tag">Enterprise</span>
+        <div class="plan__price"><b>Custom</b></div>
+        <span class="plan__quota">Beyond 20,000,000 events / mo</span>
+        <p class="plan__blurb">Dedicated deployment, custom retention, invoicing and an SLA.</p>
+        <ul class="plan__list">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Dedicated deployment</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Custom retention</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Invoicing and an SLA</li>
+        </ul>
+        <a class="btn btn--ghost btn--block mt-5" href="/contact">Talk to us</a>
+      </div>
+    </div>
+
+    <p class="center small muted mt-6">Early-access pricing, first published October 2026. If you are already running a workspace, nothing changes without advance notice.</p>
+  </div>
+</section>
+
+<!-- ══ the meter ══════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>The meter</span>
+      <h2 class="h2 mt-4">One visit, one click, one conversion. One meter.</h2>
+      <p>A tracked event is a visit, a click or a conversion — one meter. Cost sync calls, postback retries, report reads and seats are not metered.</p>
+    </div>
+
+    <div class="grid grid--2 mt-7">
+      <div class="panel panel--tint reveal">
+        <h3 class="h4">Counts as one tracked event</h3>
+        <ul class="checks mt-4">
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>A visit</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>A click</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>A conversion</li>
+        </ul>
+      </div>
+      <div class="panel panel--tint reveal" data-d="1">
+        <h3 class="h4">Never metered</h3>
+        <ul class="checks mt-4">
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Cost sync calls</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Postback retries</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Report reads and API reads</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Seats</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="center small muted mt-6">Prices in USD, billed monthly. Tracking never pauses — and there is no automatic overage charge.</p>
+  </div>
+</section>
+
+<!-- ══ the fine print, up front ═══════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="band band--dark band--flush reveal">
+      <div class="section-head section-head--center">
+        <span class="eyebrow eyebrow--onink"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>The fine print, up front</span>
+        <h2 class="h2">What we don’t do.</h2>
+        <p class="muted">Tracking is the one piece of your stack you cannot afford to be surprised by. These are the billing behaviours we have deliberately left out.</p>
+      </div>
+
+      <div class="grid grid--4 mt-8">
+        <div class="card">
+          <span class="tag tag--brand">01</span>
+          <h3>No auto-billed overages</h3>
+          <p>Go over and tracking keeps running; we email you and prorate an upgrade from the day you moved.</p>
+        </div>
+        <div class="card">
+          <span class="tag tag--brand">02</span>
+          <h3>No add-on store</h3>
+          <p>Cost sync and server-side conversion APIs are not a $19–$300/month extra.</p>
+        </div>
+        <div class="card">
+          <span class="tag tag--brand">03</span>
+          <h3>No feature paywall on the routing engine</h3>
+          <p>Filters, caps and fallbacks are core, not an upgrade.</p>
+        </div>
+        <div class="card">
+          <span class="tag tag--brand">04</span>
+          <h3>No lock-in on your own data</h3>
+          <p>Export it or delete it on demand, whenever you want.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ comparison ═════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Against the market</span>
+      <h2 class="h2 mt-4">The same job, without the metering theatre.</h2>
+      <p>How the hosted plan compares with the typical click tracker in this class — the one meter and the missing add-on store are the difference you feel on the invoice.</p>
+    </div>
+
+    <div class="dtable-wrap mt-7 reveal">
+      <table class="dtable">
+        <thead>
+          <tr><th scope="col">What you pay for</th><th scope="col">AAA Tracker</th><th scope="col">Typical tracker</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="name">Metering</td>
+            <td>One meter: visit, click or conversion</td>
+            <td>2–3 stacked meters (impressions, clicks, conversions, spend)</td>
+          </tr>
+          <tr>
+            <td class="name">Ad-platform cost sync</td>
+            <td><span class="yes">Included</span> on every paid plan</td>
+            <td>Add-on or top tier only</td>
+          </tr>
+          <tr>
+            <td class="name">Server-side conversion API</td>
+            <td><span class="yes">Included</span> on every paid plan</td>
+            <td>Add-on or top tier only</td>
+          </tr>
+          <tr>
+            <td class="name">Overage</td>
+            <td><span class="yes">Never automatic</span> — we talk first</td>
+            <td>Auto-charged per 1k, or tracking stops</td>
+          </tr>
+          <tr>
+            <td class="name">Self-hosted option</td>
+            <td><span class="yes">Yes</span> — MIT, $0, your server</td>
+            <td><span class="no">No</span> — cloud only</td>
+          </tr>
+          <tr>
+            <td class="name">Data export</td>
+            <td>Full export, on demand</td>
+            <td>Retention cliffs at 1–6 months</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small muted mt-4">Comparison describes common commercial terms among cloud click trackers as of October 2026. Individual vendors vary.</p>
+  </div>
+</section>
+
+<!-- ══ FAQ ════════════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap-narrow">
+    <div class="section-head reveal">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Questions</span>
+      <h2 class="h2 mt-4">What buyers ask about pricing.</h2>
+    </div>
+    <div class="faq mt-7 reveal">
+      <details open>
+        <summary>How much does it cost?</summary>
+        <p>Self-hosted is $0 forever under the MIT licence. Hosted: Free $0 for 50,000 tracked events a month, Starter $49 for 500,000, Growth $149 for 3 million, Scale $499 for 20 million, and Enterprise on custom terms.</p>
+      </details>
+      <details>
+        <summary>What counts as a tracked event?</summary>
+        <p>One visit, one click or one conversion. One meter — cost sync calls, postback retries, API reads and seats are never counted against you.</p>
+      </details>
+      <details>
+        <summary>What happens if I go over my plan?</summary>
+        <p>Tracking never switches off. We email you, you decide, and any upgrade is prorated from the day you moved. There is no automatic overage charge.</p>
+      </details>
+      <details>
+        <summary>Can I bring my own domain?</summary>
+        <p>Yes. Tracking links can run on your own domain, and domains can be grouped so each client or brand keeps its own. Your ad platform sees your domain, not ours.</p>
+      </details>
+      <details>
+        <summary>How do I migrate from a spreadsheet or another tracker?</summary>
+        <p>Start with one live campaign. We onboard you personally — source, offer, campaign and postback — and you can compare what AAA Tracker records against your current numbers before moving anything else across.</p>
+      </details>
+      <details>
+        <summary>How do I get help?</summary>
+        <p>You talk to the people who build the product — a direct line, not a ticket queue. <a class="link" href="/contact">Book a walkthrough</a> and we’ll set the first campaign up with you.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ══ CTA ════════════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="band band--blue band--flush cta reveal">
+      <div>
+        <h2>See it on your own campaign, at no cost.</h2>
+        <p>Start free, then send us a live campaign — we’ll wire up source, offer, postback and cost sync, and compare the numbers to what your ad platform reports.</p>
+      </div>
+      <div class="btn-row">
+        <a class="btn btn--dark btn--lg" href="/start">Start free</a>
+        <a class="btn btn--onink btn--lg" href="/contact">Book a walkthrough</a>
+      </div>
+    </div>
+  </div>
+</section>
 
 </main>
 
@@ -243,10 +429,18 @@
     <div class="footer-grid">
       <div>
         <a class="brand" href="/" aria-label="AAA Tracker home">
-          <img src="/assets/img/logo-mark.svg" alt="" width="32" height="32">
-          <span>AAA&nbsp;<b>TRACKER</b></span>
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+            <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+            <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+            <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+            <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+          </svg>
+          <span class="word">AAA<i>Tracker</i></span>
         </a>
-        <p style="margin-top:16px;max-width:36ch">Every click, accounted for. Routing, conversion tracking, cost sync and anti-fraud in one place.</p>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
       </div>
       <div>
         <h4>Product</h4>
@@ -255,6 +449,16 @@
           <li><a href="/integrations">Integrations</a></li>
           <li><a href="/security">Security &amp; anti-fraud</a></li>
           <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Compare</h4>
+        <ul class="footer-links">
+          <li><a href="/pricing">vs. typical trackers</a></li>
+          <li><a href="/features">Routing engine</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Data handling</a></li>
         </ul>
       </div>
       <div>
@@ -263,6 +467,7 @@
           <li><a href="/about">About</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="/backend/">Log in</a></li>
+          <li><a href="https://github.com/AayushRd7/AAA-tracker" rel="noopener">Source code</a></li>
         </ul>
       </div>
       <div>
@@ -274,11 +479,12 @@
       </div>
     </div>
     <div class="footer-bottom">
-      <span>© <span data-year>2026</span> AAA Tracker. All rights reserved.</span>
-      <span>aaatracker.website</span>
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
     </div>
   </div>
 </footer>
+
 <script src="/assets/js/site.js" defer></script>
 </body>
 </html>

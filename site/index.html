@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AAA Tracker — Affiliate &amp; Performance Campaign Tracking</title>
-<meta name="description" content="AAA Tracker routes your traffic, tracks conversions server-side and shows which placements actually made money — with the numbers your ad platforms agree with.">
+<script>document.documentElement.className+=' js'</script>
+<title>AAA Tracker — Every click, accounted for.</title>
+<meta name="description" content="AAA Tracker decides where each click goes, records the conversion server-side, pulls your real ad spend in, and shows profit per campaign, source and placement — with numbers your ad platforms agree with.">
 <link rel="canonical" href="https://aaatracker.website/">
-<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
-<meta name="theme-color" content="#0a101c">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#ffffff">
 <meta name="author" content="AAA Tracker">
 <meta name="format-detection" content="telephone=no">
 <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
@@ -22,15 +23,15 @@
 <meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="AAA Tracker — Every click, accounted for.">
+<meta property="og:image:alt" content="AAA Tracker">
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="AAA Tracker — Every click, accounted for.">
-<meta name="twitter:description" content="Traffic routing, conversion tracking and anti-fraud in one place.">
+<meta name="twitter:title" content="Every click, accounted for.">
+<meta name="twitter:description" content="Traffic routing, conversion tracking and anti-fraud in one place — with the numbers your ad platforms agree with.">
 <meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
-<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/fonts/inter.css">
-<link rel="stylesheet" href="/assets/css/site.css?v=1">
+<link rel="preload" href="/assets/fonts/schibsted-grotesk-normal-400-800-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css">
+<link rel="stylesheet" href="/assets/css/site.css?v=3">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -40,12 +41,7 @@
       "@id": "https://aaatracker.website/#organization",
       "name": "AAA Tracker",
       "url": "https://aaatracker.website/",
-      "logo": {
-        "@type": "ImageObject",
-        "url": "https://aaatracker.website/assets/img/icon-512.png",
-        "width": 512,
-        "height": 512
-      },
+      "logo": "https://aaatracker.website/assets/img/logo-mark.svg",
       "description": "Affiliate and performance marketing tracker: traffic routing, server-side conversion tracking, ad-platform cost sync and anti-fraud.",
       "contactPoint": [{
         "@type": "ContactPoint",
@@ -69,6 +65,7 @@
       "operatingSystem": "Web",
       "url": "https://aaatracker.website/",
       "description": "Self-serve affiliate tracking: campaign routing, conversion tracking, postbacks, cost sync and anti-fraud reporting.",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD", "description": "Free self-hosted (MIT) and a free hosted tier" },
       "featureList": [
         "Traffic routing with 30+ filters",
         "Offer and landing-page A/B testing",
@@ -88,6 +85,11 @@
         },
         {
           "@type": "Question",
+          "name": "How much does it cost?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Self-hosted is free forever under the MIT licence. Hosted plans start at $0 for 50,000 tracked events a month, $49 for 500,000, $149 for 3 million and $499 for 20 million. Cost sync and server-side conversion APIs are included on every paid plan." }
+        },
+        {
+          "@type": "Question",
           "name": "Does it work with my traffic sources and affiliate networks?",
           "acceptedAnswer": { "@type": "Answer", "text": "Yes. Traffic sources, affiliate networks and offers are configured with their own pass-through macros, so campaign, placement, keyword and sub-id data is captured out of the box. Server-side conversion APIs are supported for Meta and more." }
         },
@@ -95,11 +97,6 @@
           "@type": "Question",
           "name": "How is my data handled?",
           "acceptedAnswer": { "@type": "Answer", "text": "Each workspace is isolated: every record is scoped to its workspace, and ad-platform and bot tokens are encrypted at rest. Postback endpoints can require a secret key or an IP allowlist." }
-        },
-        {
-          "@type": "Question",
-          "name": "Do I need to be technical to set it up?",
-          "acceptedAnswer": { "@type": "Answer", "text": "No. You add a traffic source, an offer and a campaign, then copy the tracking link. Landing pages can be uploaded or pulled from a URL, and the connection to ad platforms is a guided OAuth flow." }
         }
       ]
     }
@@ -112,358 +109,681 @@
 
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="/" aria-label="AAA Tracker home">
-      <img src="/assets/img/logo-mark.svg" alt="" width="32" height="32">
-      <span>AAA&nbsp;<b>TRACKER</b></span>
-    </a>
-    <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-    </button>
-    <nav class="site-nav" id="site-nav" aria-label="Primary">
-      <a href="/features">Features</a>
-      <a href="/integrations">Integrations</a>
-      <a href="/security">Security</a>
-      <a href="/pricing">Pricing</a>
-      <a href="/about">About</a>
-    </nav>
-    <div class="header-actions">
-      <a class="btn btn-ghost btn-sm" href="/backend/">Log in</a>
-      <a class="btn btn-primary btn-sm" href="/contact">Book a walkthrough</a>
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free</a>
+      </div>
     </div>
   </div>
 </header>
 
 <main id="main">
 
-  <!-- ── hero ─────────────────────────────────────────────── -->
-  <section class="hero">
-    <div class="wrap hero-grid">
-      <div>
-        <span class="eyebrow">Affiliate &amp; performance tracking</span>
-        <h1>Every click, <em>accounted for</em>.</h1>
-        <p class="lead">
-          AAA Tracker routes your traffic, records conversions server-side, and shows you
-          which placements actually made money — in one place, with the numbers your ad
-          platforms agree with.
-        </p>
-        <div class="btn-row">
-          <a class="btn btn-primary" href="/contact">Book a walkthrough
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-          </a>
-          <a class="btn btn-ghost" href="/features">See what's inside</a>
-        </div>
-        <p class="hero-note">
-          <span>Free during early access</span>
-          <span>No per-event metering</span>
-          <span>Your data stays yours</span>
-        </p>
+<!-- ══ hero ═══════════════════════════════════════════════════════════ -->
+<section class="hero">
+  <div class="hero__glow" aria-hidden="true"></div>
+  <div class="hero__grid" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="hero__inner">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Server-side click tracking</span>
+      <h1 class="display">Every <span class="hero__click">click,<span class="hero__target" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="13.5" stroke="currentColor" stroke-width="3.4"/><path d="M24 1.5v6.5M24 40v6.5M1.5 24H8M40 24h6.5" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><circle cx="24" cy="24" r="4.6" fill="currentColor"/></svg></span><span class="hero__ripple" aria-hidden="true"></span></span> <span class="accent">accounted for</span>.</h1>
+      <p class="lead">AAA Tracker sits between your traffic and your offers. It decides where each click goes, records the conversion server-side, pulls your real ad spend in, and shows profit — campaign by campaign, in one panel.</p>
+      <div class="btn-row btn-row--center hero__cta">
+        <a class="btn btn--primary btn--lg" href="/start">Start free
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn--ghost btn--lg" href="/contact">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>
+          Book a walkthrough
+        </a>
       </div>
-
-      <div class="mock" aria-label="Campaign routing dashboard preview" role="img">
-        <div class="mock-bar"><i></i><i></i><i></i><span class="mock-title">campaigns / spring-push — routing</span></div>
-        <div class="mock-body">
-          <div class="mock-kpis">
-            <div class="kpi"><small>Clicks</small><b>18,402</b></div>
-            <div class="kpi up"><small>Conversions</small><b>1,196</b></div>
-            <div class="kpi up"><small>Revenue</small><b>$42.7k</b></div>
-            <div class="kpi up"><small>ROI</small><b>+118%</b></div>
-          </div>
-          <div class="flow">
-            <div class="flow-row head"><span>#</span><span>Flow</span><span>Share</span><span class="val">CR</span></div>
-            <div class="flow-row">
-              <span class="dot"></span>
-              <span>Desktop · US · Chrome</span>
-              <span class="track"><i style="width:62%"></i></span>
-              <span class="val">7.4%</span>
-            </div>
-            <div class="flow-row">
-              <span class="dot"></span>
-              <span>Mobile · DE · Safari</span>
-              <span class="track"><i style="width:44%"></i></span>
-              <span class="val">5.9%</span>
-            </div>
-            <div class="flow-row">
-              <span class="dot warn"></span>
-              <span>iOS · UK · Instagram</span>
-              <span class="track"><i style="width:23%"></i></span>
-              <span class="val">2.1%</span>
-            </div>
-            <div class="flow-row">
-              <span class="dot off"></span>
-              <span>Bot / datacenter traffic</span>
-              <span class="track"><i style="width:4%;background:#3b4a63"></i></span>
-              <span class="val">—</span>
-            </div>
-          </div>
-          <div class="ticker" style="margin-top:14px"><span class="rec"></span><span data-ticker>3 conversions · 184 clicks · last 4s</span></div>
-        </div>
-      </div>
+      <p class="hero__notes">
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>MIT-licensed self-host</span>
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Free hosted tier — 50,000 events</span>
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>No credit card</span>
+      </p>
     </div>
-  </section>
 
-  <!-- ── problem ──────────────────────────────────────────── -->
-  <section class="tight">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <span class="eyebrow">Why trackers get abandoned</span>
-        <h2>The numbers never quite add up.</h2>
-        <p>You buy traffic on one dashboard, convert it somewhere else, and reconcile it in a
-        spreadsheet. Every gap between those three is money you can't see.</p>
+    <!-- product shot -->
+    <div class="shot reveal" role="img" aria-label="AAA Tracker campaign report showing clicks, conversions, revenue, cost, profit, ROI and CPA per campaign, with a fraud-risk column">
+      <div class="shot__bar">
+        <span class="shot__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="shot__url">app.aaatracker.website/reports/campaigns</span>
+        <span class="shot__tag">Sample data</span>
       </div>
-      <div class="grid grid-3">
-        <div class="card reveal">
-          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg></div>
-          <h3>Spend and revenue live apart</h3>
-          <p>Ad platforms report spend; networks report payouts. Until both land in the same
-          row, every ROAS figure is a guess.</p>
-        </div>
-        <div class="card reveal">
-          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/></svg></div>
-          <h3>Attribution gets lost</h3>
-          <p>Redirects drop parameters, ITP eats cookies, and postbacks arrive before the click
-          is written. Unattributed conversions look like profit you never earned.</p>
-        </div>
-        <div class="card reveal">
-          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4v5c0 4.5-3.2 8.3-8 9-4.8-.7-8-4.5-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg></div>
-          <h3>Bots and fraud pay for themselves</h3>
-          <p>Datacenter IPs, headless browsers and competitor crawlers chew through budget while
-          your reports show healthy traffic.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <hr class="divider">
-
-  <!-- ── how it works ─────────────────────────────────────── -->
-  <section>
-    <div class="wrap">
-      <div class="section-head reveal">
-        <span class="eyebrow">How it works</span>
-        <h2>Three objects, and you're live.</h2>
-        <p>AAA Tracker is built around the same model media buyers already think in: a source
-        brings traffic, an offer converts it, a campaign decides who sees what.</p>
-      </div>
-      <div class="steps">
-        <div class="step reveal">
-          <h3>Connect the source</h3>
-          <p>Pick your traffic source — or add it — and the tracking link is generated with
-          that source's real macros already in place.</p>
-        </div>
-        <div class="step reveal">
-          <h3>Add offers and landers</h3>
-          <p>Point at an offer URL or upload a landing page. Split test as many variants as you
-          like and let the routing engine choose.</p>
-        </div>
-        <div class="step reveal">
-          <h3>Read the truth</h3>
-          <p>Every click, conversion, cost and postback lands in one report — with profit, CR,
-          EPC and ROI per row, updated as it happens.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── feature grid ─────────────────────────────────────── -->
-  <section class="tight" style="background:var(--ink-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <span class="eyebrow">The platform</span>
-        <h2>Everything a media buyer touches in a day.</h2>
-        <p>Not a feature list for its own sake — each of these exists because a campaign
-        died without it.</p>
-      </div>
-      <div class="grid grid-4">
-        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h5l4 6h7"/><path d="M4 18h5l4-6"/></svg></div><h3>Traffic routing</h3><p>Geo, device, OS, browser, ISP, referrer, language, sub-ids and more — with AND/OR groups and regex.</p></div>
-        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div><h3>A/B testing</h3><p>Landers and offers split by weight, with visitors bound to the same variant on return.</p></div>
-        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/><circle cx="18" cy="17" r="3"/></svg></div><h3>Funnels</h3><p>Multi-step flows: lander, upsell, thank-you — each step tracked with its own drop-off.</p></div>
-        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg></div><h3>Caps &amp; overflow</h3><p>Daily conversion caps per offer, automatic overflow to a backup offer, click caps per flow.</p></div>
-        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg></div><h3>Dayparting</h3><p>Run flows only on chosen days and hours, in the timezone your buyer thinks in.</p></div>
-        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5M4 19h16"/><rect x="8" y="11" width="3" height="8"/><rect x="13" y="7" width="3" height="12"/></svg></div><h3>Cost sync</h3><p>Pull daily spend from your ad accounts so cost, profit and ROI are real, not estimated.</p></div>
-        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4v5c0 4.5-3.2 8.3-8 9-4.8-.7-8-4.5-8-9V7z"/></svg></div><h3>Anti-fraud</h3><p>A 0–100 fraud score on every click, honeypots, crawler detection and per-campaign shields.</p></div>
-        <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg></div><h3>AI Copilot</h3><p>Ask your own numbers a question in plain language and get an answer built from your aggregates.</p></div>
-      </div>
-      <div class="btn-row reveal" style="margin-top:30px">
-        <a class="btn btn-ghost" href="/features">Full feature tour</a>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── routing deep dive ────────────────────────────────── -->
-  <section>
-    <div class="wrap split">
-      <div class="reveal">
-        <span class="eyebrow">Routing engine</span>
-        <h2>Decide where each click goes — precisely.</h2>
-        <p>Filters stack in groups with AND/OR logic, so "US desktop Chrome on Black Friday,
-        except datacenter IPs" is one flow, not five.</p>
-        <ul class="checklist">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>30+ filter fields</b> — geography, device, OS and version, browser, ISP, connection type, referrer, keyword, sub-ids, user agent, bot status.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Real operators</b> — is / is not, contains, regex, CIDR ranges and IPv6.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Multiple actions</b> — redirect, form POST, iframe, serve content, show HTML, 404, or do nothing.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Fallback URL</b> when nothing matches, and referrer hiding when the network demands it.</span></li>
-        </ul>
-      </div>
-      <div class="reveal">
-        <div class="mock">
-          <div class="mock-bar"><i></i><i></i><i></i><span class="mock-title">flow filters — us-desktop-chrome</span></div>
-          <div class="mock-body">
-            <div class="flow">
-              <div class="flow-row head"><span></span><span>Condition</span><span>Operator</span><span class="val">Value</span></div>
-              <div class="flow-row"><span class="dot"></span><span>Country</span><span class="val">is</span><span class="val">US</span></div>
-              <div class="flow-row"><span class="dot"></span><span>Device type</span><span class="val">is</span><span class="val">desktop</span></div>
-              <div class="flow-row"><span class="dot"></span><span>Browser</span><span class="val">is</span><span class="val">Chrome</span></div>
-              <div class="flow-row"><span class="dot warn"></span><span>ISP / connection</span><span class="val">not</span><span class="val">datacenter</span></div>
-              <div class="flow-row"><span class="dot off"></span><span>Bot</span><span class="val">is not</span><span class="val">true</span></div>
+      <div class="shot__body">
+        <div class="app">
+          <aside class="app__side" aria-hidden="true">
+            <div class="app__who">
+              <svg class="mark" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8.6" fill="#1F4BF0"/><path d="M16 9 L8.8 24.2" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/><path d="M16 9 L23.2 24.2" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/><circle cx="16" cy="9" r="2.6" fill="#fff"/></svg>
+              <span><b>northbeam-co</b><span>Production</span></span>
             </div>
-            <p class="mono" style="margin:14px 0 0;font-size:0.78rem;color:var(--muted-2)">→ 3 matching flows · weight 62 / 26 / 12</p>
+            <div class="app__navitem is-on">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V11M10 20V4M16 20v-6M22 20H2"/></svg>
+              Reports
+            </div>
+            <div class="app__navitem">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18"/></svg>
+              Campaigns
+            </div>
+            <div class="app__navitem">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M8.6 6H15a3.4 3.4 0 013.4 3.4v6.2"/></svg>
+              Flows
+            </div>
+            <div class="app__navitem">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7.5 9h9M7.5 13h6"/></svg>
+              Offers
+            </div>
+            <div class="app__navitem">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5h16v12H4z"/><path d="M8 21h8"/></svg>
+              Landers
+            </div>
+            <div class="app__navgroup">Data</div>
+            <div class="app__navitem">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v6c0 4.4-2.9 7.4-7 9-4.1-1.6-7-4.6-7-9V6z"/></svg>
+              Anti-fraud
+            </div>
+            <div class="app__navitem">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+              Logs
+            </div>
+            <div class="app__navitem">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M21 12h-2.5M5.5 12H3M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8M18.4 18.4l-1.8-1.8M7.4 7.4L5.6 5.6"/></svg>
+              Settings
+            </div>
+          </aside>
+          <div class="app__main">
+            <div class="app__top">
+              <span class="app__search">Search campaigns, offers, traffic sources…</span>
+              <span class="app__chip app__chip--on">Today</span>
+              <span class="app__chip">Group by: campaign</span>
+            </div>
+            <div class="app__filters">
+              <span class="app__chip app__chip--on">All sources</span>
+              <span class="app__chip">US · DE · UK</span>
+              <span class="app__chip">Non-bot</span>
+              <span class="app__chip">Fraud &lt; 40</span>
+            </div>
+            <div class="app__kpis">
+              <div class="app__kpi"><small>Clicks</small><b class="num">18,402</b></div>
+              <div class="app__kpi"><small>Conversions</small><b class="num">714</b></div>
+              <div class="app__kpi"><small>Revenue</small><b class="num">$42,351</b></div>
+              <div class="app__kpi"><small>Profit</small><b class="num">$14,810</b></div>
+            </div>
+            <div class="app__scroll">
+              <table class="app__table">
+                <thead>
+                  <tr><th>Campaign</th><th>Risk</th><th class="r">Revenue</th><th class="r">Cost</th><th class="r">Profit</th><th class="r">ROI</th><th class="r">CPA</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td class="name">Meta — Weight Loss · Lookalike 2%</td><td><span class="risk">Safe</span></td><td class="r">$8,910.20</td><td class="r">$6,120.00</td><td class="r">$2,790.20</td><td class="r"><span class="delta delta--up">+45.6%</span></td><td class="r">$40.26</td></tr>
+                  <tr><td class="name">Google — Solar Quotes · Exact</td><td><span class="risk">Safe</span></td><td class="r">$7,340.60</td><td class="r">$4,980.00</td><td class="r">$2,360.60</td><td class="r"><span class="delta delta--up">+47.4%</span></td><td class="r">$42.20</td></tr>
+                  <tr><td class="name">TikTok — Skin Bundle · UGC v4</td><td><span class="risk risk--warn">Watch</span></td><td class="r">$7,118.30</td><td class="r">$4,380.00</td><td class="r">$2,738.30</td><td class="r"><span class="delta delta--up">+62.5%</span></td><td class="r">$36.95</td></tr>
+                  <tr><td class="name">Meta — Life Insurance · Retargeting</td><td><span class="risk">Safe</span></td><td class="r">$6,480.90</td><td class="r">$4,120.00</td><td class="r">$2,360.90</td><td class="r"><span class="delta delta--up">+57.3%</span></td><td class="r">$37.80</td></tr>
+                  <tr><td class="name">TikTok — Keto Gummies · Spark Ads</td><td><span class="risk">Safe</span></td><td class="r">$6,380.75</td><td class="r">$3,925.10</td><td class="r">$2,455.65</td><td class="r"><span class="delta delta--up">+62.6%</span></td><td class="r">$33.26</td></tr>
+                  <tr><td class="name">Taboola — Medicare Advantage · US</td><td><span class="risk">Safe</span></td><td class="r">$6,120.00</td><td class="r">$4,015.75</td><td class="r">$2,104.25</td><td class="r"><span class="delta delta--up">+52.4%</span></td><td class="r">$40.63</td></tr>
+                  <tr><td class="name">Meta — ACA Health · Retargeting</td><td><span class="risk risk--bad">Blocked</span></td><td class="r">$0.00</td><td class="r">$0.00</td><td class="r">$0.00</td><td class="r"><span class="delta">—</span></td><td class="r">—</td></tr>
+                  <tr class="lead-row"><td>Total · 714 conversions</td><td></td><td class="r">$42,350.75</td><td class="r">$27,540.85</td><td class="r">$14,809.90</td><td class="r">+53.8%</td><td class="r">$38.57</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <!-- ── attribution ──────────────────────────────────────── -->
-  <section class="tight" style="background:var(--ink-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-    <div class="wrap split reverse">
-      <div class="reveal">
-        <div class="mock">
-          <div class="mock-bar"><i></i><i></i><i></i><span class="mock-title">postback log — live</span></div>
-          <div class="mock-body">
-            <div class="flow">
-              <div class="flow-row head"><span></span><span>Click ID</span><span>Status</span><span class="val">Payout</span></div>
-              <div class="flow-row"><span class="dot"></span><span class="mono">8f3a…c21</span><span>sale</span><span class="val">$42.00</span></div>
-              <div class="flow-row"><span class="dot"></span><span class="mono">b17e…9d4</span><span>lead</span><span class="val">$3.50</span></div>
-              <div class="flow-row"><span class="dot warn"></span><span class="mono">duplicate — 8f3a…c21</span><span>deduped</span><span class="val">$0.00</span></div>
-              <div class="flow-row"><span class="dot"></span><span class="mono">0ac2…77f</span><span>upsell</span><span class="val">$18.00</span></div>
-            </div>
-            <p class="mono" style="margin:14px 0 0;font-size:0.78rem;color:var(--muted-2)">transaction de-duplication window: 60s</p>
-          </div>
-        </div>
-      </div>
-      <div class="reveal">
-        <span class="eyebrow">Attribution you can defend</span>
-        <h2>Conversions that arrive before the click still get credited.</h2>
-        <p>Postbacks are matched against the click record itself, not a cache that may not have
-        been written yet — so a fast network can't turn a sale into an orphan.</p>
-        <ul class="checklist">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Server-side postbacks</b> with query-style URLs and macros for click id, payout, status and transaction id.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Duplicate protection</b> and retroactive status or payout updates.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Clickless conversions</b> attributed by sub-id when a click id was never stored.</span></li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span><b>Manual import</b> for networks that can only give you a CSV at the end of the day.</span></li>
-        </ul>
+<!-- ══ runs on ════════════════════════════════════════════════════════ -->
+<section class="section section--sm section--flush-top">
+  <div class="wrap">
+    <p class="center mono muted-2" style="letter-spacing:.1em;text-transform:uppercase;margin-bottom:var(--s6)">Self-hosted on the stack you already run</p>
+    <div class="logostrip">
+      <div class="logostrip__track">
+        <span class="logo-item"><img src="/assets/img/brands/postgresql.svg" alt="" width="26" height="26">PostgreSQL</span>
+        <span class="logo-item"><img src="/assets/img/brands/clickhouse.svg" alt="" width="26" height="26">ClickHouse</span>
+        <span class="logo-item"><img src="/assets/img/brands/nginx.svg" alt="" width="26" height="26">Nginx</span>
+        <span class="logo-item"><img src="/assets/img/brands/docker.svg" alt="" width="26" height="26">Docker Compose</span>
+        <span class="logo-item"><img src="/assets/img/brands/python.svg" alt="" width="26" height="26">Python</span>
+        <span class="logo-item"><img src="/assets/img/brands/cloudflare.svg" alt="" width="26" height="26">Cloudflare</span>
+        <span class="logo-item"><img src="/assets/img/brands/postgresql.svg" alt="" width="26" height="26">PostgreSQL</span>
+        <span class="logo-item"><img src="/assets/img/brands/clickhouse.svg" alt="" width="26" height="26">ClickHouse</span>
+        <span class="logo-item"><img src="/assets/img/brands/nginx.svg" alt="" width="26" height="26">Nginx</span>
+        <span class="logo-item"><img src="/assets/img/brands/docker.svg" alt="" width="26" height="26">Docker Compose</span>
+        <span class="logo-item"><img src="/assets/img/brands/python.svg" alt="" width="26" height="26">Python</span>
+        <span class="logo-item"><img src="/assets/img/brands/cloudflare.svg" alt="" width="26" height="26">Cloudflare</span>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <!-- ── integrations ─────────────────────────────────────── -->
-  <section>
-    <div class="wrap">
-      <div class="section-head center reveal">
-        <span class="eyebrow">Integrations</span>
-        <h2>Your traffic in. Your platforms out.</h2>
-        <p>Traffic sources ship with their real pass-through macros; ad platforms connect with
-        a guided OAuth flow instead of a pasted token.</p>
-      </div>
-      <div class="logo-row reveal" style="margin-bottom:34px">
-        <span class="logo-chip">Google Ads</span>
-        <span class="logo-chip">Meta Ads</span>
-        <span class="logo-chip">TikTok Ads</span>
-        <span class="logo-chip">Snapchat Ads</span>
-        <span class="logo-chip">Pinterest Ads</span>
-        <span class="logo-chip">AppLovin</span>
-        <span class="logo-chip">Taboola</span>
-        <span class="logo-chip">Outbrain</span>
-        <span class="logo-chip">MGID</span>
-        <span class="logo-chip">PropellerAds</span>
-        <span class="logo-chip">+ 30 more sources</span>
-      </div>
-      <div class="grid grid-3">
-        <div class="card reveal"><h3>Server-side conversion APIs</h3><p>Send conversion signals straight to the ad platform from the server, so iOS and cookie blocking don't erase your optimisation signal.</p></div>
-        <div class="card reveal"><h3>Ad cost sync</h3><p>Daily spend, impressions and clicks pulled per campaign and folded into the tracker's cost, so ROI is computed from reality.</p></div>
-        <div class="card reveal"><h3>Click API</h3><p>Send a click from an app or webview, get the routing decision back as JSON — the same engine, without a redirect.</p></div>
-      </div>
-      <div class="btn-row reveal" style="margin-top:30px">
-        <a class="btn btn-ghost" href="/integrations">All integrations</a>
+<!-- ══ statband ═══════════════════════════════════════════════════════ -->
+<section class="section section--tight">
+  <div class="wrap">
+    <div class="band band--blue reveal">
+      <div class="statband">
+        <div><b><span data-count="30" data-suffix="+">30+</span></b><small>routing filter fields — geo, device, ISP, sub-id, regex</small></div>
+        <div><b><span data-count="0">0</span>–100</b><small>fraud score written on every single click</small></div>
+        <div><b><span data-count="60" data-suffix="s">60s</span></b><small>postback de-duplication window, plus transaction ids</small></div>
+        <div><b><span data-count="15" data-suffix=" min">15 min</span></b><small>optimizer re-balances weights from real performance</small></div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <!-- ── stats ────────────────────────────────────────────── -->
-  <section class="tight">
-    <div class="wrap">
-      <div class="stats reveal">
-        <div class="stat"><b>0–100</b><small>fraud score on every click</small></div>
-        <div class="stat"><b>30+</b><small>routing filter fields</small></div>
-        <div class="stat"><b>15 min</b><small>optimizer re-pack, from real performance</small></div>
-        <div class="stat"><b>60 s</b><small>postback de-duplication window</small></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── FAQ ──────────────────────────────────────────────── -->
-  <section>
-    <div class="wrap" style="max-width:900px">
-      <div class="section-head reveal">
-        <span class="eyebrow">Questions</span>
-        <h2>The things buyers ask first.</h2>
-      </div>
-      <div class="faq reveal">
-        <details open>
-          <summary>What exactly does AAA Tracker do?</summary>
-          <p>It sits between your traffic and your offers. It decides which offer or landing page
-          each visitor sees, records the click, records the conversion when the network posts it
-          back, pulls your ad spend in, and reports profit per campaign, source, offer and
-          placement.</p>
-        </details>
-        <details>
-          <summary>Will it work with my traffic sources and networks?</summary>
-          <p>Yes. Sources and networks carry their own pass-through macros, so campaign,
-          placement, keyword and sub-id data is captured without hand-built parameters. If a
-          source isn't in the list, adding one takes a minute.</p>
-        </details>
-        <details>
-          <summary>How does it handle iOS and cookie restrictions?</summary>
-          <p>Clicks are recorded server-side and conversions come back as postbacks or
-          server-side conversion API calls, so attribution doesn't depend on a third-party
-          cookie surviving.</p>
-        </details>
-        <details>
-          <summary>Is my data separate from other customers?</summary>
-          <p>Yes. Every record is scoped to your workspace, and platform tokens are encrypted at
-          rest. See <a href="/security" style="color:var(--accent)">Security</a> for the detail.</p>
-        </details>
-        <details>
-          <summary>Do I need to be technical to set it up?</summary>
-          <p>No. You add a source, an offer and a campaign, then copy the tracking link. Landing
-          pages can be uploaded or pulled from a URL, and ad platforms connect through OAuth
-          rather than a pasted token.</p>
-        </details>
-        <details>
-          <summary>What does it cost?</summary>
-          <p>It's free while we're onboarding design partners, with no per-event metering. See
-          <a href="/pricing" style="color:var(--accent)">Pricing</a>.</p>
-        </details>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── CTA ──────────────────────────────────────────────── -->
-  <section class="tight" style="padding-bottom:96px">
-    <div class="wrap">
-      <div class="cta-band reveal">
+<!-- ══ the foundation ═════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="band reveal">
+      <div class="split">
         <div>
-          <h2>Bring one campaign. See the difference in a day.</h2>
-          <p>Send us a live campaign and we'll wire it up with you — source, offer, postback and
-          ad-platform cost sync.</p>
+          <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>The foundation</span>
+          <h2 class="h2 mt-4">Your ad platforms can’t optimise data they never received.</h2>
+          <p class="lead mt-4">Pixels miss conversions, redirects drop parameters and iOS eats the cookie. Nothing looks broken — the report still adds up. So the platform optimises harder toward the wrong thing.</p>
+          <p class="mt-4 muted small">AAA Tracker owns the layer underneath: it captures the click, stitches the session, passes the click id downstream and matches the postback back to the ad. Everything you report on sits on top of that.</p>
+          <ul class="checks mt-5">
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span><b>Server-side capture</b> — immune to ad blockers and browser limits</span></li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span><b>One source of truth</b> — clicks, cost, payouts and postbacks in one row</span></li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span><b>Enriched signals</b> sent back to the platform that needs them</span></li>
+          </ul>
         </div>
-        <div class="btn-row">
-          <a class="btn btn-primary" href="/contact">Book a walkthrough</a>
-          <a class="btn btn-ghost" href="/backend/">Log in</a>
+        <div class="stack">
+          <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+            <span class="card__ico card__ico--v"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V11M10 20V4M16 20v-6M22 20H2"/></svg></span>
+            <span><b class="h4">Reporting &amp; analytics</b><p class="small muted mt-3" style="margin-top:4px">Custom breakdowns, saved views, real-time profit per row.</p></span>
+          </div>
+          <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+            <span class="card__ico card__ico--p"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M8.6 6H15a3.4 3.4 0 013.4 3.4v6.2"/></svg></span>
+            <span><b class="h4">Attribution &amp; routing</b><p class="small muted" style="margin-top:4px">Smart click routing and built-in A/B testing.</p></span>
+          </div>
+          <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+            <span class="card__ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v6c0 4.4-2.9 7.4-7 9-4.1-1.6-7-4.6-7-9V6z"/><path d="M9.4 12.2l1.9 1.9 3.6-3.8"/></svg></span>
+            <span><b class="h4">Fraud &amp; bot filtering</b><p class="small muted" style="margin-top:4px">A 0–100 score per click, honeypots and crawler detection.</p></span>
+          </div>
+          <div class="card" style="display:flex;gap:14px;align-items:flex-start">
+            <span class="card__ico card__ico--w"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13.5H11L10 22l8.5-11.5H12z"/></svg></span>
+            <span><b class="h4">Cost &amp; automation</b><p class="small muted" style="margin-top:4px">Daily spend sync, rules and a 15-minute optimizer.</p></span>
+          </div>
+          <div style="background:var(--ink);color:#fff;border-radius:var(--r-lg);padding:16px 20px;display:flex;align-items:center;gap:12px">
+            <svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#1F4BF0"/><path d="M16 9 L8.8 24.2" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/><path d="M16 9 L23.2 24.2" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/><circle cx="16" cy="9" r="2.6" fill="#fff"/></svg>
+            <span><b style="font-size:.9375rem;font-weight:700">Accurate data foundation</b><span class="small" style="display:block;color:#9aa5bd">Clicks, cost and conversions reconciled in one record</span></span>
+          </div>
         </div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
+
+<!-- ══ the stack, unified (tabs) ══════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="section-head section-head--center reveal">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>One panel</span>
+      <h2 class="h2">Your whole tracking stack, unified.</h2>
+      <p>Four jobs that used to live in four tools — capture, route, attribute, report — running on the same click record.</p>
+    </div>
+
+    <div class="center mt-6 reveal" data-tabs>
+      <div class="tabs" role="tablist" aria-label="Capabilities">
+        <button class="tabs__btn" role="tab" aria-selected="true" id="tab-capture" aria-controls="pane-capture" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h4l2-5 3 10 2-5h5"/></svg>Capture
+        </button>
+        <button class="tabs__btn" role="tab" aria-selected="false" id="tab-route" aria-controls="pane-route" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M8.6 6H15a3.4 3.4 0 013.4 3.4v6.2"/></svg>Route
+        </button>
+        <button class="tabs__btn" role="tab" aria-selected="false" id="tab-attribute" aria-controls="pane-attribute" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>Attribute
+        </button>
+        <button class="tabs__btn" role="tab" aria-selected="false" id="tab-report" aria-controls="pane-report" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V11M10 20V4M16 20v-6M22 20H2"/></svg>Report
+        </button>
+      </div>
+
+      <!-- capture -->
+      <div class="tabpane is-on" role="tabpanel" id="pane-capture" aria-labelledby="tab-capture" tabindex="0">
+        <div class="split split--top mt-7" style="text-align:left">
+          <div>
+            <span class="tag tag--brand">Replaces client-side pixels</span>
+            <h3 class="h2 mt-4" style="font-size:clamp(1.6rem,1.2rem+1.6vw,2.25rem)">Capture every click, no matter what blocks it.</h3>
+            <p class="lead mt-4" style="font-size:1rem">Server-side capture that ad blockers, ITP and iOS restrictions can’t break — with a redirect served in the half-second before the page loads.</p>
+            <ul class="checks mt-5">
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Capture immune to browser restrictions</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Built-in bot and fraud filtering on entry</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Every click id stored against the session</li>
+            </ul>
+            <a class="link-arrow mt-5" href="/features">Explore capture <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+          </div>
+          <div class="compare">
+            <div class="compare__card compare__card--bad">
+              <div class="compare__head"><span class="dot"></span>Browser-only tracking</div>
+              <div class="compare__rows">
+                <div class="compare__row"><b>Ad click</b><span class="compare__pill compare__pill--ok">Captured</span></div>
+                <div class="compare__row"><b>Page view</b><span class="compare__pill compare__pill--ok">Captured</span></div>
+                <div class="compare__row"><b>Form submit</b><span class="compare__pill compare__pill--no">Blocked</span></div>
+                <div class="compare__row"><b>Purchase</b><span class="compare__pill compare__pill--no">Blocked</span></div>
+              </div>
+              <div class="compare__score"><span class="meter" style="flex:1"><span class="meter__fill meter__fill--bad" data-meter="68"></span></span><b>68%</b></div>
+            </div>
+            <div class="compare__card compare__card--good">
+              <div class="compare__head"><span class="dot"></span>AAA Tracker server-side</div>
+              <div class="compare__rows">
+                <div class="compare__row"><b>Ad click</b><span class="compare__pill compare__pill--ok">Captured</span></div>
+                <div class="compare__row"><b>Page view</b><span class="compare__pill compare__pill--ok">Captured</span></div>
+                <div class="compare__row"><b>Form submit</b><span class="compare__pill compare__pill--ok">Captured</span></div>
+                <div class="compare__row"><b>Purchase</b><span class="compare__pill compare__pill--ok">Captured</span></div>
+              </div>
+              <div class="compare__score"><span class="meter" style="flex:1"><span class="meter__fill meter__fill--good" data-meter="100"></span></span><b>100%</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- route -->
+      <div class="tabpane" role="tabpanel" id="pane-route" aria-labelledby="tab-route" tabindex="0">
+        <div class="split split--top mt-7" style="text-align:left">
+          <div>
+            <span class="tag tag--brand">30+ filter fields</span>
+            <h3 class="h2 mt-4" style="font-size:clamp(1.6rem,1.2rem+1.6vw,2.25rem)">Decide where each click goes — precisely.</h3>
+            <p class="lead mt-4" style="font-size:1rem">Filters stack in AND/OR groups with real operators, so “US desktop Chrome, except datacenter IPs” is one flow, not five.</p>
+            <ul class="checks mt-5">
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Geo, device, OS, browser, ISP, connection, referrer, keyword, sub-ids, user agent</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Is / is not, contains, regex, CIDR ranges and IPv6</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Split by weight, by position, or let the optimizer move them</li>
+            </ul>
+            <a class="link-arrow mt-5" href="/features">Explore routing <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+          </div>
+          <div class="panel panel--flush">
+            <div class="shot__bar">
+              <span class="shot__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="shot__url">flows / us-desktop-chrome</span>
+              <span class="shot__tag">5 rules</span>
+            </div>
+            <div class="dtable-wrap" style="border:0;border-radius:0">
+              <table class="dtable">
+                <thead><tr><th>Condition</th><th>Operator</th><th>Value</th></tr></thead>
+                <tbody>
+                  <tr><td class="name">Country</td><td class="mono muted">is</td><td class="mono">US</td></tr>
+                  <tr><td class="name">Device type</td><td class="mono muted">is</td><td class="mono">desktop</td></tr>
+                  <tr><td class="name">Browser</td><td class="mono muted">is</td><td class="mono">Chrome</td></tr>
+                  <tr><td class="name">ISP / connection</td><td class="mono muted">is not</td><td class="mono">datacenter</td></tr>
+                  <tr><td class="name">Bot</td><td class="mono muted">is not</td><td class="mono">true</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="padding:var(--s5);border-top:1px solid var(--line)">
+              <div class="stack--sm">
+                <div style="display:flex;align-items:center;gap:12px"><span class="mono muted tiny" style="width:70px">Offer A</span><span class="meter" style="flex:1"><span class="meter__fill" data-meter="62"></span></span><span class="mono tiny num">62%</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span class="mono muted tiny" style="width:70px">Offer B</span><span class="meter" style="flex:1"><span class="meter__fill" data-meter="26"></span></span><span class="mono tiny num">26%</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span class="mono muted tiny" style="width:70px">Offer C</span><span class="meter" style="flex:1"><span class="meter__fill" data-meter="12"></span></span><span class="mono tiny num">12%</span></div>
+              </div>
+              <p class="mono tiny muted-2 mt-4">→ 3 matching flows · weights re-pack every 15 min</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- attribute -->
+      <div class="tabpane" role="tabpanel" id="pane-attribute" aria-labelledby="tab-attribute" tabindex="0">
+        <div class="split split--top mt-7" style="text-align:left">
+          <div>
+            <span class="tag tag--brand">60s window + transaction ids</span>
+            <h3 class="h2 mt-4" style="font-size:clamp(1.6rem,1.2rem+1.6vw,2.25rem)">Conversions that arrive before the click still get credited.</h3>
+            <p class="lead mt-4" style="font-size:1rem">Postbacks are matched against the click record itself — not a cache that may not have been written yet. A fast network can’t turn a sale into an orphan.</p>
+            <ul class="checks mt-5">
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Query-style conversion URLs with click id, payout, status and transaction macros</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Duplicate protection, plus retroactive status and payout updates</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Clickless conversions attributed by sub-id when no click id was stored</li>
+            </ul>
+            <a class="link-arrow mt-5" href="/features">Explore attribution <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+          </div>
+          <div class="panel panel--flush">
+            <div class="shot__bar">
+              <span class="shot__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="shot__url">logs / postbacks</span>
+              <span class="shot__tag">live</span>
+            </div>
+            <div class="dtable-wrap" style="border:0;border-radius:0">
+              <table class="dtable">
+                <thead><tr><th>Click ID</th><th>Status</th><th class="r">Payout</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">8f3a…c21</td><td><span class="risk">sale</span></td><td class="r mono">$42.00</td></tr>
+                  <tr><td class="mono">b17e…9d4</td><td><span class="risk">lead</span></td><td class="r mono">$3.50</td></tr>
+                  <tr><td class="mono">8f3a…c21</td><td><span class="risk risk--warn">deduped</span></td><td class="r mono muted-2">$0.00</td></tr>
+                  <tr><td class="mono">0ac2…77f</td><td><span class="risk">upsell</span></td><td class="r mono">$18.00</td></tr>
+                  <tr><td class="mono">51de…2aa</td><td><span class="risk risk--bad">rejected · 403</span></td><td class="r mono muted-2">$0.00</td></tr>
+                  <tr class="lead-row"><td>Credited</td><td></td><td class="r mono">$63.50</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="mono tiny muted-2" style="padding:var(--s4) var(--s5);border-top:1px solid var(--line)">transaction de-duplication window: 60s · secret key and IP allowlist optional</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- report -->
+      <div class="tabpane" role="tabpanel" id="pane-report" aria-labelledby="tab-report" tabindex="0">
+        <div class="split split--top mt-7" style="text-align:left">
+          <div>
+            <span class="tag tag--brand">Profit per row</span>
+            <h3 class="h2 mt-4" style="font-size:clamp(1.6rem,1.2rem+1.6vw,2.25rem)">Know exactly what drove every sale.</h3>
+            <p class="lead mt-4" style="font-size:1rem">One source of truth instead of five reports that disagree — with profit, CR, EPC and ROI computed per row, per day, per source, per offer and per placement.</p>
+            <ul class="checks mt-5">
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Breakdowns by campaign, source, offer, lander, country, device, browser, OS and sub-id</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Saved views, read-only public links and scheduled email snapshots</li>
+              <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Rules that pause a flow when a metric crosses a line</li>
+            </ul>
+            <a class="link-arrow mt-5" href="/features">Explore reporting <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+          </div>
+          <div class="panel panel--flush">
+            <div class="shot__bar">
+              <span class="shot__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="shot__url">reports / breakdown · country</span>
+              <span class="shot__tag">Sample data</span>
+            </div>
+            <div style="padding:var(--s5)">
+              <div class="stack--sm">
+                <div style="display:flex;align-items:center;gap:12px"><span class="mono tiny" style="width:44px">US</span><span class="meter" style="flex:1"><span class="meter__fill meter__fill--good" data-meter="100"></span></span><span class="mono tiny num" style="width:76px;text-align:right">+61.4% ROI</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span class="mono tiny" style="width:44px">DE</span><span class="meter" style="flex:1"><span class="meter__fill meter__fill--good" data-meter="72"></span></span><span class="mono tiny num" style="width:76px;text-align:right">+44.2% ROI</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span class="mono tiny" style="width:44px">UK</span><span class="meter" style="flex:1"><span class="meter__fill meter__fill--warn" data-meter="38"></span></span><span class="mono tiny num" style="width:76px;text-align:right">+16.8% ROI</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span class="mono tiny" style="width:44px">CA</span><span class="meter" style="flex:1"><span class="meter__fill meter__fill--good" data-meter="54"></span></span><span class="mono tiny num" style="width:76px;text-align:right">+31.0% ROI</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span class="mono tiny muted-2" style="width:44px">AU</span><span class="meter" style="flex:1"><span class="meter__fill meter__fill--bad" data-meter="11"></span></span><span class="mono tiny num" style="width:76px;text-align:right">−9.4% ROI</span></div>
+              </div>
+            </div>
+            <div class="dtable-wrap" style="border:0;border-top:1px solid var(--line);border-radius:0">
+              <table class="dtable">
+                <thead><tr><th>Placement</th><th class="r">Clicks</th><th class="r">CR</th><th class="r">EPC</th><th class="r">ROI</th></tr></thead>
+                <tbody>
+                  <tr><td class="name">Meta · Lookalike 2%</td><td class="r mono">6,214</td><td class="r mono">5.7%</td><td class="r mono">$1.43</td><td class="r mono" style="color:var(--pos)">+45.6%</td></tr>
+                  <tr><td class="name">Google · Exact match</td><td class="r mono">3,880</td><td class="r mono">3.0%</td><td class="r mono">$1.89</td><td class="r mono" style="color:var(--pos)">+47.4%</td></tr>
+                  <tr><td class="name">TikTok · Spark Ads</td><td class="r mono">5,102</td><td class="r mono">2.5%</td><td class="r mono">$1.40</td><td class="r mono" style="color:var(--pos)">+62.6%</td></tr>
+                  <tr><td class="name">Taboola · US native</td><td class="r mono">2,940</td><td class="r mono">3.9%</td><td class="r mono">$2.08</td><td class="r mono" style="color:var(--pos)">+52.4%</td></tr>
+                  <tr><td class="name">Bot / datacenter</td><td class="r mono">266</td><td class="r mono muted-2">—</td><td class="r mono muted-2">—</td><td class="r mono muted-2">filtered</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ integrations ═══════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="band band--dark band--flush reveal band--bleed" data-bleed>
+      <div class="section-head section-head--center">
+        <span class="eyebrow eyebrow--onink"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Integrations</span>
+        <h2 class="h2">Connects with everything you already buy on.</h2>
+        <p>Native cost sync and server-side conversion APIs for the ad platforms, plus traffic-source templates with their real pass-through macros — set up in minutes, not sprints.</p>
+      </div>
+
+      <div class="orbs mt-8" aria-label="Supported ad platforms and platforms">
+        <span class="orb orb--float"><img src="/assets/img/brands/pinterest.svg" alt="Pinterest Ads"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/meta.svg" alt="Meta Ads"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/shopify.svg" alt="Shopify"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/googleads.svg" alt="Google Ads"></span>
+        <span class="orb orb--center"><img src="/assets/img/logo-mark.svg" alt="AAA Tracker"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/tiktok.svg" alt="TikTok Ads"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/hubspot.svg" alt="HubSpot"></span>
+        <span class="orb orb--float orb--dark"><img src="/assets/img/brands/snapchat.svg" alt="Snapchat Ads"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/reddit.svg" alt="Reddit Ads"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/mailchimp.svg" alt="Mailchimp"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/zapier.svg" alt="Zapier"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/stripe.svg" alt="Stripe"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/x.svg" alt="X Ads"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/googleanalytics.svg" alt="Google Analytics"></span>
+        <span class="orb orb--float orb--dark"><img src="/assets/img/brands/intercom.svg" alt="Intercom"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/woocommerce.svg" alt="WooCommerce"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/wordpress.svg" alt="WordPress"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/brevo.svg" alt="Brevo"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/mixpanel.svg" alt="Mixpanel"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/youtube.svg" alt="YouTube"></span>
+        <span class="orb orb--float"><img src="/assets/img/brands/telegram.svg" alt="Telegram"></span>
+      </div>
+
+      <p class="center muted mt-7" style="color:#9aa5bd">Meta CAPI is live today. TikTok, Google Ads, Snapchat, Pinterest and AppLovin are next — and any traffic source you add takes about a minute.</p>
+      <div class="btn-row btn-row--center mt-6">
+        <a class="btn btn--primary" href="/integrations">All integrations
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ reliability ════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="split split--top">
+      <div class="reveal">
+        <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Anti-fraud &amp; reliability</span>
+        <h2 class="h2 mt-4">When a tracker goes down, you lose money quietly.</h2>
+        <p class="lead mt-4" style="font-size:1rem">A dead destination or a bot wave costs you a day of data before anyone notices. AAA Tracker scores every click, checks every destination and takes broken links out of rotation.</p>
+        <ul class="checks mt-5">
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span><b>0–100 fraud score</b> from proxy, datacenter, headless-browser and behavioural signals</span></li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span><b>Verified-crawler detection</b> — real Googlebot is recognised, the fake one isn’t</span></li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span><b>Flow monitoring</b> — destinations are HTTP-checked on a schedule and pulled if they die</span></li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span><b>Anomaly insights</b> — revenue stops, cost spikes and conversion collapse, flagged</span></li>
+        </ul>
+      </div>
+      <div class="status reveal" data-d="1">
+        <div class="status__head">
+          <span class="status__dot">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          </span>
+          <span><b>Routing engine</b><small>All checks passing</small></span>
+          <span class="tag tag--pos" style="margin-left:auto">Healthy</span>
+        </div>
+        <div class="uptime" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="is-bad"></i><i></i><i></i>
+        </div>
+        <div class="status__axis"><span>90 days ago</span><span>Today</span></div>
+        <div class="status__grid">
+          <div class="status__row"><span>Click tracking</span><span class="tag tag--pos">100%</span></div>
+          <div class="status__row"><span>Redirect network</span><span class="tag tag--pos">100%</span></div>
+          <div class="status__row"><span>Conversion API</span><span class="tag tag--pos">100%</span></div>
+          <div class="status__row"><span>Dashboard</span><span class="tag tag--pos">100%</span></div>
+          <div class="status__row"><span>Reporting</span><span class="tag tag--pos">100%</span></div>
+          <div class="status__row"><span>Fraud filter</span><span class="tag tag--pos">100%</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid--4 mt-8 reveal" style="border-top:1px solid var(--line);padding-top:var(--s7)">
+      <div>
+        <span class="card__ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v6c0 4.4-2.9 7.4-7 9-4.1-1.6-7-4.6-7-9V6z"/></svg></span>
+        <h3 class="h4 mt-4">Workspace isolation</h3>
+        <p class="small muted mt-3" style="margin-top:6px">Every record carries its workspace and every query is filtered by it. Nothing is visible by default.</p>
+      </div>
+      <div>
+        <span class="card__ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10.5" width="16" height="10" rx="2.4"/><path d="M8 10.5V8a4 4 0 018 0v2.5"/></svg></span>
+        <h3 class="h4 mt-4">Encrypted credentials</h3>
+        <p class="small muted" style="margin-top:6px">Ad-platform tokens are encrypted at rest, masked in responses and never included in a settings export.</p>
+      </div>
+      <div>
+        <span class="card__ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 3 2.6 15 0 18M12 3c-2.6 3-2.6 15 0 18"/></svg></span>
+        <h3 class="h4 mt-4">Privacy controls</h3>
+        <p class="small muted" style="margin-top:6px">IP anonymisation at collection, a retention window you define, and an opt-out endpoint you can host.</p>
+      </div>
+      <div>
+        <span class="card__ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5h16v14H4z"/><path d="M8 10h8M8 14h5"/></svg></span>
+        <h3 class="h4 mt-4">Roles &amp; audit trail</h3>
+        <p class="small muted" style="margin-top:6px">Section-level permissions, and a log of who changed what, and when.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ copilot ════════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="band band--dark band--flush reveal band--bleed" data-bleed>
+      <div class="split split--top">
+        <div>
+          <span class="eyebrow eyebrow--onink"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Copilot</span>
+          <h2 class="h2 mt-4">Your campaigns just got a dedicated analyst.</h2>
+          <p class="lead mt-4" style="font-size:1rem;color:#9aa5bd">Because the data underneath is accurate, the Copilot can do more than chat. Ask in plain English and it reads your own aggregates, breaks the number down, and tells you which campaign is doing the damage.</p>
+          <ul class="checks checks--onink mt-5">
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Answers grounded in your workspace, not the open web</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Breaks a metric down by campaign, offer, country or device</li>
+            <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Included on Growth and above — not a separate product</li>
+          </ul>
+        </div>
+        <div>
+          <div class="chat">
+            <div class="bubble bubble--me">
+              <span class="bubble__label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 4v16M4 12h16"/></svg>You</span>
+              Why did my CPA jump on Meta this week?
+            </div>
+            <div class="bubble">
+              <span class="bubble__label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.2 5.1 5.5.5-4.2 3.6 1.3 5.4-4.8-2.9-4.8 2.9 1.3-5.4L4.3 8.6l5.5-.5z"/></svg>Copilot</span>
+              CPA is up 18% week over week on Meta. Three things moved:
+              <span class="chat__steps">
+                <span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Meta — Weight Loss · Lookalike 2%: CR fell from 8.1% to 5.2% after the creative swap on Monday</span>
+                <span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Fraud score above 60 on 412 clicks from one /24 range — now blocked</span>
+                <span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>The optimizer shifted 12% weight to Offer C, which converts 1.4× better on this traffic</span>
+              </span>
+            </div>
+          </div>
+          <div class="chatbar">
+            <span>Ask anything about your own data…</span>
+            <span class="btn btn--primary btn--sm">Ask Copilot</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ pricing teaser ═════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="section-head section-head--center reveal">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Pricing</span>
+      <h2 class="h2">One meter. No add-on store.</h2>
+      <p>Tracked events are visits, clicks and conversions — one number. Cost sync, server-side conversion APIs and the anti-fraud engine are never a paid extra.</p>
+    </div>
+
+    <div class="plans mt-8">
+      <div class="plan reveal">
+        <span class="tag plan__tag">Free</span>
+        <div class="plan__price"><b>$0</b><span>/ month</span></div>
+        <span class="plan__quota">50,000 tracked events / mo</span>
+        <p class="plan__blurb">The full tracker, one workspace, no credit card.</p>
+        <ul class="plan__list">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Routing, splits, funnels, caps, dayparting</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Postbacks and reporting</li>
+        </ul>
+        <a class="btn btn--ghost btn--block mt-5" href="/start">Start free</a>
+      </div>
+
+      <div class="plan plan--featured reveal" data-d="1">
+        <span class="tag tag--brand plan__tag">Most teams</span>
+        <div class="plan__price"><b>$149</b><span>/ month</span></div>
+        <span class="plan__quota">3,000,000 tracked events / mo</span>
+        <p class="plan__blurb">For a team running serious spend: rules, the optimizer, scheduled reports and the Copilot.</p>
+        <ul class="plan__list">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Everything in Starter, unlimited seats</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Rules + optimizer, re-weighted every 15 min</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Copilot and scheduled email reporting</li>
+        </ul>
+        <a class="btn btn--primary btn--block mt-5" href="/pricing">See all plans</a>
+      </div>
+
+      <div class="plan reveal" data-d="2">
+        <span class="tag plan__tag">Scale</span>
+        <div class="plan__price"><b>$499</b><span>/ month</span></div>
+        <span class="plan__quota">20,000,000 tracked events / mo</span>
+        <p class="plan__blurb">For volume and agencies: multiple workspaces, roles with section-level permissions, domain groups.</p>
+        <ul class="plan__list">
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Everything in Growth across workspaces</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Roles, audit trail, domain groups</li>
+        </ul>
+        <a class="btn btn--ghost btn--block mt-5" href="/pricing">See all plans</a>
+      </div>
+    </div>
+
+    <p class="center small muted mt-6">Early-access pricing, first published October 2026. Self-hosted is MIT-licensed and free forever. No auto-billed overages — go over and tracking keeps running.</p>
+  </div>
+</section>
+
+<!-- ══ FAQ ════════════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap-narrow">
+    <div class="section-head reveal">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Questions</span>
+      <h2 class="h2 mt-4">The things buyers ask first.</h2>
+    </div>
+    <div class="faq mt-7 reveal">
+      <details open>
+        <summary>What exactly does AAA Tracker do?</summary>
+        <p>It sits between your traffic and your offers. It decides which offer or landing page each visitor sees, records the click, records the conversion when the network posts it back, pulls your ad spend in, and reports profit per campaign, source, offer and placement.</p>
+      </details>
+      <details>
+        <summary>How much does it cost?</summary>
+        <p>Self-hosted is free forever under the MIT licence. Hosted plans start at $0 for 50,000 tracked events a month and scale to $499 for 20 million — one meter, no add-on store, and cost sync plus server-side conversion APIs included on every paid plan. See <a class="link" href="/pricing">Pricing</a>.</p>
+      </details>
+      <details>
+        <summary>Will it work with my traffic sources and networks?</summary>
+        <p>Yes. Sources and networks carry their own pass-through macros, so campaign, placement, keyword and sub-id data is captured without hand-built parameters. If a source isn’t in the list, adding one takes about a minute.</p>
+      </details>
+      <details>
+        <summary>How does it handle iOS and cookie restrictions?</summary>
+        <p>Clicks are recorded server-side and conversions come back as postbacks or server-side conversion API calls, so attribution doesn’t depend on a third-party cookie surviving.</p>
+      </details>
+      <details>
+        <summary>Is my data separate from other customers?</summary>
+        <p>Yes. Every record is scoped to your workspace, and platform tokens are encrypted at rest. See <a class="link" href="/security">Security</a> for the detail.</p>
+      </details>
+      <details>
+        <summary>Do I need to be technical to set it up?</summary>
+        <p>No. You add a source, an offer and a campaign, then copy the tracking link. Landing pages can be uploaded or pulled from a URL, and ad platforms connect through OAuth rather than a pasted token.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ══ CTA ════════════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="band band--blue band--flush cta reveal">
+      <div>
+        <h2>Bring one campaign. See the difference in a day.</h2>
+        <p>Start free on your own server or in a hosted workspace — and we’ll wire the first campaign up with you: source, offer, postback and cost sync.</p>
+      </div>
+      <div class="btn-row">
+        <a class="btn btn--dark btn--lg" href="/start">Start free</a>
+        <a class="btn btn--onink btn--lg" href="/contact">Book a walkthrough</a>
+      </div>
+    </div>
+  </div>
+</section>
 
 </main>
 
@@ -472,11 +792,18 @@
     <div class="footer-grid">
       <div>
         <a class="brand" href="/" aria-label="AAA Tracker home">
-          <img src="/assets/img/logo-mark.svg" alt="" width="32" height="32">
-          <span>AAA&nbsp;<b>TRACKER</b></span>
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+            <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+            <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+            <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+            <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+          </svg>
+          <span class="word">AAA<i>Tracker</i></span>
         </a>
-        <p style="margin-top:16px;max-width:36ch">Every click, accounted for. Routing, conversion
-        tracking, cost sync and anti-fraud in one place.</p>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
       </div>
       <div>
         <h4>Product</h4>
@@ -485,6 +812,16 @@
           <li><a href="/integrations">Integrations</a></li>
           <li><a href="/security">Security &amp; anti-fraud</a></li>
           <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Compare</h4>
+        <ul class="footer-links">
+          <li><a href="/pricing">vs. typical trackers</a></li>
+          <li><a href="/features">Routing engine</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Data handling</a></li>
         </ul>
       </div>
       <div>
@@ -493,6 +830,7 @@
           <li><a href="/about">About</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="/backend/">Log in</a></li>
+          <li><a href="https://github.com/AayushRd7/AAA-tracker" rel="noopener">Source code</a></li>
         </ul>
       </div>
       <div>
@@ -504,8 +842,8 @@
       </div>
     </div>
     <div class="footer-bottom">
-      <span>© <span data-year>2026</span> AAA Tracker. All rights reserved.</span>
-      <span>aaatracker.website</span>
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
     </div>
   </div>
 </footer>

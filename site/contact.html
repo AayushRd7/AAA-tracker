@@ -3,11 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Contact — Talk to the AAA Tracker Team</title>
-<meta name="description" content="Book a walkthrough of AAA Tracker, or ask a question about tracking, postbacks and ad-platform cost sync. We reply within one business day.">
+<script>document.documentElement.className+=' js'</script>
+<title>Contact — Talk to the team behind AAA Tracker</title>
+<meta name="description" content="Tell us what you’re tracking and where your conversions come from. We reply within one business day and walk through your setup on your own campaign.">
 <link rel="canonical" href="https://aaatracker.website/contact">
 <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
-<meta name="theme-color" content="#0a101c">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
 <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/assets/img/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
@@ -15,116 +18,190 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="AAA Tracker">
 <meta property="og:title" content="Talk to the team behind AAA Tracker.">
-<meta property="og:description" content="Book a walkthrough or ask a question — we reply within one business day.">
+<meta property="og:description" content="Tell us what you’re tracking. We’ll show you the shortest path to numbers that reconcile.">
 <meta property="og:url" content="https://aaatracker.website/contact">
-<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-contact.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Talk to the team behind AAA Tracker.">
-<meta name="twitter:description" content="Book a walkthrough or ask a question — we reply within one business day.">
-<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
-<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/fonts/inter.css">
-<link rel="stylesheet" href="/assets/css/site.css?v=1">
+<meta name="twitter:description" content="Tell us what you’re tracking. We’ll show you the shortest path to numbers that reconcile.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-contact.png">
+<link rel="preload" href="/assets/fonts/schibsted-grotesk-normal-400-800-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css">
+<link rel="stylesheet" href="/assets/css/site.css?v=3">
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="/" aria-label="AAA Tracker home">
-      <img src="/assets/img/logo-mark.svg" alt="" width="32" height="32">
-      <span>AAA&nbsp;<b>TRACKER</b></span>
-    </a>
-    <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-    </button>
-    <nav class="site-nav" id="site-nav" aria-label="Primary">
-      <a href="/features">Features</a>
-      <a href="/integrations">Integrations</a>
-      <a href="/security">Security</a>
-      <a href="/pricing">Pricing</a>
-      <a href="/about">About</a>
-    </nav>
-    <div class="header-actions">
-      <a class="btn btn-ghost btn-sm" href="/backend/">Log in</a>
-      <a class="btn btn-primary btn-sm" href="/contact">Book a walkthrough</a>
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free</a>
+      </div>
     </div>
   </div>
 </header>
 
 <main id="main">
 
-  <section class="page-hero">
-    <div class="wrap">
-      <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>/</span>Contact</nav>
-      <span class="eyebrow">Contact</span>
-      <h1>Talk to the team behind AAA Tracker.</h1>
-      <p class="lead">Tell us what you're tracking and where your conversions come from. We'll show
-      you the shortest path to a campaign whose numbers reconcile with your ad platform.</p>
+<!-- ══ hero ═══════════════════════════════════════════════════════════ -->
+<section class="page-hero">
+  <div class="wrap">
+    <div class="page-hero__inner">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Contact</span>
+      <h1 class="h1">Talk to the team behind AAA Tracker.</h1>
+      <p class="lead">Tell us what you’re tracking and where your conversions come from. We’ll show you the shortest path to a campaign whose numbers reconcile with your ad platform.</p>
+      <div class="btn-row mt-6">
+        <a class="btn btn--primary" href="mailto:hello@aaatracker.website">hello@aaatracker.website</a>
+        <a class="btn btn--ghost" href="/start">Start free</a>
+      </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="tight">
-    <div class="wrap">
-      <div class="grid grid-2">
-        <div class="card reveal">
-          <h3>What happens next</h3>
-          <p>You write to a person, not a ticket queue. Here is the shape of the conversation.</p>
-          <ul class="checklist" style="margin-top:20px">
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span>We reply <b>within one business day</b> — usually sooner during the working week.</span></li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span>We'll ask for <b>your traffic source, your offer, and how your network posts conversions</b>, so the walkthrough runs on your setup rather than a demo account.</span></li>
-            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg><span>You'll leave with <b>a working tracking link</b> and a report you can compare, line for line, against what the ad platform says it spent.</span></li>
-          </ul>
-        </div>
-        <div class="card reveal">
-          <h3>How to reach us</h3>
-          <p>Email is the fastest route. It reaches someone who can answer a tracking question on
-          the first reply.</p>
-          <div class="btn-row" style="margin-top:20px">
-            <a class="btn btn-primary" href="mailto:hello@aaatracker.website">hello@aaatracker.website</a>
+<!-- ══ write to us ════════════════════════════════════════════════════ -->
+<section class="section section--flush-top">
+  <div class="wrap">
+    <div class="split split--top">
+      <div class="reveal">
+        <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Write to us</span>
+        <h2 class="h2 mt-4">Send the setup, not a sales form.</h2>
+        <p class="lead mt-4" style="font-size:1rem">The more of your setup you put in the first message, the less back-and-forth there is. Traffic source, offer or network, and how conversions come back to you is enough to start.</p>
+
+        <form class="form mt-6" data-mailto="hello@aaatracker.website" action="mailto:hello@aaatracker.website" method="post" enctype="text/plain">
+          <div class="form-row">
+            <div class="field">
+              <label for="name">Name</label>
+              <input id="name" name="name" type="text" autocomplete="name" required>
+            </div>
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" name="email" type="email" autocomplete="email" required>
+            </div>
           </div>
-          <p style="margin-top:20px">Book a walkthrough — say so in your email and offer two times
-          that suit you. We'll confirm, then set up a source, an offer and a postback with you so
-          the session runs on your own campaign.</p>
-          <p style="margin-top:16px">Existing customer?
-          <a href="/backend/" style="color:var(--accent)">Log in to your workspace</a> to pick up
-          where you left off.</p>
+          <div class="form-row">
+            <div class="field">
+              <label for="company">Company <span class="muted-2" style="font-weight:400">(optional)</span></label>
+              <input id="company" name="company" type="text" autocomplete="organization">
+            </div>
+            <div class="field">
+              <label for="topic">Topic</label>
+              <select id="topic" name="topic">
+                <option>Hosted access</option>
+                <option>Self-hosting help</option>
+                <option>Migration from another tracker</option>
+                <option>Agency / multiple workspaces</option>
+                <option>Something else</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="message">Your setup</label>
+            <textarea id="message" name="message" required placeholder="Traffic source, offer or network, and how conversions come back — postback, server-side API, or a CSV at the end of the day."></textarea>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn--primary" type="submit">Send message</button>
+            <a class="btn btn--ghost" href="mailto:hello@aaatracker.website">Email directly</a>
+          </div>
+          <p class="form-note">This opens your email client with the message ready to send to hello@aaatracker.website — nothing is stored on this site.</p>
+          <p class="form-note" data-mailto-done hidden>Your email client should now have the message. If it didn’t open, write to hello@aaatracker.website directly.</p>
+        </form>
+      </div>
+
+      <div class="stack--lg reveal" data-d="1">
+        <div class="panel">
+          <h4 class="h4">What happens next</h4>
+          <p class="mt-4">You write to a person, not a ticket queue. Here is the shape of the conversation.</p>
+          <ol class="numlist mt-5">
+            <li><p>We reply within one business day — usually sooner during the working week.</p></li>
+            <li><p>We’ll ask for your traffic source, your offer, and how your network posts conversions, so the walkthrough runs on your setup rather than a demo account.</p></li>
+            <li><p>You’ll leave with a working tracking link and a report you can compare, line for line, against what the ad platform says it spent.</p></li>
+          </ol>
+        </div>
+
+        <div class="panel">
+          <h4 class="h4">How to reach us</h4>
+          <p class="mt-4">Email is the fastest route. It reaches someone who can answer a tracking question on the first reply.</p>
+          <p class="mono mt-4"><a class="link" href="mailto:hello@aaatracker.website">hello@aaatracker.website</a></p>
+          <p class="mt-4"><b>Existing customer?</b> <a class="link" href="/backend/">Log in</a> to your workspace to pick up where you left off.</p>
         </div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="tight" style="padding-bottom:96px">
-    <div class="wrap" style="max-width:900px">
-      <div class="section-head reveal">
-        <span class="eyebrow">Before you write</span>
-        <h2>A few questions we get first.</h2>
+<!-- ══ FAQ ════════════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="band reveal">
+      <div class="section-head">
+        <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Before you write</span>
+        <h2 class="h2 mt-4">A few questions we get first.</h2>
       </div>
-      <div class="faq reveal">
+      <div class="faq mt-7">
         <details open>
-          <summary>What should I include in my message?</summary>
-          <p>Your traffic source, the offer or network you're running, and how conversions come
-          back to you — postback, server-side API, or a CSV at the end of the day. If you already
-          have tracking links or a campaign running somewhere else, describe the shape of it. The
-          more of your setup you put in the first email, the less back-and-forth there is.</p>
+          <summary><span class="mono muted-2" style="margin-right:var(--s3)">01</span>What should I include in my message?</summary>
+          <p>Your traffic source, the offer or network you’re running, and how conversions come back to you — postback, server-side API, or a CSV at the end of the day. If you already have tracking links or a campaign running somewhere else, describe the shape of it.</p>
         </details>
         <details>
-          <summary>Can you migrate my existing campaigns?</summary>
-          <p>Yes. We'll take your campaigns, offers, landers and domains from an export or from the
-          platform's API, map the fields, and check the numbers against a source you already trust
-          before anything goes live. Migration is usually a single working session.</p>
+          <summary><span class="mono muted-2" style="margin-right:var(--s3)">02</span>Can you migrate my existing campaigns?</summary>
+          <p>Yes. We’ll take your campaigns, offers, landers and domains from an export or from the platform’s API, map the fields, and check the numbers against a source you already trust before anything goes live. Migration is usually a single working session.</p>
         </details>
         <details>
-          <summary>Do you offer onboarding for agencies?</summary>
-          <p>We do. Agency onboarding covers multiple workspaces or clients, shared team access,
-          and the reporting views you'll hand to a client. Tell us how many workspaces you run and
-          who needs access, and we'll scope it on the call.</p>
+          <summary><span class="mono muted-2" style="margin-right:var(--s3)">03</span>Do you offer onboarding for agencies?</summary>
+          <p>We do. Agency onboarding covers multiple workspaces or clients, shared team access, and the reporting views you’ll hand to a client. Tell us how many workspaces you run and who needs access, and we’ll scope it on the call.</p>
+        </details>
+        <details>
+          <summary><span class="mono muted-2" style="margin-right:var(--s3)">04</span>Can I just run it myself?</summary>
+          <p>Yes — the self-hosted edition is MIT-licensed and free forever. Say so in your message and we’ll point you at the install path instead of a sales call.</p>
         </details>
       </div>
     </div>
-  </section>
+  </div>
+</section>
+
+<!-- ══ CTA ════════════════════════════════════════════════════════════ -->
+<section class="section">
+  <div class="wrap">
+    <div class="band band--blue band--flush cta reveal">
+      <div>
+        <h2>Talk to the team behind AAA Tracker.</h2>
+        <p>Tell us what you’re tracking and where your conversions come from. We reply within one business day and walk through your setup on your own campaign.</p>
+      </div>
+      <div class="btn-row">
+        <a class="btn btn--dark btn--lg" href="/start">Start free</a>
+        <a class="btn btn--onink btn--lg" href="mailto:hello@aaatracker.website">Email directly</a>
+      </div>
+    </div>
+  </div>
+</section>
 
 </main>
 
@@ -133,10 +210,18 @@
     <div class="footer-grid">
       <div>
         <a class="brand" href="/" aria-label="AAA Tracker home">
-          <img src="/assets/img/logo-mark.svg" alt="" width="32" height="32">
-          <span>AAA&nbsp;<b>TRACKER</b></span>
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+            <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+            <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+            <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+            <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+          </svg>
+          <span class="word">AAA<i>Tracker</i></span>
         </a>
-        <p style="margin-top:16px;max-width:36ch">Every click, accounted for. Routing, conversion tracking, cost sync and anti-fraud in one place.</p>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
       </div>
       <div>
         <h4>Product</h4>
@@ -145,6 +230,16 @@
           <li><a href="/integrations">Integrations</a></li>
           <li><a href="/security">Security &amp; anti-fraud</a></li>
           <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Compare</h4>
+        <ul class="footer-links">
+          <li><a href="/pricing">vs. typical trackers</a></li>
+          <li><a href="/features">Routing engine</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Data handling</a></li>
         </ul>
       </div>
       <div>
@@ -153,6 +248,7 @@
           <li><a href="/about">About</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="/backend/">Log in</a></li>
+          <li><a href="https://github.com/AayushRd7/AAA-tracker" rel="noopener">Source code</a></li>
         </ul>
       </div>
       <div>
@@ -164,11 +260,12 @@
       </div>
     </div>
     <div class="footer-bottom">
-      <span>© <span data-year>2026</span> AAA Tracker. All rights reserved.</span>
-      <span>aaatracker.website</span>
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
     </div>
   </div>
 </footer>
+
 <script src="/assets/js/site.js" defer></script>
 </body>
 </html>

@@ -3,73 +3,92 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.className+=' js'</script>
 <title>Page not found | AAA Tracker</title>
-<meta name="description" content="That page does not exist. Head back to the AAA Tracker home page or browse the features.">
-<link rel="canonical" href="https://aaatracker.website/404">
-<meta name="robots" content="noindex,follow">
-<meta name="theme-color" content="#0a101c">
+<meta name="description" content="That page isn’t here.">
+<link rel="canonical" href="https://aaatracker.website/404.html">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
 <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/assets/img/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="AAA Tracker">
-<meta property="og:title" content="Page not found — AAA Tracker">
-<meta property="og:description" content="That page does not exist. Head back to the AAA Tracker home page or browse the features.">
-<meta property="og:url" content="https://aaatracker.website/404">
+<meta property="og:title" content="Page not found">
+<meta property="og:description" content="That page isn’t here.">
+<meta property="og:url" content="https://aaatracker.website/404.html">
 <meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Page not found — AAA Tracker">
-<meta name="twitter:description" content="That page does not exist. Head back to the AAA Tracker home page or browse the features.">
+<meta name="twitter:title" content="Page not found">
+<meta name="twitter:description" content="That page isn’t here.">
 <meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
-<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/fonts/inter.css">
-<link rel="stylesheet" href="/assets/css/site.css?v=1">
+<link rel="preload" href="/assets/fonts/schibsted-grotesk-normal-400-800-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css">
+<link rel="stylesheet" href="/assets/css/site.css?v=3">
 </head>
-<body class="paper">
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
 
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="/" aria-label="AAA Tracker home">
-      <img src="/assets/img/logo-mark.svg" alt="" width="32" height="32">
-      <span>AAA&nbsp;<b>TRACKER</b></span>
-    </a>
-    <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-    </button>
-    <nav class="site-nav" id="site-nav" aria-label="Primary">
-      <a href="/features">Features</a>
-      <a href="/integrations">Integrations</a>
-      <a href="/security">Security</a>
-      <a href="/pricing">Pricing</a>
-      <a href="/about">About</a>
-    </nav>
-    <div class="header-actions">
-      <a class="btn btn-ghost btn-sm" href="/backend/">Log in</a>
-      <a class="btn btn-primary btn-sm" href="/contact">Book a walkthrough</a>
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free</a>
+      </div>
     </div>
   </div>
 </header>
 
 <main id="main">
-  <div class="notfound">
-    <div class="wrap">
-      <span class="eyebrow">404</span>
-      <h1>That page isn't here.</h1>
-      <p>The link may be old, or the address may have a typo in it. Nothing is broken — the page
-      you asked for just isn't at this address. Try one of these instead.</p>
-      <div class="btn-row" style="justify-content:center;margin-top:26px">
-        <a class="btn btn-primary" href="/">Back to home</a>
-        <a class="btn btn-ghost" href="/features">Browse the features</a>
+
+<section class="page-hero">
+  <div class="wrap">
+    <div class="page-hero__inner center mx-auto reveal">
+      <span class="eyebrow"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Error 404</span>
+      <p class="mono muted-2 mt-5" style="letter-spacing:.22em;text-transform:uppercase">ERROR 404</p>
+      <h1 class="display mt-4">That page isn’t here.</h1>
+      <p class="lead mx-auto mt-4">The link may be old, or the page may have moved. Everything worth keeping is one hop away.</p>
+      <div class="btn-row btn-row--center mt-6">
+        <a class="btn btn--primary" href="/">Back to home
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn--ghost" href="/features">Features</a>
+        <a class="btn btn--ghost" href="/pricing">Pricing</a>
       </div>
-      <nav class="crumbs" aria-label="Useful links" style="margin-top:34px">
-        <a href="/features">Features</a><span>·</span><a href="/integrations">Integrations</a><span>·</span><a href="/pricing">Pricing</a><span>·</span><a href="/backend/">Log in</a>
-      </nav>
     </div>
   </div>
+</section>
+
 </main>
 
 <footer class="site-footer">
@@ -77,10 +96,18 @@
     <div class="footer-grid">
       <div>
         <a class="brand" href="/" aria-label="AAA Tracker home">
-          <img src="/assets/img/logo-mark.svg" alt="" width="32" height="32">
-          <span>AAA&nbsp;<b>TRACKER</b></span>
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+            <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+            <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+            <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+            <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+          </svg>
+          <span class="word">AAA<i>Tracker</i></span>
         </a>
-        <p style="margin-top:16px;max-width:36ch">Every click, accounted for. Routing, conversion tracking, cost sync and anti-fraud in one place.</p>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
       </div>
       <div>
         <h4>Product</h4>
@@ -89,6 +116,16 @@
           <li><a href="/integrations">Integrations</a></li>
           <li><a href="/security">Security &amp; anti-fraud</a></li>
           <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Compare</h4>
+        <ul class="footer-links">
+          <li><a href="/pricing">vs. typical trackers</a></li>
+          <li><a href="/features">Routing engine</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Data handling</a></li>
         </ul>
       </div>
       <div>
@@ -97,6 +134,7 @@
           <li><a href="/about">About</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="/backend/">Log in</a></li>
+          <li><a href="https://github.com/AayushRd7/AAA-tracker" rel="noopener">Source code</a></li>
         </ul>
       </div>
       <div>
@@ -108,11 +146,12 @@
       </div>
     </div>
     <div class="footer-bottom">
-      <span>© <span data-year>2026</span> AAA Tracker. All rights reserved.</span>
-      <span>aaatracker.website</span>
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
     </div>
   </div>
 </footer>
+
 <script src="/assets/js/site.js" defer></script>
 </body>
 </html>
