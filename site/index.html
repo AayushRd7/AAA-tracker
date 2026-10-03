@@ -65,7 +65,12 @@
       "operatingSystem": "Web",
       "url": "https://aaatracker.website/",
       "description": "Self-serve affiliate tracking: campaign routing, conversion tracking, postbacks, cost sync and anti-fraud reporting.",
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD", "description": "Free self-hosted (source-available) and a free hosted tier" },
+      "offers": [
+        { "@type": "Offer", "name": "Free trial", "price": "0", "priceCurrency": "USD", "description": "14-day free trial" },
+        { "@type": "Offer", "name": "Starter", "price": "49", "priceCurrency": "USD", "description": "500,000 tracked events per month" },
+        { "@type": "Offer", "name": "Growth", "price": "149", "priceCurrency": "USD", "description": "3,000,000 tracked events per month" },
+        { "@type": "Offer", "name": "Scale", "price": "499", "priceCurrency": "USD", "description": "20,000,000 tracked events per month" }
+      ],
       "featureList": [
         "Traffic routing with 30+ filters",
         "Offer and landing-page A/B testing",
@@ -86,7 +91,7 @@
         {
           "@type": "Question",
           "name": "How much does it cost?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Self-hosted is free forever under the source-available licence. Hosted plans start at $0 for 50,000 tracked events a month, $49 for 500,000, $149 for 3 million and $499 for 20 million. Cost sync and server-side conversion APIs are included on every paid plan." }
+          "acceptedAnswer": { "@type": "Answer", "text": "Start with a 14-day free trial, then choose a plan: Starter $49 for 500,000 tracked events a month, Growth $149 for 3 million, Scale $499 for 20 million, and Enterprise on custom terms. Cost sync and server-side conversion APIs are included on every paid plan." }
         },
         {
           "@type": "Question",
@@ -134,7 +139,7 @@
       </nav>
       <div class="header-actions">
         <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
-        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free trial</a>
       </div>
     </div>
   </div>
@@ -152,7 +157,7 @@
       <h1 class="display">Every <span class="hero__click">click,<span class="hero__target" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="13.5" stroke="currentColor" stroke-width="3.4"/><path d="M24 1.5v6.5M24 40v6.5M1.5 24H8M40 24h6.5" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><circle cx="24" cy="24" r="4.6" fill="currentColor"/></svg></span><span class="hero__ripple" aria-hidden="true"></span></span> <span class="accent">accounted for</span>.</h1>
       <p class="lead">AAA Tracker sits between your traffic and your offers. It decides where each click goes, records the conversion server-side, pulls your real ad spend in, and shows profit — campaign by campaign, in one panel.</p>
       <div class="btn-row btn-row--center hero__cta">
-        <a class="btn btn--primary btn--lg" href="/start">Start free
+        <a class="btn btn--primary btn--lg" href="/start">Start free trial
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </a>
         <a class="btn btn--ghost btn--lg" href="/contact">
@@ -161,8 +166,8 @@
         </a>
       </div>
       <p class="hero__notes">
-        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>source-available self-host</span>
-        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Free hosted tier — 50,000 events</span>
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>14-day free trial</span>
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Plans from $49/mo</span>
         <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>No credit card</span>
       </p>
     </div>
@@ -252,29 +257,6 @@
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ══ runs on ════════════════════════════════════════════════════════ -->
-<section class="section section--sm section--flush-top">
-  <div class="wrap">
-    <p class="center mono muted-2" style="letter-spacing:.1em;text-transform:uppercase;margin-bottom:var(--s6)">Self-hosted on the stack you already run</p>
-    <div class="logostrip">
-      <div class="logostrip__track">
-        <span class="logo-item"><img src="/assets/img/brands/postgresql.svg" alt="" width="26" height="26">PostgreSQL</span>
-        <span class="logo-item"><img src="/assets/img/brands/clickhouse.svg" alt="" width="26" height="26">ClickHouse</span>
-        <span class="logo-item"><img src="/assets/img/brands/nginx.svg" alt="" width="26" height="26">Nginx</span>
-        <span class="logo-item"><img src="/assets/img/brands/docker.svg" alt="" width="26" height="26">Docker Compose</span>
-        <span class="logo-item"><img src="/assets/img/brands/python.svg" alt="" width="26" height="26">Python</span>
-        <span class="logo-item"><img src="/assets/img/brands/cloudflare.svg" alt="" width="26" height="26">Cloudflare</span>
-        <span class="logo-item"><img src="/assets/img/brands/postgresql.svg" alt="" width="26" height="26">PostgreSQL</span>
-        <span class="logo-item"><img src="/assets/img/brands/clickhouse.svg" alt="" width="26" height="26">ClickHouse</span>
-        <span class="logo-item"><img src="/assets/img/brands/nginx.svg" alt="" width="26" height="26">Nginx</span>
-        <span class="logo-item"><img src="/assets/img/brands/docker.svg" alt="" width="26" height="26">Docker Compose</span>
-        <span class="logo-item"><img src="/assets/img/brands/python.svg" alt="" width="26" height="26">Python</span>
-        <span class="logo-item"><img src="/assets/img/brands/cloudflare.svg" alt="" width="26" height="26">Cloudflare</span>
       </div>
     </div>
   </div>
@@ -692,15 +674,15 @@
 
     <div class="plans mt-8">
       <div class="plan reveal">
-        <span class="tag plan__tag">Free</span>
-        <div class="plan__price"><b>$0</b><span>/ month</span></div>
-        <span class="plan__quota">50,000 tracked events / mo</span>
-        <p class="plan__blurb">The full tracker, one workspace, no credit card.</p>
+        <span class="tag plan__tag">14-day trial</span>
+        <div class="plan__price"><b>14 days</b><span>free</span></div>
+        <span class="plan__quota">Full access for 14 days</span>
+        <p class="plan__blurb">The full tracker, one workspace, no credit card. Then pick the paid plan that fits.</p>
         <ul class="plan__list">
           <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Routing, splits, funnels, caps, dayparting</li>
           <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Postbacks and reporting</li>
         </ul>
-        <a class="btn btn--ghost btn--block mt-5" href="/start">Start free</a>
+        <a class="btn btn--ghost btn--block mt-5" href="/start">Start free trial</a>
       </div>
 
       <div class="plan plan--featured reveal" data-d="1">
@@ -729,7 +711,7 @@
       </div>
     </div>
 
-    <p class="center small muted mt-6">Early-access pricing, first published October 2026. Self-hosted is source-available and free forever. No auto-billed overages — go over and tracking keeps running.</p>
+    <p class="center small muted mt-6">Early-access pricing, first published October 2026. No auto-billed overages — go over and tracking keeps running.</p>
   </div>
 </section>
 
@@ -747,7 +729,7 @@
       </details>
       <details>
         <summary>How much does it cost?</summary>
-        <p>Self-hosted is free forever under the source-available licence. Hosted plans start at $0 for 50,000 tracked events a month and scale to $499 for 20 million — one meter, no add-on store, and cost sync plus server-side conversion APIs included on every paid plan. See <a class="link" href="/pricing">Pricing</a>.</p>
+        <p>Start with a 14-day free trial, then choose a plan: Starter $49 for 500,000 tracked events a month, Growth $149 for 3 million, Scale $499 for 20 million, and Enterprise on custom terms. One meter, no add-on store, and cost sync plus server-side conversion APIs included on every paid plan. See <a class="link" href="/pricing">Pricing</a>.</p>
       </details>
       <details>
         <summary>Will it work with my traffic sources and networks?</summary>
@@ -775,10 +757,10 @@
     <div class="band band--blue band--flush cta reveal">
       <div>
         <h2>Bring one campaign. See the difference in a day.</h2>
-        <p>Start free on your own server or in a hosted workspace — and we’ll wire the first campaign up with you: source, offer, postback and cost sync.</p>
+        <p>Start your 14-day free trial — and we’ll wire the first campaign up with you: source, offer, postback and cost sync.</p>
       </div>
       <div class="btn-row">
-        <a class="btn btn--dark btn--lg" href="/start">Start free</a>
+        <a class="btn btn--dark btn--lg" href="/start">Start free trial</a>
         <a class="btn btn--onink btn--lg" href="/contact">Book a walkthrough</a>
       </div>
     </div>
@@ -812,7 +794,7 @@
           <li><a href="/integrations">Integrations</a></li>
           <li><a href="/security">Security &amp; anti-fraud</a></li>
           <li><a href="/pricing">Pricing</a></li>
-          <li><a href="/start">Start free</a></li>
+          <li><a href="/start">Start free trial</a></li>
         </ul>
       </div>
       <div>
@@ -830,7 +812,6 @@
           <li><a href="/about">About</a></li>
           <li><a href="/contact">Contact</a></li>
           <li><a href="/backend/">Log in</a></li>
-          <li><a href="https://github.com/AayushRd7/AAA-tracker" rel="noopener">Source code</a></li>
         </ul>
       </div>
       <div>

@@ -117,7 +117,7 @@ PAGES = {
     "og-pricing": (
         "Pricing",
         'One meter. No add-on <span class="ac">store</span>',
-        "Self-host free forever (source-available), or hosted from $0. Cost sync and CAPI on every paid plan.",
+        "Start with a 14-day free trial, then pay for what you track. Starter $49, Growth $149, Scale $499. Cost sync and CAPI on every paid plan.",
     ),
     "og-security": (
         "Security &amp; anti-fraud",
@@ -130,9 +130,9 @@ PAGES = {
         "The tracker we wanted: fast, honest about attribution, clear about where every dollar went.",
     ),
     "og-start": (
-        "Start free",
-        'Two ways to start. <span class="ac">Both&nbsp;free</span>',
-        "Clone the source-available tracker and run it yourself, or start on the hosted free tier.",
+        "Get started",
+        'Start your <span class="ac">14-day free trial</span>',
+        "Create a workspace, connect a traffic source and add a campaign — no credit card to start.",
     ),
     "og-contact": (
         "Contact",

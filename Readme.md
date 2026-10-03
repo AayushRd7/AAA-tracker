@@ -37,7 +37,9 @@
 
 ## 📖 About the Project
 
-AAA Tracker is a source-available traffic tracker you can self-host:
+AAA Tracker is a cloud-native traffic tracker, delivered as a hosted SaaS. This
+repository holds the application source and the deployment tooling the team runs;
+AAA Tracker is **not** offered as self-hosted software.
 
 - **Backend:** FastAPI — a high-performance asynchronous API server.
 - **Frontend:** Vue 2 + Vuetify — a Material Design UI framework for Vue.js.
@@ -76,6 +78,9 @@ Key features:
 ---
 
 ## 🛠️ Getting Started
+
+> Internal deployment and development instructions. AAA Tracker is sold as a hosted
+> service — these steps are for the team running the product, not a self-host kit.
 
 ### Install
 

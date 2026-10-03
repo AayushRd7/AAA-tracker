@@ -2,7 +2,7 @@
 
 > **Direction: "The instrument panel"** — precision software for people who buy traffic.
 > A light, white-first surface, one cobalt signal colour, and monospace for anything
-> numeric. Rebuilt October 2026 against the ClickFlare-class SaaS convention, then made
+> numeric. Rebuilt October 2026 against the prevailing cloud-tracker SaaS convention, then made
 > ours. Marketing site only (`site/`); the product UI is untouched.
 
 ---
@@ -256,7 +256,7 @@ These are binding, not stylistic:
 
 1. **No fabricated social proof.** There are no testimonials, no customer logos and no
    star ratings on this site, because there are no customers to quote yet. The proof on
-   the page is product proof: the app mockup, the uptime card and the source-available licence.
+   the page is product proof: the app mockup and the uptime card.
    When real quotes exist, build the section — the space is designed for it.
 2. **Sample data is labelled.** Every mockup frame that shows invented numbers carries a
    `Sample data` tag in its chrome.
@@ -268,7 +268,7 @@ These are binding, not stylistic:
 
 ## 9. Competitor reference
 
-The rebuild took its structural grammar from ClickFlare (`clickflare.com`), sampled
+The rebuild took its structural grammar from the prevailing cloud-tracker SaaS convention, sampled
 directly rather than from memory: floating pill nav → centred display headline with a
 coloured key phrase → product screenshot in the hero → logo band → blue stat band →
 tinted capability panel → segmented tab control → dark integration band with a logo
@@ -285,7 +285,7 @@ a chart arrow, and a lighter dark section count (three per page maximum).
 site/assets/css/site.css        the whole system (~1.09k lines, token-driven)
 site/assets/js/site.js          nav, sticky header shrink, reveal, counters, meters, tabs,
                                 expanding bands, form
-site/assets/fonts/              Schibsted Grotesk + IBM Plex Mono (self-hosted woff2)
+site/assets/fonts/              Schibsted Grotesk + IBM Plex Mono (bundled woff2)
 site/assets/img/brands/         26 real brand SVGs (Simple Icons) for the logo wall
 site/assets/img/logo-mark.svg   the mark; favicon.svg / logo.svg derive from it
 site/tools/make_og.py           regenerates the 8 OG cards + all icons
