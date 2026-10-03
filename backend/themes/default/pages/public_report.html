@@ -5,50 +5,76 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Shared report — AAA Tracker</title>
     <style>
+        /* This page is shell-less, so it carries its own @font-face rather than
+           relying on the app stylesheet. Same two faces as the app and the
+           marketing site. */
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal; font-weight: 400 800; font-display: swap;
+            src: url(/backend/backend/css/fonts/inter-latin.woff2) format('woff2');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal; font-weight: 400 800; font-display: swap;
+            src: url(/backend/backend/css/fonts/inter-latin-ext.woff2) format('woff2');
+            unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+        }
+        @font-face {
+            font-family: 'IBM Plex Mono';
+            font-style: normal; font-weight: 400; font-display: swap;
+            src: url(/backend/backend/css/fonts/ibm-plex-mono-normal-400-latin.woff2) format('woff2');
+        }
+        @font-face {
+            font-family: 'IBM Plex Mono';
+            font-style: normal; font-weight: 600; font-display: swap;
+            src: url(/backend/backend/css/fonts/ibm-plex-mono-normal-600-latin.woff2) format('woff2');
+        }
         :root {
-            --font-stack: 'Inter', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            --mono-stack: 'SFMono-Regular', ui-monospace, Menlo, Consolas, monospace;
-            --content-bg: #f5f6f8;
+            --font-stack: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            --mono-stack: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            --content-bg: #f5f7fb;
             --card-bg: #ffffff;
-            --surface: #f9fafb;
-            --border: #e4e7ec;
-            --border-soft: #eef1f5;
-            --text-primary: #101828;
-            --text-secondary: #667085;
-            --accent: #16a34a;
-            --accent-soft: rgba(22, 163, 74, 0.12);
-            --status-success-bg: #e2f5ea;
-            --status-success-text: #15803d;
-            --status-danger-bg: #fce4e2;
-            --status-danger-text: #b42318;
-            --status-info-bg: #dbeafe;
-            --status-info-text: #1d4ed8;
-            --status-warning-bg: #fef3c7;
-            --status-warning-text: #92400e;
-            --status-neutral-bg: #eef1f5;
-            --status-neutral-text: #667085;
+            --surface: #f5f7fb;
+            --border: #e4e9f2;
+            --border-soft: #eff2f8;
+            --text-primary: #0a0d16;
+            --text-secondary: #6b7280;
+            --accent: #1f4bf0;
+            --accent-soft: rgba(31, 75, 240, 0.10);
+            --status-success-bg: #e9f8f0;
+            --status-success-text: #0b7a45;
+            --status-danger-bg: #fdeeee;
+            --status-danger-text: #a92b2b;
+            --status-info-bg: #eef3ff;
+            --status-info-text: #1430a8;
+            --status-warning-bg: #fdf3e2;
+            --status-warning-text: #8a5a08;
+            --status-neutral-bg: #eef2f9;
+            --status-neutral-text: #6b7280;
             --radius: 12px;
         }
         @media (prefers-color-scheme: dark) {
             :root {
-                --content-bg: #0f1722;
-                --card-bg: #16202e;
-                --surface: #131c29;
-                --border: #243147;
-                --border-soft: #1c2635;
-                --text-primary: #e6eaf2;
-                --text-secondary: #94a1b7;
-                --accent-soft: rgba(22, 163, 74, 0.2);
-                --status-success-bg: #12291c;
-                --status-success-text: #4ade80;
+                --content-bg: #0a0d16;
+                --card-bg: #121826;
+                --surface: #121826;
+                --border: #232c40;
+                --border-soft: #1c2436;
+                --text-primary: #f4f6fb;
+                --text-secondary: #9aa5bd;
+                --accent: #5b7cff;
+                --accent-soft: rgba(91, 124, 255, 0.18);
+                --status-success-bg: #10241a;
+                --status-success-text: #5cf08d;
                 --status-danger-bg: #2e1614;
-                --status-danger-text: #f87171;
-                --status-info-bg: #16233d;
-                --status-info-text: #60a5fa;
+                --status-danger-text: #ff8a8a;
+                --status-info-bg: #16203d;
+                --status-info-text: #8fa6ff;
                 --status-warning-bg: #2a2113;
-                --status-warning-text: #fbbf24;
-                --status-neutral-bg: #1c2635;
-                --status-neutral-text: #94a1b7;
+                --status-warning-text: #e0a33a;
+                --status-neutral-bg: #1c2436;
+                --status-neutral-text: #9aa5bd;
             }
         }
         * { box-sizing: border-box; }
@@ -63,12 +89,14 @@
         .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 16px 64px; }
         .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
         .brand { display: flex; align-items: center; gap: 10px; }
-        .brand__mark {
-            width: 34px; height: 34px; border-radius: 9px; background: var(--accent);
-            color: #fff; font-weight: 800; font-size: 16px;
-            display: flex; align-items: center; justify-content: center;
+        .brand__mark { width: 34px; height: 34px; flex: none; display: block; }
+        /* Same lockup as the marketing site: "AAA" heavy, "Tracker" medium. */
+        .brand__name {
+            display: inline-flex; align-items: baseline; gap: .3em;
+            font-size: 15px; font-weight: 800; letter-spacing: -.03em;
+            color: var(--text-primary);
         }
-        .brand__name { font-weight: 700; letter-spacing: 0.12em; font-size: 13px; }
+        .brand__name i { font-style: normal; font-weight: 500; color: var(--text-secondary); }
         .brand__sub { color: var(--text-secondary); font-size: 11px; margin-top: 1px; }
         .card {
             background: var(--card-bg);
@@ -109,9 +137,19 @@
 <div class="wrap">
     <div class="head">
         <div class="brand">
-            <div class="brand__mark">A</div>
+            <div class="brand__mark" aria-hidden="true">
+                <svg viewBox="0 0 32 32" fill="none" width="34" height="34">
+                    <defs><linearGradient id="bmk" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+                    <rect width="32" height="32" rx="8.6" fill="url(#bmk)"/>
+                    <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+                    <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+                    <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+                    <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+                    <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+                </svg>
+            </div>
             <div>
-                <div class="brand__name">AAA TRACKER</div>
+                <div class="brand__name"><b>AAA</b><i>Tracker</i></div>
                 <div class="brand__sub">Shared report · read-only</div>
             </div>
         </div>

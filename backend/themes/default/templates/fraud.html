@@ -532,11 +532,11 @@
             summaryCards() {
                 const s = this.summary;
                 return [
-                    {title: 'Clicks (24h)', value: this.fmtInt(s.total_clicks), color: '#2563eb', icon: 'mdi-cursor-default-click-outline'},
-                    {title: 'Bot clicks', value: this.fmtInt(s.bot_clicks), color: '#dc2626', icon: 'mdi-robot-outline'},
-                    {title: 'Bot share', value: (s.bot_share_pct || 0) + '%', color: '#f59e0b', icon: 'mdi-percent-outline'},
-                    {title: 'Avg fraud score', value: String(s.avg_fraud_score ?? 0), color: '#7c3aed', icon: 'mdi-shield-alert-outline'},
-                    {title: 'Est. savings', value: '$' + this.fmtMoney(s.est_savings), color: '#16a34a', icon: 'mdi-cash-check'},
+                    {title: 'Clicks (24h)', value: this.fmtInt(s.total_clicks), color: '#1f4bf0', icon: 'mdi-cursor-default-click-outline'},
+                    {title: 'Bot clicks', value: this.fmtInt(s.bot_clicks), color: '#d93a3a', icon: 'mdi-robot-outline'},
+                    {title: 'Bot share', value: (s.bot_share_pct || 0) + '%', color: '#b8770a', icon: 'mdi-percent-outline'},
+                    {title: 'Avg fraud score', value: String(s.avg_fraud_score ?? 0), color: '#0f9d58', icon: 'mdi-shield-alert-outline'},
+                    {title: 'Est. savings', value: '$' + this.fmtMoney(s.est_savings), color: '#0f9d58', icon: 'mdi-cash-check'},
                 ];
             },
         },

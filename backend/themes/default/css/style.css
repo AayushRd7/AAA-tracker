@@ -1,11 +1,74 @@
 /* ============================================================
-   AAA Tracker — modern analytics design system
-   Dark navy chrome · light content · green accent · Inter
+   AAA Tracker — application design system
+
+   Deliberately the same system as the marketing site: white-first
+   surfaces, ONE cobalt signal colour, Inter for the UI
+   and IBM Plex Mono for anything numeric. The values below are the
+   site's tokens under their application names, so the two surfaces
+   read as one product.
+
+   Everything downstream is token-driven — recolouring the product
+   should only ever mean editing this block.
    ============================================================ */
+
+/* ---------- Type (self-hosted; same files the marketing site ships) ----------
+   Inter for the interface — the face the product has always used — and IBM Plex
+   Mono for anything numeric. Paths are relative to this stylesheet, so they
+   resolve under whatever prefix the app is mounted at (/backend/backend/css/…). */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal; font-weight: 400 800; font-display: swap;
+  src: url(fonts/inter-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal; font-weight: 400 800; font-display: swap;
+  src: url(fonts/inter-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url(fonts/ibm-plex-mono-normal-400-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal; font-weight: 400; font-display: swap;
+  src: url(fonts/ibm-plex-mono-normal-400-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal; font-weight: 500; font-display: swap;
+  src: url(fonts/ibm-plex-mono-normal-500-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal; font-weight: 500; font-display: swap;
+  src: url(fonts/ibm-plex-mono-normal-500-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal; font-weight: 600; font-display: swap;
+  src: url(fonts/ibm-plex-mono-normal-600-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal; font-weight: 600; font-display: swap;
+  src: url(fonts/ibm-plex-mono-normal-600-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 :root {
   /* Typography */
-  --font-stack: 'Inter', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-stack: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   /* Spacing scale */
   --space-1: 4px;
   --space-2: 8px;
@@ -27,49 +90,49 @@
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
-  /* Chrome (dark navigation surfaces) */
-  --chrome: #151d2b;
-  --chrome-2: #141b27;
-  --chrome-text: #9aa4b6;
+  /* Chrome (dark navigation surfaces) — the site's ink */
+  --chrome: #0a0d16;
+  --chrome-2: #121826;
+  --chrome-text: #9aa5bd;
   /* Surfaces */
-  --content-bg: #f5f6f8;
+  --content-bg: #f5f7fb;
   --card-bg: #ffffff;
-  --surface: #f9fafb;
-  --surface-hover: #f8fafc;
-  /* Accent */
-  --accent: #16a34a;
-  --accent-hover: #15803d;
-  --accent-soft: rgba(22, 163, 74, 0.12);
+  --surface: #f5f7fb;
+  --surface-hover: #eef2f9;
+  /* Accent — the site's cobalt, not a second green */
+  --accent: #1f4bf0;
+  --accent-hover: #1a3fd4;
+  --accent-soft: rgba(31, 75, 240, 0.10);
   /* Borders */
-  --border: #e4e7ec;
-  --border-soft: #eef1f5;
+  --border: #e4e9f2;
+  --border-soft: #eff2f8;
   /* Text */
-  --text-primary: #101828;
-  --text-secondary: #667085;
+  --text-primary: #0a0d16;
+  --text-secondary: #6b7280;
   /* Cards */
   --card-radius: var(--radius-lg);
-  --card-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
-  --card-shadow-hover: 0 4px 14px rgba(16, 24, 40, 0.1);
+  --card-shadow: 0 1px 2px rgba(10, 13, 22, 0.04), 0 1px 3px rgba(10, 13, 22, 0.06);
+  --card-shadow-hover: 0 8px 24px -12px rgba(10, 13, 22, 0.18);
   /* Status */
-  --status-success: #16a34a;
-  --status-success-bg: #e2f5ea;
-  --status-success-text: #15803d;
-  --status-warning: #f59e0b;
-  --status-warning-bg: #fef3c7;
-  --status-warning-text: #92400e;
-  --status-danger: #dc2626;
-  --status-danger-bg: #fce4e2;
-  --status-danger-text: #b42318;
-  --status-info: #2563eb;
-  --status-info-bg: #dbeafe;
-  --status-info-text: #1d4ed8;
-  --status-neutral-bg: #eef1f5;
-  --status-neutral-text: #667085;
+  --status-success: #0f9d58;
+  --status-success-bg: #e9f8f0;
+  --status-success-text: #0b7a45;
+  --status-warning: #b8770a;
+  --status-warning-bg: #fdf3e2;
+  --status-warning-text: #8a5a08;
+  --status-danger: #d93a3a;
+  --status-danger-bg: #fdeeee;
+  --status-danger-text: #a92b2b;
+  --status-info: #1f4bf0;
+  --status-info-bg: #eef3ff;
+  --status-info-text: #1430a8;
+  --status-neutral-bg: #eef2f9;
+  --status-neutral-text: #6b7280;
   /* Motion */
   --t-fast: 0.15s;
   --t-med: 0.25s;
   /* Focus */
-  --focus-ring: 0 0 0 2px #fff, 0 0 0 4px #2563eb;
+  --focus-ring: 0 0 0 2px #fff, 0 0 0 4px #1f4bf0;
   /* Legacy aliases (keep old token names working) */
   --danger: var(--status-danger);
   --info: var(--status-info);
@@ -78,34 +141,37 @@
 
 /* ---------- Dark mode foundation ---------- */
 
+/* Dark mode is derived from the same ink scale the marketing site uses, and the
+   accent lifts to a lighter cobalt — the light-mode #1f4bf0 loses too much
+   contrast once it sits on an ink surface. */
 [data-theme="dark"] {
-  --chrome: #0d1420;
-  --chrome-2: #0a111c;
-  --chrome-text: #94a1b7;
-  --content-bg: #0f1722;
-  --card-bg: #16202e;
-  --surface: #131c29;
-  --surface-hover: #182334;
-  --accent: #16a34a;
-  --accent-hover: #22c55e;
-  --accent-soft: rgba(22, 163, 74, 0.2);
-  --border: #243147;
-  --border-soft: #1c2635;
-  --text-primary: #e6eaf2;
-  --text-secondary: #94a1b7;
+  --chrome: #0a0d16;
+  --chrome-2: #121826;
+  --chrome-text: #9aa5bd;
+  --content-bg: #0a0d16;
+  --card-bg: #121826;
+  --surface: #121826;
+  --surface-hover: #1c2436;
+  --accent: #5b7cff;
+  --accent-hover: #7a95ff;
+  --accent-soft: rgba(91, 124, 255, 0.18);
+  --border: #232c40;
+  --border-soft: #1c2436;
+  --text-primary: #f4f6fb;
+  --text-secondary: #9aa5bd;
   --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
   --card-shadow-hover: 0 4px 14px rgba(0, 0, 0, 0.5);
-  --status-success-bg: #12291c;
-  --status-success-text: #4ade80;
+  --status-success-bg: #10241a;
+  --status-success-text: #5cf08d;
   --status-warning-bg: #2a2113;
-  --status-warning-text: #fbbf24;
+  --status-warning-text: #e0a33a;
   --status-danger-bg: #2e1614;
-  --status-danger-text: #f87171;
-  --status-info-bg: #16233d;
-  --status-info-text: #60a5fa;
-  --status-neutral-bg: #1c2635;
-  --status-neutral-text: #94a1b7;
-  --focus-ring: 0 0 0 2px #0f1722, 0 0 0 4px #3b82f6;
+  --status-danger-text: #ff8a8a;
+  --status-info-bg: #16203d;
+  --status-info-text: #8fa6ff;
+  --status-neutral-bg: #1c2436;
+  --status-neutral-text: #9aa5bd;
+  --focus-ring: 0 0 0 2px #0a0d16, 0 0 0 4px #5b7cff;
 }
 
 [data-theme="dark"] .v-card {
@@ -148,7 +214,7 @@ body,
   background: var(--content-bg) !important;
 }
 
-/* Vuetify pins Roboto on its typography classes — pin them to Inter too */
+/* Vuetify pins Roboto on its typography classes — pin them to the app stack */
 .v-application .headline,
 .v-application .title,
 .v-application .subtitle-1,
@@ -171,8 +237,25 @@ body,
   font-family: var(--font-stack) !important;
 }
 
+/* Numbers read in mono with tabular figures, so columns line up and a value that
+   ticks over does not shuffle the layout around it — the same rule the marketing
+   site's product mockups follow. Scoped to stat-card values and table cells
+   rather than every .text-h5, which also carries prose headings. */
+.stat-card .text-h5,
+.stat-card .stat-value,
+.v-data-table tbody td,
+.v-data-table__wrapper tbody td {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+.stat-card .text-h5,
+.stat-card .stat-value {
+  font-family: var(--font-mono);
+  letter-spacing: -0.02em;
+}
+
 ::selection {
-  background: rgba(22, 163, 74, 0.18);
+  background: rgba(31, 75, 240, 0.18);
 }
 
 /* ---------- Cards ---------- */
@@ -189,7 +272,7 @@ body,
 
 .v-dialog__content .v-card {
   border-radius: var(--card-radius) !important;
-  box-shadow: 0 16px 48px rgba(16, 24, 40, 0.16), 0 4px 12px rgba(16, 24, 40, 0.08) !important;
+  box-shadow: 0 16px 48px rgba(10, 13, 22, 0.16), 0 4px 12px rgba(10, 13, 22, 0.08) !important;
 }
 
 .v-card__title {
@@ -224,15 +307,15 @@ body,
 }
 
 .v-btn--is-elevated:not(.v-btn--outlined):not(.v-btn--text) {
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1);
+  box-shadow: 0 1px 2px rgba(10, 13, 22, 0.1);
 }
 
 .v-btn--is-elevated.primary {
-  box-shadow: 0 1px 2px rgba(22, 163, 74, 0.4), 0 1px 3px rgba(22, 163, 74, 0.25);
+  box-shadow: 0 1px 2px rgba(31, 75, 240, 0.4), 0 1px 3px rgba(31, 75, 240, 0.25);
 }
 
 .v-btn--is-elevated.primary:hover {
-  box-shadow: 0 3px 8px rgba(22, 163, 74, 0.35);
+  box-shadow: 0 3px 8px rgba(31, 75, 240, 0.35);
 }
 
 /* Contained (flat or raised) primary buttons get a real hover state */
@@ -249,7 +332,7 @@ body,
 
 .v-btn--text:hover,
 .v-btn--outlined:hover {
-  background: rgba(16, 24, 40, 0.04) !important;
+  background: rgba(10, 13, 22, 0.04) !important;
 }
 
 .v-btn--text.primary--text:hover,
@@ -326,7 +409,7 @@ body,
   height: 38px;
   border-radius: var(--radius-sm);
   display: block;
-  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.35);
+  box-shadow: 0 2px 6px rgba(31, 75, 240, 0.35);
   flex-shrink: 0;
 }
 
@@ -335,7 +418,7 @@ body,
   height: 64px;
   border-radius: var(--radius-lg);
   margin-bottom: var(--space-3);
-  box-shadow: 0 8px 20px rgba(22, 163, 74, 0.28);
+  box-shadow: 0 8px 20px rgba(31, 75, 240, 0.28);
 }
 
 .brand-name {
@@ -451,11 +534,11 @@ body,
 
 .v-application .v-text-field--outlined fieldset {
   border-radius: var(--radius-sm);
-  border-color: #d0d5dd;
+  border-color: #d6dce8;
 }
 
 .v-application .v-text-field--outlined:not(.v-input--is-focused):not(.v-input--has-state):hover > .v-input__control > .v-input__slot fieldset {
-  border-color: #98a2b3;
+  border-color: #9aa5bd;
 }
 
 .v-application .v-text-field--outlined > .v-input__control > .v-input__slot fieldset {
@@ -479,9 +562,9 @@ code {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   font-size: var(--fs-12);
-  color: #0f172a;
+  color: #0a0d16;
   box-shadow: none;
-  font-family: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 pre {
@@ -494,7 +577,7 @@ pre {
 
 .toastify {
   border-radius: var(--radius-sm) !important;
-  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.18) !important;
+  box-shadow: 0 8px 24px rgba(10, 13, 22, 0.18) !important;
   font-weight: 500;
   font-family: var(--font-stack);
 }
@@ -566,13 +649,13 @@ pre {
 
 .empty-state .v-icon {
   font-size: 44px;
-  color: #d0d5dd;
+  color: #d6dce8;
   margin-bottom: 10px;
 }
 
 /* ---------- Color helpers (legacy) ---------- */
 
-.red { color: #f44336; }
+.red { color: #d93a3a; }
 .green { color: var(--accent); }
 .blue { color: var(--status-info); }
 
@@ -619,39 +702,39 @@ body::-webkit-scrollbar {
 
 .v-data-table__wrapper::-webkit-scrollbar-thumb,
 body::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #cfd8e8;
   border-radius: var(--radius-sm);
 }
 
 .v-data-table__wrapper::-webkit-scrollbar-thumb:hover,
 body::-webkit-scrollbar-thumb:hover {
-  background: #98a2b3;
+  background: #9aa5bd;
 }
 /* ---------- Performance tables (conditional win/loss coloring) ---------- */
 
 /* Rows tint by profit magnitude: the stronger the result, the deeper the tint. */
-.v-data-table tr.perf-win-1 > td { background: #f3faf6 !important; }
+.v-data-table tr.perf-win-1 > td { background: #e9f8f0 !important; }
 .v-data-table tr.perf-win-2 > td { background: var(--status-success-bg) !important; }
-.v-data-table tr.perf-win-3 > td { background: #cdefdd !important; }
-.v-data-table tr.perf-loss-1 > td { background: #fdf3f2 !important; }
+.v-data-table tr.perf-win-3 > td { background: #b6e6cd !important; }
+.v-data-table tr.perf-loss-1 > td { background: #fdeeee !important; }
 .v-data-table tr.perf-loss-2 > td { background: var(--status-danger-bg) !important; }
-.v-data-table tr.perf-loss-3 > td { background: #fad4d1 !important; }
+.v-data-table tr.perf-loss-3 > td { background: #f6c9c9 !important; }
 
 /* Colored leading edge on each perf row. */
-.v-data-table tr.perf-win-1 > td:first-child { box-shadow: inset 3px 0 0 #86c9a4; }
-.v-data-table tr.perf-win-2 > td:first-child { box-shadow: inset 3px 0 0 #4db384; }
+.v-data-table tr.perf-win-1 > td:first-child { box-shadow: inset 3px 0 0 #6bc79b; }
+.v-data-table tr.perf-win-2 > td:first-child { box-shadow: inset 3px 0 0 #0f9d58; }
 .v-data-table tr.perf-win-3 > td:first-child { box-shadow: inset 3px 0 0 var(--status-success); }
-.v-data-table tr.perf-loss-1 > td:first-child { box-shadow: inset 3px 0 0 #f3a19a; }
-.v-data-table tr.perf-loss-2 > td:first-child { box-shadow: inset 3px 0 0 #e97066; }
+.v-data-table tr.perf-loss-1 > td:first-child { box-shadow: inset 3px 0 0 #e89b9b; }
+.v-data-table tr.perf-loss-2 > td:first-child { box-shadow: inset 3px 0 0 #d93a3a; }
 .v-data-table tr.perf-loss-3 > td:first-child { box-shadow: inset 3px 0 0 var(--status-danger); }
 
 /* Hover keeps the tint but deepens it slightly. */
 .v-data-table tr.perf-win-1:hover > td,
 .v-data-table tr.perf-win-2:hover > td,
-.v-data-table tr.perf-win-3:hover > td { background: #d8f0e2 !important; }
+.v-data-table tr.perf-win-3:hover > td { background: #d3f0e0 !important; }
 .v-data-table tr.perf-loss-1:hover > td,
 .v-data-table tr.perf-loss-2:hover > td,
-.v-data-table tr.perf-loss-3:hover > td { background: #fad9d6 !important; }
+.v-data-table tr.perf-loss-3:hover > td { background: #f6c9c9 !important; }
 
 /* ---------- Wave 19A: workspace row colouring ----------
    Palette names map to the status tokens, so the same class reads correctly
@@ -670,7 +753,7 @@ body::-webkit-scrollbar-thumb:hover {
 /* Positive/negative figures. */
 .num-pos { color: var(--status-success); font-weight: 600; }
 .num-neg { color: var(--status-danger); font-weight: 600; }
-.num-neutral { color: var(--text-secondary, #667085); }
+.num-neutral { color: var(--text-secondary, #6b7280); }
 
 /* Tabular figures so columns line up like a trading desk. */
 .v-data-table td, .v-data-table th {
@@ -912,7 +995,12 @@ body::-webkit-scrollbar-thumb:hover {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
 }
+
+.topbar-brand:hover { background: var(--surface-hover); }
+.topbar-brand:focus-visible { box-shadow: var(--focus-ring); outline: none; }
 
 .topbar-brand .brand-logo {
   width: 28px;
@@ -921,13 +1009,15 @@ body::-webkit-scrollbar-thumb:hover {
   box-shadow: none;
 }
 
-.topbar-brand-name {
-  font-size: var(--fs-13);
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: var(--text-primary);
-  white-space: nowrap;
+/* The wordmark is the same lockup the marketing site uses: "AAA" in the heavy
+   weight, "Tracker" in medium at the secondary colour, tight tracking. */
+.wordmark {
+  display: inline-flex; align-items: baseline; gap: .3em;
+  font-size: 15px; font-weight: 800; letter-spacing: -.03em;
+  line-height: 1; color: var(--text-primary); white-space: nowrap;
 }
+.wordmark i { font-style: normal; font-weight: 500; color: var(--text-secondary); }
+.wordmark--lg { font-size: 22px; }
 
 .topbar-version {
   font-size: var(--fs-11);
@@ -1070,7 +1160,7 @@ body::-webkit-scrollbar-thumb:hover {
 }
 .col-drag-handle:hover::after,
 body.col-resizing .col-drag-handle::after {
-    background: rgba(22, 163, 74, .55);
+    background: rgba(31, 75, 240, .55);
 }
 body.col-resizing {
     user-select: none;
@@ -1112,8 +1202,8 @@ table.cols-free {
   transition: background var(--t-fast) ease, color var(--t-fast) ease;
 }
 .tag-chip:hover {
-  background: rgba(22, 163, 74, 0.1);
-  border-color: rgba(22, 163, 74, 0.4) !important;
+  background: rgba(31, 75, 240, 0.1);
+  border-color: rgba(31, 75, 240, 0.4) !important;
   color: var(--accent-hover) !important;
 }
 .tag-chip--on,
@@ -1734,8 +1824,8 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 /* Code blocks */
 .doc-code {
   display: block;
-  background: var(--chrome, #151d2b);
-  color: #d6deeb;
+  background: var(--chrome, #0a0d16);
+  color: #d6dce8;
   border-radius: var(--radius-sm, 8px);
   padding: var(--space-3, 12px) var(--space-4, 16px);
   margin: 0 0 var(--space-5, 24px);
@@ -1798,10 +1888,10 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 /* --- G56: anomaly insights --------------------------------------------- */
 .insights-card {
     cursor: pointer;
-    border-left: 3px solid var(--status-warning, #f59e0b);
+    border-left: 3px solid var(--status-warning, #b8770a);
 }
 .insight-campaign-link {
-    color: var(--accent, #2563eb);
+    color: var(--accent, #1f4bf0);
     text-decoration: none;
 }
 .insight-campaign-link:hover {

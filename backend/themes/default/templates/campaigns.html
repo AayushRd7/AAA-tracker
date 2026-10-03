@@ -1983,7 +1983,7 @@
                              {value: 'mobile', text: 'Mobile'}],
                 simPrefixes: [{value: '', text: 'Random'}].concat(
                     ['11.22.33.', '44.55.66.', '77.88.99.', '90.12.34.'].map(p => ({value: p, text: p}))),
-                simPalette: ['#16a34a', '#2563eb', '#d97706', '#dc2626', '#7c3aed', '#0891b2'],
+                simPalette: ['#0f9d58', '#1f4bf0', '#b8770a', '#d93a3a', '#0f9d58', '#0d7fa8'],
                 headers: [
                     {text: 'Name', value: 'name'},
                     {text: 'Tags', value: 'tags', sortable: false},
@@ -4253,8 +4253,8 @@
 
 <style>
     .bulk-bar {
-        background: var(--status-success-bg, #f0fdf4);
-        border-bottom: 1px solid var(--border-soft, #e3e8ef);
+        background: var(--status-success-bg, #e9f8f0);
+        border-bottom: 1px solid var(--border-soft, #e4e9f2);
         border-radius: var(--radius-md, 12px) var(--radius-md, 12px) 0 0;
     }
     /* D1b — archived rows stay visible but clearly dormant */
@@ -4267,12 +4267,12 @@
     .import-results {
         max-height: 180px;
         overflow-y: auto;
-        border: 1px solid var(--border-soft, #e3e8ef);
+        border: 1px solid var(--border-soft, #e4e9f2);
         border-radius: var(--radius-md, 12px);
         padding: 8px 12px;
     }
-    .import-ok { color: var(--status-success, #16a34a); }
-    .import-fail { color: var(--status-danger, #dc2626); }
+    .import-ok { color: var(--status-success, #0f9d58); }
+    .import-fail { color: var(--status-danger, #d93a3a); }
     /* D1f — simulation distribution bars */
     .sim-row {
         display: flex;
@@ -4291,7 +4291,7 @@
     .sim-bar-track {
         flex: 1;
         height: 14px;
-        background: var(--surface-raised, #eef1f5);
+        background: var(--surface-raised, #eff2f8);
         border-radius: var(--radius-sm, 8px);
         overflow: hidden;
     }
@@ -4300,8 +4300,8 @@
         border-radius: var(--radius-sm, 8px);
         transition: width var(--t-med, 240ms) ease-out;
     }
-    .sim-bar--schema { background: #2563eb; }
-    .sim-bar--offer { background: #d97706; }
+    .sim-bar--schema { background: #1f4bf0; }
+    .sim-bar--offer { background: #b8770a; }
     .sim-count {
         width: 44px;
         text-align: right;
@@ -4325,11 +4325,11 @@
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: var(--text-secondary, #667085);
-        border-bottom: 1px solid var(--border-soft, #e3e8ef);
+        color: var(--text-secondary, #6b7280);
+        border-bottom: 1px solid var(--border-soft, #e4e9f2);
     }
     .direct-tracking-head {
-        border-top: 1px solid var(--border-soft, #e3e8ef);
+        border-top: 1px solid var(--border-soft, #e4e9f2);
         margin-top: 8px;
         padding-top: 16px;
     }
@@ -4342,15 +4342,15 @@
         margin-top: 4px;
         font-size: var(--fs-12, 12px);
         line-height: 1.5;
-        color: var(--text-secondary, #667085);
+        color: var(--text-secondary, #6b7280);
     }
     .filter-group-card {
-        border: 1px solid var(--border-soft, #e3e8ef) !important;
+        border: 1px solid var(--border-soft, #e4e9f2) !important;
         border-radius: var(--radius-md, 12px);
         background: var(--surface-raised, transparent);
     }
     .flow-extra-panels .v-expansion-panel {
-        border: 1px solid var(--border-soft, #e3e8ef);
+        border: 1px solid var(--border-soft, #e4e9f2);
         border-radius: var(--radius-md, 12px) !important;
         margin-bottom: 8px;
     }
@@ -4400,7 +4400,7 @@
         height: auto;
     }
     .campaign-editor-pane-flat {
-        border: 1px solid var(--border-soft, #e3e8ef);
+        border: 1px solid var(--border-soft, #e4e9f2);
         border-radius: var(--radius-md, 12px);
         padding: 12px;
     }
@@ -4414,11 +4414,11 @@
         justify-content: space-between;
         gap: 12px;
         padding: 6px 0;
-        border-bottom: 1px solid var(--border-soft, #e3e8ef);
+        border-bottom: 1px solid var(--border-soft, #e4e9f2);
         font-size: var(--fs-13, 13px);
     }
     .review-key {
-        color: var(--text-secondary, #667085);
+        color: var(--text-secondary, #6b7280);
     }
     .review-val {
         font-weight: 600;
@@ -4426,17 +4426,17 @@
         word-break: break-word;
     }
     /* Perf row tints in dark mode (light hexes live in the global sheet) */
-    [data-theme="dark"] .v-data-table tr.perf-win-1 > td { background: #16241c !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-1 > td { background: #10241a !important; }
     [data-theme="dark"] .v-data-table tr.perf-win-2 > td { background: var(--status-success-bg) !important; }
-    [data-theme="dark"] .v-data-table tr.perf-win-3 > td { background: #1a3526 !important; }
-    [data-theme="dark"] .v-data-table tr.perf-loss-1 > td { background: #2a1a18 !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-3 > td { background: #14301f !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-1 > td { background: #2e1614 !important; }
     [data-theme="dark"] .v-data-table tr.perf-loss-2 > td { background: var(--status-danger-bg) !important; }
-    [data-theme="dark"] .v-data-table tr.perf-loss-3 > td { background: #3a201d !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-3 > td { background: #3a1c1a !important; }
     [data-theme="dark"] .v-data-table tr.perf-win-1:hover > td,
     [data-theme="dark"] .v-data-table tr.perf-win-2:hover > td,
-    [data-theme="dark"] .v-data-table tr.perf-win-3:hover > td { background: #1d3a2a !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-3:hover > td { background: #14301f !important; }
     [data-theme="dark"] .v-data-table tr.perf-loss-1:hover > td,
     [data-theme="dark"] .v-data-table tr.perf-loss-2:hover > td,
-    [data-theme="dark"] .v-data-table tr.perf-loss-3:hover > td { background: #452622 !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-3:hover > td { background: #48211e !important; }
 </style>
 {% endraw %}

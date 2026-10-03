@@ -300,8 +300,8 @@
                                     <td>
                                         <div class="d-flex align-center">
                                             <input type="color" v-model="cs.color" class="ct-color-input"
-                                                   :title="cs.color || '#90a4ae'" aria-label="Status colour">
-                                            <code class="ml-2 caption">{{ cs.color || '#90a4ae' }}</code>
+                                                   :title="cs.color || '#9aa5bd'" aria-label="Status colour">
+                                            <code class="ml-2 caption">{{ cs.color || '#9aa5bd' }}</code>
                                         </div>
                                     </td>
                                     <td>
@@ -468,7 +468,7 @@
                             .filter(cs => cs && typeof cs === 'object')
                             .map(cs => ({
                                 name: cs.name || '',
-                                color: cs.color || '#90a4ae',
+                                color: cs.color || '#9aa5bd',
                                 mode: cs.mode || 'new',
                                 role: cs.role || 'primary',
                             }));
@@ -523,7 +523,7 @@
                         .filter(cs => this.slugifyStatus(cs.name))
                         .map(cs => ({
                             name: cs.name,
-                            color: cs.color || '#90a4ae',
+                            color: cs.color || '#9aa5bd',
                             mode: cs.mode || 'new',
                             role: cs.role || 'primary',
                         })),
@@ -590,7 +590,7 @@
                     this.$set(this.settings, 'custom_statuses', []);
                 }
                 this.settings.custom_statuses.push({
-                    name: '', color: '#90a4ae', mode: 'new', role: 'primary',
+                    name: '', color: '#9aa5bd', mode: 'new', role: 'primary',
                 });
             },
             removeCustomStatus(i) {

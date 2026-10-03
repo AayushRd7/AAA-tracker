@@ -2909,7 +2909,7 @@
     /* Grouped view: the first-level row is the group subtotal. */
     .v-data-table tr.perf-group-row > td {
         font-weight: 600;
-        border-bottom: 2px solid var(--border, #e2e8f0);
+        border-bottom: 2px solid var(--border, #e4e9f2);
     }
     .log-filter-sm {
         max-width: 120px;
@@ -2941,7 +2941,7 @@
     .click-time__date {
         display: block;
         font-size: var(--fs-11, 11px);
-        color: var(--text-secondary, #667085);
+        color: var(--text-secondary, #6b7280);
         white-space: nowrap;
     }
     .click-time__time {
@@ -2958,18 +2958,18 @@
         to { opacity: 1; transform: none; }
     }
     /* Perf row tints in dark mode (light hexes live in the global sheet) */
-    [data-theme="dark"] .v-data-table tr.perf-win-1 > td { background: #16241c !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-1 > td { background: #10241a !important; }
     [data-theme="dark"] .v-data-table tr.perf-win-2 > td { background: var(--status-success-bg) !important; }
-    [data-theme="dark"] .v-data-table tr.perf-win-3 > td { background: #1a3526 !important; }
-    [data-theme="dark"] .v-data-table tr.perf-loss-1 > td { background: #2a1a18 !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-3 > td { background: #14301f !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-1 > td { background: #2e1614 !important; }
     [data-theme="dark"] .v-data-table tr.perf-loss-2 > td { background: var(--status-danger-bg) !important; }
-    [data-theme="dark"] .v-data-table tr.perf-loss-3 > td { background: #3a201d !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-3 > td { background: #3a1c1a !important; }
     [data-theme="dark"] .v-data-table tr.perf-win-1:hover > td,
     [data-theme="dark"] .v-data-table tr.perf-win-2:hover > td,
-    [data-theme="dark"] .v-data-table tr.perf-win-3:hover > td { background: #1d3a2a !important; }
+    [data-theme="dark"] .v-data-table tr.perf-win-3:hover > td { background: #14301f !important; }
     [data-theme="dark"] .v-data-table tr.perf-loss-1:hover > td,
     [data-theme="dark"] .v-data-table tr.perf-loss-2:hover > td,
-    [data-theme="dark"] .v-data-table tr.perf-loss-3:hover > td { background: #452622 !important; }
+    [data-theme="dark"] .v-data-table tr.perf-loss-3:hover > td { background: #48211e !important; }
     .column-menu-card {
         min-width: 280px;
         max-height: 460px;
@@ -2992,11 +2992,11 @@
         transition: box-shadow var(--t-med, 200ms) ease, border-color var(--t-med, 200ms) ease;
     }
     .report-template-card:hover {
-        border-color: var(--primary, #2563eb);
+        border-color: var(--primary, #1f4bf0);
     }
     .report-template-card--active {
-        border-color: var(--primary, #2563eb);
-        box-shadow: 0 0 0 1px var(--primary, #2563eb);
+        border-color: var(--primary, #1f4bf0);
+        box-shadow: 0 0 0 1px var(--primary, #1f4bf0);
     }
     /* Wave 19B — approval lifecycle chips (mirrors .status-chip) */
     .approval-chip {

@@ -5,12 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AAA TRACKER</title>
 
-    <link rel="icon" type="image/svg+xml" href="/backend/backend/img/favicon.svg?v=3">
-    <link rel="alternate icon" type="image/x-icon" href="favicon.ico?v=3">
+    <link rel="icon" type="image/svg+xml" href="/backend/backend/img/favicon.svg?v=4">
+    <link rel="alternate icon" type="image/x-icon" href="favicon.ico?v=4">
+    <meta name="theme-color" content="#0a0d16">
 
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Type is self-hosted from the theme (@font-face lives at the top of
+         css/style.css) and is the same two faces the marketing site ships —
+         Inter for the interface, IBM Plex Mono for anything numeric. No
+         third-party font request; Vuetify's Roboto is repinned to the app stack
+         in the stylesheet. -->
+    <link rel="preload" href="/backend/backend/css/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 
     <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet" integrity="sha384-scpQJqXbp/4O66QYGm9hiZWcHYBwPwFE/4BPPc63T0ziKqrQVOIwWnSsEIjNuH3e" crossorigin="anonymous">
 
@@ -30,7 +34,7 @@
     <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js" integrity="sha384-6foQBJHuUSRZT7FlYD0AkFDsYH7bowmqBulLZUb8S1qBoEItSgOaXiGkxDn9kSLP" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/vue-apexcharts@1.6.2/dist/vue-apexcharts.min.js" integrity="sha384-qnL07gjeOh/gT8wuQ5lLlhnunZVX/sbfDVsiDH4wWB0/b+VZ0h459IwxDYKHTTMM" crossorigin="anonymous"></script>
 
-    <link href="/backend/backend/css/style.css?v=26" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=28" rel="stylesheet">
 
     <!-- Theme toggle helper: reads localStorage('theme'), exposes window.setTheme(t) -->
     <script>
@@ -415,10 +419,10 @@
             <v-btn icon class="d-lg-none mr-1" @click="drawer = true" aria-label="Open navigation">
                 <v-icon>mdi-menu</v-icon>
             </v-btn>
-            <div class="topbar-brand">
-                <img src="/backend/backend/img/logo.svg" alt="AAA Tracker logo" class="brand-logo">
-                <div class="topbar-brand-name">AAA TRACKER</div>
-            </div>
+            <a class="topbar-brand" href="/backend/dashboard" aria-label="AAA Tracker — go to the dashboard">
+                <img src="/backend/backend/img/logo.svg" alt="" class="brand-logo">
+                <div class="wordmark"><b>AAA</b><i>Tracker</i></div>
+            </a>
             <!-- Section nav: one dropdown per group, so the header never needs a
                  second row and no item is ever off-screen. -->
             <div class="topnav-menus d-none d-lg-flex ml-4">
@@ -663,14 +667,14 @@
                 options: { customProperties: true },
                 themes: {
                     light: {
-                        primary: '#16a34a',
-                        secondary: '#151d2b',
-                        background: '#f5f6f8',
+                        primary: '#1f4bf0',
+                        secondary: '#0a0d16',
+                        background: '#f5f7fb',
                     },
                     dark: {
-                        primary: '#16a34a',
-                        secondary: '#0d1420',
-                        background: '#0f1722',
+                        primary: '#5b7cff',
+                        secondary: '#121826',
+                        background: '#0a0d16',
                     }
                 }
             }

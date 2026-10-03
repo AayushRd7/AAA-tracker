@@ -17,8 +17,8 @@
             <v-col cols="12">
                 <v-card class="pa-4 onboarding-card">
                     <div class="d-flex align-center flex-wrap mb-3">
-                        <v-avatar :color="onboarding.complete ? '#16a34a1f' : '#2563eb1f'" size="40" class="mr-3">
-                            <v-icon small :color="onboarding.complete ? '#16a34a' : '#2563eb'">mdi-rocket-launch-outline</v-icon>
+                        <v-avatar :color="onboarding.complete ? '#0f9d581f' : '#1f4bf01f'" size="40" class="mr-3">
+                            <v-icon small :color="onboarding.complete ? '#0f9d58' : '#1f4bf0'">mdi-rocket-launch-outline</v-icon>
                         </v-avatar>
                         <div class="font-weight-medium mr-3">
                             {{ onboarding.complete ? 'Workspace setup complete' : 'Finish setting up your workspace' }}
@@ -77,8 +77,8 @@
             <v-col cols="12">
                 <v-card class="pa-4 stat-card fraud-watch-card" @click="goToFraud">
                     <div class="d-flex align-center flex-wrap">
-                        <v-avatar color="#dc26261f" size="40" class="mr-3">
-                            <v-icon small color="#dc2626">mdi-shield-alert-outline</v-icon>
+                        <v-avatar color="#d93a3a1f" size="40" class="mr-3">
+                            <v-icon small color="#d93a3a">mdi-shield-alert-outline</v-icon>
                         </v-avatar>
                         <div class="font-weight-medium mr-4">Fraud watch</div>
                         <span class="caption grey--text mr-4">
@@ -107,8 +107,8 @@
             <v-col cols="12">
                 <v-card class="pa-4 stat-card insights-card" @click="goToInsights">
                     <div class="d-flex align-center flex-wrap">
-                        <v-avatar :color="insightsSummary.critical ? '#dc26261f' : '#f59e0b1f'" size="40" class="mr-3">
-                            <v-icon small :color="insightsSummary.critical ? '#dc2626' : '#f59e0b'">mdi-brain</v-icon>
+                        <v-avatar :color="insightsSummary.critical ? '#d93a3a1f' : '#b8770a1f'" size="40" class="mr-3">
+                            <v-icon small :color="insightsSummary.critical ? '#d93a3a' : '#b8770a'">mdi-brain</v-icon>
                         </v-avatar>
                         <div class="font-weight-medium mr-4">Insights</div>
                         <span v-if="insightsSummary.critical" class="caption mr-4">
@@ -365,14 +365,14 @@
 </script>
 
 <script type="application/javascript">
-    const DASH_CHART_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f59e0b', '#0ea5e9'];
+    const DASH_CHART_COLORS = ['#1f4bf0', '#7a3dff', '#0f9d58', '#b8770a', '#0d7fa8'];
     const DASH_COLORS = {
-        info: '#2563eb',
-        unique: '#0ea5e9',
-        accent: '#7c3aed',
-        danger: '#dc2626',
-        success: '#16a34a',
-        warning: '#f59e0b',
+        info: '#1f4bf0',
+        unique: '#7a3dff',
+        accent: '#0f9d58',
+        danger: '#d93a3a',
+        success: '#0b7a45',
+        warning: '#b8770a',
     };
 
     // Onboarding checklist: each key mirrors a boolean in
@@ -488,14 +488,14 @@
                             labels: {
                                 rotate: -45,
                                 style: {
-                                    colors: '#667085'
+                                    colors: '#6b7280'
                                 }
                             }
                         },
                         yaxis: {
                             labels: {
                                 style: {
-                                    colors: '#667085'
+                                    colors: '#6b7280'
                                 }
                             }
                         },
@@ -601,11 +601,11 @@
                     ...o,
                     theme: {mode: dark ? 'dark' : 'light'},
                     chart: {...chart, background: 'transparent'},
-                    grid: {...grid, borderColor: val('--border') || '#e4e7ec'},
+                    grid: {...grid, borderColor: val('--border') || '#e4e9f2'},
                     tooltip: {...tooltip, theme: dark ? 'dark' : 'light'},
-                    legend: {...legend, labels: {...(legend.labels || {}), colors: [val('--text-primary') || '#101828']}},
-                    xaxis: {...xaxis, labels: {...xlabels, style: {...(xlabels.style || {}), colors: val('--text-secondary') || '#667085'}}},
-                    yaxis: {...yaxis, labels: {...ylabels, style: {...(ylabels.style || {}), colors: val('--text-secondary') || '#667085'}}},
+                    legend: {...legend, labels: {...(legend.labels || {}), colors: [val('--text-primary') || '#0a0d16']}},
+                    xaxis: {...xaxis, labels: {...xlabels, style: {...(xlabels.style || {}), colors: val('--text-secondary') || '#6b7280'}}},
+                    yaxis: {...yaxis, labels: {...ylabels, style: {...(ylabels.style || {}), colors: val('--text-secondary') || '#6b7280'}}},
                 };
             },
             loadVisits() {
@@ -764,7 +764,7 @@
             },
             // --- G57: annotations ---
             annotationColor(color) {
-                const map = {success: '#16a34a', warning: '#f59e0b', danger: '#dc2626', info: '#2563eb'};
+                const map = {success: '#0f9d58', warning: '#b8770a', danger: '#d93a3a', info: '#1f4bf0'};
                 return map[color] || map.info;
             },
             openAnnotations() {
@@ -1036,7 +1036,7 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--status-success, #16a34a);
+        background: var(--status-success, #0f9d58);
         animation: live-pulse 1.6s ease-in-out infinite;
     }
     @keyframes live-pulse {
@@ -1127,7 +1127,7 @@
     /* Onboarding checklist */
     .onboarding-step .onboarding-done {
         text-decoration: line-through;
-        color: var(--text-secondary, #667085);
+        color: var(--text-secondary, #6b7280);
     }
     @keyframes dash-fade-up {
         from { opacity: 0; transform: translateY(6px); }
