@@ -34,7 +34,7 @@
     <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js" integrity="sha384-6foQBJHuUSRZT7FlYD0AkFDsYH7bowmqBulLZUb8S1qBoEItSgOaXiGkxDn9kSLP" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/vue-apexcharts@1.6.2/dist/vue-apexcharts.min.js" integrity="sha384-qnL07gjeOh/gT8wuQ5lLlhnunZVX/sbfDVsiDH4wWB0/b+VZ0h459IwxDYKHTTMM" crossorigin="anonymous"></script>
 
-    <link href="/backend/backend/css/style.css?v=29" rel="stylesheet">
+    <link href="/backend/backend/css/style.css?v=30" rel="stylesheet">
 
     <!-- Theme toggle helper: reads localStorage('theme'), exposes window.setTheme(t) -->
     <script>
@@ -90,7 +90,10 @@
         hour: 'numeric',
         minute: '2-digit',
         hour12: true,
-        timeZone: 'America/New_York' // or leave empty to use local time
+        // The workspace timezone (Settings → General) wins; ET is only the
+        // fallback while the workspace is unset or still loading.
+        timeZone: (Vue.prototype.$workspace && Vue.prototype.$workspace.timezone)
+            || 'America/New_York'
       };
       return new Date(dateStr).toLocaleString(locale, options);
     };
@@ -121,6 +124,9 @@
     Vue.prototype.$workspaceRev = null;
 
     Vue.prototype.$loadWorkspace = function() {
+        // One request. The workspace payload also carries `timezone` (folded in
+        // server-side from the settings document) so every $formatDate can honour
+        // the workspace clock without a second authenticated GET on every page.
         return fetch('/backend/api/workspace/', {credentials: 'include'})
             .then(r => r.ok ? r.json() : null)
             .then(d => {
@@ -128,6 +134,7 @@
                     Object.assign(Vue.prototype.$workspace, d.workspace);
                 }
                 Vue.prototype.$workspaceRev = (d && d.settings_rev) || null;
+                return d;
             })
             .catch(() => {});
     };
@@ -462,6 +469,7 @@
                     :close-on-content-click="false" max-width="440" min-width="380">
                 <template v-slot:activator="{ on, attrs }">
                     <v-text-field
+                            ref="globalSearch"
                             v-model="searchQuery"
                             dense
                             hide-details
@@ -875,6 +883,10 @@
             // Display preferences (number formatting / row colouring) apply on
             // every page, not just the dashboard shell.
             this.$loadWorkspace();
+            // Cmd/Ctrl-K jumps to the global search. If focus is already in a
+            // text field (or any editable surface) the browser's own handling
+            // wins — the shortcut must never trap the user mid-typing.
+            window.addEventListener('keydown', this.onGlobalShortcut);
             if (!this.dashboardShell) return;
             // Restore the sidebar's expanded groups (the active section's group
             // is the default when nothing is stored).
@@ -1015,6 +1027,22 @@
                 if (groups.length) {
                     this.searchGo(groups[0].key, groups[0].items[0]);
                 }
+            },
+            // The global search lives in the dashboard shell's top bar only.
+            onGlobalShortcut(e) {
+                if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+                if (e.key !== 'k' && e.key !== 'K') return;
+                // Never hijack the shortcut while the user is typing — leave the
+                // browser/OS binding (and the field's own editing) alone.
+                const el = document.activeElement;
+                const tag = el ? el.tagName : '';
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+                    || (el && el.isContentEditable)) return;
+                const field = this.$refs.globalSearch;
+                if (!field) return;
+                e.preventDefault();
+                this.searchMenu = true;
+                this.$nextTick(() => { if (field.focus) field.focus(); });
             },
             copyText(text) {
                 navigator.clipboard.writeText(text).then(() => {

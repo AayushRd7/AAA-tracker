@@ -252,7 +252,8 @@
                         <template v-slot:item.actions="{ item }">
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openBlacklistDialog(item)">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openBlacklistDialog(item)"
+                                           :aria-label="'Edit ' + item.name">
                                         <v-icon small>mdi-pencil-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -260,7 +261,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteBlacklist(item)">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteBlacklist(item)"
+                                           :aria-label="'Delete ' + item.name">
                                         <v-icon small>mdi-trash-can-outline</v-icon>
                                     </v-btn>
                                 </template>

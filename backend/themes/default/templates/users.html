@@ -81,6 +81,7 @@
                                 <v-tooltip bottom v-if="canManageMembers && item.role !== 'owner'">
                                     <template v-slot:activator="{ on, attrs }">
                                         <v-btn icon small color="primary" v-bind="attrs" v-on="on"
+                                               :aria-label="'Make ' + item.username + ' owner'"
                                                @click="transferOwnership(item)">
                                             <v-icon small>mdi-crown-outline</v-icon>
                                         </v-btn>
@@ -90,6 +91,7 @@
                                 <v-tooltip bottom v-if="canManageMembers && item.role !== 'owner'">
                                     <template v-slot:activator="{ on, attrs }">
                                         <v-btn icon small color="red" v-bind="attrs" v-on="on"
+                                               :aria-label="'Remove ' + item.username + ' from workspace'"
                                                @click="removeMember(item)">
                                             <v-icon small>mdi-account-remove-outline</v-icon>
                                         </v-btn>
@@ -149,7 +151,8 @@
                                 {{ item.expires_at ? $formatDate(item.expires_at) : '—' }}
                             </template>
                             <template v-slot:item.actions="{ item }">
-                                <v-btn icon small color="red" @click="revokeInvitation(item)">
+                                <v-btn icon small color="red" @click="revokeInvitation(item)"
+                                       :aria-label="'Revoke invitation for ' + inviteeLabel(item)">
                                     <v-icon small>mdi-email-remove-outline</v-icon>
                                 </v-btn>
                             </template>
@@ -431,7 +434,8 @@
                         <template v-slot:item.actions="{ item }">
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)"
+                                           :aria-label="'Edit ' + item.username">
                                         <v-icon small>mdi-pencil-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -439,7 +443,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="teal" v-bind="attrs" v-on="on" @click="openSessions(item)">
+                                    <v-btn icon small color="teal" v-bind="attrs" v-on="on" @click="openSessions(item)"
+                                           :aria-label="'View devices for ' + item.username">
                                         <v-icon small>mdi-devices</v-icon>
                                     </v-btn>
                                 </template>
@@ -447,7 +452,8 @@
                             </v-tooltip>
                             <v-tooltip bottom v-if="item.totp_enabled">
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="orange" v-bind="attrs" v-on="on" @click="resetTotp(item)">
+                                    <v-btn icon small color="orange" v-bind="attrs" v-on="on" @click="resetTotp(item)"
+                                           :aria-label="'Reset 2FA for ' + item.username">
                                         <v-icon small>mdi-shield-off-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -455,7 +461,8 @@
                             </v-tooltip>
                             <v-tooltip bottom v-if="item.username !== 'tracker_admin'">
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteUser(item)">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteUser(item)"
+                                           :aria-label="'Delete ' + item.username">
                                         <v-icon small>mdi-trash-can-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -513,7 +520,8 @@
                                 {{ $formatDate(item.created_at) }}
                             </template>
                             <template v-slot:item.actions="{ item }">
-                                <v-btn v-if="!item.current" icon small color="red" @click="revokeMySession(item)">
+                                <v-btn v-if="!item.current" icon small color="red" @click="revokeMySession(item)"
+                                       :aria-label="'Log out ' + item.device + ' device'">
                                     <v-icon small>mdi-delete-outline</v-icon>
                                 </v-btn>
                                 <span v-else class="caption grey--text">Current</span>

@@ -66,7 +66,17 @@
                 <div class="page-title">Landing Pages</div>
                 <div class="page-subtitle">Manage your landing pages</div>
             </v-col>
-            <v-col class="d-flex justify-end" cols="auto">
+            <v-col class="d-flex justify-end align-center" cols="auto">
+                <v-text-field
+                        v-model="landingSearch"
+                        label="Search landings"
+                        prepend-inner-icon="mdi-magnify"
+                        outlined
+                        dense
+                        hide-details
+                        clearable
+                        class="mr-3 landing-search"
+                ></v-text-field>
                 <v-btn color="primary" elevation="0" @click="openCreate">
                     <v-icon small class="mr-1">mdi-plus</v-icon>
                     Create landing
@@ -140,7 +150,7 @@
                 <v-card>
                     <v-data-table v-col-resize:landings="headers"
                             :headers="headers"
-                            :items="landings"
+                            :items="filteredLandings"
                             dense
                             :items-per-page="10"
                             :footer-props="{ 'items-per-page-options': [10, 25, 50] }"
@@ -165,7 +175,8 @@
                         <template v-slot:item.actions="{ item }">
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)"
+                                           :aria-label="'Edit ' + item.name">
                                         <v-icon small>mdi-pencil-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -174,7 +185,8 @@
                             <v-tooltip bottom v-if="item.type === 'local_file'">
                                 <template v-slot:activator="{ on, attrs }">
                                     <a :href="'/backend/editor?landing='+item.id" target="_blank" rel="noopener">
-                                        <v-btn icon small color="info" v-bind="attrs" v-on="on">
+                                        <v-btn icon small color="info" v-bind="attrs" v-on="on"
+                                               :aria-label="'Open code editor for ' + item.name">
                                             <v-icon small>mdi-code-tags</v-icon>
                                         </v-btn>
                                     </a>
@@ -183,7 +195,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="confirmDeleteLanding(item)">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="confirmDeleteLanding(item)"
+                                           :aria-label="'Delete ' + item.name">
                                         <v-icon small>mdi-trash-can-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -192,9 +205,17 @@
                         </template>
 
                         <template v-slot:no-data>
-                            <div class="empty-state">
-                                <v-icon>mdi-inbox-outline</v-icon>
-                                <div class="mt-2">No data yet</div>
+                            <div class="empty-state" v-if="landingSearch && landings.length">
+                                <v-icon>mdi-filter-off-outline</v-icon>
+                                <div class="mt-2">No landings match your search</div>
+                                <v-btn small text color="primary" class="mt-2" @click="landingSearch = ''">Clear search</v-btn>
+                            </div>
+                            <div class="empty-state" v-else>
+                                <v-icon>mdi-lan</v-icon>
+                                <div class="mt-2">No landing pages yet — create your first one</div>
+                                <v-btn small color="primary" elevation="0" class="mt-3" @click="openCreate">
+                                    <v-icon small class="mr-1">mdi-plus</v-icon>Create landing
+                                </v-btn>
                             </div>
                         </template>
 
@@ -236,6 +257,7 @@
                     {text: 'Actions', value: 'actions', sortable: false}
                 ],
                 landings: [],
+                landingSearch: '',
 
                 dialog: false,
                 isEdit: false,
@@ -253,6 +275,15 @@
         computed: {
             dateRangeText() {
                 return this.date_range.join(' ~ ')
+            },
+            filteredLandings() {
+                const q = (this.landingSearch || '').trim().toLowerCase();
+                if (!q) return this.landings;
+                return this.landings.filter(l =>
+                    (l.name || '').toLowerCase().includes(q)
+                    || (l.folder || '').toLowerCase().includes(q)
+                    || (Array.isArray(l.tags) ? l.tags : String(l.tags || '').split(','))
+                        .some(t => String(t).trim().toLowerCase().includes(q)));
             },
         },
         methods: {

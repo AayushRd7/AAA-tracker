@@ -1916,3 +1916,29 @@ body .v-application .v-chip.v-chip.tag-chip--on:hover {
 .tabular {
     font-variant-numeric: tabular-nums;
 }
+
+/* --- Settings dirty-state guard ---------------------------------------- */
+/* Appears only while there are unsaved settings edits. Sits below the fixed
+   56px app bar (sticky, not fixed) so it never covers the page content and
+   never fights the per-card Save buttons. */
+.settings-dirty-bar {
+    position: sticky;
+    top: 64px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2, 8px);
+    margin-bottom: var(--space-3, 12px);
+    padding: var(--space-2, 8px) var(--space-3, 12px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 8px);
+    background: var(--card-bg);
+    box-shadow: var(--card-shadow);
+}
+.settings-dirty-bar .settings-dirty-text {
+    font-size: var(--fs-13, 13px);
+    font-weight: 600;
+}
+.settings-dirty-bar .v-icon {
+    color: var(--status-warning, #b8770a);
+}

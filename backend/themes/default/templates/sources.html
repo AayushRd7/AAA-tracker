@@ -330,8 +330,10 @@
                         </div>
                     </div>
                     <div v-else class="empty-state py-8">
-                        <v-icon>mdi-magnify-close</v-icon>
+                        <v-icon>mdi-filter-off-outline</v-icon>
                         <div class="mt-2">No sources match your search</div>
+                        <v-btn small text color="primary" class="mt-2"
+                               @click="catalogSearch = ''; catalogFilter = 'all'">Clear filters</v-btn>
                     </div>
                 </v-card-text>
             </v-card>
@@ -386,7 +388,8 @@
                         <template v-slot:item.actions="{ item }">
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)"
+                                           :aria-label="'Edit ' + item.name">
                                         <v-icon small>mdi-pencil-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -394,7 +397,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteSource(item)">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteSource(item)"
+                                           :aria-label="'Delete ' + item.name">
                                         <v-icon small>mdi-trash-can-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -404,8 +408,11 @@
 
                         <template v-slot:no-data>
                             <div class="empty-state">
-                                <v-icon>mdi-inbox-outline</v-icon>
-                                <div class="mt-2">No data yet</div>
+                                <v-icon>mdi-database-outline</v-icon>
+                                <div class="mt-2">No traffic sources yet — add your first one</div>
+                                <v-btn small color="primary" elevation="0" class="mt-3" @click="openCreate">
+                                    <v-icon small class="mr-1">mdi-plus</v-icon>Add source
+                                </v-btn>
                             </div>
                         </template>
                     </v-data-table>

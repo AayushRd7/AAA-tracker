@@ -75,5 +75,12 @@ def get_workspace(db: Session = Depends(get_db)):
     # same raw stored value so the two endpoints agree: the pages that write the
     # workspace block back (Logs / Reports default columns) echo it, so a page
     # whose workspace never loaded cannot overwrite the stored one.
-    return {"workspace": {**WORKSPACE_DEFAULTS, **(workspace or {})},
-            "settings_rev": _settings_rev(raw)}
+    out = {**WORKSPACE_DEFAULTS, **(workspace or {})}
+    # `timezone` sits at the top level of the settings document rather than inside
+    # the workspace block, but every page needs it to render timestamps in the
+    # workspace's zone. Folded in here so the shell does not have to fetch the
+    # whole settings document — which also needs the settings permission — purely
+    # to find out what the clock is set to.
+    if not out.get("timezone") and isinstance(cfg.get("timezone"), str):
+        out["timezone"] = cfg["timezone"]
+    return {"workspace": out, "settings_rev": _settings_rev(raw)}

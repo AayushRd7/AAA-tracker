@@ -474,9 +474,18 @@
                     </tr>
                 </template>
                 <template v-slot:no-data>
-                    <div class="empty-state">
+                    <div class="empty-state" v-if="!reportRan">
                         <v-icon>mdi-chart-box-outline</v-icon>
                         <div class="mt-2">Run a report to see the breakdown</div>
+                    </div>
+                    <div class="empty-state" v-else-if="selectedCampaigns.length">
+                        <v-icon>mdi-filter-off-outline</v-icon>
+                        <div class="mt-2">No rows match these filters</div>
+                        <v-btn small text color="primary" class="mt-2" @click="clearReportFilters">Clear filters</v-btn>
+                    </div>
+                    <div class="empty-state" v-else>
+                        <v-icon>mdi-inbox-outline</v-icon>
+                        <div class="mt-2">No rows for this date range</div>
                     </div>
                 </template>
             </v-data-table>
@@ -928,7 +937,8 @@
                         <template v-slot:item.actions="{ item }">
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon x-small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                    <v-btn icon x-small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)"
+                                           :aria-label="item.click_id ? 'Edit conversion ' + item.click_id : 'Edit conversion'">
                                         <v-icon small>mdi-pencil-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -936,7 +946,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon x-small color="error" v-bind="attrs" v-on="on" @click="deleteConversion(item)">
+                                    <v-btn icon x-small color="error" v-bind="attrs" v-on="on" @click="deleteConversion(item)"
+                                           :aria-label="item.click_id ? 'Delete conversion ' + item.click_id : 'Delete conversion'">
                                         <v-icon small>mdi-trash-can-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -1356,6 +1367,11 @@
                     {text: 'Human Clicks', value: 'human_clicks', align: 'end'},
                 ],
                 reportRows: [],
+                // True once a run has completed (even with zero rows), so the
+                // empty state can tell "never run" apart from "no rows match".
+                reportRan: false,
+                // Debounce handle for the automatic re-run on dimension change.
+                reportRunTimer: null,
                 headers: [
                     {text: 'Received At', value: 'received_at'},
                     {text: 'Click ID', value: 'click_id'},
@@ -1586,6 +1602,23 @@
                     + `  -d '{"click_id":"abc123","transaction_id":"order-42",`
                     + `"status":"sale","payout":19.99,"currency":"USD",`
                     + `"occurred_at":"2026-09-30T10:00:00Z"}'`;
+            },
+        },
+        watch: {
+            // Editing the breakdown pipeline invalidates the table below it.
+            // Auto-run (debounced) once a report has already been produced, so
+            // the shown result always matches the shown dimensions; before the
+            // first run there is nothing to refresh, so we stay put. The
+            // `loading` guard skips the watcher's run when a dimension change
+            // was itself followed by an explicit runReport() (templates, saved
+            // reports, presets).
+            dimensions: {
+                deep: true,
+                handler() {
+                    if (!this.reportRan || this.loading) return;
+                    clearTimeout(this.reportRunTimer);
+                    this.reportRunTimer = setTimeout(() => this.runReport(), 400);
+                },
             },
         },
         mounted() {
@@ -2302,6 +2335,12 @@
                     .catch(err => this.$root.$emit('show-message', {
                         type: 'error', text: 'Offer update failed: ' + sanitizeToastMessage(err.message)}));
             },
+            // Empty-state CTA: drop the report's filters so the next run is
+            // unfiltered again (keeps the chosen dimensions/columns).
+            clearReportFilters() {
+                this.selectedCampaigns = [];
+                this.runReport();
+            },
             runReport() {
                 this.templateNote = '';
                 if (this.dimensions.includes('ip') && !this.isSingleDayRange()) {
@@ -2334,6 +2373,7 @@
                         this.reportRows = data.rows || [];
                         this.reportTotals = data.totals || {};
                         this.basisNote = data.fallback_note || null;
+                        this.reportRan = true;
                         if (data.date_basis && data.date_basis !== this.dateBasis) this.dateBasis = data.date_basis;
                         this.loading = false;
                     })

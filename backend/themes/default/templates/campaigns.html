@@ -8,6 +8,16 @@
             </div>
             <v-col class="d-flex justify-end align-center">
                 <div class="filter-bar align-center">
+                <v-text-field
+                        v-model="campaignSearch"
+                        label="Search campaigns"
+                        prepend-inner-icon="mdi-magnify"
+                        outlined
+                        dense
+                        hide-details
+                        clearable
+                        class="campaign-search"
+                ></v-text-field>
                 <v-menu v-model="colMenu" offset-y :close-on-content-click="false">
                     <template v-slot:activator="{ on, attrs }">
                         <v-btn small outlined v-bind="attrs" v-on="on">
@@ -1841,12 +1851,15 @@
                         <template v-slot:no-data>
                             <div class="empty-state" v-if="campaigns.length && !filteredCampaigns.length">
                                 <v-icon>mdi-filter-off-outline</v-icon>
-                                <div class="mt-2">No campaigns match the selected tags</div>
-                                <v-btn small text color="primary" class="mt-2" @click="tagFilter = []">Clear tag filter</v-btn>
+                                <div class="mt-2">No campaigns match your filters</div>
+                                <v-btn small text color="primary" class="mt-2" @click="tagFilter = []; campaignSearch = ''">Clear filters</v-btn>
                             </div>
                             <div class="empty-state" v-else>
                                 <v-icon>mdi-sitemap</v-icon>
                                 <div class="mt-2">No campaigns yet — create your first one</div>
+                                <v-btn small color="primary" elevation="0" class="mt-3" @click="openCreate">
+                                    <v-icon small class="mr-1">mdi-plus</v-icon>Create campaign
+                                </v-btn>
                             </div>
                         </template>
                         <template v-slot:body.append="{ headers: tHeaders }">
@@ -1890,6 +1903,7 @@
                                 <template v-slot:activator="{ on, attrs }">
                                     <v-btn icon small v-bind="attrs" v-on="on"
                                            :color="platformStatusOf(item) === 'PAUSED' ? 'green darken-1' : 'orange darken-2'"
+                                           :aria-label="(platformStatusOf(item) === 'PAUSED' ? 'Resume on Meta ' : 'Pause on Meta ') + item.name"
                                            @click="rowPlatformToggle(item)">
                                         <v-icon small>{{ platformStatusOf(item) === 'PAUSED' ? 'mdi-play' : 'mdi-pause' }}</v-icon>
                                     </v-btn>
@@ -1898,7 +1912,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="success" v-bind="attrs" v-on="on" @click="openSimulate(item)">
+                                    <v-btn icon small color="success" v-bind="attrs" v-on="on" @click="openSimulate(item)"
+                                           :aria-label="'Simulate traffic for ' + item.name + ' (dry run)'">
                                         <v-icon small>mdi-test-tube</v-icon>
                                     </v-btn>
                                 </template>
@@ -1906,7 +1921,8 @@
                             </v-tooltip>
                             <v-tooltip bottom v-if="isArchived(item)">
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="success" v-bind="attrs" v-on="on" @click="restoreCampaign(item)">
+                                    <v-btn icon small color="success" v-bind="attrs" v-on="on" @click="restoreCampaign(item)"
+                                           :aria-label="'Restore ' + item.name + ' from archive'">
                                         <v-icon small>mdi-archive-arrow-up-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -1914,7 +1930,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)"
+                                           :aria-label="'Edit ' + item.name">
                                         <v-icon small>mdi-pencil-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -1922,7 +1939,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="info" v-bind="attrs" v-on="on" @click="duplicateCampaign(item)">
+                                    <v-btn icon small color="info" v-bind="attrs" v-on="on" @click="duplicateCampaign(item)"
+                                           :aria-label="'Duplicate ' + item.name">
                                         <v-icon small>mdi-content-copy</v-icon>
                                     </v-btn>
                                 </template>
@@ -1930,7 +1948,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteCampaign(item)">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteCampaign(item)"
+                                           :aria-label="'Delete ' + item.name">
                                         <v-icon small>mdi-trash-can-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -2012,6 +2031,7 @@
                 ],
                 colMenu: false,
                 colVisibility: {},
+                campaignSearch: '',
                 tagFilter: [],
                 tagEditor: {open: false, id: null, name: '', tags: []},
                 bulkTagDialog: false,
@@ -2402,6 +2422,13 @@
                 // D1b archived rows are hidden unless "Show archived" is on
                 if (!this.showArchived) {
                     rows = rows.filter(c => !this.isArchived(c));
+                }
+                const q = (this.campaignSearch || '').trim().toLowerCase();
+                if (q) {
+                    rows = rows.filter(c =>
+                        (c.name || '').toLowerCase().includes(q)
+                        || (c.alias || '').toLowerCase().includes(q)
+                        || (c.tags || []).some(t => String(t).toLowerCase().includes(q)));
                 }
                 if (!this.tagFilter.length) return rows;
                 return rows.filter(c => (c.tags || []).some(t => this.tagFilter.includes(t)));

@@ -159,7 +159,8 @@
                         <template v-slot:item.actions="{ item }">
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)"
+                                           :aria-label="'Edit ' + item.domain">
                                         <v-icon small>mdi-pencil-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -167,7 +168,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="info" v-bind="attrs" v-on="on" @click="setupSSL(item)">
+                                    <v-btn icon small color="info" v-bind="attrs" v-on="on" @click="setupSSL(item)"
+                                           :aria-label="'Update SSL for ' + item.domain">
                                         <v-icon small>mdi-certificate-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -175,7 +177,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteDomain(item)">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteDomain(item)"
+                                           :aria-label="'Delete ' + item.domain">
                                         <v-icon small>mdi-trash-can-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -233,7 +236,8 @@
                         <template v-slot:item.actions="{ item }">
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openGroupManage(item)">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openGroupManage(item)"
+                                           :aria-label="'Manage domains and users for ' + item.name">
                                         <v-icon small>mdi-playlist-edit</v-icon>
                                     </v-btn>
                                 </template>
@@ -241,7 +245,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteGroup(item)">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteGroup(item)"
+                                           :aria-label="'Delete group ' + item.name">
                                         <v-icon small>mdi-trash-can-outline</v-icon>
                                     </v-btn>
                                 </template>

@@ -124,8 +124,10 @@
                     </div>
 
                     <div v-if="!filteredPresets.length" class="empty-state py-6">
-                        <v-icon>mdi-magnify</v-icon>
+                        <v-icon>mdi-filter-off-outline</v-icon>
                         <div class="mt-2">No networks match your search</div>
+                        <v-btn small text color="primary" class="mt-2"
+                               @click="catalogSearch = ''; catalogVertical = ''">Clear filters</v-btn>
                     </div>
                 </v-card-text>
             </v-card>
@@ -201,7 +203,8 @@
                         <template v-slot:item.actions="{ item }">
                             <v-tooltip bottom v-if="item.s2s_postback">
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="grey" v-bind="attrs" v-on="on" @click="copyPostback(item)">
+                                    <v-btn icon small color="grey" v-bind="attrs" v-on="on" @click="copyPostback(item)"
+                                           :aria-label="'Copy postback URL for ' + item.name">
                                         <v-icon small>mdi-content-copy</v-icon>
                                     </v-btn>
                                 </template>
@@ -209,7 +212,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)">
+                                    <v-btn icon small color="primary" v-bind="attrs" v-on="on" @click="openEdit(item)"
+                                           :aria-label="'Edit ' + item.name">
                                         <v-icon small>mdi-pencil-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -217,7 +221,8 @@
                             </v-tooltip>
                             <v-tooltip bottom>
                                 <template v-slot:activator="{ on, attrs }">
-                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteAffiliateNetwork(item)">
+                                    <v-btn icon small color="red" v-bind="attrs" v-on="on" @click="deleteAffiliateNetwork(item)"
+                                           :aria-label="'Delete ' + item.name">
                                         <v-icon small>mdi-trash-can-outline</v-icon>
                                     </v-btn>
                                 </template>
@@ -227,8 +232,11 @@
 
                         <template v-slot:no-data>
                             <div class="empty-state">
-                                <v-icon>mdi-inbox-outline</v-icon>
-                                <div class="mt-2">No data yet</div>
+                                <v-icon>mdi-cash-multiple</v-icon>
+                                <div class="mt-2">No affiliate networks yet — add your first one</div>
+                                <v-btn small color="primary" elevation="0" class="mt-3" @click="openCreate">
+                                    <v-icon small class="mr-1">mdi-plus</v-icon>Add affiliate network
+                                </v-btn>
                             </div>
                         </template>
                     </v-data-table>

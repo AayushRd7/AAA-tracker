@@ -52,6 +52,23 @@
             <v-btn v-if="settingsLoadError" text small color="primary" class="ml-2"
                    @click="loadSettings">Reload</v-btn>
         </v-alert>
+        <!-- Dirty-state guard: the Save button sits at the very top of a long
+             page, so an unsaved edit is easy to walk away from. This bar only
+             appears while there is something to save and never changes what a
+             save does (see saveSettings / changedSettingsPayload). -->
+        <div v-if="settingsDirty" class="settings-dirty-bar" role="status">
+            <v-icon small class="mr-2">mdi-content-save-alert-outline</v-icon>
+            <span class="settings-dirty-text">
+                {{ changedSectionCount }} unsaved
+                {{ changedSectionCount === 1 ? 'section' : 'sections' }}
+            </span>
+            <v-spacer></v-spacer>
+            <v-btn text small class="mr-1" @click="discardSettings">Discard</v-btn>
+            <v-btn color="primary" elevation="0" small
+                   :loading="savingSettings" @click="saveSettings(false)">
+                <v-icon small class="mr-1">mdi-content-save-outline</v-icon>Save
+            </v-btn>
+        </div>
         <v-container fluid class="px-0 settings-grid">
             <div class="settings-section-title">Tracking</div>
             <div class="settings-section-sub">Where clicks go and how conversions come back.</div>
@@ -1462,6 +1479,12 @@
             this.loadMonitorStatus();
             this.loadFxStatus();
             this.$root.$on('load-settings', this.loadSettings);
+            // Guard a close/reload while edits are unsaved. Removed on destroy so
+            // leaving the Settings section stops prompting.
+            window.addEventListener('beforeunload', this.onBeforeUnload);
+        },
+        beforeDestroy() {
+            window.removeEventListener('beforeunload', this.onBeforeUnload);
         },
         watch: {
             darkMode(on) {
@@ -1473,6 +1496,20 @@
             auditSortDesc() { this.loadAudit(1); },
         },
         computed:{
+              // Dirty-state guard inputs. `settingsDirty` drives the sticky bar
+              // and the beforeunload prompt; both reuse the exact payload the
+              // save would send, so the count can never disagree with what a
+              // save writes. `subIdMapping` is a separate whole-block write, so
+              // it counts as one extra changed section.
+              settingsDirty() {
+                return this.settingsLoaded
+                    && (Object.keys(this.changedSettingsPayload()).length > 0
+                        || this.subIdMappingChanged());
+              },
+              changedSectionCount() {
+                return Object.keys(this.changedSettingsPayload()).length
+                    + (this.subIdMappingChanged() ? 1 : 0);
+              },
               // The saved list the cost sync reads — mirrored read-only in the
               // cost-sync card so accounts are picked in exactly one place.
               metaAdsSavedAccounts() {
@@ -1921,6 +1958,20 @@
                         throw err;
                     })
                     .finally(() => { this.savingSettings = false; });
+            },
+            // Discard everything edited since the last successful load/save,
+            // restoring the snapshot the diff is computed against.
+            discardSettings() {
+                if (!this.settingsSnapshot) return;
+                this.settings = JSON.parse(JSON.stringify(this.settingsSnapshot));
+                this.subIdMapping = JSON.parse(JSON.stringify(this.subIdMappingSnapshot || []));
+                this.$root.$emit("show-message", {type: "info", text: "Unsaved changes discarded"});
+            },
+            onBeforeUnload(e) {
+                if (!this.settingsDirty) return undefined;
+                e.preventDefault();
+                e.returnValue = "";
+                return "";
             },
             async exportSettingsBackup() {
                 try {

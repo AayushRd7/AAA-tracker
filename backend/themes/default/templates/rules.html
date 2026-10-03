@@ -74,7 +74,8 @@
                             <template v-slot:item.actions="{ item }">
                                 <v-btn small text color="primary" :loading="ruleRunning === item.id"
                                        @click="runRuleNow(item)">Run now</v-btn>
-                                <v-btn icon small color="red" @click="deleteRule(item)">
+                                <v-btn icon small color="red" @click="deleteRule(item)"
+                                       :aria-label="'Delete rule ' + item.name">
                                     <v-icon small>mdi-trash-can-outline</v-icon>
                                 </v-btn>
                             </template>
