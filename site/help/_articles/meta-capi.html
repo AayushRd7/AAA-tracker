@@ -1,0 +1,74 @@
+<h2>What the conversion API does</h2>
+<p>The Meta Conversions API (CAPI) sends your conversions from the tracker's server straight to Meta, independent of the browser — so they survive ad blockers, browser restrictions and the drop in third-party cookies. Meta matches each event back to the ad click using the click identifiers the tracker captured (see below), not the tracker's own click id: a click that arrived with <code>fbclid=</code> is what makes a match possible.</p>
+<p>Everything lives on <b>Manage → CAPI integrations</b> — open the <b>Meta</b> tile and press <b>Manage all</b> to see its pixels. Meta is the only platform whose sender is live today; the other tiles store records but send nothing yet.</p>
+
+<h2>Turning it on</h2>
+<ol class="help-steps">
+  <li>On <b>Manage → CAPI integrations</b>, open the <b>Meta</b> tile.</li>
+  <li>Switch on <b>Send conversions to Meta</b>.</li>
+  <li>Set the dataset and token — either the fallback fields or one or more pixel records (below).</li>
+  <li>Leave <b>Dry-run</b> on and use <b>Send test event</b> while testing, then clear the test event code and turn dry-run off.</li>
+  <li>Press <b>Save settings</b> — it stays disabled until the stored settings load, so a failed load cannot overwrite your configuration with the page defaults.</li>
+</ol>
+
+<h2>Fallback dataset versus pixel records</h2>
+<p>There are two ways to tell the tracker where to send:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Where</th><th>Fields</th><th>When it is used</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Fallback (on the Meta panel)</td><td><b>Fallback Dataset / Pixel ID</b> and <b>Fallback access token</b></td><td>Only when no pixel is bound. The token is stored as a secret.</td></tr>
+    <tr><td>Pixel records (Add new pixel)</td><td><b>Pixel / Dataset ID</b>, <b>API key / Access token</b>, plus the per-pixel options below</td><td>When bound to a traffic channel or an offer. A pixel's own id and token win.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Bind a pixel in <b>one</b> place: at the <b>traffic-channel</b> level to send only that channel's conversions, or at the <b>offer / website</b> level to send all of that offer's conversions from any channel. If it is bound at both levels, the sender resolves the channel first and still sends once, so this is redundant rather than harmful.</p>
+
+<h2>The access token and the test event code</h2>
+<p>The access token authenticates the call. Treat it as a secret: masked and stored hidden, and it must belong to the same dataset as the id beside it. A mismatched pair fails at Meta and appears in <b>Logs → Internal postbacks</b> as a <code>failed</code> send with Meta's error text.</p>
+<p><b>Test event code</b> is optional. With it filled in, every event is routed to the <b>Test Events</b> tab of Meta's Events Manager instead of the normal stream — useful for confirming the wiring, but those events do not count as conversions in ad reporting. Clear it when you go live.</p>
+
+<h2>Which conversion statuses to send</h2>
+<p>The <b>Send these conversion statuses</b> checkboxes control what leaves the tracker. Defaults are <code>lead</code>, <code>sale</code> and <code>upsale</code>; custom statuses you defined also appear. A status that is not ticked is skipped silently — no event, and no row in the outbound log.</p>
+<p>Each status maps to a Meta event name: defaults are <code>sale</code> → <code>Purchase</code>, <code>lead</code> → <code>Lead</code> and <code>upsale</code> → <code>Subscribe</code>. With a pixel record, the pixel's <b>Default event name</b> applies to every status unless a <b>Custom conversion matching</b> row overrides it.</p>
+
+<h2>Currency and value</h2>
+<p>The event's value is the conversion payout; its currency is the conversion's own, falling back to the panel's <b>Default currency</b> (USD, EUR, GBP or JPY). A pixel can carry <b>payout customisations</b> — one row per conversion type with a fixed <b>Value</b> and/or <b>Currency</b> that overrides those defaults. Leave both empty to keep the conversion's numbers.</p>
+
+<h2>fbclid, _fbc and _fbp are captured for you</h2>
+<p>You do not map Meta's click identifiers. On a Meta ad click the tracker reads <code>fbclid</code> from the ad URL automatically and stitches it with the <code>_fbc</code> and <code>_fbp</code> cookies:</p>
+<ul>
+  <li><code>fbp</code> comes from the <code>_fbp</code> cookie.</li>
+  <li><code>fbc</code> uses the <code>_fbc</code> cookie when present; otherwise it is derived from <code>fbclid</code> in Meta's required form <code>fb.1.&lt;unix-ms&gt;.&lt;fbclid&gt;</code>.</li>
+</ul>
+<p>Those values are stored on the click and carried into the event's <code>user_data</code>, along with the visitor's IP and user agent. With <b>Include hashed email/phone when the postback provides them</b> on, any email or phone on the conversion is normalised and SHA-256 hashed before sending. If a redirect, landing page or URL builder strips the query string, the click arrives without <code>fbclid</code> and Meta has little to match on — check that first when conversions do not appear.</p>
+
+<h2>Per-pixel overrides</h2>
+<p>A pixel record can be tuned beyond its id and token:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Default event name</b></td><td>The Meta event used for every conversion this pixel receives unless a custom match overrides it.</td></tr>
+    <tr><td><b>Event URL</b></td><td>Optional <code>event_source_url</code> sent with the event.</td></tr>
+    <tr><td><b>Action source</b></td><td>Store tracking URL, App, Offline, Chat or Other.</td></tr>
+    <tr><td><b>Data Quality API Token</b></td><td>Optional; stored as a secret.</td></tr>
+    <tr><td><b>Status</b></td><td><code>active</code> or <code>inactive</code>.</td></tr>
+    <tr><td><b>Custom conversion matching</b></td><td>Maps a conversion type to a specific Meta event name; anything not listed uses the default event name.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Dry-run and Send test event</h2>
+<p><b>Dry-run (build + log the payload, send nothing)</b> is <b>on by default</b>: the payload is built and the outcome recorded, but no HTTP call is made. <b>Send test event</b> saves the settings, then sends one synthetic event so you can confirm credentials and formatting; the result is shown on the page. Turn dry-run off only when you are ready for real events to reach Meta.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">The two silent failures</p>
+  <p>Dry-run left on, and a status that is not ticked. Both write no row to <b>Logs → Internal postbacks</b>, so the sender looks broken when it is simply not running. Confirm those two first, then follow <a href="/help/troubleshooting-meta">Meta shows no conversions</a> in order.</p>
+</div>
+
+<p>Cost is a separate connection: <a href="/help/meta-cost-sync">Syncing Meta ad spend</a> pulls your spend in and matches it to the campaign.</p>

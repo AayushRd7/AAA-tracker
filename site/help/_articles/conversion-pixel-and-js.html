@@ -1,0 +1,66 @@
+<h2>Server callback or browser callback</h2>
+<p>Most conversion data should arrive server to server: the network or your CRM calls the tracker directly, which does not depend on the visitor's browser and cannot be blocked by it. There are two cases, though, where no server callback exists — a thank-you page on a destination you do not control, or a client-side event such as a form submit — and that is what the <b>conversion pixel</b> and the <b>JavaScript snippet</b> are for. This page covers both, and the <a href="/help/s2s-postback">postback reference</a> covers the server path.</p>
+
+<h2>Direct JS tracking</h2>
+<p>Add the snippet to any page on your own site:</p>
+<pre><code>&lt;script src="/t.js?c={alias}"&gt;&lt;/script&gt;</code></pre>
+<p>The script keeps a first-party visitor id in the <code>aaa_cid</code> cookie (with a localStorage copy, 30 days), then posts a visit to <code>/t/collect</code> using <code>sendBeacon</code>, falling back to <code>fetch</code> and finally an image request. The visit is recorded as a visit, not a click, and the response is <code>{"status":"ok","click_id":"…"}</code>. Once the script is loaded it exposes three functions:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Function</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>aaaTrack()</code></td><td>Returns the visitor's click id (and fires the collect).</td></tr>
+    <tr><td><code>aaaClickThrough(url)</code></td><td>Appends <code>&amp;click_id=</code> to a click-out URL so <code>/c/{alias}/{offer}</code> reuses the same id.</td></tr>
+    <tr><td><code>aaaFire(status, payout, extra)</code></td><td>Fires a client-side conversion pixel for this visitor.</td></tr>
+  </tbody>
+</table>
+</div>
+<p><code>/t/collect</code> also works on its own as a GET or POST with <code>?c={alias}&amp;click_id=…</code>. It collects UTM parameters and the page title, honours bot rules (blocked bots get a 404) and respects the GDPR opt-out cookie.</p>
+
+<h2>The conversion pixel</h2>
+<p>The pixel is a single request that records a conversion and returns a 1×1 GIF:</p>
+<pre><code>GET /p/{alias}?click_id=9f2c1a7e&amp;status=sale&amp;payout=10.5</code></pre>
+<p>The click id comes from <code>?click_id=</code> or, when the snippet is present, from the <code>aaa_cid</code> cookie it set. Extra attribution fields — <code>transaction_id</code>, <code>external_id</code> and <code>sub_id_1</code> through <code>sub_id_10</code> — pass through as query parameters. A bare pixel with no click id and no attribution parameters gets a <b>400</b>, and an opted-out visitor gets the GIF with nothing recorded. Because it is addressed by campaign alias, the pixel is bound to one campaign.</p>
+
+<h2>How the click id is carried through</h2>
+<ol class="help-steps">
+  <li>The visit lands and <code>/t.js</code> writes the visitor's click id to the <code>aaa_cid</code> cookie.</li>
+  <li><code>aaaClickThrough(url)</code> appends <code>click_id=…</code> to the click-out so the offer click reuses the same id rather than minting a new one.</li>
+  <li>On the thank-you page the pixel reads <code>?click_id=…</code> first and falls back to the cookie, so you get the same id without wiring anything.</li>
+</ol>
+<p>If you do not use the snippet, pass the click id to the pixel yourself in the URL. If neither the URL nor the cookie has an id, supply a transaction id or sub-id and the pixel takes the <a href="/help/clickless-conversions">clickless path</a>.</p>
+
+<h2>Pixel or snippet?</h2>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Situation</th><th>Use</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>A thank-you page you host, no server callback</td><td>The pixel with <code>?click_id=…</code>, or <code>aaaFire()</code> if the snippet is already on the page.</td></tr>
+    <tr><td>You want every page view tracked, plus a conversion later</td><td>The JS snippet — it sets the cookie and exposes the API.</td></tr>
+    <tr><td>A destination page you do not control</td><td>The pixel: paste one <code>&lt;img&gt;</code> tag with its click id hard-coded, or render the URL server-side.</td></tr>
+    <tr><td>The conversion happens on a server you own</td><td>Prefer S2S — see <a href="/help/s2s-postback">postbacks</a> and <a href="/help/clickless-conversions">offline ingestion</a>.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>JSON-mode pixel</h2>
+<p>Add <code>&amp;fmt=json</code> to get a JSON response instead of a GIF:</p>
+<pre><code>curl "https://your-domain.com/p/my-campaign?click_id=9f2c1a7e&amp;status=lead&amp;payout=3.25&amp;fmt=json"</code></pre>
+<p>This is the right form when the call is made by script or by a server rather than by a browser image tag, because you can read the result — for example to confirm the conversion was recorded or to surface an invalid status. The GIF form is for embedding on a page, where nothing reads the response.</p>
+
+<h2>Cross-domain and impressions</h2>
+<p>The pixel and <code>/t.js</code> are served with open CORS headers so they work from any domain, which is what lets you track a destination page you do not host. There is also an impression pixel, <code>GET /i/{alias}</code>, which records an impression and returns a 1×1 GIF so view-through reporting can attribute a later conversion through the same <code>aaa_cid</code> cookie.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Testing a pixel by hand</p>
+  <p>There is no test button. Fire a click on the campaign link, copy the click id from <b>Logs → Clicks</b>, then call <code>/p</code> (or <code>/pb</code>) with curl and <code>&amp;fmt=json</code>. Confirm the conversion in <b>Reports → Conversions</b>. That exercises the same path the browser would.</p>
+</div>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">Browser tracking can be blocked</p>
+  <p>Ad blockers, ITP and disabled cookies can stop a pixel or script from firing. Treat browser tracking as a convenience for pages with no server callback; treat the server-to-server postback or the ingestion API as the dependable path for money-critical conversions.</p>
+</div>

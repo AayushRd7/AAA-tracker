@@ -1,0 +1,52 @@
+<h2>Break down by any dimension</h2>
+<p>Open <b>Performance → Reports</b>. The report builder turns your live click stream into a drill-down table. Choose a <b>Date range</b>, one or more <b>Campaigns</b>, and an ordered set of <b>dimensions</b> in the <b>Breakdown pipeline</b>, then press <b>Run report</b>.</p>
+<p>You can stack up to <b>five dimensions</b>. They read left to right, and clicking a value in the table expands the next level beneath it. Any of these can be a dimension:</p>
+<ul>
+  <li><b>Time</b> — date, hour, ISO week</li>
+  <li><b>Objects</b> — campaign, offer, landing page</li>
+  <li><b>Geo</b> — country, region, city</li>
+  <li><b>Device</b> — device type, OS, OS version, browser, language</li>
+  <li><b>Traffic</b> — traffic source, UTM source/medium/campaign/creative, keyword, ISP, connection type</li>
+  <li><b>Identifiers</b> — Sub ID 1 through Sub ID 10, domain, IP, user agent</li>
+  <li><b>Quality</b> — conversion status, bot flag, proxy flag</li>
+</ul>
+<p>Preset chains load in one click: <b>SubID chain</b>, <b>Geo chain</b>, <b>Traffic chain</b> and <b>Funnel</b>. The <b>Report templates</b> gallery loads a whole configuration — dimensions, columns and window — for common jobs such as campaign performance, offer/landing split or device breakdown.</p>
+
+<h2>Metrics and date basis</h2>
+<p>Columns include visits, unique visits, clicks, unique clicks, leads, conversions, rejected, cost, revenue, profit, and the derived CR %, EPC and ROI %, plus bot clicks, bot cost, fraud score average and human clicks. Pick the columns you want, sort by any of them, and use <b>Custom metrics</b> to add a formula over the built-in keys, for example <code>conversions*100/clicks</code>.</p>
+<p>The <b>Click date</b> / <b>Conversion date</b> toggle decides which timestamp the range filters on. Click date counts a conversion on the day its click happened; conversion date counts it on the day the conversion arrived. Compare the two when a network reports late.</p>
+
+<h2>Saved views, presets and templates</h2>
+<p>Three different things can be saved here, and they are not interchangeable:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>What</th><th>Action</th><th>What it stores</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Saved report</b></td><td><b>Save report</b></td><td>Dimensions, columns, custom metrics, date basis and filters — reload it from the <b>Saved reports</b> dropdown</td></tr>
+    <tr><td><b>Column template</b></td><td><b>Save as template</b></td><td>Only which columns are visible in this table</td></tr>
+    <tr><td><b>Filter preset</b></td><td><b>Save filters</b></td><td>Only the filter values currently applied</td></tr>
+  </tbody>
+</table>
+</div>
+<p><b>Use as default</b> pins the current columns as the workspace default for that table, so the next person opening it sees the same view.</p>
+
+<h2>The conversion log</h2>
+<p>Below the builder is the <b>Conversion log</b> — every conversion received via postback. Filter it by <b>Status</b>, <b>Approval</b>, a free-text <b>Search</b> (click id, external id, transaction id, visitor id) and <b>Offer URL contains</b>. Each row has an <b>Edit</b> action and a <b>Delete</b> action.</p>
+<p><b>Edit</b> opens a dialog where you can change <b>Status</b>, <b>Approval</b>, <b>Payout</b>, <b>Revenue</b>, <b>External ID</b> and <b>Transaction ID</b>. This is how you correct a conversion a network reported late, or with the wrong status or amount. Select rows to apply a status or approval in bulk, and use <b>Add conversion</b> or <b>Import</b> for offline sales. Remember that a later postback still updates the row: status follows the latest event and payout accumulates, so a manual edit is not necessarily final.</p>
+<p>The read-only list of the same records lives at <a href="/help/logs-reference">Logs → Conversions</a>; editing happens here.</p>
+
+<h2>Exporting</h2>
+<p><b>Export CSV</b> appears on the report, the click log and the conversion log, and exports exactly what the current filters select. Every cell is quoted, so values always open as plain text and separators or newlines cannot break the rows. The separate <b>Warehouse export</b> card writes raw click, conversion and cost datasets with a manifest for BI tools, over its own date range and with optional gzip.</p>
+
+<h2>Retroactive cost update</h2>
+<p>When cost is missing or wrong for a period, an admin can correct it without re-importing anything. Press <b>Cost update</b> and choose an optional <b>Campaign</b> (leave it empty for all campaigns), a <b>From</b> and <b>To</b> date, and a <b>Cost per click</b>. The tracker overwrites the per-click cost on every matching row, so total spend is cost × matched rows and existing costs are replaced rather than added. A cost of <code>0</code> clears costs for the window. Every change is recorded in <a href="/help/logs-reference">Logs → Cost updates</a> with who ran it and how many rows changed. See also <a href="/help/cost-handling">Cost models and cost handling</a>.</p>
+
+<h2>Sharing a report</h2>
+<p>Save a report, then use its <b>Share report</b> action to create a tokenized public link. Anyone with the link — a client or a partner — sees a clean read-only copy of that one breakdown, with no login required. Revoking the link or re-creating it invalidates the old one instantly. A saved report can also be emailed on a schedule with <b>Email schedule</b>.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">A capped report shows short totals</p>
+  <p>A breakdown returns at most 1,000 rows. When that cap is reached the table says so, and the totals only cover the rows shown. Narrow the date range or campaigns, add a filter, or use fewer dimensions to see every row.</p>
+</div>

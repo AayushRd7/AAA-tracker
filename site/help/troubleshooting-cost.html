@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.className+=' js'</script>
+<title>Cost is missing or wrong | AAA Tracker Help</title>
+<meta name="description" content="Fix a missing or wrong cost: check the cost model, the cost parameter on the campaign link, and the ad-platform sync.">
+<link rel="canonical" href="https://aaatracker.website/help/troubleshooting-cost">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="AAA Tracker">
+<meta property="og:title" content="Cost is missing or wrong | AAA Tracker Help">
+<meta property="og:description" content="Fix a missing or wrong cost: check the cost model, the cost parameter on the campaign link, and the ad-platform sync.">
+<meta property="og:url" content="https://aaatracker.website/help/troubleshooting-cost">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Cost is missing or wrong | AAA Tracker Help">
+<meta name="twitter:description" content="Fix a missing or wrong cost: check the cost model, the cost parameter on the campaign link, and the ad-platform sync.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Cost is missing or wrong",
+      "description": "Fix a missing or wrong cost: check the cost model, the cost parameter on the campaign link, and the ad-platform sync.",
+      "dateModified": "2026-10-05",
+      "datePublished": "2026-10-05",
+      "inLanguage": "en",
+      "url": "https://aaatracker.website/help/troubleshooting-cost",
+      "mainEntityOfPage": "https://aaatracker.website/help/troubleshooting-cost",
+      "keywords": "cost, troubleshooting, cost model, sync",
+      "articleSection": "Troubleshooting",
+      "publisher": {
+        "@type": "Organization",
+        "name": "AAA Tracker",
+        "url": "https://aaatracker.website/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://aaatracker.website/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Help",
+          "item": "https://aaatracker.website/help/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Cost is missing or wrong",
+          "item": "https://aaatracker.website/help/troubleshooting-cost"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css?v=2">
+<link rel="stylesheet" href="/assets/css/site.css?v=7">
+<link rel="stylesheet" href="/help/assets/help.css?v=1">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M3.4 6h17.2M3.4 12h17.2M3.4 18h17.2"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/help/" aria-current="page">Docs</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free trial</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <div class="wrap">
+    <nav class="help-breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        <li><a href="/help/">Help</a></li>
+        <li aria-current="page">Cost is missing or wrong</li>
+      </ol>
+    </nav>
+  </div>
+
+  <article class="help-article section section--sm">
+    <div class="wrap">
+      <div class="help-layout">
+        <div class="help-main">
+          <header class="help-article__head">
+            <span class="eyebrow">Troubleshooting</span>
+            <h1 class="h1 mt-4">Cost is missing or wrong</h1>
+            <p class="lead mt-5">Fix a missing or wrong cost: check the cost model, the cost parameter on the campaign link, and the ad-platform sync.</p>
+            <p class="help-meta mono mt-6">Updated <time datetime="2026-10-05">5 October 2026</time></p>
+          </header>
+
+          <div class="prose help-prose mt-8">
+<h2 id="how-cost-reaches-a-report">How cost reaches a report</h2>
+<p>Cost can arrive from three places, and a wrong number is usually a mismatch between them. Per-click cost comes from the <code>cost</code> parameter on the campaign link, or from the campaign's configured cost; synced spend comes from an ad platform; and a manual correction can be applied retroactively in Reports. Work the checks in order to find which of these is missing or feeding the wrong value.</p>
+
+<h2 id="1-is-there-an-ad-platform-campaign-id-on-the-campaign">1. Is there an Ad-platform campaign ID on the campaign?</h2>
+<p>Cost sync matches a platform's spend to your campaign by id first. Open <b>Manage → Campaigns</b>, edit the campaign, and set <b>Ad-platform campaign ID</b> — for Meta this is the Meta Ads campaign id. Without it the sync falls back to matching by campaign name, then by the campaign's configured tracking identifiers; if none match, the platform's spend for that campaign is never attached and the campaign shows no synced cost.</p>
+<p>If Meta is connected, the field offers discovered campaigns to pick from, so copy the id from there rather than typing it.</p>
+
+<h2 id="2-is-meta-connected-and-is-the-ad-account-selected">2. Is Meta connected, and is the ad account selected?</h2>
+<p>Cost sync has two switches outside the campaign. Open <b>Manage → Integrations</b> and check the Meta tile shows <b>connected</b>. Then, in the <b>Ad accounts for cost sync</b> picker on that tile, choose the ad accounts whose spend you want read, and press <b>Save accounts</b>. A connected platform with no account selected syncs nothing.</p>
+<p>If the tile reads <b>Needs reconnect</b>, the stored token can no longer be read or has expired — reconnect before looking at anything else.</p>
+
+<h2 id="3-has-the-backfill-window-reached-the-day">3. Has the backfill window reached the day?</h2>
+<p>The sync does not walk your whole history. It queries a rolling window ending today, going back a fixed number of days — by default <b>7</b>. A day older than that window is never re-fetched, so its spend stays at whatever was last written, or at zero if the campaign was created after the day passed.</p>
+<p>The tell is a cost that is correct for recent days and missing for older ones. Wait for the next scheduled run (the sync runs on a cadence, hourly or daily) and confirm the day is inside the window; if you need older days, widen the backfill window and re-run.</p>
+
+<h2 id="4-currency-mismatch">4. Currency mismatch</h2>
+<p>This is the check people skip, and it makes a correct-looking cost read wrong. Spend is stored in the currency the ad platform reports for that ad account. Three currencies can be in play:</p>
+<ul>
+  <li>the <b>ad account's</b> currency, which is what the platform returns;</li>
+  <li>the campaign's <b>Cost currency</b> field (Manage → Campaigns);</li>
+  <li>the workspace <b>base currency</b> from <b>Settings → Multi-currency</b>, which reports convert to before aggregating.</li>
+</ul>
+<p>If the campaign's Cost currency does not match the currency of the spend you are comparing it to, the figures will not line up. Multi-currency converts revenue, cost and payout into the single base currency, so once set, check that the ad account and base currency are on the same page. There is <b>no currency parameter</b> on <code>/pb</code> — a postback never sets currency; it comes from the offer or workspace.</p>
+
+<h2 id="5-manual-campaign-cost-versus-synced-spend">5. Manual campaign cost versus synced spend</h2>
+<p>Two mechanisms can both write per-click cost, and the last writer wins per campaign and day:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Source</th><th>When it applies</th><th>Behaviour</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>cost</code> parameter on the campaign link</td><td>Campaign has <b>Cost from cost parameter</b> on; the source maps its token to <code>cost</code>.</td><td>Stored on the individual click; falls back to the campaign's Cost value for the whole period otherwise.</td></tr>
+    <tr><td>Synced platform spend</td><td>Campaign matched by Ad-platform campaign ID.</td><td>Authoritative for that campaign and day; re-running a day <b>replaces</b> it (never adds), so re-syncs are idempotent.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>The campaign's <b>Cost model</b> (<code>CPC</code>, <code>CPUC</code>, <code>CPM</code>, <code>CPA</code>, <code>CPS</code>, <code>RevShare</code>, <code>Auto</code>) and its <b>Cost</b> value define the manual fallback. If a campaign has a stale manual cost, the sync overwrites it for any day it matches — so check whether the number you are seeing predates the last sync run.</p>
+
+<h2 id="6-the-retroactive-cost-update-in-reports">6. The retroactive cost update in Reports</h2>
+<p>For a correction the sync cannot make — an unmapped campaign or a one-off fix — open <b>Performance → Reports</b> and use the <b>Cost update</b> action. The <b>Retroactive cost update</b> dialog sets per-click cost on every matching analytics row:</p>
+<ol class="help-steps">
+  <li>Choose a <b>Campaign</b>, or leave it empty to apply to all campaigns.</li>
+  <li>Set the <b>From</b> and <b>To</b> dates for the window.</li>
+  <li>Enter <b>Cost per click</b> and press <b>Apply</b>.</li>
+</ol>
+<p>Total spend becomes cost × matched rows, and existing costs are <b>overwritten, not adjusted</b>. Enter <code>0</code> to clear cost from a window. Each run is recorded in <b>Logs → Cost updates</b> with the user, campaign, date range, cost and number of rows changed.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">Correcting one day does not stick if the sync still covers it</p>
+  <p>The last writer wins per campaign and day. A manual retroactive update is overwritten the next time the platform sync covers that same day. Fix the mapping or the campaign id first, or the manual correction will be replaced.</p>
+</div>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Confirm where a number came from</p>
+  <p><b>Logs → Cost updates</b> shows manual edits. To see a per-click value actually recorded on traffic, check <b>Logs → Clicks</b>. Comparing the two tells you quickly whether the figure you are disputing came from a manual update or from the sync.</p>
+</div>
+
+          </div>
+
+          <nav class="help-pager" aria-label="More in this category">
+        <a class="help-pager__link help-pager__link--prev" href="/help/troubleshooting-meta"><span class="help-pager__dir">Previous</span><span class="help-pager__title">Meta shows no conversions</span></a>
+        <span></span>
+      </nav>
+        </div>
+
+        <aside class="help-aside">
+        <nav class="help-toc" aria-label="On this page">
+          <p class="help-toc__title">On this page</p>
+          <ul class="help-toc__list">
+<li class="help-toc__item help-toc__item--h2"><a href="#how-cost-reaches-a-report">How cost reaches a report</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#1-is-there-an-ad-platform-campaign-id-on-the-campaign">1. Is there an Ad-platform campaign ID on the campaign?</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#2-is-meta-connected-and-is-the-ad-account-selected">2. Is Meta connected, and is the ad account selected?</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#3-has-the-backfill-window-reached-the-day">3. Has the backfill window reached the day?</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#4-currency-mismatch">4. Currency mismatch</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#5-manual-campaign-cost-versus-synced-spend">5. Manual campaign cost versus synced spend</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#6-the-retroactive-cost-update-in-reports">6. The retroactive cost update in Reports</a>
+</li>
+</ul>
+        </nav>
+      </aside>
+      </div>
+    </div>
+  </article>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/" aria-label="AAA Tracker home">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+          <span class="word">AAA<i>Tracker</i></span>
+        </a>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul class="footer-links">
+          <li><a href="/features">Features</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Security &amp; anti-fraud</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free trial</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul class="footer-links">
+          <li><a href="/help/">Help centre</a></li>
+          <li><a href="/help/getting-started">Getting started</a></li>
+          <li><a href="/help/s2s-postback">Postbacks</a></li>
+          <li><a href="/help/troubleshooting-postbacks">Troubleshooting</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul class="footer-links">
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/backend/">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul class="footer-links">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/js/site.js?v=1" defer></script>
+<script src="/help/assets/help.js?v=1" defer></script>
+</body>
+</html>

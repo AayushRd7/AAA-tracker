@@ -1,0 +1,48 @@
+<h2>What an affiliate network is</h2>
+<p>An affiliate network is the party that pays you for a conversion. It groups your offers, stores the click-id convention the network expects, and holds the postback template the network will call. An offer points at a network; a campaign does not, so the same network record can sit behind many offers.</p>
+
+<h2>The catalog and "From catalog"</h2>
+<p>Open <b>Manage → Networks</b>. The catalog ships around <b>125 presets</b>, each with the network's click-id parameter and its standard postback template pre-filled. <b>From catalog</b> opens it; <b>Add affiliate network</b> opens a blank form.</p>
+<p>In the catalog you can search by network name or vertical, and narrow by <b>vertical</b> chips (Dating, Gambling, Nutra, Sweepstakes, and others). Once added, a preset network is marked as a <b>Preset</b> and can still be edited like any other. The catalog can also be opened from the offer editor: the <b>Affiliate network</b> picker has a <b>+</b> button that creates a network without leaving the offer form.</p>
+
+<h2>The fields</h2>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Network name</b></td><td>The label used in the offer's network picker and in filtering.</td></tr>
+    <tr><td><b>Offer parameters</b></td><td>A stored reference recording the network's click-id convention, e.g. <code>s1={click_id}</code> or <code>subid={click_id}</code>. Comma or JSON format.</td></tr>
+    <tr><td><b>S2S postback URL</b></td><td>The inbound template you hand to the network, so its conversions land in your tracker.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Offer parameters is a stored reference</h2>
+<p>This is the field readers get wrong. <b>Offer parameters is not appended to your offer URL at runtime.</b> It is a note-to-self: it records what the network calls your click-id parameter, so you know what to write when you build the offer's Target URL.</p>
+<p>The tracker already appends <code>click_id=…</code> to every offer URL automatically, but a network almost always reads the id under its own name. You add that yourself in the offer's <b>Target URL</b>. If the network's Offer parameters say <code>s1={click_id}</code>, then the offer URL gets:</p>
+<pre><code>https://network.example.com/offer?aff=12345&amp;s1={click_id}</code></pre>
+<p>At click-out, <code>{click_id}</code> is replaced with the tracker-generated id, and the network echoes it back on the postback. Repeat that for any extra fields the network wants, such as <code>&amp;s2={sub_id_1}</code>. The full macro list and the click-id round trip are covered in <a href="/help/offers">Offers and offer URLs</a> and <a href="/help/click-ids-and-macros">Click IDs and URL macros</a>.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">The click id must be in the offer's Target URL</p>
+  <p>Writing <code>s1={click_id}</code> into Offer parameters does nothing by itself. If you never place <code>&amp;s1={click_id}</code> in the offer's Target URL, the network never receives your click id — the click still records, but the conversion comes back with nothing to match it to. See <a href="/help/troubleshooting-postbacks">Postback not recorded</a>.</p>
+</div>
+
+<h2>The S2S postback URL is the template you hand over</h2>
+<p>On a network, the S2S postback URL is <b>inbound</b>: it is a URL on your tracker that the network calls when a conversion happens. The preset fills it with the standard template:</p>
+<pre><code>https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&amp;payout={payout}&amp;status={status}&amp;tid={tid}</code></pre>
+<p>Replace <code>YOUR-TRACKER-DOMAIN</code> with your tracker domain and paste the result into the network's own conversion-tracking settings. The braces are the network's macros — it substitutes its real click id and payout when it calls you. This is the opposite direction from a <a href="/help/traffic-sources">traffic source</a>'s postback URL, which is outbound. The accepted parameters, aliases, defaults and responses are all in <a href="/help/s2s-postback">the postback reference</a>.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Same URL, network's own macro names</p>
+  <p>The template above uses <code>{clickid}</code>, <code>{payout}</code>, <code>{status}</code> and <code>{tid}</code> because those are common network macro names. The tracker accepts those aliases case-insensitively, so you rarely need to change the template — just paste it where the network asks for its postback URL.</p>
+</div>
+
+<h2>Confirming it works</h2>
+<ul>
+  <li><b>Logs → S2S postbacks</b> shows inbound calls from the network as they arrive, including any rejection and its reason.</li>
+  <li><b>Reports → Conversions</b> is where a recorded conversion can be inspected, edited or deleted.</li>
+  <li><b>Health centre</b> shows whether postbacks are landing, which is the quickest signal that the network has gone quiet.</li>
+</ul>

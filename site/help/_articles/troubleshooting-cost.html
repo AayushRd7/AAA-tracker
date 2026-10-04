@@ -1,0 +1,57 @@
+<h2>How cost reaches a report</h2>
+<p>Cost can arrive from three places, and a wrong number is usually a mismatch between them. Per-click cost comes from the <code>cost</code> parameter on the campaign link, or from the campaign's configured cost; synced spend comes from an ad platform; and a manual correction can be applied retroactively in Reports. Work the checks in order to find which of these is missing or feeding the wrong value.</p>
+
+<h2>1. Is there an Ad-platform campaign ID on the campaign?</h2>
+<p>Cost sync matches a platform's spend to your campaign by id first. Open <b>Manage → Campaigns</b>, edit the campaign, and set <b>Ad-platform campaign ID</b> — for Meta this is the Meta Ads campaign id. Without it the sync falls back to matching by campaign name, then by the campaign's configured tracking identifiers; if none match, the platform's spend for that campaign is never attached and the campaign shows no synced cost.</p>
+<p>If Meta is connected, the field offers discovered campaigns to pick from, so copy the id from there rather than typing it.</p>
+
+<h2>2. Is Meta connected, and is the ad account selected?</h2>
+<p>Cost sync has two switches outside the campaign. Open <b>Manage → Integrations</b> and check the Meta tile shows <b>connected</b>. Then, in the <b>Ad accounts for cost sync</b> picker on that tile, choose the ad accounts whose spend you want read, and press <b>Save accounts</b>. A connected platform with no account selected syncs nothing.</p>
+<p>If the tile reads <b>Needs reconnect</b>, the stored token can no longer be read or has expired — reconnect before looking at anything else.</p>
+
+<h2>3. Has the backfill window reached the day?</h2>
+<p>The sync does not walk your whole history. It queries a rolling window ending today, going back a fixed number of days — by default <b>7</b>. A day older than that window is never re-fetched, so its spend stays at whatever was last written, or at zero if the campaign was created after the day passed.</p>
+<p>The tell is a cost that is correct for recent days and missing for older ones. Wait for the next scheduled run (the sync runs on a cadence, hourly or daily) and confirm the day is inside the window; if you need older days, widen the backfill window and re-run.</p>
+
+<h2>4. Currency mismatch</h2>
+<p>This is the check people skip, and it makes a correct-looking cost read wrong. Spend is stored in the currency the ad platform reports for that ad account. Three currencies can be in play:</p>
+<ul>
+  <li>the <b>ad account's</b> currency, which is what the platform returns;</li>
+  <li>the campaign's <b>Cost currency</b> field (Manage → Campaigns);</li>
+  <li>the workspace <b>base currency</b> from <b>Settings → Multi-currency</b>, which reports convert to before aggregating.</li>
+</ul>
+<p>If the campaign's Cost currency does not match the currency of the spend you are comparing it to, the figures will not line up. Multi-currency converts revenue, cost and payout into the single base currency, so once set, check that the ad account and base currency are on the same page. There is <b>no currency parameter</b> on <code>/pb</code> — a postback never sets currency; it comes from the offer or workspace.</p>
+
+<h2>5. Manual campaign cost versus synced spend</h2>
+<p>Two mechanisms can both write per-click cost, and the last writer wins per campaign and day:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Source</th><th>When it applies</th><th>Behaviour</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>cost</code> parameter on the campaign link</td><td>Campaign has <b>Cost from cost parameter</b> on; the source maps its token to <code>cost</code>.</td><td>Stored on the individual click; falls back to the campaign's Cost value for the whole period otherwise.</td></tr>
+    <tr><td>Synced platform spend</td><td>Campaign matched by Ad-platform campaign ID.</td><td>Authoritative for that campaign and day; re-running a day <b>replaces</b> it (never adds), so re-syncs are idempotent.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>The campaign's <b>Cost model</b> (<code>CPC</code>, <code>CPUC</code>, <code>CPM</code>, <code>CPA</code>, <code>CPS</code>, <code>RevShare</code>, <code>Auto</code>) and its <b>Cost</b> value define the manual fallback. If a campaign has a stale manual cost, the sync overwrites it for any day it matches — so check whether the number you are seeing predates the last sync run.</p>
+
+<h2>6. The retroactive cost update in Reports</h2>
+<p>For a correction the sync cannot make — an unmapped campaign or a one-off fix — open <b>Performance → Reports</b> and use the <b>Cost update</b> action. The <b>Retroactive cost update</b> dialog sets per-click cost on every matching analytics row:</p>
+<ol class="help-steps">
+  <li>Choose a <b>Campaign</b>, or leave it empty to apply to all campaigns.</li>
+  <li>Set the <b>From</b> and <b>To</b> dates for the window.</li>
+  <li>Enter <b>Cost per click</b> and press <b>Apply</b>.</li>
+</ol>
+<p>Total spend becomes cost × matched rows, and existing costs are <b>overwritten, not adjusted</b>. Enter <code>0</code> to clear cost from a window. Each run is recorded in <b>Logs → Cost updates</b> with the user, campaign, date range, cost and number of rows changed.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">Correcting one day does not stick if the sync still covers it</p>
+  <p>The last writer wins per campaign and day. A manual retroactive update is overwritten the next time the platform sync covers that same day. Fix the mapping or the campaign id first, or the manual correction will be replaced.</p>
+</div>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Confirm where a number came from</p>
+  <p><b>Logs → Cost updates</b> shows manual edits. To see a per-click value actually recorded on traffic, check <b>Logs → Clicks</b>. Comparing the two tells you quickly whether the figure you are disputing came from a manual update or from the sync.</p>
+</div>

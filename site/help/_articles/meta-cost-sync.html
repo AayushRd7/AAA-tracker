@@ -1,0 +1,55 @@
+<h2>What the cost sync does</h2>
+<p>Meta Ads cost sync pulls each day's <b>spend</b>, <b>impressions</b> and <b>clicks</b> from Meta and folds the spend into the matching tracker campaign, so cost, profit and ROI line up without you typing daily budgets by hand. It runs on a schedule, off the tracking path, or on demand with <b>Sync now</b>. The spend it reads for a matched campaign and day is treated as authoritative for that day.</p>
+<p>There are two halves: connect the platform and choose your ad accounts once under <b>Manage → Integrations</b>, then switch the sync on and tune it under <b>Settings → Meta Ads cost sync</b>.</p>
+
+<h2>Connect Meta under Integrations</h2>
+<ol class="help-steps">
+  <li>Open <b>Manage → Integrations</b>. The <b>Ad platforms</b> card lists Meta alongside placeholders for the other platforms.</li>
+  <li>Press <b>Connect</b> on the Meta tile. The browser leaves the tracker, you authorise on Meta, and it returns to the Integrations page with a confirmation.</li>
+  <li>Once connected, the tile shows <b>Connected as …</b> with the number of ad accounts and datasets discovered, and the expiry date of the connection.</li>
+</ol>
+<p>If the tile ever reads <b>Needs reconnect</b>, the stored token can no longer be read or has expired — press <b>Connect</b> again. <b>Disconnect</b> removes the connection and its stored token.</p>
+
+<h2>Pick the ad account(s)</h2>
+<p>With Meta connected, the tile shows <b>Ad accounts for cost sync</b>, a multi-select fed by the accounts discovered on your connection. Select every account whose spend you want tracked and press <b>Save accounts</b>. This is the <b>only</b> place accounts are chosen; the cost-sync card in Settings shows the saved list read-only, which is why it can look empty until you choose here.</p>
+<p>With no account selected, the sync has nothing to read. If the picker is empty, the connection exists but Meta returned no ad accounts for it — reconnect and grant access to the right business.</p>
+
+<h2>Turn the sync on and set its cadence</h2>
+<p>Open <b>Settings → Meta Ads cost sync</b> (under the ad-platform section) and switch on <b>Keep my Meta costs up to date</b>. Then set:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Setting</th><th>What it controls</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Test mode</b></td><td><i>Work out the numbers and log them, but don't change any costs yet.</i> On by default — nothing is written until you switch it off.</td></tr>
+    <tr><td><b>How often</b></td><td>The cadence: <b>Hourly</b> or <b>Daily</b>.</td></tr>
+    <tr><td><b>Days to look back</b></td><td>The backfill window, re-checked on every run. Default <code>7</code>; set <code>0</code> for yesterday only. A wider window re-reads recent days, so late-published spend self-corrects.</td></tr>
+    <tr><td><b>Match campaigns by</b></td><td>How Meta campaigns are matched to yours: <b>Auto — best match (recommended)</b>, <b>Meta campaign ID</b>, <b>Campaign name</b> or <b>Tracking ID (UTM / sub-id)</b>.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>The last sync time, outcome, and the matched / unmatched counts are shown next to <b>Sync now</b>. A failed run records its error there rather than silently doing nothing.</p>
+
+<h2>How spend is matched to a campaign</h2>
+<p>Every Meta insight row carries a platform campaign id and name. The sync indexes your campaigns and matches in this order:</p>
+<ol class="help-steps">
+  <li>the campaign's explicit <b>Ad-platform campaign ID</b> column, then</li>
+  <li>the campaign <b>name</b> (case-insensitive), then</li>
+  <li>the campaign's <b>tracking id</b>.</li>
+</ol>
+<p><b>Auto</b> lets all three run in that order. Choosing one of the other values restricts matching to that single strategy, which is useful when names collide and you want the id to be the only truth.</p>
+
+<h3>Set the Ad-platform campaign ID</h3>
+<p>Open the campaign and find <b>Ad-platform campaign ID</b> on the <b>Settings</b> step. Its hint reads <i>Meta Ads campaign id — used by the Meta Ads cost sync to match spend to this campaign</i>. When a Meta connection exists, this is a picker fed by your discovered Meta campaigns; without one, you can type the id by hand. Leave it empty and the sync falls back to matching on name or tracking id, which is less reliable.</p>
+
+<h2>Test mode and Sync now</h2>
+<p>In <b>Test mode</b> the sync still makes the read-only request and computes every match, but writes no costs — the result panel shows exactly what it would have done. Use <b>Sync now</b> to run it on demand; the button respects test mode. Once you are happy with the matches, turn test mode off and run again to write the costs.</p>
+<p>Spend is spread across the matched campaign's clicks for that day. If a matched campaign-day had no tracker clicks, the daily figure is still stored for the audit trail but there is nothing to allocate. Transient network failures are retried with backoff before a run is marked failed.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">Test mode is on by default</p>
+  <p>A fresh setup records runs and computes matches but never changes a cost. If your campaign cost stays at zero while the sync looks healthy, check that <b>Test mode</b> is off and that at least one ad account is selected under <b>Integrations</b>.</p>
+</div>
+
+<p>If a cost is missing or wrong after a run, work through <a href="/help/troubleshooting-cost">Cost is missing or wrong</a>. For how costs are recorded in the first place — models, the <code>cost</code> parameter and per-click allocation — see <a href="/help/cost-handling">Cost models and cost handling</a>.</p>

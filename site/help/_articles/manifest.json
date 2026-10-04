@@ -1,0 +1,242 @@
+[
+  {
+    "slug": "getting-started",
+    "title": "Getting started: your first campaign",
+    "description": "Create your first campaign, connect a traffic source, point it at an offer and read your first reconciled conversion in minutes.",
+    "category": "Getting started",
+    "tags": ["campaign", "traffic source", "offer", "setup"],
+    "updated": "2026-10-05",
+    "order": 10,
+    "popular": true
+  },
+  {
+    "slug": "quick-start-revshare-meta",
+    "title": "Rev-share offer with Meta traffic, end to end",
+    "description": "Wire a rev-share offer to Meta traffic end to end: campaign link, postback, click id stitching and the conversion API.",
+    "category": "Getting started",
+    "tags": ["rev-share", "meta", "quick start", "capi"],
+    "updated": "2026-10-05",
+    "order": 20,
+    "popular": false
+  },
+  {
+    "slug": "campaigns-and-flows",
+    "title": "Campaigns and flows",
+    "description": "How campaigns hold your routing, targeting and caps, and how flows decide which offer or lander each visitor sees.",
+    "category": "Getting started",
+    "tags": ["campaign", "flow", "routing", "targeting"],
+    "updated": "2026-10-05",
+    "order": 30,
+    "popular": false
+  },
+  {
+    "slug": "s2s-postback",
+    "title": "Server-to-server postbacks: the complete reference",
+    "description": "The inbound postback URL, every accepted parameter alias, default statuses, de-duplication and the exact responses you get back.",
+    "category": "Tracking & postbacks",
+    "tags": ["postback", "s2s", "conversion", "status"],
+    "updated": "2026-10-05",
+    "order": 10,
+    "popular": true
+  },
+  {
+    "slug": "click-ids-and-macros",
+    "title": "Click IDs and URL macros",
+    "description": "How click ids travel from the campaign link to the network and back, and the macros you can drop into an offer URL.",
+    "category": "Tracking & postbacks",
+    "tags": ["click id", "macros", "offer url", "sub ids"],
+    "updated": "2026-10-05",
+    "order": 20,
+    "popular": false
+  },
+  {
+    "slug": "clickless-conversions",
+    "title": "Clickless conversions and manual import",
+    "description": "Record conversions without a click id using a transaction id or unique sub-ids, and import a batch of conversions from a file.",
+    "category": "Tracking & postbacks",
+    "tags": ["clickless", "import", "transaction id", "attribution"],
+    "updated": "2026-10-05",
+    "order": 30,
+    "popular": false
+  },
+  {
+    "slug": "conversion-pixel-and-js",
+    "title": "Conversion pixel and JS tracking",
+    "description": "Client-side conversion tracking with the pixel and JavaScript snippet, and when to prefer server-to-server instead.",
+    "category": "Tracking & postbacks",
+    "tags": ["pixel", "javascript", "browser", "tracking"],
+    "updated": "2026-10-05",
+    "order": 40,
+    "popular": false
+  },
+  {
+    "slug": "cost-handling",
+    "title": "Cost models and cost handling",
+    "description": "Cost models, when a cost is recorded, and how to send cost and currency on the campaign link or sync it from an ad platform.",
+    "category": "Tracking & postbacks",
+    "tags": ["cost", "revenue", "currency", "profit"],
+    "updated": "2026-10-05",
+    "order": 50,
+    "popular": false
+  },
+  {
+    "slug": "traffic-sources",
+    "title": "Adding a traffic source",
+    "description": "Add a traffic source, capture its click-id convention, and generate a tracking link with that source's real macros.",
+    "category": "Traffic sources & networks",
+    "tags": ["traffic source", "tracking link", "macros", "setup"],
+    "updated": "2026-10-05",
+    "order": 10,
+    "popular": false
+  },
+  {
+    "slug": "affiliate-networks",
+    "title": "Adding an affiliate network",
+    "description": "Add an affiliate network, store its click-id parameter and postback template, and give it the URL it needs to call back.",
+    "category": "Traffic sources & networks",
+    "tags": ["affiliate network", "postback template", "click id", "setup"],
+    "updated": "2026-10-05",
+    "order": 20,
+    "popular": false
+  },
+  {
+    "slug": "offers",
+    "title": "Offers and offer URLs",
+    "description": "Build an offer URL, place macros where the network expects the click id, and manage payouts and currencies per offer.",
+    "category": "Traffic sources & networks",
+    "tags": ["offer", "target url", "payout", "macros"],
+    "updated": "2026-10-05",
+    "order": 30,
+    "popular": false
+  },
+  {
+    "slug": "meta-capi",
+    "title": "Sending conversions to Meta (CAPI)",
+    "description": "Send conversions to Meta server-side from Manage → CAPI integrations, with the statuses to send, a default currency and a dry-run.",
+    "category": "Ad platforms",
+    "tags": ["meta", "capi", "server-side", "pixel"],
+    "updated": "2026-10-05",
+    "order": 10,
+    "popular": true
+  },
+  {
+    "slug": "meta-cost-sync",
+    "title": "Syncing Meta ad spend",
+    "description": "Connect Meta under Manage → Integrations and match ad spend to campaigns by the ad-platform campaign ID.",
+    "category": "Ad platforms",
+    "tags": ["meta", "cost sync", "ad spend", "campaign id"],
+    "updated": "2026-10-05",
+    "order": 20,
+    "popular": false
+  },
+  {
+    "slug": "landings-and-editor",
+    "title": "Landers and the landing editor",
+    "description": "Upload landers, edit them in the landing editor, and route visitors between a landing page and an offer inside a flow.",
+    "category": "Landings & domains",
+    "tags": ["lander", "landing editor", "flow", "setup"],
+    "updated": "2026-10-05",
+    "order": 10,
+    "popular": false
+  },
+  {
+    "slug": "domains-and-ssl",
+    "title": "Domains and SSL",
+    "description": "Point your own domain at campaigns and offers so links stay clean, with certificates handled for you.",
+    "category": "Landings & domains",
+    "tags": ["domain", "ssl", "https", "campaign link"],
+    "updated": "2026-10-05",
+    "order": 20,
+    "popular": false
+  },
+  {
+    "slug": "reports-and-saved-views",
+    "title": "Reports, breakdowns and saved views",
+    "description": "Read reports and breakdowns, edit or delete a conversion, and save the views you check every day.",
+    "category": "Reports & logs",
+    "tags": ["reports", "breakdowns", "saved views", "conversions"],
+    "updated": "2026-10-05",
+    "order": 10,
+    "popular": false
+  },
+  {
+    "slug": "logs-reference",
+    "title": "Logs: what each one shows",
+    "description": "What the clicks, conversions, S2S postbacks and internal postbacks logs each show, and when to open which one.",
+    "category": "Reports & logs",
+    "tags": ["logs", "clicks", "postbacks", "debugging"],
+    "updated": "2026-10-05",
+    "order": 20,
+    "popular": false
+  },
+  {
+    "slug": "health-centre",
+    "title": "Health centre and system status",
+    "description": "Watch failed outbound sends, the last successful postback per source, and the public system status page.",
+    "category": "Reports & logs",
+    "tags": ["health", "status", "outbound", "monitoring"],
+    "updated": "2026-10-05",
+    "order": 30,
+    "popular": false
+  },
+  {
+    "slug": "team-and-invitations",
+    "title": "Team members, invitations and roles",
+    "description": "Invite teammates, assign roles and understand who can see or change what inside a workspace.",
+    "category": "Account & access",
+    "tags": ["team", "invite", "roles", "permissions"],
+    "updated": "2026-10-05",
+    "order": 10,
+    "popular": false
+  },
+  {
+    "slug": "password-and-2fa",
+    "title": "Password, two-factor and sessions",
+    "description": "Change your password, turn on two-factor authentication and review the sessions signed in to your account.",
+    "category": "Account & access",
+    "tags": ["password", "2fa", "sessions", "security"],
+    "updated": "2026-10-05",
+    "order": 20,
+    "popular": false
+  },
+  {
+    "slug": "postback-security",
+    "title": "Securing your postback URL",
+    "description": "Lock down the inbound postback URL with a secret key and an IP allowlist, and understand what a 403 response means.",
+    "category": "Account & access",
+    "tags": ["postback", "security", "secret key", "allowlist"],
+    "updated": "2026-10-05",
+    "order": 30,
+    "popular": false
+  },
+  {
+    "slug": "troubleshooting-postbacks",
+    "title": "Postback not recorded (400 / 403 / no match)",
+    "description": "Diagnose a postback that never landed: 400 and 403 responses, click ids that do not match, and where to confirm what arrived.",
+    "category": "Troubleshooting",
+    "tags": ["postback", "troubleshooting", "400", "403"],
+    "updated": "2026-10-05",
+    "order": 10,
+    "popular": true
+  },
+  {
+    "slug": "troubleshooting-meta",
+    "title": "Meta shows no conversions",
+    "description": "Why Meta shows no conversions, and how to check the outbound send to the ad platform without leaving the tracker.",
+    "category": "Troubleshooting",
+    "tags": ["meta", "capi", "troubleshooting", "conversions"],
+    "updated": "2026-10-05",
+    "order": 20,
+    "popular": false
+  },
+  {
+    "slug": "troubleshooting-cost",
+    "title": "Cost is missing or wrong",
+    "description": "Fix a missing or wrong cost: check the cost model, the cost parameter on the campaign link, and the ad-platform sync.",
+    "category": "Troubleshooting",
+    "tags": ["cost", "troubleshooting", "cost model", "sync"],
+    "updated": "2026-10-05",
+    "order": 30,
+    "popular": false
+  }
+]

@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.className+=' js'</script>
+<title>Cost models and cost handling | AAA Tracker Help</title>
+<meta name="description" content="Cost models, when a cost is recorded, and how to send cost and currency on the campaign link or sync it from an ad platform.">
+<link rel="canonical" href="https://aaatracker.website/help/cost-handling">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="AAA Tracker">
+<meta property="og:title" content="Cost models and cost handling | AAA Tracker Help">
+<meta property="og:description" content="Cost models, when a cost is recorded, and how to send cost and currency on the campaign link or sync it from an ad platform.">
+<meta property="og:url" content="https://aaatracker.website/help/cost-handling">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Cost models and cost handling | AAA Tracker Help">
+<meta name="twitter:description" content="Cost models, when a cost is recorded, and how to send cost and currency on the campaign link or sync it from an ad platform.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Cost models and cost handling",
+      "description": "Cost models, when a cost is recorded, and how to send cost and currency on the campaign link or sync it from an ad platform.",
+      "dateModified": "2026-10-05",
+      "datePublished": "2026-10-05",
+      "inLanguage": "en",
+      "url": "https://aaatracker.website/help/cost-handling",
+      "mainEntityOfPage": "https://aaatracker.website/help/cost-handling",
+      "keywords": "cost, revenue, currency, profit",
+      "articleSection": "Tracking & postbacks",
+      "publisher": {
+        "@type": "Organization",
+        "name": "AAA Tracker",
+        "url": "https://aaatracker.website/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://aaatracker.website/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Help",
+          "item": "https://aaatracker.website/help/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Cost models and cost handling",
+          "item": "https://aaatracker.website/help/cost-handling"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css?v=2">
+<link rel="stylesheet" href="/assets/css/site.css?v=7">
+<link rel="stylesheet" href="/help/assets/help.css?v=1">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M3.4 6h17.2M3.4 12h17.2M3.4 18h17.2"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/help/" aria-current="page">Docs</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free trial</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <div class="wrap">
+    <nav class="help-breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        <li><a href="/help/">Help</a></li>
+        <li aria-current="page">Cost models and cost handling</li>
+      </ol>
+    </nav>
+  </div>
+
+  <article class="help-article section section--sm">
+    <div class="wrap">
+      <div class="help-layout">
+        <div class="help-main">
+          <header class="help-article__head">
+            <span class="eyebrow">Tracking &amp; postbacks</span>
+            <h1 class="h1 mt-4">Cost models and cost handling</h1>
+            <p class="lead mt-5">Cost models, when a cost is recorded, and how to send cost and currency on the campaign link or sync it from an ad platform.</p>
+            <p class="help-meta mono mt-6">Updated <time datetime="2026-10-05">5 October 2026</time></p>
+          </header>
+
+          <div class="prose help-prose mt-8">
+<h2 id="cost-revenue-and-profit">Cost, revenue and profit</h2>
+<p>A tracker holds two sides of a ledger. <b>Revenue</b> is what a conversion is worth — it arrives on an inbound postback and accumulates over the life of a click. <b>Cost</b> is what you paid to get that visitor — it is recorded once, at click time, from the traffic source or from an ad platform. Everything else in reporting is derived from those two numbers:</p>
+<pre><code>profit = revenue − cost
+ROI %  = (revenue − cost) / cost × 100
+EPC    = revenue / clicks</code></pre>
+<p>Get cost wrong and every ROI figure is wrong with it, which is why the cost model and the cost parameter matter as much as the offer payout does.</p>
+
+<h2 id="the-cost-models">The cost models</h2>
+<p>A campaign carries a <b>Cost model</b> — the billing basis it is bought on. Choose it under <b>Manage → Campaigns → Add/Edit campaign</b>, in the <b>Costs</b> section.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Model</th><th>The campaign is billed per</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>CPC</code></td><td>Click (cost per click).</td></tr>
+    <tr><td><code>CPUC</code></td><td>Unique click (cost per unique click).</td></tr>
+    <tr><td><code>CPM</code></td><td>Thousand impressions (cost per mille).</td></tr>
+    <tr><td><code>CPA</code></td><td>Acquisition — a fixed amount per conversion.</td></tr>
+    <tr><td><code>CPS</code></td><td>Sale — a fixed amount per sale.</td></tr>
+    <tr><td><code>RevShare</code></td><td>Share of the revenue the traffic produced.</td></tr>
+    <tr><td><code>Auto</code></td><td>No fixed basis; let cost arrive from the parameter or the sync.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>The model records how the campaign is bought so reports and teammates can read it. Whatever model you pick, the spend that actually lands on a click arrives through one of the three paths below.</p>
+
+<h2 id="entering-cost-on-a-campaign">Entering cost on a campaign</h2>
+<p>The <b>Costs</b> section of the campaign editor holds all of the cost settings together:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Cost model</b></td><td>The billing basis, from the table above.</td></tr>
+    <tr><td><b>Traffic loss (%)</b></td><td>The expected gap between the clicks the source reports and the visits the tracker records, kept for reconciliation.</td></tr>
+    <tr><td><b>Cost</b></td><td>A campaign-level cost value. Used for the whole period when no per-click cost arrives.</td></tr>
+    <tr><td><b>Cost currency</b></td><td>The currency that Cost value is expressed in.</td></tr>
+    <tr><td><b>Cost from cost parameter</b></td><td>When on, the <code>cost</code> value passed on each click is used instead of the flat campaign Cost.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="the-cost-query-parameter">The cost query parameter</h2>
+<p>Most traffic sources can pass the price of a click straight through. The campaign link accepts a <code>cost</code> parameter alongside the usual identifiers:</p>
+<pre><code>https://&lt;your-domain&gt;/&lt;alias&gt;?cost=0.45&amp;sub_id_1=adset-42</code></pre>
+<p>The value is stored on the click itself, so per-click cost can vary by placement, keyword or time of day. For the tracker to read it, map the source's own token to the <code>cost</code> parameter in the source's <b>Settings mapping</b> — for example a token of <code>{cost}</code> on the row whose Parameter is <code>cost</code>. If nothing maps, the parameter is ignored.</p>
+
+<h2 id="traffic-loss">Traffic loss</h2>
+<p>Traffic loss is a percentage, not a deduction. It records the expected difference between the clicks a source bills you for and the visits that reach the tracker — redirects that fail, ad blockers, dropped requests. It is stored per campaign and per source so a reconciliation discrepancy can be explained rather than merely seen. It does not change the recorded cost; it is context for reading it.</p>
+
+<h2 id="ad-platform-cost-sync">Ad-platform cost sync</h2>
+<p>If you advertise on an ad platform, you can let the platform's reported spend become your cost automatically. The campaign's <b>Ad-platform campaign ID</b> field (in the campaign editor) is what ties the two records together.</p>
+<ol class="help-steps">
+  <li>Connect the platform under <b>Manage → Integrations</b> and pick the ad accounts to read.</li>
+  <li>On each campaign, set <b>Ad-platform campaign ID</b> so spend can be matched to it.</li>
+  <li>The sync pulls each day's spend and impressions, then writes cost onto that day's clicks — the per-click cost is the day's spend divided by that day's clicks.</li>
+</ol>
+<p>It is idempotent: re-running a sync replaces the day's allocation rather than adding to it, so running it twice never doubles your spend. Spend for a campaign with no clicks that day is stored but allocates nothing. Use <b>Test mode</b> (dry-run) to compute and log the numbers without changing any costs. The full walkthrough is in <a href="/help/meta-cost-sync">Syncing Meta ad spend</a>.</p>
+
+<h2 id="retroactive-cost-update">Retroactive cost update</h2>
+<p>Sometimes the number is simply wrong and you want to overwrite it. In <b>Reports</b>, the <b>Cost update</b> action opens a <b>Retroactive cost update</b> dialog:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Campaign</b></td><td>Optional. Leave empty to apply to all campaigns.</td></tr>
+    <tr><td><b>From</b> / <b>To</b></td><td>The date range to overwrite.</td></tr>
+    <tr><td><b>Cost per click</b></td><td>The value written onto every matching row. Total spend becomes cost × matched rows.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Every applied change is recorded in <b>Logs → Cost updates</b>, so you can see what was overwritten and when.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">The usual mistake</p>
+  <p>Cost defaults to <b>0</b> until one of the three paths supplies it. A campaign with a cost model but no per-click <code>cost</code>, no campaign Cost value and no sync reports 100% ROI on every conversion. If profit looks impossibly good, check cost first — see <a href="/help/troubleshooting-cost">Cost is missing or wrong</a>.</p>
+</div>
+
+          </div>
+
+          <nav class="help-pager" aria-label="More in this category">
+        <a class="help-pager__link help-pager__link--prev" href="/help/conversion-pixel-and-js"><span class="help-pager__dir">Previous</span><span class="help-pager__title">Conversion pixel and JS tracking</span></a>
+        <span></span>
+      </nav>
+        </div>
+
+        <aside class="help-aside">
+        <nav class="help-toc" aria-label="On this page">
+          <p class="help-toc__title">On this page</p>
+          <ul class="help-toc__list">
+<li class="help-toc__item help-toc__item--h2"><a href="#cost-revenue-and-profit">Cost, revenue and profit</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-cost-models">The cost models</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#entering-cost-on-a-campaign">Entering cost on a campaign</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-cost-query-parameter">The cost query parameter</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#traffic-loss">Traffic loss</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#ad-platform-cost-sync">Ad-platform cost sync</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#retroactive-cost-update">Retroactive cost update</a>
+</li>
+</ul>
+        </nav>
+      </aside>
+      </div>
+    </div>
+  </article>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/" aria-label="AAA Tracker home">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+          <span class="word">AAA<i>Tracker</i></span>
+        </a>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul class="footer-links">
+          <li><a href="/features">Features</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Security &amp; anti-fraud</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free trial</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul class="footer-links">
+          <li><a href="/help/">Help centre</a></li>
+          <li><a href="/help/getting-started">Getting started</a></li>
+          <li><a href="/help/s2s-postback">Postbacks</a></li>
+          <li><a href="/help/troubleshooting-postbacks">Troubleshooting</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul class="footer-links">
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/backend/">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul class="footer-links">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/js/site.js?v=1" defer></script>
+<script src="/help/assets/help.js?v=1" defer></script>
+</body>
+</html>

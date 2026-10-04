@@ -1,0 +1,72 @@
+<h2>What a campaign is</h2>
+<p>A campaign is your entry point for traffic. It ties a traffic source to the offers and landers you want to serve, and it hands you a public URL:</p>
+<pre><code>https://&lt;your-domain&gt;/&lt;alias&gt;</code></pre>
+<p>Open <b>Manage → Campaigns → Create campaign</b> and the editor runs as a three-step wizard: <b>Settings · Targeting &amp; rules · Postbacks &amp; review</b>. Only <b>Name</b> and <b>Alias</b> are required — every other field has a sensible default.</p>
+
+<h2>Step 1 — Settings</h2>
+<p>This step holds the campaign’s identity and its cost configuration.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>What it does</th><th>Required</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Name</b></td><td>Label shown in lists, pickers and reports.</td><td>Yes</td></tr>
+    <tr><td><b>Alias</b></td><td>The short path that becomes the tracking link — <code>/&lt;alias&gt;</code>. Must be unique.</td><td>Yes</td></tr>
+    <tr><td><b>Type</b></td><td><b>Campaign</b> (runs flows) or <b>Tracking only</b> (records hits, no routing).</td><td>No</td></tr>
+    <tr><td><b>Status</b></td><td>Active / paused switch. Paused campaigns stop serving.</td><td>No</td></tr>
+    <tr><td><b>Traffic source</b></td><td>The source whose parameters and macro convention the link expects.</td><td>No</td></tr>
+    <tr><td><b>Domain</b></td><td>Which of your tracking domains serves the link.</td><td>No</td></tr>
+    <tr><td><b>Flow selection</b></td><td><b>Position</b> (first matching flow wins) or <b>Weight&nbsp;%</b> (random split by weight, e.g. 70/30). Also shown as <i>Distribution</i> on step 2.</td><td>No</td></tr>
+    <tr><td><b>Tags</b></td><td>Free-form labels for filtering the list.</td><td>No</td></tr>
+    <tr><td><b>Ad-platform campaign ID</b></td><td>Ad-platform campaign id used by cost sync to match spend to this campaign.</td><td>No</td></tr>
+    <tr><td><b>Cost model</b></td><td><code>CPC</code>, <code>CPUC</code>, <code>CPM</code>, <code>CPA</code>, <code>CPS</code>, <code>RevShare</code> or <code>Auto</code>.</td><td>No</td></tr>
+    <tr><td><b>Traffic loss (%)</b></td><td>Expected loss between the source’s reported clicks and tracked visits, kept for reconciliation.</td><td>No</td></tr>
+    <tr><td><b>Cost</b></td><td>The cost value applied for the period.</td><td>No</td></tr>
+    <tr><td><b>Cost currency</b></td><td>Currency the cost is recorded in.</td><td>No</td></tr>
+  </tbody>
+</table>
+</div>
+<p>There is also a <b>Cost from cost parameter</b> switch: when on, the per-click <code>cost</code> arriving on the campaign link wins over the fixed cost above. The alias is the only part of this step that changes the shape of your link, so pick it first.</p>
+
+<h2>Step 2 — Targeting &amp; rules</h2>
+<p>This step defines the campaign’s <b>flows</b>. Each flow is a routing rule with its own target, filters, schedule, caps and weight:</p>
+<ul>
+  <li><b>Flow type</b> — <b>forced</b> flows are evaluated first, <b>regular</b> flows follow by position, and a <b>default</b> flow catches everything no other flow matched.</li>
+  <li><b>Position / weight</b> — used depending on whether Flow selection is <b>Position</b> or <b>Weight&nbsp;%</b>.</li>
+  <li><b>Target</b> — the offer, lander and/or campaign the flow serves.</li>
+  <li><b>Filters</b> — geo, device, traffic, sub-id/UTM and time conditions, combined with AND/OR and invertible with “IS NOT”.</li>
+  <li><b>Schedule and caps</b> — dayparting and per-hour / per-day / total click caps per flow.</li>
+</ul>
+
+<h3>Direct vs multi flows and redirect modes</h3>
+<p>A flow’s <b>schema</b> decides what the visitor gets. The ones you will use most:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Schema</th><th>What happens</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>direct</code></td><td>Redirects straight to the offer URL. Fastest path — no landing.</td></tr>
+    <tr><td><code>landing_offer</code></td><td>Serves a landing page; its click-out link then redirects to the offer.</td></tr>
+    <tr><td><code>landing_only</code></td><td>Serves a landing page with no offer click-out.</td></tr>
+    <tr><td><code>multi</code></td><td>Picks one landing and one offer at random from the configured pools (A/B rotation).</td></tr>
+    <tr><td><code>redirect</code></td><td>302-redirects to a fixed URL.</td></tr>
+    <tr><td><code>redirect_campaign</code></td><td>Redirects the visitor into another campaign.</td></tr>
+    <tr><td><code>return_404</code></td><td>Answers 404 — use as a “drop” flow for unwanted traffic.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>A complementary setting, <b>Delivery action</b>, controls how the destination is reached — <b>302 redirect</b> (the default), <b>iFrame</b>, <b>Form POST</b>, <b>Serve content</b> or <b>Do nothing</b>. The <b>Distribution</b> control at the top of the step is the same choice as Flow selection in Settings.</p>
+
+<h2>Step 3 — Postbacks &amp; review</h2>
+<p>The final step is where you tell the tracker what to send <i>outbound</i> when a conversion lands. Add a <b>Postback URL</b>, choose <b>GET</b> or <b>POST</b>, and tick which <b>statuses</b> should fire it. A traffic source also carries its own S2S postback URL with per-status toggles, and this campaign step lets you add campaign-specific ones. The review pane below summarizes the name, alias, cost model and postback count before you <b>Save</b>.</p>
+<p>Note the direction: <i>inbound</i> postbacks (the network reporting a sale to you) go to <code>/pb</code> and are not configured here — see the <a href="/help/s2s-postback">postback reference</a>. This step is the tracker reporting onward to your source.</p>
+
+<h2>Simulate before you spend</h2>
+<p>A campaign row has a <b>Simulate</b> action. It runs the flow, filter, schedule and cap logic in memory — side-effect free, no redirects and no postbacks — and returns how the traffic would be distributed. Use it to confirm the routing before real visitors arrive. You can pin a country, device, OS or IP prefix for the run.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Two different “modes” people mix up</p>
+  <p><b>Flow selection / Distribution</b> decides <i>which</i> flow is chosen (first match vs weighted split). A flow’s <b>schema</b> decides <i>what that flow does</i> (direct to offer, through a lander, multi rotation). One is the selector; the other is the destination. Setting one does not change the other.</p>
+</div>

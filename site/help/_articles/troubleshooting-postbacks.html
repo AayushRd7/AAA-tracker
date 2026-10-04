@@ -1,0 +1,51 @@
+<h2>First, confirm what the network sent</h2>
+<p>Before changing anything, open <b>Logs → S2S postbacks</b>. Every inbound call is listed there, whether it was accepted or rejected, so the log tells you which of the cases below you are actually in. If the call is not there at all, the problem is on the network's side or in the URL you gave it — not in your parameter mapping.</p>
+
+<h2>400 — invalid status or payout</h2>
+<p>A 400 means the tracker understood the call but refused the values. There are just two common causes:</p>
+<ul>
+  <li><b>Unknown status.</b> The status the network sent is not one of <code>lead</code>, <code>sale</code>, <code>upsale</code>, <code>rejected</code>, <code>hold</code>, <code>trash</code>, and is not a custom status you have defined. Check the spelling the network uses and either map it in the network's postback template or define the status in Settings.</li>
+  <li><b>Non-numeric payout.</b> The payout value contains a currency symbol, a comma decimal separator, or text. Send a plain number — the currency is not part of the payout and is not accepted on this endpoint.</li>
+</ul>
+<p>Remember the aliases: if the network sends <code>type</code> instead of <code>status</code>, or <code>sum</code> instead of <code>payout</code>, that is fine and does not cause a 400. An empty status defaults to <code>lead</code>, and an empty payout to <code>0</code> — those are not errors either.</p>
+
+<h2>403 — postback security</h2>
+<p>A 403 means the call was blocked before it was read. Two controls can block it, both under <b>Settings → Postback security</b>:</p>
+<ul>
+  <li><b>Secret key.</b> You have required a key, and the network did not send it. The key can travel as <code>?key=</code>, <code>?secret=</code>, or the <code>X-Postback-Key</code> header. Add it to the postback URL you gave the network, or remove the requirement.</li>
+  <li><b>IP allowlist.</b> You have restricted callers to a list of IPs or CIDR ranges, and the network's server is not on it. Networks frequently send from a range that changes; if you cannot pin it down, either widen the allowlist or turn the IP check off and rely on the secret key instead.</li>
+</ul>
+<p>If a mirror or a proxy sits between the network and the tracker, the address the tracker sees may be the proxy's, not the network's.</p>
+
+<h2>200 but no conversion appears</h2>
+<p>If the log shows a 200 and the response was <code>{"status":"ok",…}</code>, the conversion <i>was</i> recorded. If you cannot see it, you are usually looking at the wrong click.</p>
+
+<h3>The click id does not match</h3>
+<p>The most common cause is that the click id never made it round the loop. The tracker appends <code>click_id=…</code> to the offer URL automatically, but almost every network reads <i>its own</i> parameter. If you did not add that parameter to the offer's Target URL — for example <code>&amp;sub1={click_id}</code> — the network has nothing to send back, and the postback arrives with an empty or wrong click id.</p>
+<p>To confirm: open <b>Logs → Clicks</b>, copy a recent click id, and post it by hand. A <code>{"status":"ok",…}</code> answers whether the endpoint works; then compare that click id with the one your network is actually sending.</p>
+
+<h3>It matched, but not the click you expected</h3>
+<p>When the click id cannot be matched, the tracker falls back to the <b>transaction id</b>, then to <b>unique sub-ids</b> within its window, then records an <b>unattributed</b> row. If your network sends an old or reused transaction id, the fallback can attach the conversion somewhere unexpected. Check the conversion in <b>Reports → Conversions</b> and delete or correct it from there.</p>
+
+<h2>Nothing arrived at all</h2>
+<ul>
+  <li><b>Wrong URL shape.</b> The endpoint is <code>https://YOUR-TRACKER-DOMAIN/pb</code>. If you pasted the legacy path form, it redirects, but a network that does not follow redirects will see nothing.</li>
+  <li><b>Wrong domain.</b> The postback URL must point at the same tracker domain your campaign link uses. A staging or old domain will accept the call into a place you are not looking.</li>
+  <li><b>The network only fires on certain statuses.</b> Many networks send a postback for approved sales only. A pending or rejected conversion may simply never be reported.</li>
+  <li><b>The network is quiet.</b> <b>Health centre</b> shows the last successful postback per source; if it stopped at a specific time, the problem is on the network side.</li>
+</ul>
+
+<h2>A checklist</h2>
+<ol class="help-steps">
+  <li>Open <b>Logs → S2S postbacks</b> and find the call.</li>
+  <li>If 400 — fix the status name or send a plain numeric payout.</li>
+  <li>If 403 — fix the key in the URL, or the IP allowlist.</li>
+  <li>If 200 — open <b>Logs → Clicks</b>, fire a known click id by hand, and compare.</li>
+  <li>Confirm the offer's Target URL carries the network's own click-id parameter (for example <code>&amp;sub1={click_id}</code>).</li>
+  <li>Confirm the postback URL points at your live tracker domain and uses the <code>/pb?…</code> query form.</li>
+</ol>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">The manual test</p>
+  <p>There is no test-postback button. Fire a click on the campaign link, copy the click id from <b>Logs → Clicks</b>, then call <code>/pb</code> with curl. That exercises the same path a network uses and rules the endpoint in or out immediately.</p>
+</div>

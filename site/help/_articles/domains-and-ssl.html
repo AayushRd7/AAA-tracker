@@ -1,0 +1,57 @@
+<h2>What a tracking domain does</h2>
+<p>A tracking domain is the address your campaign links, served landing pages and postback URL all answer on. When you build a campaign you choose which domain its link uses, and the link takes the form:</p>
+<pre><code>https://&lt;domain&gt;/&lt;alias&gt;</code></pre>
+<p>Add domains under <b>Tools → Domains</b> with <b>Add domain</b>. Each row stores the hostname, whether to <b>Redirect to HTTPS</b>, its <b>404 handling</b> (<b>Handle 404 errors</b> serves the tracker's styled page; <b>Error</b> returns a bare response), an optional <b>Default campaign</b> for visitors who reach <code>/</code> with no alias, and an optional group name. Add only a hostname you control, because you are about to point its DNS here.</p>
+
+<h2>Add the DNS record</h2>
+<p>The Domains page shows this tracker's public IP in its banner. You have two equivalent ways to point a hostname at it:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Record</th><th>Use it for</th><th>Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>A</b></td><td>An apex or bare domain, such as <code>example.com</code></td><td>The server IP shown in the Domains banner</td></tr>
+    <tr><td><b>CNAME</b></td><td>A subdomain, such as <code>track.example.com</code></td><td>Your tracker host</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Use one record per hostname — you do not need both. A CNAME has the advantage that the tracker host's address can change without you editing DNS again.</p>
+
+<h2>While DNS propagates</h2>
+<ol class="help-steps">
+  <li>Add the domain row first. It shows a <code>pending</code> status while it waits.</li>
+  <li>Create the record at your DNS provider, using the value above.</li>
+  <li>Allow time to propagate — usually minutes, but up to a day where a long TTL was cached. You can keep building campaigns and offers in the meantime; nothing is lost.</li>
+  <li>Do not send live traffic to the domain yet. Until it resolves here and has a certificate, HTTPS will not work, so test on the tracker host or another live domain in the meantime.</li>
+</ol>
+
+<h2>Check DNS</h2>
+<p>Each row has a DNS check button. It looks the domain up and compares the answer with this server's address, then shows one of three states:</p>
+<ul>
+  <li><b>Points here</b> — the domain resolves to this tracker; you can issue a certificate.</li>
+  <li><b>Resolves elsewhere</b> — DNS answers, but not with this server. Usually a stale record, a proxy in front of it, or a record created at the wrong provider.</li>
+  <li><b>No DNS</b> — nothing resolves yet. Propagation has not finished, or the record is missing.</li>
+</ul>
+<p>The <b>Check domains statuses</b> button re-tests every domain over HTTP and updates the <b>Status</b> column.</p>
+
+<h2>Update SSL</h2>
+<p>Once DNS points here, use the row's <b>Update SSL for 90 days</b> action. The tracker confirms the domain over plain HTTP and issues the certificate automatically. This can take up to <b>10 minutes per domain</b>, so keep the page open until it confirms. The <b>SSL Status</b> and <b>SSL Expiry</b> columns then show the state — a day count while it is valid, and <b>warning</b>, <b>critical</b>, <b>expired</b> or <b>No cert</b> when it is not. With <b>Redirect to HTTPS</b> on, plain-http requests for this domain are upgraded to https.</p>
+
+<h2>Wildcards and renewal</h2>
+<p>The certificate follows the domain row, so it covers the exact hostname you added. Add every hostname you actually serve — for example <code>track.example.com</code> and <code>www.example.com</code> — as its own row. One entry does not cover its subdomains, and a wildcard certificate is not part of this flow.</p>
+<p>Certificates are valid for 90 days and renewal is not automatic on every setup. Watch the <b>SSL Expiry</b> column and re-run <b>Update SSL</b> before it lapses, or enable the renewal timer on the host so it renews for you. A lapsed certificate breaks the HTTPS redirect for that domain, and links and postbacks that expect HTTPS start failing.</p>
+
+<h2>Why hits land in the right workspace</h2>
+<p>A domain belongs to exactly one workspace. On every click and every <code>/pb</code> postback the tracker reads the hostname the request arrived on, resolves the workspace that owns it, and then matches the campaign alias or click id strictly inside that workspace. Aliases are unique per workspace rather than globally, so two workspaces can each run a campaign called <code>promo</code> without colliding, as long as they are served on different domains. A request on a host that no workspace owns is refused rather than guessed, so a conversion can never be credited to the wrong workspace's numbers.</p>
+<p>This is also why the postback URL you give a network must use the same domain as the campaign link. Pointing it at a staging or old domain sends the call to a workspace you are not watching. See <a href="/help/troubleshooting-postbacks">Postback not recorded</a>.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">The certificate challenge runs over HTTP first</p>
+  <p>A certificate can only be issued after the domain already routes here, because the check is fetched over plain HTTP. Confirm DNS and allow propagation before pressing <b>Update SSL</b>.</p>
+</div>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">One domain, many campaigns</p>
+  <p>A single domain can serve any number of campaigns through their aliases and can carry a default campaign for bare <code>/</code> visits. Add a second domain when you want separate branding, or to keep an old link alive.</p>
+</div>

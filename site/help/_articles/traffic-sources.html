@@ -1,0 +1,72 @@
+<h2>What a traffic source is</h2>
+<p>A traffic source is the record of where your clicks come from. It holds the source's own click-id convention, the macros it understands, where conversion data should be sent back to it, and the expected traffic loss. A campaign always points at one source, and that source is what lets the tracker name the channel behind every click.</p>
+
+<h2>The catalog and "New from template"</h2>
+<p>Open <b>Manage → Sources</b>. The catalog ships around <b>187 presets</b>, each with the source's real pass-through macros filled in. <b>New from template</b> opens the catalog; <b>Add source</b> opens a blank form.</p>
+<p>In the catalog you can search sources, and filter to <b>All</b> or <b>With API integrations</b>. A preset carries capability badges for the automation it supports:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Badge</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>cost</code></td><td>Cost update supported.</td></tr>
+    <tr><td><code>pause_campaign</code></td><td>Campaign pausing supported.</td></tr>
+    <tr><td><code>blacklist</code></td><td>Blacklisting supported.</td></tr>
+    <tr><td><code>pause_creative</code></td><td>Creative pausing supported.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>A preset with no badges is marked <b>No API integration</b> — it still tracks clicks, it just cannot be driven by the automation the badges describe. If your source is not in the list, use <b>Add source</b> and fill in the same fields by hand.</p>
+
+<h2>The fields</h2>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Source name</b></td><td>The label used everywhere the source appears — reports, filters, the campaign picker.</td></tr>
+    <tr><td><b>Traffic loss (%)</b></td><td>The expected gap between the clicks the source reports and the visits tracked here, kept for reconciliation.</td></tr>
+    <tr><td><b>S2S postback URL</b></td><td>Where the tracker sends conversion data <b>to the source</b> (outbound — see below).</td></tr>
+    <tr><td><b>S2S postback statuses</b></td><td>Checkboxes for <code>sale</code>, <code>lead</code>, <code>rejected</code> and <code>upsale</code>, choosing which statuses fire the outbound postback.</td></tr>
+    <tr><td><b>Conversion fanout controls</b></td><td>Two switches that thin out what the source is told — see below.</td></tr>
+    <tr><td><b>Additional settings</b></td><td>Free-form key/value pairs for the source integration, such as API keys.</td></tr>
+    <tr><td><b>Settings mapping</b></td><td>Rows of Name / Parameter / Token mapping the source's macros to tracker parameters.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>The S2S postback URL here is outbound</h2>
+<p>Read this one carefully, because the same phrase means the opposite thing in the two records. On a <b>traffic source</b>, the S2S postback URL is <b>outbound</b>: it is the URL on the source's side that the tracker calls when a conversion lands. The tracker fills the placeholders with real values, for example:</p>
+<pre><code>https://source.example.com/post?clickid={click_id}&amp;payout={payout}&amp;status={status}</code></pre>
+<p>The source's postback template is not your tracker's <code>/pb</code> endpoint. On an <b>affiliate network</b>, the S2S postback URL is the inbound template you hand <i>to the network</i> so it can call you — that is covered in <a href="/help/affiliate-networks">Adding an affiliate network</a> and <a href="/help/s2s-postback">the postback reference</a>.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">Do not paste your own postback URL here</p>
+  <p>If you paste <code>https://YOUR-TRACKER-DOMAIN/pb…</code> into a source's outbound field, the tracker will call itself on every conversion. Use the URL the source gave you for receiving postbacks.</p>
+</div>
+
+<h2>S2S postback statuses</h2>
+<p>The four checkboxes decide which conversion statuses are worth telling the source about. Tick <b>sale</b> and <b>lead</b> for the common case; add <b>rejected</b> if the source wants to know about reversals, and <b>upsale</b> if it pays on them. A status left unticked simply does not fire an outbound postback.</p>
+
+<h2>Conversion fanout controls</h2>
+<ul>
+  <li><b>Don't forward upsell conversions to this source</b> — sale and lead forwards are unaffected, and campaign postbacks are unaffected. Use it when the source only wants the first conversion.</li>
+  <li><b>Forward only this share of conversions (%)</b> — leave empty to forward every conversion. The same click id always gets the same decision, so a source sees a consistent sample rather than a random flicker.</li>
+</ul>
+
+<h2>Settings mapping</h2>
+<p>Each row maps one value. <b>Name</b> is the human label, <b>Parameter</b> is the tracker parameter it lands in, and <b>Token</b> is the source's macro that fills it. For example, the Cost row maps a token of <code>{cost}</code> to the <code>cost</code> parameter so per-click spend is captured; <code>{campaign_id}</code> maps to <code>utm_campaign</code>. Mapped values flow into reports, filters, macros and postbacks. This mapping is also how the source's click id is captured — for example a token such as <code>clickid</code> on the row whose Parameter is <code>click_id</code>.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Meta needs no click-id mapping</p>
+  <p>Meta's <code>fbclid</code> is captured automatically from the ad URL and stitched with the <code>_fbc</code> and <code>_fbp</code> cookies. You do not map it, and you do not need a token for it. To push conversions back to Meta, see <a href="/help/meta-capi">Sending conversions to Meta (CAPI)</a>.</p>
+</div>
+
+<h2>Confirming it works</h2>
+<ul>
+  <li><b>Health centre</b> shows the last successful postback per source, which tells you quickly whether an outbound destination has gone quiet.</li>
+  <li><b>Logs → Internal postbacks</b> shows the outbound delivery attempts this tracker sent, with their outcome.</li>
+  <li><b>Reports</b> breaks any metric down by traffic source once clicks are flowing.</li>
+</ul>

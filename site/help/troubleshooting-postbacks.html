@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.className+=' js'</script>
+<title>Postback not recorded (400 / 403 / no match) | AAA Tracker Help</title>
+<meta name="description" content="Diagnose a postback that never landed: 400 and 403 responses, click ids that do not match, and where to confirm what arrived.">
+<link rel="canonical" href="https://aaatracker.website/help/troubleshooting-postbacks">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="AAA Tracker">
+<meta property="og:title" content="Postback not recorded (400 / 403 / no match) | AAA Tracker Help">
+<meta property="og:description" content="Diagnose a postback that never landed: 400 and 403 responses, click ids that do not match, and where to confirm what arrived.">
+<meta property="og:url" content="https://aaatracker.website/help/troubleshooting-postbacks">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Postback not recorded (400 / 403 / no match) | AAA Tracker Help">
+<meta name="twitter:description" content="Diagnose a postback that never landed: 400 and 403 responses, click ids that do not match, and where to confirm what arrived.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Postback not recorded (400 / 403 / no match)",
+      "description": "Diagnose a postback that never landed: 400 and 403 responses, click ids that do not match, and where to confirm what arrived.",
+      "dateModified": "2026-10-05",
+      "datePublished": "2026-10-05",
+      "inLanguage": "en",
+      "url": "https://aaatracker.website/help/troubleshooting-postbacks",
+      "mainEntityOfPage": "https://aaatracker.website/help/troubleshooting-postbacks",
+      "keywords": "postback, troubleshooting, 400, 403",
+      "articleSection": "Troubleshooting",
+      "publisher": {
+        "@type": "Organization",
+        "name": "AAA Tracker",
+        "url": "https://aaatracker.website/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://aaatracker.website/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Help",
+          "item": "https://aaatracker.website/help/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Postback not recorded (400 / 403 / no match)",
+          "item": "https://aaatracker.website/help/troubleshooting-postbacks"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css?v=2">
+<link rel="stylesheet" href="/assets/css/site.css?v=7">
+<link rel="stylesheet" href="/help/assets/help.css?v=1">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M3.4 6h17.2M3.4 12h17.2M3.4 18h17.2"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/help/" aria-current="page">Docs</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free trial</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <div class="wrap">
+    <nav class="help-breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        <li><a href="/help/">Help</a></li>
+        <li aria-current="page">Postback not recorded (400 / 403 / no match)</li>
+      </ol>
+    </nav>
+  </div>
+
+  <article class="help-article section section--sm">
+    <div class="wrap">
+      <div class="help-layout">
+        <div class="help-main">
+          <header class="help-article__head">
+            <span class="eyebrow">Troubleshooting</span>
+            <h1 class="h1 mt-4">Postback not recorded (400 / 403 / no match)</h1>
+            <p class="lead mt-5">Diagnose a postback that never landed: 400 and 403 responses, click ids that do not match, and where to confirm what arrived.</p>
+            <p class="help-meta mono mt-6">Updated <time datetime="2026-10-05">5 October 2026</time></p>
+          </header>
+
+          <div class="prose help-prose mt-8">
+<h2 id="first-confirm-what-the-network-sent">First, confirm what the network sent</h2>
+<p>Before changing anything, open <b>Logs → S2S postbacks</b>. Every inbound call is listed there, whether it was accepted or rejected, so the log tells you which of the cases below you are actually in. If the call is not there at all, the problem is on the network's side or in the URL you gave it — not in your parameter mapping.</p>
+
+<h2 id="400-invalid-status-or-payout">400 — invalid status or payout</h2>
+<p>A 400 means the tracker understood the call but refused the values. There are just two common causes:</p>
+<ul>
+  <li><b>Unknown status.</b> The status the network sent is not one of <code>lead</code>, <code>sale</code>, <code>upsale</code>, <code>rejected</code>, <code>hold</code>, <code>trash</code>, and is not a custom status you have defined. Check the spelling the network uses and either map it in the network's postback template or define the status in Settings.</li>
+  <li><b>Non-numeric payout.</b> The payout value contains a currency symbol, a comma decimal separator, or text. Send a plain number — the currency is not part of the payout and is not accepted on this endpoint.</li>
+</ul>
+<p>Remember the aliases: if the network sends <code>type</code> instead of <code>status</code>, or <code>sum</code> instead of <code>payout</code>, that is fine and does not cause a 400. An empty status defaults to <code>lead</code>, and an empty payout to <code>0</code> — those are not errors either.</p>
+
+<h2 id="403-postback-security">403 — postback security</h2>
+<p>A 403 means the call was blocked before it was read. Two controls can block it, both under <b>Settings → Postback security</b>:</p>
+<ul>
+  <li><b>Secret key.</b> You have required a key, and the network did not send it. The key can travel as <code>?key=</code>, <code>?secret=</code>, or the <code>X-Postback-Key</code> header. Add it to the postback URL you gave the network, or remove the requirement.</li>
+  <li><b>IP allowlist.</b> You have restricted callers to a list of IPs or CIDR ranges, and the network's server is not on it. Networks frequently send from a range that changes; if you cannot pin it down, either widen the allowlist or turn the IP check off and rely on the secret key instead.</li>
+</ul>
+<p>If a mirror or a proxy sits between the network and the tracker, the address the tracker sees may be the proxy's, not the network's.</p>
+
+<h2 id="200-but-no-conversion-appears">200 but no conversion appears</h2>
+<p>If the log shows a 200 and the response was <code>{"status":"ok",…}</code>, the conversion <i>was</i> recorded. If you cannot see it, you are usually looking at the wrong click.</p>
+
+<h3 id="the-click-id-does-not-match">The click id does not match</h3>
+<p>The most common cause is that the click id never made it round the loop. The tracker appends <code>click_id=…</code> to the offer URL automatically, but almost every network reads <i>its own</i> parameter. If you did not add that parameter to the offer's Target URL — for example <code>&amp;sub1={click_id}</code> — the network has nothing to send back, and the postback arrives with an empty or wrong click id.</p>
+<p>To confirm: open <b>Logs → Clicks</b>, copy a recent click id, and post it by hand. A <code>{"status":"ok",…}</code> answers whether the endpoint works; then compare that click id with the one your network is actually sending.</p>
+
+<h3 id="it-matched-but-not-the-click-you-expected">It matched, but not the click you expected</h3>
+<p>When the click id cannot be matched, the tracker falls back to the <b>transaction id</b>, then to <b>unique sub-ids</b> within its window, then records an <b>unattributed</b> row. If your network sends an old or reused transaction id, the fallback can attach the conversion somewhere unexpected. Check the conversion in <b>Reports → Conversions</b> and delete or correct it from there.</p>
+
+<h2 id="nothing-arrived-at-all">Nothing arrived at all</h2>
+<ul>
+  <li><b>Wrong URL shape.</b> The endpoint is <code>https://YOUR-TRACKER-DOMAIN/pb</code>. If you pasted the legacy path form, it redirects, but a network that does not follow redirects will see nothing.</li>
+  <li><b>Wrong domain.</b> The postback URL must point at the same tracker domain your campaign link uses. A staging or old domain will accept the call into a place you are not looking.</li>
+  <li><b>The network only fires on certain statuses.</b> Many networks send a postback for approved sales only. A pending or rejected conversion may simply never be reported.</li>
+  <li><b>The network is quiet.</b> <b>Health centre</b> shows the last successful postback per source; if it stopped at a specific time, the problem is on the network side.</li>
+</ul>
+
+<h2 id="a-checklist">A checklist</h2>
+<ol class="help-steps">
+  <li>Open <b>Logs → S2S postbacks</b> and find the call.</li>
+  <li>If 400 — fix the status name or send a plain numeric payout.</li>
+  <li>If 403 — fix the key in the URL, or the IP allowlist.</li>
+  <li>If 200 — open <b>Logs → Clicks</b>, fire a known click id by hand, and compare.</li>
+  <li>Confirm the offer's Target URL carries the network's own click-id parameter (for example <code>&amp;sub1={click_id}</code>).</li>
+  <li>Confirm the postback URL points at your live tracker domain and uses the <code>/pb?…</code> query form.</li>
+</ol>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">The manual test</p>
+  <p>There is no test-postback button. Fire a click on the campaign link, copy the click id from <b>Logs → Clicks</b>, then call <code>/pb</code> with curl. That exercises the same path a network uses and rules the endpoint in or out immediately.</p>
+</div>
+
+          </div>
+
+          <nav class="help-pager" aria-label="More in this category">
+        <span></span>
+        <a class="help-pager__link help-pager__link--next" href="/help/troubleshooting-meta"><span class="help-pager__dir">Next</span><span class="help-pager__title">Meta shows no conversions</span></a>
+      </nav>
+        </div>
+
+        <aside class="help-aside">
+        <nav class="help-toc" aria-label="On this page">
+          <p class="help-toc__title">On this page</p>
+          <ul class="help-toc__list">
+<li class="help-toc__item help-toc__item--h2"><a href="#first-confirm-what-the-network-sent">First, confirm what the network sent</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#400-invalid-status-or-payout">400 — invalid status or payout</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#403-postback-security">403 — postback security</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#200-but-no-conversion-appears">200 but no conversion appears</a>
+<ul class="help-toc__sub">
+<li class="help-toc__item help-toc__item--h3"><a href="#the-click-id-does-not-match">The click id does not match</a></li>
+<li class="help-toc__item help-toc__item--h3"><a href="#it-matched-but-not-the-click-you-expected">It matched, but not the click you expected</a></li>
+</ul>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#nothing-arrived-at-all">Nothing arrived at all</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#a-checklist">A checklist</a>
+</li>
+</ul>
+        </nav>
+      </aside>
+      </div>
+    </div>
+  </article>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/" aria-label="AAA Tracker home">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+          <span class="word">AAA<i>Tracker</i></span>
+        </a>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul class="footer-links">
+          <li><a href="/features">Features</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Security &amp; anti-fraud</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free trial</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul class="footer-links">
+          <li><a href="/help/">Help centre</a></li>
+          <li><a href="/help/getting-started">Getting started</a></li>
+          <li><a href="/help/s2s-postback">Postbacks</a></li>
+          <li><a href="/help/troubleshooting-postbacks">Troubleshooting</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul class="footer-links">
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/backend/">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul class="footer-links">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/js/site.js?v=1" defer></script>
+<script src="/help/assets/help.js?v=1" defer></script>
+</body>
+</html>

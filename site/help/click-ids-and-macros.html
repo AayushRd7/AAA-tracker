@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.className+=' js'</script>
+<title>Click IDs and URL macros | AAA Tracker Help</title>
+<meta name="description" content="How click ids travel from the campaign link to the network and back, and the macros you can drop into an offer URL.">
+<link rel="canonical" href="https://aaatracker.website/help/click-ids-and-macros">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="AAA Tracker">
+<meta property="og:title" content="Click IDs and URL macros | AAA Tracker Help">
+<meta property="og:description" content="How click ids travel from the campaign link to the network and back, and the macros you can drop into an offer URL.">
+<meta property="og:url" content="https://aaatracker.website/help/click-ids-and-macros">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Click IDs and URL macros | AAA Tracker Help">
+<meta name="twitter:description" content="How click ids travel from the campaign link to the network and back, and the macros you can drop into an offer URL.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Click IDs and URL macros",
+      "description": "How click ids travel from the campaign link to the network and back, and the macros you can drop into an offer URL.",
+      "dateModified": "2026-10-05",
+      "datePublished": "2026-10-05",
+      "inLanguage": "en",
+      "url": "https://aaatracker.website/help/click-ids-and-macros",
+      "mainEntityOfPage": "https://aaatracker.website/help/click-ids-and-macros",
+      "keywords": "click id, macros, offer url, sub ids",
+      "articleSection": "Tracking & postbacks",
+      "publisher": {
+        "@type": "Organization",
+        "name": "AAA Tracker",
+        "url": "https://aaatracker.website/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://aaatracker.website/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Help",
+          "item": "https://aaatracker.website/help/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Click IDs and URL macros",
+          "item": "https://aaatracker.website/help/click-ids-and-macros"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css?v=2">
+<link rel="stylesheet" href="/assets/css/site.css?v=7">
+<link rel="stylesheet" href="/help/assets/help.css?v=1">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M3.4 6h17.2M3.4 12h17.2M3.4 18h17.2"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/help/" aria-current="page">Docs</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free trial</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <div class="wrap">
+    <nav class="help-breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        <li><a href="/help/">Help</a></li>
+        <li aria-current="page">Click IDs and URL macros</li>
+      </ol>
+    </nav>
+  </div>
+
+  <article class="help-article section section--sm">
+    <div class="wrap">
+      <div class="help-layout">
+        <div class="help-main">
+          <header class="help-article__head">
+            <span class="eyebrow">Tracking &amp; postbacks</span>
+            <h1 class="h1 mt-4">Click IDs and URL macros</h1>
+            <p class="lead mt-5">How click ids travel from the campaign link to the network and back, and the macros you can drop into an offer URL.</p>
+            <p class="help-meta mono mt-6">Updated <time datetime="2026-10-05">5 October 2026</time></p>
+          </header>
+
+          <div class="prose help-prose mt-8">
+<h2 id="what-a-click-id-is">What a click id is</h2>
+<p>Every click the tracker records gets a <b>click id</b> — a unique value generated at the moment of the click. It is the thread that ties a click to the conversion that arrives later: the offer URL carries it out, the network echoes it back on the postback, and the tracker joins the two. Get the click id round the loop intact and attribution is exact; lose it and the tracker has to fall back to a less certain match.</p>
+
+<h2 id="the-click-id-lifecycle">The click-id lifecycle</h2>
+<ol class="help-steps">
+  <li><b>Generated at the click.</b> When a visitor hits the campaign link <code>https://&lt;your-domain&gt;/&lt;alias&gt;</code>, the tracker generates a click id — unless the link already carried one in <code>click_id</code>, in which case that value wins and is kept.</li>
+  <li><b>Passed to the offer.</b> At click-out the tracker substitutes <code>{click_id}</code> in the offer URL wherever it appears, and always appends <code>click_id=…</code> to the final URL.</li>
+  <li><b>Handed to the network in its own parameter.</b> Most networks ignore <code>click_id</code> and read a name of their own choosing, so you add it to the offer's Target URL — for example <code>&amp;sub1={click_id}</code> or <code>&amp;aff_sub={click_id}</code>.</li>
+  <li><b>Returned on the postback.</b> The network calls <code>/pb</code> with the value in a click-id alias such as <code>clickid</code>, <code>subid</code> or <code>cid</code>, and the tracker matches it back to the click.</li>
+</ol>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">The offer-parameters field is a stored reference</p>
+  <p>An affiliate network record has an <b>Offer parameters</b> field that stores that network's click-id convention (for example <code>s1={click_id}</code>). It is documentation you keep next to the network — it is <b>not appended to your offers at runtime</b>. The macro has to live in the offer's own Target URL for the network to receive it.</p>
+</div>
+
+<p>See <a href="/help/offers">Offers and offer URLs</a> and <a href="/help/affiliate-networks">Adding an affiliate network</a> for where each piece is entered.</p>
+
+<h2 id="the-sub-id-chain">The sub-id chain</h2>
+<p><code>sub_id_1</code> through <code>sub_id_10</code> are ten free slots for values your traffic source passes on the campaign link — ad set, creative, keyword, placement, anything. The tracker stores them on the click and exposes them as offer macros, so you can forward the ones the network should see (for example <code>&amp;s2={sub_id_2}</code>), and the network can echo them back on the postback as passthrough fields. That chain is what lets a report split revenue by the source's own granularity, and it is the fallback key when a clickless conversion has no transaction id.</p>
+
+<h2 id="what-the-campaign-link-accepts">What the campaign link accepts</h2>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Parameter</th><th>Purpose</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>click_id</code></td><td>The source's own click id; kept instead of generating a new one.</td></tr>
+    <tr><td><code>cost</code></td><td>Per-click cost for this hit.</td></tr>
+    <tr><td><code>sub_id_1</code> … <code>sub_id_10</code></td><td>Your own identifiers, carried end to end.</td></tr>
+    <tr><td><code>utm_source</code>, <code>utm_medium</code>, <code>utm_campaign</code></td><td>Campaign tagging; other <code>utm_*</code> values are collected too.</td></tr>
+    <tr><td><code>external_id</code></td><td>The source's own entity id (ad, ad set).</td></tr>
+    <tr><td><code>country</code>, <code>region</code>, <code>city</code>, <code>gender</code></td><td>Extra attributes some sources append.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Anything the source does not send is simply left empty. If a source uses different names, map its token to the canonical one in that source's <b>paramsIdMapping</b> (for example <code>clickid → click</code>) — see <a href="/help/traffic-sources">Adding a traffic source</a>.</p>
+
+<h2 id="offer-url-macros">Offer URL macros</h2>
+<p>Place a macro in single braces anywhere in the offer URL; the tracker replaces it with the value from the current hit. <b>Unknown macros are left exactly as written</b>, so a typo shows up in the URL rather than silently blanking it.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Macro</th><th>Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>{click_id}</code></td><td>The click's unique id</td></tr>
+    <tr><td><code>{sub_id_1}</code> … <code>{sub_id_10}</code></td><td>Sub-ids 1–10</td></tr>
+    <tr><td><code>{external_id}</code></td><td>External (ad) id</td></tr>
+    <tr><td><code>{visitor_id}</code></td><td>First-party visitor id, stable across sessions</td></tr>
+    <tr><td><code>{country}</code> <code>{region}</code> <code>{city}</code></td><td>Geo</td></tr>
+    <tr><td><code>{ip}</code> <code>{isp}</code> <code>{connection_type}</code></td><td>Network and connection</td></tr>
+    <tr><td><code>{os}</code> <code>{os_version}</code></td><td>Operating system</td></tr>
+    <tr><td><code>{browser}</code> <code>{browser_version}</code></td><td>Browser</td></tr>
+    <tr><td><code>{device_type}</code> <code>{device_brand}</code> <code>{device_model}</code></td><td>Device</td></tr>
+    <tr><td><code>{language}</code></td><td>Visitor locale</td></tr>
+    <tr><td><code>{referrer}</code> <code>{keyword}</code></td><td>Referrer and search keyword</td></tr>
+    <tr><td><code>{cost}</code> <code>{currency}</code></td><td>Click cost and its currency</td></tr>
+    <tr><td><code>{utm_source}</code> <code>{utm_medium}</code> <code>{utm_campaign}</code> <code>{utm_creative}</code></td><td>UTM tags carried by the hit</td></tr>
+    <tr><td><code>{offer_id}</code> <code>{campaign_id}</code> <code>{landing_id}</code></td><td>Tracker object ids</td></tr>
+    <tr><td><code>{payout}</code></td><td>The offer's payout</td></tr>
+    <tr><td><code>{_md5}</code></td><td>MD5 hex of the click id</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3 id="md5">{_md5}</h3>
+<p><code>{_md5}</code> is the MD5 hex digest of the click id — a fixed-length, opaque version of the same value. Use it when a network wants a hashed or length-limited identifier, or when you want a deterministic token that cannot be traced back to the raw id. The same click id always produces the same <code>{_md5}</code>, so it works as a stable join key on the network's side too.</p>
+
+<h2 id="lander-and-fallback-macros">Lander and fallback macros</h2>
+<p>Inside a local lander's HTML, the placeholder <code>{offer}</code> is replaced with the click-out URL <code>/c/{alias}/{offer_id}</code>, so a button like <code>&lt;a href="{offer}"&gt;Continue&lt;/a&gt;</code> always routes back through the tracker.</p>
+<p>A campaign's <b>Fallback URL</b> (and the workspace-wide fallback) accepts the same click macros as an offer URL, plus <code>{campaign_name}</code> and <code>{_md5}</code> — useful when the drop-off page needs to know which campaign sent the visitor.</p>
+
+<h2 id="outgoing-postback-tokens">Outgoing postback tokens</h2>
+<p>The outbound postback the tracker sends to a traffic source or on a campaign cycle supports everything in the offer macro table, plus the conversion-specific tokens below. These belong in a source's S2S postback URL, not in an offer URL.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Token</th><th>Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>{payout}</code></td><td>The conversion payout being reported</td></tr>
+    <tr><td><code>{revenue}</code> <code>{profit}</code></td><td>Revenue and profit for the row</td></tr>
+    <tr><td><code>{status}</code> <code>{status2}</code></td><td>Primary status, and a secondary status when the row carries one</td></tr>
+    <tr><td><code>{_md5}</code></td><td>MD5 hex of the click id</td></tr>
+    <tr><td><code>{unixconversiontime}</code></td><td>Conversion time as Unix epoch seconds</td></tr>
+    <tr><td><code>event_1</code> … <code>event_30</code></td><td>Custom conversion event parameters</td></tr>
+  </tbody>
+</table>
+</div>
+<p>A literal <code>payout=auto</code> in a postback URL is replaced with the payout actually being fired, so one template can serve offers with different payouts. Unknown tokens in a postback URL stay literal; a known token with no value resolves to empty.</p>
+
+<h2 id="geo-device-and-utm-values">Geo, device and UTM values</h2>
+<p>Geo and device macros are filled from what the tracking request resolves — the visitor's IP, User-Agent and any proxy/CDN geo header — so they are available even when the source sends nothing. UTM macros come from the UTM parameters on the hit. Where a value could not be resolved, the macro is simply empty rather than guessed; that is the honest result, but it also means a report grouped by <code>{city}</code> will be sparse if your source never passes usable location data.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Keep the id in one place</p>
+  <p>The tracker appends <code>click_id=…</code> to every offer URL on its own, so the network parameter you add (for example <code>&amp;sub1={click_id}</code>) is the only extra one it needs. Give the same parameter name to the network's postback template so what goes out comes back.</p>
+</div>
+
+          </div>
+
+          <nav class="help-pager" aria-label="More in this category">
+        <a class="help-pager__link help-pager__link--prev" href="/help/s2s-postback"><span class="help-pager__dir">Previous</span><span class="help-pager__title">Server-to-server postbacks: the complete reference</span></a>
+        <a class="help-pager__link help-pager__link--next" href="/help/clickless-conversions"><span class="help-pager__dir">Next</span><span class="help-pager__title">Clickless conversions and manual import</span></a>
+      </nav>
+        </div>
+
+        <aside class="help-aside">
+        <nav class="help-toc" aria-label="On this page">
+          <p class="help-toc__title">On this page</p>
+          <ul class="help-toc__list">
+<li class="help-toc__item help-toc__item--h2"><a href="#what-a-click-id-is">What a click id is</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-click-id-lifecycle">The click-id lifecycle</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-sub-id-chain">The sub-id chain</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#what-the-campaign-link-accepts">What the campaign link accepts</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#offer-url-macros">Offer URL macros</a>
+<ul class="help-toc__sub">
+<li class="help-toc__item help-toc__item--h3"><a href="#md5">{_md5}</a></li>
+</ul>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#lander-and-fallback-macros">Lander and fallback macros</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#outgoing-postback-tokens">Outgoing postback tokens</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#geo-device-and-utm-values">Geo, device and UTM values</a>
+</li>
+</ul>
+        </nav>
+      </aside>
+      </div>
+    </div>
+  </article>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/" aria-label="AAA Tracker home">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+          <span class="word">AAA<i>Tracker</i></span>
+        </a>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul class="footer-links">
+          <li><a href="/features">Features</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Security &amp; anti-fraud</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free trial</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul class="footer-links">
+          <li><a href="/help/">Help centre</a></li>
+          <li><a href="/help/getting-started">Getting started</a></li>
+          <li><a href="/help/s2s-postback">Postbacks</a></li>
+          <li><a href="/help/troubleshooting-postbacks">Troubleshooting</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul class="footer-links">
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/backend/">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul class="footer-links">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/js/site.js?v=1" defer></script>
+<script src="/help/assets/help.js?v=1" defer></script>
+</body>
+</html>

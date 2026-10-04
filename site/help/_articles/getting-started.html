@@ -1,0 +1,40 @@
+<h2>What you are building</h2>
+<p>A tracker records one row per click and joins the conversions that come back to it later. To get that first row you need three things: a traffic source to label where the click came from, an offer to send the visitor to, and a campaign that ties the two together and hands you a link. Once that link is live, a click becomes a click, a postback becomes a conversion, and the ledger starts to reconcile.</p>
+<p>This walkthrough follows the shortest path to a working conversion. Everything else in the tracker — flows, landers, caps, splits — layers on top of these same three objects.</p>
+
+<h2>Step 1 — Add the traffic source</h2>
+<p>Open <b>Manage → Traffic sources</b> and pick your source from the presets, or add it from scratch. A traffic source stores the source's own click-id convention and the macros it understands, so the tracking link the tracker generates already carries the right placeholders.</p>
+<p>If your source is not in the list, add it and record how it passes a click id (for example a parameter such as <code>click_id</code> or a source-specific one). Get that wrong and the click still records — it just records without the identifier your source will quote back to you.</p>
+
+<h2>Step 2 — Add the offer</h2>
+<p>Open <b>Manage → Offers</b> and add the destination you are sending traffic to. Set the offer URL — the page the visitor lands on — and its payout. The offer URL accepts macros, and the one you will almost always use is <code>{click_id}</code>, which the tracker replaces with the click id it generated.</p>
+<p>Most networks need your click id in a parameter of <i>their</i> choosing. The tracker already appends <code>click_id=…</code> to the offer URL automatically, but the network usually reads a different name, so you add that name yourself in the offer's Target URL — for example <code>&amp;sub1={click_id}</code>. Whatever the network calls it, that is the value it must echo back on the postback.</p>
+
+<h2>Step 3 — Build the campaign</h2>
+<p>Open <b>Manage → Campaigns</b>, create a campaign, and pick the traffic source and the offer you just made. Save it, then copy the campaign link. It takes the form:</p>
+<pre><code>https://&lt;your-domain&gt;/&lt;alias&gt;</code></pre>
+<p>The campaign link accepts a set of parameters when your source can pass them: <code>click_id</code>, <code>cost</code>, <code>sub_id_1</code> through <code>sub_id_10</code>, <code>utm_*</code>, <code>external_id</code>, and extras such as <code>country</code> or <code>gender</code>. Anything your source does not send is simply left empty. The <code>alias</code> is the short path you chose; it is what identifies the campaign when the link is clicked.</p>
+
+<h2>Step 4 — Fire a test conversion</h2>
+<p>There is no dedicated test-click or test-postback button. The honest test is the real path: fire a click on the campaign link, then send a postback for it by hand.</p>
+
+<h3>Read the click id</h3>
+<p>Open the campaign link in a browser. Then open <b>Logs → Clicks</b> and find the newest row. Copy its <b>click id</b> — that is the value the network would return to you.</p>
+
+<h3>Send the postback</h3>
+<p>On your own machine, replace the click id and hit the inbound postback endpoint. This is exactly what an affiliate network does when it reports a sale:</p>
+<pre><code>curl "https://YOUR-TRACKER-DOMAIN/pb?clickid=YOUR-CLICK-ID&amp;payout=25&amp;status=sale"</code></pre>
+<p>A good response is HTTP 200 with a body like <code>{"status":"ok",…}</code>. A 400 means the status or payout was rejected; a 403 means postback security blocked the call. The <a href="/help/s2s-postback">postback reference</a> lists every accepted parameter and alias.</p>
+
+<h2>Where to confirm everything</h2>
+<ul>
+  <li><b>Logs → Clicks</b> — the click you fired, with its click id, sub-ids and UTM values.</li>
+  <li><b>Logs → S2S postbacks</b> — the inbound call you sent, including any rejection and its reason.</li>
+  <li><b>Reports → Conversions</b> — the conversion now attached to the click, where you can edit or delete it.</li>
+</ul>
+<p>When those three line up, the plumbing is finished. The next useful pages are <a href="/help/offers">Offers and offer URLs</a> and <a href="/help/campaigns-and-flows">Campaigns and flows</a>, which is where routing and multiple offers come in.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">In-memory rehearsal</p>
+  <p>A campaign row also has a <b>Simulate</b> action. It runs the flow, filter and cap logic in memory — side-effect free — without real traffic. Use it to sanity-check routing before you spend.</p>
+</div>

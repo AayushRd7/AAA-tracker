@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.className+=' js'</script>
+<title>Securing your postback URL | AAA Tracker Help</title>
+<meta name="description" content="Lock down the inbound postback URL with a secret key and an IP allowlist, and understand what a 403 response means.">
+<link rel="canonical" href="https://aaatracker.website/help/postback-security">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="AAA Tracker">
+<meta property="og:title" content="Securing your postback URL | AAA Tracker Help">
+<meta property="og:description" content="Lock down the inbound postback URL with a secret key and an IP allowlist, and understand what a 403 response means.">
+<meta property="og:url" content="https://aaatracker.website/help/postback-security">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Securing your postback URL | AAA Tracker Help">
+<meta name="twitter:description" content="Lock down the inbound postback URL with a secret key and an IP allowlist, and understand what a 403 response means.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Securing your postback URL",
+      "description": "Lock down the inbound postback URL with a secret key and an IP allowlist, and understand what a 403 response means.",
+      "dateModified": "2026-10-05",
+      "datePublished": "2026-10-05",
+      "inLanguage": "en",
+      "url": "https://aaatracker.website/help/postback-security",
+      "mainEntityOfPage": "https://aaatracker.website/help/postback-security",
+      "keywords": "postback, security, secret key, allowlist",
+      "articleSection": "Account & access",
+      "publisher": {
+        "@type": "Organization",
+        "name": "AAA Tracker",
+        "url": "https://aaatracker.website/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://aaatracker.website/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Help",
+          "item": "https://aaatracker.website/help/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Securing your postback URL",
+          "item": "https://aaatracker.website/help/postback-security"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css?v=2">
+<link rel="stylesheet" href="/assets/css/site.css?v=7">
+<link rel="stylesheet" href="/help/assets/help.css?v=1">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M3.4 6h17.2M3.4 12h17.2M3.4 18h17.2"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/help/" aria-current="page">Docs</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free trial</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <div class="wrap">
+    <nav class="help-breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        <li><a href="/help/">Help</a></li>
+        <li aria-current="page">Securing your postback URL</li>
+      </ol>
+    </nav>
+  </div>
+
+  <article class="help-article section section--sm">
+    <div class="wrap">
+      <div class="help-layout">
+        <div class="help-main">
+          <header class="help-article__head">
+            <span class="eyebrow">Account &amp; access</span>
+            <h1 class="h1 mt-4">Securing your postback URL</h1>
+            <p class="lead mt-5">Lock down the inbound postback URL with a secret key and an IP allowlist, and understand what a 403 response means.</p>
+            <p class="help-meta mono mt-6">Updated <time datetime="2026-10-05">5 October 2026</time></p>
+          </header>
+
+          <div class="prose help-prose mt-8">
+<h2 id="why-an-open-postback-url-can-be-abused">Why an open postback URL can be abused</h2>
+<p>Your inbound postback endpoint, <code>https://YOUR-TRACKER-DOMAIN/pb</code>, has to be reachable by every affiliate network you work with. That also means it is reachable by anyone else who learns the URL. An attacker who knows a valid click id — or who can guess one — can post a fabricated conversion and quietly change your numbers:</p>
+<ul>
+  <li><b>Padding revenue.</b> Fake <code>sale</code> postbacks inflate payout and revenue, which flatters ROI, EPC and every report that reads them.</li>
+  <li><b>Hiding bad traffic.</b> A stream of fake <code>lead</code> conversions can mask a source that is really underperforming.</li>
+  <li><b>Polluting attribution.</b> Junk conversions tie themselves to real clicks and distort which campaign, offer or creative looks profitable.</li>
+</ul>
+<p>The endpoint is public by design, so the fix is not to hide it but to require proof that a caller is allowed to use it.</p>
+
+<h2 id="the-two-controls">The two controls</h2>
+<p>Both live in <b>Settings → Postback security</b>. Turn the panel on with the switch <b>Require a secret key or IP allowlist for inbound postbacks</b>, then fill either or both fields. When the panel is enabled, a postback must satisfy <b>every non-empty check</b>. If you enable it and leave both fields empty, postbacks are still allowed — so set at least one.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Control</th><th>Field</th><th>What it enforces</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Secret key</td><td><b>Secret key</b></td><td>Every postback must carry a matching key, or it is refused.</td></tr>
+    <tr><td>IP allowlist</td><td><b>Allowed IPs</b></td><td>Only callers whose source IP is listed may post. Accepts a comma-separated list of IPs and CIDR ranges, for example <code>203.0.113.5, 10.0.0.0/8</code>.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Use the key alone when a network posts from a range that changes; add the allowlist when the network can give you a stable set of sending addresses.</p>
+
+<h2 id="how-the-key-travels">How the key travels</h2>
+<p>The key is accepted in three places, so you can fit whichever shape a network's postback template supports:</p>
+<ul>
+  <li>a <code>?key=</code> query parameter,</li>
+  <li>a <code>?secret=</code> query parameter,</li>
+  <li>an <code>X-Postback-Key</code> request header.</li>
+</ul>
+<p>For a URL-shaped template, append the key to the postback URL you hand the network:</p>
+<pre><code>https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&amp;payout={payout}&amp;status={status}&amp;key=YOUR-SECRET</code></pre>
+<p>If the network allows custom headers instead, keep the URL clean and pass the same value as <code>X-Postback-Key</code>. Either form works; do not put the key in both.</p>
+
+<h2 id="the-exact-403-a-blocked-postback-gets">The exact 403 a blocked postback gets</h2>
+<p>A postback that fails either check is refused <b>before it is read</b>. It gets HTTP <code>403</code> with a JSON body naming the reason:</p>
+<pre><code>{"detail":"Invalid or missing postback key"}</code></pre>
+<p>An IP failure reads instead:</p>
+<pre><code>{"detail":"Client IP '203.0.113.9' is not in the allowlist"}</code></pre>
+<p>The attempt is also written to <b>Logs → S2S postbacks</b> with the result <code>blocked</code> and the same reason, so you can see which control refused it. Note that the check happens after the click id and payout are parsed but before any conversion is recorded — a blocked postback never becomes a conversion.</p>
+
+<h2 id="test-it-with-curl">Test it with curl</h2>
+<p>Use a real click id from <b>Logs → Clicks</b>, then call the endpoint with and without the key:</p>
+<pre><code># with the key — accepted
+curl "https://YOUR-TRACKER-DOMAIN/pb?clickid=YOUR-CLICK-ID&amp;payout=25&amp;status=sale&amp;key=YOUR-SECRET"
+
+# without the key — 403
+curl -i "https://YOUR-TRACKER-DOMAIN/pb?clickid=YOUR-CLICK-ID&amp;payout=25&amp;status=sale"</code></pre>
+<p>Or send the header instead of the query parameter:</p>
+<pre><code>curl -H "X-Postback-Key: YOUR-SECRET" "https://YOUR-TRACKER-DOMAIN/pb?clickid=YOUR-CLICK-ID&amp;payout=25&amp;status=sale"</code></pre>
+<p>A correct call answers <code>200</code> with <code>{"status":"ok",…}</code>. A blocked one answers <code>403</code> as above. Testing an IP allowlist from your own machine is less direct: your address must be the one the tracker sees, which may be a proxy in front of the network.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">Enable it before you hand the URL over</p>
+  <p>Turn on the key <i>before</i> you paste the postback URL into a network's settings. The key then travels inside the URL the network stores, so there is nothing to re-edit later. Adding a key after a network is already live means every postback fails with a 403 until you update that network's template too.</p>
+</div>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Keep the key, watch the logs</p>
+  <p>Treat the secret like any credential: give a different value per workspace, rotate it if it leaks, and update the networks in the same sitting. After any change, watch <b>Logs → S2S postbacks</b> for a <code>blocked</code> result — it is the fastest signal that a network is still sending the old value.</p>
+</div>
+
+          </div>
+
+          <nav class="help-pager" aria-label="More in this category">
+        <a class="help-pager__link help-pager__link--prev" href="/help/password-and-2fa"><span class="help-pager__dir">Previous</span><span class="help-pager__title">Password, two-factor and sessions</span></a>
+        <span></span>
+      </nav>
+        </div>
+
+        <aside class="help-aside">
+        <nav class="help-toc" aria-label="On this page">
+          <p class="help-toc__title">On this page</p>
+          <ul class="help-toc__list">
+<li class="help-toc__item help-toc__item--h2"><a href="#why-an-open-postback-url-can-be-abused">Why an open postback URL can be abused</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-two-controls">The two controls</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#how-the-key-travels">How the key travels</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-exact-403-a-blocked-postback-gets">The exact 403 a blocked postback gets</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#test-it-with-curl">Test it with curl</a>
+</li>
+</ul>
+        </nav>
+      </aside>
+      </div>
+    </div>
+  </article>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/" aria-label="AAA Tracker home">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+          <span class="word">AAA<i>Tracker</i></span>
+        </a>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul class="footer-links">
+          <li><a href="/features">Features</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Security &amp; anti-fraud</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free trial</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul class="footer-links">
+          <li><a href="/help/">Help centre</a></li>
+          <li><a href="/help/getting-started">Getting started</a></li>
+          <li><a href="/help/s2s-postback">Postbacks</a></li>
+          <li><a href="/help/troubleshooting-postbacks">Troubleshooting</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul class="footer-links">
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/backend/">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul class="footer-links">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/js/site.js?v=1" defer></script>
+<script src="/help/assets/help.js?v=1" defer></script>
+</body>
+</html>

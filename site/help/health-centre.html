@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.className+=' js'</script>
+<title>Health centre and system status | AAA Tracker Help</title>
+<meta name="description" content="Watch failed outbound sends, the last successful postback per source, and the public system status page.">
+<link rel="canonical" href="https://aaatracker.website/help/health-centre">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="AAA Tracker">
+<meta property="og:title" content="Health centre and system status | AAA Tracker Help">
+<meta property="og:description" content="Watch failed outbound sends, the last successful postback per source, and the public system status page.">
+<meta property="og:url" content="https://aaatracker.website/help/health-centre">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Health centre and system status | AAA Tracker Help">
+<meta name="twitter:description" content="Watch failed outbound sends, the last successful postback per source, and the public system status page.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Health centre and system status",
+      "description": "Watch failed outbound sends, the last successful postback per source, and the public system status page.",
+      "dateModified": "2026-10-05",
+      "datePublished": "2026-10-05",
+      "inLanguage": "en",
+      "url": "https://aaatracker.website/help/health-centre",
+      "mainEntityOfPage": "https://aaatracker.website/help/health-centre",
+      "keywords": "health, status, outbound, monitoring",
+      "articleSection": "Reports & logs",
+      "publisher": {
+        "@type": "Organization",
+        "name": "AAA Tracker",
+        "url": "https://aaatracker.website/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://aaatracker.website/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Help",
+          "item": "https://aaatracker.website/help/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Health centre and system status",
+          "item": "https://aaatracker.website/help/health-centre"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css?v=2">
+<link rel="stylesheet" href="/assets/css/site.css?v=7">
+<link rel="stylesheet" href="/help/assets/help.css?v=1">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M3.4 6h17.2M3.4 12h17.2M3.4 18h17.2"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/help/" aria-current="page">Docs</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free trial</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <div class="wrap">
+    <nav class="help-breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        <li><a href="/help/">Help</a></li>
+        <li aria-current="page">Health centre and system status</li>
+      </ol>
+    </nav>
+  </div>
+
+  <article class="help-article section section--sm">
+    <div class="wrap">
+      <div class="help-layout">
+        <div class="help-main">
+          <header class="help-article__head">
+            <span class="eyebrow">Reports &amp; logs</span>
+            <h1 class="h1 mt-4">Health centre and system status</h1>
+            <p class="lead mt-5">Watch failed outbound sends, the last successful postback per source, and the public system status page.</p>
+            <p class="help-meta mono mt-6">Updated <time datetime="2026-10-05">5 October 2026</time></p>
+          </header>
+
+          <div class="prose help-prose mt-8">
+<h2 id="what-the-health-centre-is">What the Health centre is</h2>
+<p>Open <b>Tools → Health centre</b> for a single read of everything the tracker can honestly say about itself: whether its stores answer, how its background loops are keeping time, what failed to send out in the last day, and which traffic sources have gone quiet. For clicks, conversions and profit, use <a href="/help/reports-and-saved-views">Reports</a> and the <a href="/help/logs-reference">logs</a>.</p>
+<p>It reads live state on load and again whenever you press <b>Re-check</b>. It is part of the workspace management plane, visible to owners and admins by default and grantable per section.</p>
+
+<h2 id="the-verdict-banner">The verdict banner</h2>
+<p>At the top sits one verdict: <b>All clear</b> when nothing is wrong, or <b>Attention needed</b> when anything below is flagged. The banner agrees with the incident console underneath — if the console has any row at all, the verdict will not claim all clear. Under the headline, a short list spells out the summary reasons (a store not answering, a stale loop, a run of failed sends).</p>
+
+<h2 id="incident-console">Incident console</h2>
+<p>The console groups every finding the page can derive into three severities. Each row names the subject and its area, gives the reason, and offers a <b>fix</b> link that jumps to the page where it is resolved.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Severity</th><th>Typical examples</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Critical</b></td><td>The main database is not answering; the analytics store is not answering; a domain's TLS certificate has expired or expires within 7 days; an integration token already expired.</td></tr>
+    <tr><td><b>Warning</b></td><td>A background loop is stale; more than a handful of outbound sends failed in 24 hours; a source has not delivered an accepted postback in more than 7 days; a domain does not resolve; a stored integration token expires within 7 days.</td></tr>
+    <tr><td><b>Info</b></td><td>A domain resolves but not to this server's address (a proxy or CDN in front is legitimate); a certificate could not be read.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>When the console is empty it shows a green <b>No incidents</b> state — every check this backend can make came back clean.</p>
+
+<h2 id="databases">Databases</h2>
+<p>Two rows report reachability and a small round-trip latency:</p>
+<ul>
+  <li><b>Database</b> — the primary store; the row reads <i>reachable</i> with a millisecond round-trip, or <i>unreachable</i>.</li>
+  <li><b>Analytics</b> — the store that serves the click stream; shown the same way.</li>
+</ul>
+<p>A store that does not answer becomes a critical incident, since the numbers elsewhere depend on it.</p>
+
+<h2 id="background-loops">Background loops</h2>
+<p>The tracker runs several loops on its own schedule. The Health centre lists each one with its cadence, its last run, and a state chip:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Loop</th><th>Cadence</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Monitor</td><td>15 min</td><td>Probes active campaigns' flow URLs and can auto-disable a flow after repeated failures.</td></tr>
+    <tr><td>Auto rules</td><td>15 min</td><td>Evaluates your automation rules and fires their actions (pause, alert).</td></tr>
+    <tr><td>Optimizer</td><td>15 min</td><td>Re-weights flows for campaigns with the optimizer enabled.</td></tr>
+    <tr><td>Insights</td><td>15 min</td><td>Runs the anomaly detectors and alerts on new critical findings.</td></tr>
+    <tr><td>Meta cost sync</td><td>periodic</td><td>Pulls ad spend from the connected ad platform.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>The state chip is <b>ok</b>, <b>stale</b>, or <b>not yet run</b>. A loop that has not had its first pass since the process started is <b>not yet run</b>, not stale — normal after a restart and not an incident. A loop whose heartbeat is far older than its cadence is <b>stale</b> and appears in the incident console with its age in minutes.</p>
+
+<h2 id="failed-outbound-sends-24h">Failed outbound sends (24h)</h2>
+<p>The <b>Process</b> card shows the app version, its uptime, and a count of <b>Failed outbound sends (24h)</b> — conversions the tracker tried to deliver onward to an ad platform and could not. A few are noise; a burst is worth acting on and will surface both in the attention list and as a warning incident linking to <b>Manage → CAPI integrations</b>.</p>
+
+<h2 id="last-successful-postback-per-source">Last successful postback per source</h2>
+<p>The last card is the quickest way to tell whether an affiliate network has gone quiet. It lists one row per traffic source with the timestamp of that source's most recent <i>accepted</i> inbound postback, newest first.</p>
+<ul>
+  <li>The source name is a link that opens <b>Logs → S2S postbacks</b> already filtered to that postback's click id, so you can see the exact call.</li>
+  <li>Only accepted postbacks from the last <b>30 days</b> are considered; a source with none shows an empty state instead of a row.</li>
+  <li>A source with no accepted postback for more than <b>7 days</b> is called out as a warning incident.</li>
+</ul>
+
+<h2 id="counts-and-totals">Counts and totals</h2>
+<p>A row of tiles summarizes the workspace: clicks, conversions, campaigns, users, postbacks and CAPI attempts. They are scope indicators, not a report — for a date range or a breakdown, go to Reports.</p>
+
+<h2 id="the-system-status-card">The System status card</h2>
+<p>The Documentation page has a second tab, <b>System status</b>, shown to workspace managers. It is a lighter version of the same idea and it refreshes itself every 15 seconds:</p>
+<ul>
+  <li>a <b>Version</b> tile, plus <b>Database</b> and <b>Analytics</b> tiles that read <i>Up</i> with a latency in milliseconds or <i>Down</i>;</li>
+  <li><b>Clicks (24h)</b> and <b>Conversions (24h)</b> tiles, so you can see at a glance whether events are still flowing;</li>
+  <li>a <b>Background loops</b> table with each loop's last run, marked <i>not yet</i> when it has not run since boot;</li>
+  <li>a footer line with the app version and the polling interval, and the landings disk's used and free space where that is reported.</li>
+</ul>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">What this page cannot see</p>
+  <p>The Health centre reports only from inside the application — the reachability of its own stores, its own loops, its own outbound sends. It does not inspect the host or its containers, so "All clear" means every check the app can make passed, not that the whole server is healthy.</p>
+</div>
+
+          </div>
+
+          <nav class="help-pager" aria-label="More in this category">
+        <a class="help-pager__link help-pager__link--prev" href="/help/logs-reference"><span class="help-pager__dir">Previous</span><span class="help-pager__title">Logs: what each one shows</span></a>
+        <span></span>
+      </nav>
+        </div>
+
+        <aside class="help-aside">
+        <nav class="help-toc" aria-label="On this page">
+          <p class="help-toc__title">On this page</p>
+          <ul class="help-toc__list">
+<li class="help-toc__item help-toc__item--h2"><a href="#what-the-health-centre-is">What the Health centre is</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-verdict-banner">The verdict banner</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#incident-console">Incident console</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#databases">Databases</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#background-loops">Background loops</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#failed-outbound-sends-24h">Failed outbound sends (24h)</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#last-successful-postback-per-source">Last successful postback per source</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#counts-and-totals">Counts and totals</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-system-status-card">The System status card</a>
+</li>
+</ul>
+        </nav>
+      </aside>
+      </div>
+    </div>
+  </article>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/" aria-label="AAA Tracker home">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+          <span class="word">AAA<i>Tracker</i></span>
+        </a>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul class="footer-links">
+          <li><a href="/features">Features</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Security &amp; anti-fraud</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free trial</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul class="footer-links">
+          <li><a href="/help/">Help centre</a></li>
+          <li><a href="/help/getting-started">Getting started</a></li>
+          <li><a href="/help/s2s-postback">Postbacks</a></li>
+          <li><a href="/help/troubleshooting-postbacks">Troubleshooting</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul class="footer-links">
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/backend/">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul class="footer-links">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/js/site.js?v=1" defer></script>
+<script src="/help/assets/help.js?v=1" defer></script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<h2>What an offer is</h2>
+<p>An offer is the final destination of a click — the network’s page the visitor is sent to. Open <b>Manage → Offers → Add offer</b> to create one. The wizard is a short form; this page walks every field, then explains the one thing most people get wrong: getting your click id onto the network’s URL.</p>
+
+<h2>Every field</h2>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Offer name</b></td><td>Label shown in lists, pickers and reports. Use the network’s offer id in the name so you can find it fast.</td></tr>
+    <tr><td><b>Target URL</b></td><td>The page the visitor lands on. Accepts macros; the network’s click-id parameter must be placed here (see below).</td></tr>
+    <tr><td><b>Affiliate network</b></td><td>The network this offer belongs to, so its click-id convention and postback template are known.</td></tr>
+    <tr><td><b>Countries</b></td><td>ISO-code targeting list — search by name or code. Leave empty for all countries.</td></tr>
+    <tr><td><b>Payout</b></td><td>The value a conversion is worth, in this offer’s currency. Set <code>0</code> for a rev-share offer.</td></tr>
+    <tr><td><b>Currency</b></td><td>The currency the payout (and the postback’s amount) is recorded in.</td></tr>
+    <tr><td><b>Status</b></td><td>Active, paused or archived. Archiving is a soft delete — restore any time.</td></tr>
+    <tr><td><b>Daily conversions cap</b></td><td>Stop serving the offer once this many conversions land in a day; traffic overflows to the <b>Overflow offer</b>.</td></tr>
+    <tr><td><b>Overflow offer</b></td><td>Where traffic goes when the daily cap is reached.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Below the main fields there are also <b>Tags</b> (free-form, e.g. <code>nutra</code>, <code>tier1</code>), <b>Notes</b> and an optional <b>CAPI pixel</b> binding. Offers can be created in bulk with a CSV whose header is <code>id,name,url,affiliate_network_id,countries,payout,currency,status,tags,daily_conversions_cap,overflow_offer_id,notes</code>.</p>
+
+<h2>Putting the network’s click id into the Target URL</h2>
+<p>When a click-out happens, the tracker substitutes every <code>{macro}</code> in the Target URL from the click’s data and <i>also</i> appends <code>click_id=…</code> automatically. That auto-append is not enough on its own: a network reads <b>its own</b> parameter name, and if that parameter is not on the URL the network has nothing to echo back on the postback. Your conversion arrives with an empty or wrong click id.</p>
+<p>The fix is to insert the network’s parameter into the Target URL with the <code>{click_id}</code> macro. If the network expects <code>sub1</code>, the URL becomes:</p>
+<pre><code>https://network.example.com/click?offer=123&amp;sub1={click_id}</code></pre>
+<p>Other networks use different names — <code>s1={click_id}</code>, <code>aff_sub={click_id}</code>, and so on. Use whichever the network documents. One caution: the <b>“Offer parameters”</b> field on the network record is a stored reference only. It is <b>not</b> appended to the offer URL at runtime, so the parameter has to live on the Target URL itself.</p>
+
+<h2>Offer URL macros</h2>
+<p>Placeholders are single-brace; unknown macros are left untouched. The ones you will reach for most:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Macro</th><th>Value</th><th>Macro</th><th>Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>{click_id}</code></td><td>Unique click id</td><td><code>{visitor_id}</code></td><td>First-party visitor id</td></tr>
+    <tr><td><code>{sub_id_1}</code>…<code>{sub_id_10}</code></td><td>Sub ids 1–10</td><td><code>{offer_id}</code> / <code>{campaign_id}</code></td><td>Offer / campaign id</td></tr>
+    <tr><td><code>{country}</code> / <code>{city}</code> / <code>{region}</code></td><td>Geo</td><td><code>{os}</code> / <code>{browser}</code> / <code>{device_type}</code></td><td>Device &amp; platform</td></tr>
+    <tr><td><code>{language}</code></td><td>Locale</td><td><code>{referrer}</code> / <code>{keyword}</code></td><td>Context</td></tr>
+    <tr><td><code>{cost}</code> / <code>{currency}</code></td><td>Click cost &amp; currency</td><td><code>{ip}</code> / <code>{isp}</code></td><td>Network details</td></tr>
+    <tr><td><code>{utm_*}</code></td><td>UTM tags</td><td><code>{_md5}</code> / <code>{payout}</code></td><td>Hashed value / payout</td></tr>
+  </tbody>
+</table>
+</div>
+<p>The full set also includes <code>{device_brand}</code>, <code>{os_version}</code>, <code>{browser_version}</code>, <code>{connection_type}</code> and <code>{landing_id}</code>. Local landing files use <code>{offer}</code> for the click-out URL. See <a href="/help/click-ids-and-macros">Click IDs and URL macros</a> for how the id travels end to end.</p>
+
+<h2>Rev-share offers</h2>
+<p>With a rev-share deal the amount you are paid is a share of the sale, so it cannot be known when you build the offer. Set <b>Payout</b> to <code>0</code> and let the value come in on the postback’s payout (or <code>amount</code>/<code>sum</code>) field. The tracker accumulates that amount onto the conversion, and repeats for the same click add up — that is how lifetime value builds. Set the <b>Currency</b> to match what the network pays, because the postback itself carries no currency parameter.</p>
+
+<h2>Daily caps and overflow</h2>
+<p><b>Daily conversions cap</b> counts conversions per day for the offer. Once it is reached the offer stops taking new traffic, and any click that would have gone to it is sent to the <b>Overflow offer</b> instead. Set the cap as a whole number; leave it empty or <code>0</code> for unlimited. If the cap is hit and no overflow offer is configured, the offers flow simply stops matching and normal campaign fallback applies.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">The one that breaks postbacks</p>
+  <p>Never assume the auto-appended <code>click_id=…</code> is enough. Check the offer’s <b>Target URL</b> carries the <i>network’s own</i> parameter with the <code>{click_id}</code> macro — for example <code>&amp;sub1={click_id}</code>. Without it, conversions land unattributed and look like they were never tracked.</p>
+</div>

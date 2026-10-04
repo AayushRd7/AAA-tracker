@@ -1,0 +1,32 @@
+<h2>Six trails, one shape</h2>
+<p>The <b>Logs</b> section keeps six separate event trails, one per sidebar entry. Every page has the same controls: a <b>From</b> and <b>To</b> date range, filters for that log, <b>Refresh</b>, <b>Export CSV</b>, a <b>Columns</b> picker and a <b>Preset</b> dropdown where you can <b>Save filters</b> and reuse them later.</p>
+<p>A log can also be opened pre-filtered by a link. Put a filter name in the query string — for example <code>?click_id=YOUR-CLICK-ID</code> — and the matching field is filled in when the page loads. The Health centre uses this to jump from a failed delivery straight to the row behind it. Copy a click id from <b>Logs → Clicks</b> and paste it into any other log's URL to follow one visitor across all six.</p>
+
+<h2>Clicks</h2>
+<p>Every click the tracker received. Columns: <code>Time</code>, <code>Click id</code>, <code>IP</code>, <code>Country</code>, <code>Device</code>, <code>Status</code>, <code>URL</code>, <code>Bot</code>. Filters: <b>Country</b>, <b>Device</b>, <b>OS</b>, <b>Status</b>, and a free-text <b>Search</b> over URL, IP and visitor id.</p>
+<p><b>Open it when</b> you need to confirm a click actually arrived — a campaign link hit lands here first — or to copy a click id for a manual postback test. The <b>Bot</b> flag tells you at a glance whether the hit was filtered as automated.</p>
+
+<h2>Conversions</h2>
+<p>The inbound conversion records as stored. Columns: <code>Time</code>, <code>Click id</code>, <code>Status</code>, <code>Campaign</code>, <code>Offer</code>, <code>Payout</code>, <code>Revenue</code>, <code>Transaction</code>. Filters: <b>Status</b>, <b>Click id</b> and <b>Campaign id</b>.</p>
+<p><b>Open it when</b> a postback returned 200 and you want to see the conversion row it created, or to confirm that an unknown click id became an unattributed row. This list is read-only; to change a status, payout or delete a row, use the conversion log on <b>Reports</b>.</p>
+
+<h2>S2S postbacks</h2>
+<p>Every inbound server-to-server call to <code>/pb</code>, accepted or not. Columns: <code>Time</code>, <code>Click id</code>, <code>Status</code>, <code>Result</code>, <code>Payout</code>, <code>Transaction</code>, <code>Source IP</code>, <code>Reason</code>, <code>Raw URL</code>. Filters: <b>Click id</b>, <b>Status</b>, <b>Result</b>, and a free-text <b>Search</b> over URL, reason and IP.</p>
+<p>The <b>Result</b> column is the diagnosis: <code>accepted</code>, <code>duplicate</code>, <code>rejected</code> or a rule/block outcome, with the <b>Reason</b> spelling out why. <b>Open it when</b> a network says it posted but revenue did not move — the reason tells you whether the call was refused before anything was written, or removed by the duplicate guard. See <a href="/help/troubleshooting-postbacks">Postback not recorded</a>.</p>
+
+<h2>Internal postbacks</h2>
+<p>The outbound delivery attempts this tracker sent onward, such as conversions pushed to an ad platform. Columns: <code>Time</code>, <code>Click id</code>, <code>Platform</code>, <code>Pixel</code>, <code>Event</code>, <code>Status</code>, <code>HTTP</code>, <code>Outcome</code>, <code>Attempts</code>, <code>Response</code>. Filters: <b>Click id</b>, <b>Event</b>, <b>Conversion status</b> and <b>Outcome</b>.</p>
+<p>The <code>HTTP</code> column and the clipped <code>Response</code> body are the delivery receipt: they show what the receiving platform answered. <b>Open it when</b> a conversion is missing downstream — the tracker recorded it, but the send may have failed or been retried. See <a href="/help/meta-capi">Sending conversions to Meta (CAPI)</a> for one platform's path.</p>
+
+<h2>Click forwarding</h2>
+<p>Every redirect decision a click went through. Columns: <code>Time</code>, <code>Click id</code>, <code>Campaign</code>, <code>Flow</code>, <code>Schema</code>, <code>Offer</code>, <code>Status</code>, <code>Destination</code>, <code>Reason</code>. Filters: <b>Click id</b>, <b>Campaign id</b>, <b>Status</b>, and a free-text <b>Search</b> over reason and destination.</p>
+<p><b>Open it when</b> a visitor reached the wrong destination or no redirect at all. The <code>Status</code> and <code>Reason</code> show which routing outcome was taken — a normal redirect, a fallback, a cap, an out-of-schedule flow or a blocked request — and the <code>Destination</code> is the URL the visitor was sent to.</p>
+
+<h2>Cost updates</h2>
+<p>Retroactive cost changes applied from <b>Reports</b>. Columns: <code>Time</code>, <code>Username</code>, <code>Campaign</code>, <code>From</code>, <code>To</code>, <code>Cost</code>, <code>Rows</code>. Filters: <b>Username</b> and <b>Campaign id</b>.</p>
+<p><b>Open it when</b> cost for a period changed unexpectedly or you want to know who last touched it. Each row records who applied the update, the window it covered, the new per-click cost and how many rows were rewritten.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Follow one click across every log</p>
+  <p>Copy the click id from <b>Logs → Clicks</b>, then open another log with <code>?click_id=…</code> appended to its URL. The filter is seeded for you, so Clicks → Click forwarding → S2S postbacks → Internal postbacks read as one story.</p>
+</div>

@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.className+=' js'</script>
+<title>Adding a traffic source | AAA Tracker Help</title>
+<meta name="description" content="Add a traffic source, capture its click-id convention, and generate a tracking link with that source&#x27;s real macros.">
+<link rel="canonical" href="https://aaatracker.website/help/traffic-sources">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="AAA Tracker">
+<meta property="og:title" content="Adding a traffic source | AAA Tracker Help">
+<meta property="og:description" content="Add a traffic source, capture its click-id convention, and generate a tracking link with that source&#x27;s real macros.">
+<meta property="og:url" content="https://aaatracker.website/help/traffic-sources">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Adding a traffic source | AAA Tracker Help">
+<meta name="twitter:description" content="Add a traffic source, capture its click-id convention, and generate a tracking link with that source&#x27;s real macros.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Adding a traffic source",
+      "description": "Add a traffic source, capture its click-id convention, and generate a tracking link with that source's real macros.",
+      "dateModified": "2026-10-05",
+      "datePublished": "2026-10-05",
+      "inLanguage": "en",
+      "url": "https://aaatracker.website/help/traffic-sources",
+      "mainEntityOfPage": "https://aaatracker.website/help/traffic-sources",
+      "keywords": "traffic source, tracking link, macros, setup",
+      "articleSection": "Traffic sources & networks",
+      "publisher": {
+        "@type": "Organization",
+        "name": "AAA Tracker",
+        "url": "https://aaatracker.website/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://aaatracker.website/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Help",
+          "item": "https://aaatracker.website/help/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Adding a traffic source",
+          "item": "https://aaatracker.website/help/traffic-sources"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css?v=2">
+<link rel="stylesheet" href="/assets/css/site.css?v=7">
+<link rel="stylesheet" href="/help/assets/help.css?v=1">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M3.4 6h17.2M3.4 12h17.2M3.4 18h17.2"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/help/" aria-current="page">Docs</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free trial</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <div class="wrap">
+    <nav class="help-breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        <li><a href="/help/">Help</a></li>
+        <li aria-current="page">Adding a traffic source</li>
+      </ol>
+    </nav>
+  </div>
+
+  <article class="help-article section section--sm">
+    <div class="wrap">
+      <div class="help-layout">
+        <div class="help-main">
+          <header class="help-article__head">
+            <span class="eyebrow">Traffic sources &amp; networks</span>
+            <h1 class="h1 mt-4">Adding a traffic source</h1>
+            <p class="lead mt-5">Add a traffic source, capture its click-id convention, and generate a tracking link with that source&#x27;s real macros.</p>
+            <p class="help-meta mono mt-6">Updated <time datetime="2026-10-05">5 October 2026</time></p>
+          </header>
+
+          <div class="prose help-prose mt-8">
+<h2 id="what-a-traffic-source-is">What a traffic source is</h2>
+<p>A traffic source is the record of where your clicks come from. It holds the source's own click-id convention, the macros it understands, where conversion data should be sent back to it, and the expected traffic loss. A campaign always points at one source, and that source is what lets the tracker name the channel behind every click.</p>
+
+<h2 id="the-catalog-and-new-from-template">The catalog and "New from template"</h2>
+<p>Open <b>Manage → Sources</b>. The catalog ships around <b>187 presets</b>, each with the source's real pass-through macros filled in. <b>New from template</b> opens the catalog; <b>Add source</b> opens a blank form.</p>
+<p>In the catalog you can search sources, and filter to <b>All</b> or <b>With API integrations</b>. A preset carries capability badges for the automation it supports:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Badge</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>cost</code></td><td>Cost update supported.</td></tr>
+    <tr><td><code>pause_campaign</code></td><td>Campaign pausing supported.</td></tr>
+    <tr><td><code>blacklist</code></td><td>Blacklisting supported.</td></tr>
+    <tr><td><code>pause_creative</code></td><td>Creative pausing supported.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>A preset with no badges is marked <b>No API integration</b> — it still tracks clicks, it just cannot be driven by the automation the badges describe. If your source is not in the list, use <b>Add source</b> and fill in the same fields by hand.</p>
+
+<h2 id="the-fields">The fields</h2>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Source name</b></td><td>The label used everywhere the source appears — reports, filters, the campaign picker.</td></tr>
+    <tr><td><b>Traffic loss (%)</b></td><td>The expected gap between the clicks the source reports and the visits tracked here, kept for reconciliation.</td></tr>
+    <tr><td><b>S2S postback URL</b></td><td>Where the tracker sends conversion data <b>to the source</b> (outbound — see below).</td></tr>
+    <tr><td><b>S2S postback statuses</b></td><td>Checkboxes for <code>sale</code>, <code>lead</code>, <code>rejected</code> and <code>upsale</code>, choosing which statuses fire the outbound postback.</td></tr>
+    <tr><td><b>Conversion fanout controls</b></td><td>Two switches that thin out what the source is told — see below.</td></tr>
+    <tr><td><b>Additional settings</b></td><td>Free-form key/value pairs for the source integration, such as API keys.</td></tr>
+    <tr><td><b>Settings mapping</b></td><td>Rows of Name / Parameter / Token mapping the source's macros to tracker parameters.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="the-s2s-postback-url-here-is-outbound">The S2S postback URL here is outbound</h2>
+<p>Read this one carefully, because the same phrase means the opposite thing in the two records. On a <b>traffic source</b>, the S2S postback URL is <b>outbound</b>: it is the URL on the source's side that the tracker calls when a conversion lands. The tracker fills the placeholders with real values, for example:</p>
+<pre><code>https://source.example.com/post?clickid={click_id}&amp;payout={payout}&amp;status={status}</code></pre>
+<p>The source's postback template is not your tracker's <code>/pb</code> endpoint. On an <b>affiliate network</b>, the S2S postback URL is the inbound template you hand <i>to the network</i> so it can call you — that is covered in <a href="/help/affiliate-networks">Adding an affiliate network</a> and <a href="/help/s2s-postback">the postback reference</a>.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">Do not paste your own postback URL here</p>
+  <p>If you paste <code>https://YOUR-TRACKER-DOMAIN/pb…</code> into a source's outbound field, the tracker will call itself on every conversion. Use the URL the source gave you for receiving postbacks.</p>
+</div>
+
+<h2 id="s2s-postback-statuses">S2S postback statuses</h2>
+<p>The four checkboxes decide which conversion statuses are worth telling the source about. Tick <b>sale</b> and <b>lead</b> for the common case; add <b>rejected</b> if the source wants to know about reversals, and <b>upsale</b> if it pays on them. A status left unticked simply does not fire an outbound postback.</p>
+
+<h2 id="conversion-fanout-controls">Conversion fanout controls</h2>
+<ul>
+  <li><b>Don't forward upsell conversions to this source</b> — sale and lead forwards are unaffected, and campaign postbacks are unaffected. Use it when the source only wants the first conversion.</li>
+  <li><b>Forward only this share of conversions (%)</b> — leave empty to forward every conversion. The same click id always gets the same decision, so a source sees a consistent sample rather than a random flicker.</li>
+</ul>
+
+<h2 id="settings-mapping">Settings mapping</h2>
+<p>Each row maps one value. <b>Name</b> is the human label, <b>Parameter</b> is the tracker parameter it lands in, and <b>Token</b> is the source's macro that fills it. For example, the Cost row maps a token of <code>{cost}</code> to the <code>cost</code> parameter so per-click spend is captured; <code>{campaign_id}</code> maps to <code>utm_campaign</code>. Mapped values flow into reports, filters, macros and postbacks. This mapping is also how the source's click id is captured — for example a token such as <code>clickid</code> on the row whose Parameter is <code>click_id</code>.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Meta needs no click-id mapping</p>
+  <p>Meta's <code>fbclid</code> is captured automatically from the ad URL and stitched with the <code>_fbc</code> and <code>_fbp</code> cookies. You do not map it, and you do not need a token for it. To push conversions back to Meta, see <a href="/help/meta-capi">Sending conversions to Meta (CAPI)</a>.</p>
+</div>
+
+<h2 id="confirming-it-works">Confirming it works</h2>
+<ul>
+  <li><b>Health centre</b> shows the last successful postback per source, which tells you quickly whether an outbound destination has gone quiet.</li>
+  <li><b>Logs → Internal postbacks</b> shows the outbound delivery attempts this tracker sent, with their outcome.</li>
+  <li><b>Reports</b> breaks any metric down by traffic source once clicks are flowing.</li>
+</ul>
+
+          </div>
+
+          <nav class="help-pager" aria-label="More in this category">
+        <span></span>
+        <a class="help-pager__link help-pager__link--next" href="/help/affiliate-networks"><span class="help-pager__dir">Next</span><span class="help-pager__title">Adding an affiliate network</span></a>
+      </nav>
+        </div>
+
+        <aside class="help-aside">
+        <nav class="help-toc" aria-label="On this page">
+          <p class="help-toc__title">On this page</p>
+          <ul class="help-toc__list">
+<li class="help-toc__item help-toc__item--h2"><a href="#what-a-traffic-source-is">What a traffic source is</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-catalog-and-new-from-template">The catalog and &quot;New from template&quot;</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-fields">The fields</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-s2s-postback-url-here-is-outbound">The S2S postback URL here is outbound</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#s2s-postback-statuses">S2S postback statuses</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#conversion-fanout-controls">Conversion fanout controls</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#settings-mapping">Settings mapping</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#confirming-it-works">Confirming it works</a>
+</li>
+</ul>
+        </nav>
+      </aside>
+      </div>
+    </div>
+  </article>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/" aria-label="AAA Tracker home">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+          <span class="word">AAA<i>Tracker</i></span>
+        </a>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul class="footer-links">
+          <li><a href="/features">Features</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Security &amp; anti-fraud</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free trial</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul class="footer-links">
+          <li><a href="/help/">Help centre</a></li>
+          <li><a href="/help/getting-started">Getting started</a></li>
+          <li><a href="/help/s2s-postback">Postbacks</a></li>
+          <li><a href="/help/troubleshooting-postbacks">Troubleshooting</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul class="footer-links">
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/backend/">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul class="footer-links">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/js/site.js?v=1" defer></script>
+<script src="/help/assets/help.js?v=1" defer></script>
+</body>
+</html>

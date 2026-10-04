@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.className+=' js'</script>
+<title>Logs: what each one shows | AAA Tracker Help</title>
+<meta name="description" content="What the clicks, conversions, S2S postbacks and internal postbacks logs each show, and when to open which one.">
+<link rel="canonical" href="https://aaatracker.website/help/logs-reference">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="AAA Tracker">
+<meta property="og:title" content="Logs: what each one shows | AAA Tracker Help">
+<meta property="og:description" content="What the clicks, conversions, S2S postbacks and internal postbacks logs each show, and when to open which one.">
+<meta property="og:url" content="https://aaatracker.website/help/logs-reference">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Logs: what each one shows | AAA Tracker Help">
+<meta name="twitter:description" content="What the clicks, conversions, S2S postbacks and internal postbacks logs each show, and when to open which one.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Logs: what each one shows",
+      "description": "What the clicks, conversions, S2S postbacks and internal postbacks logs each show, and when to open which one.",
+      "dateModified": "2026-10-05",
+      "datePublished": "2026-10-05",
+      "inLanguage": "en",
+      "url": "https://aaatracker.website/help/logs-reference",
+      "mainEntityOfPage": "https://aaatracker.website/help/logs-reference",
+      "keywords": "logs, clicks, postbacks, debugging",
+      "articleSection": "Reports & logs",
+      "publisher": {
+        "@type": "Organization",
+        "name": "AAA Tracker",
+        "url": "https://aaatracker.website/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://aaatracker.website/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Help",
+          "item": "https://aaatracker.website/help/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Logs: what each one shows",
+          "item": "https://aaatracker.website/help/logs-reference"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css?v=2">
+<link rel="stylesheet" href="/assets/css/site.css?v=7">
+<link rel="stylesheet" href="/help/assets/help.css?v=1">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M3.4 6h17.2M3.4 12h17.2M3.4 18h17.2"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/help/" aria-current="page">Docs</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free trial</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <div class="wrap">
+    <nav class="help-breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        <li><a href="/help/">Help</a></li>
+        <li aria-current="page">Logs: what each one shows</li>
+      </ol>
+    </nav>
+  </div>
+
+  <article class="help-article section section--sm">
+    <div class="wrap">
+      <div class="help-layout">
+        <div class="help-main">
+          <header class="help-article__head">
+            <span class="eyebrow">Reports &amp; logs</span>
+            <h1 class="h1 mt-4">Logs: what each one shows</h1>
+            <p class="lead mt-5">What the clicks, conversions, S2S postbacks and internal postbacks logs each show, and when to open which one.</p>
+            <p class="help-meta mono mt-6">Updated <time datetime="2026-10-05">5 October 2026</time></p>
+          </header>
+
+          <div class="prose help-prose mt-8">
+<h2 id="six-trails-one-shape">Six trails, one shape</h2>
+<p>The <b>Logs</b> section keeps six separate event trails, one per sidebar entry. Every page has the same controls: a <b>From</b> and <b>To</b> date range, filters for that log, <b>Refresh</b>, <b>Export CSV</b>, a <b>Columns</b> picker and a <b>Preset</b> dropdown where you can <b>Save filters</b> and reuse them later.</p>
+<p>A log can also be opened pre-filtered by a link. Put a filter name in the query string — for example <code>?click_id=YOUR-CLICK-ID</code> — and the matching field is filled in when the page loads. The Health centre uses this to jump from a failed delivery straight to the row behind it. Copy a click id from <b>Logs → Clicks</b> and paste it into any other log's URL to follow one visitor across all six.</p>
+
+<h2 id="clicks">Clicks</h2>
+<p>Every click the tracker received. Columns: <code>Time</code>, <code>Click id</code>, <code>IP</code>, <code>Country</code>, <code>Device</code>, <code>Status</code>, <code>URL</code>, <code>Bot</code>. Filters: <b>Country</b>, <b>Device</b>, <b>OS</b>, <b>Status</b>, and a free-text <b>Search</b> over URL, IP and visitor id.</p>
+<p><b>Open it when</b> you need to confirm a click actually arrived — a campaign link hit lands here first — or to copy a click id for a manual postback test. The <b>Bot</b> flag tells you at a glance whether the hit was filtered as automated.</p>
+
+<h2 id="conversions">Conversions</h2>
+<p>The inbound conversion records as stored. Columns: <code>Time</code>, <code>Click id</code>, <code>Status</code>, <code>Campaign</code>, <code>Offer</code>, <code>Payout</code>, <code>Revenue</code>, <code>Transaction</code>. Filters: <b>Status</b>, <b>Click id</b> and <b>Campaign id</b>.</p>
+<p><b>Open it when</b> a postback returned 200 and you want to see the conversion row it created, or to confirm that an unknown click id became an unattributed row. This list is read-only; to change a status, payout or delete a row, use the conversion log on <b>Reports</b>.</p>
+
+<h2 id="s2s-postbacks">S2S postbacks</h2>
+<p>Every inbound server-to-server call to <code>/pb</code>, accepted or not. Columns: <code>Time</code>, <code>Click id</code>, <code>Status</code>, <code>Result</code>, <code>Payout</code>, <code>Transaction</code>, <code>Source IP</code>, <code>Reason</code>, <code>Raw URL</code>. Filters: <b>Click id</b>, <b>Status</b>, <b>Result</b>, and a free-text <b>Search</b> over URL, reason and IP.</p>
+<p>The <b>Result</b> column is the diagnosis: <code>accepted</code>, <code>duplicate</code>, <code>rejected</code> or a rule/block outcome, with the <b>Reason</b> spelling out why. <b>Open it when</b> a network says it posted but revenue did not move — the reason tells you whether the call was refused before anything was written, or removed by the duplicate guard. See <a href="/help/troubleshooting-postbacks">Postback not recorded</a>.</p>
+
+<h2 id="internal-postbacks">Internal postbacks</h2>
+<p>The outbound delivery attempts this tracker sent onward, such as conversions pushed to an ad platform. Columns: <code>Time</code>, <code>Click id</code>, <code>Platform</code>, <code>Pixel</code>, <code>Event</code>, <code>Status</code>, <code>HTTP</code>, <code>Outcome</code>, <code>Attempts</code>, <code>Response</code>. Filters: <b>Click id</b>, <b>Event</b>, <b>Conversion status</b> and <b>Outcome</b>.</p>
+<p>The <code>HTTP</code> column and the clipped <code>Response</code> body are the delivery receipt: they show what the receiving platform answered. <b>Open it when</b> a conversion is missing downstream — the tracker recorded it, but the send may have failed or been retried. See <a href="/help/meta-capi">Sending conversions to Meta (CAPI)</a> for one platform's path.</p>
+
+<h2 id="click-forwarding">Click forwarding</h2>
+<p>Every redirect decision a click went through. Columns: <code>Time</code>, <code>Click id</code>, <code>Campaign</code>, <code>Flow</code>, <code>Schema</code>, <code>Offer</code>, <code>Status</code>, <code>Destination</code>, <code>Reason</code>. Filters: <b>Click id</b>, <b>Campaign id</b>, <b>Status</b>, and a free-text <b>Search</b> over reason and destination.</p>
+<p><b>Open it when</b> a visitor reached the wrong destination or no redirect at all. The <code>Status</code> and <code>Reason</code> show which routing outcome was taken — a normal redirect, a fallback, a cap, an out-of-schedule flow or a blocked request — and the <code>Destination</code> is the URL the visitor was sent to.</p>
+
+<h2 id="cost-updates">Cost updates</h2>
+<p>Retroactive cost changes applied from <b>Reports</b>. Columns: <code>Time</code>, <code>Username</code>, <code>Campaign</code>, <code>From</code>, <code>To</code>, <code>Cost</code>, <code>Rows</code>. Filters: <b>Username</b> and <b>Campaign id</b>.</p>
+<p><b>Open it when</b> cost for a period changed unexpectedly or you want to know who last touched it. Each row records who applied the update, the window it covered, the new per-click cost and how many rows were rewritten.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Follow one click across every log</p>
+  <p>Copy the click id from <b>Logs → Clicks</b>, then open another log with <code>?click_id=…</code> appended to its URL. The filter is seeded for you, so Clicks → Click forwarding → S2S postbacks → Internal postbacks read as one story.</p>
+</div>
+
+          </div>
+
+          <nav class="help-pager" aria-label="More in this category">
+        <a class="help-pager__link help-pager__link--prev" href="/help/reports-and-saved-views"><span class="help-pager__dir">Previous</span><span class="help-pager__title">Reports, breakdowns and saved views</span></a>
+        <a class="help-pager__link help-pager__link--next" href="/help/health-centre"><span class="help-pager__dir">Next</span><span class="help-pager__title">Health centre and system status</span></a>
+      </nav>
+        </div>
+
+        <aside class="help-aside">
+        <nav class="help-toc" aria-label="On this page">
+          <p class="help-toc__title">On this page</p>
+          <ul class="help-toc__list">
+<li class="help-toc__item help-toc__item--h2"><a href="#six-trails-one-shape">Six trails, one shape</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#clicks">Clicks</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#conversions">Conversions</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#s2s-postbacks">S2S postbacks</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#internal-postbacks">Internal postbacks</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#click-forwarding">Click forwarding</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#cost-updates">Cost updates</a>
+</li>
+</ul>
+        </nav>
+      </aside>
+      </div>
+    </div>
+  </article>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/" aria-label="AAA Tracker home">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+          <span class="word">AAA<i>Tracker</i></span>
+        </a>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul class="footer-links">
+          <li><a href="/features">Features</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Security &amp; anti-fraud</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free trial</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul class="footer-links">
+          <li><a href="/help/">Help centre</a></li>
+          <li><a href="/help/getting-started">Getting started</a></li>
+          <li><a href="/help/s2s-postback">Postbacks</a></li>
+          <li><a href="/help/troubleshooting-postbacks">Troubleshooting</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul class="footer-links">
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/backend/">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul class="footer-links">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/js/site.js?v=1" defer></script>
+<script src="/help/assets/help.js?v=1" defer></script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+<h2>What a click id is</h2>
+<p>Every click the tracker records gets a <b>click id</b> — a unique value generated at the moment of the click. It is the thread that ties a click to the conversion that arrives later: the offer URL carries it out, the network echoes it back on the postback, and the tracker joins the two. Get the click id round the loop intact and attribution is exact; lose it and the tracker has to fall back to a less certain match.</p>
+
+<h2>The click-id lifecycle</h2>
+<ol class="help-steps">
+  <li><b>Generated at the click.</b> When a visitor hits the campaign link <code>https://&lt;your-domain&gt;/&lt;alias&gt;</code>, the tracker generates a click id — unless the link already carried one in <code>click_id</code>, in which case that value wins and is kept.</li>
+  <li><b>Passed to the offer.</b> At click-out the tracker substitutes <code>{click_id}</code> in the offer URL wherever it appears, and always appends <code>click_id=…</code> to the final URL.</li>
+  <li><b>Handed to the network in its own parameter.</b> Most networks ignore <code>click_id</code> and read a name of their own choosing, so you add it to the offer's Target URL — for example <code>&amp;sub1={click_id}</code> or <code>&amp;aff_sub={click_id}</code>.</li>
+  <li><b>Returned on the postback.</b> The network calls <code>/pb</code> with the value in a click-id alias such as <code>clickid</code>, <code>subid</code> or <code>cid</code>, and the tracker matches it back to the click.</li>
+</ol>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">The offer-parameters field is a stored reference</p>
+  <p>An affiliate network record has an <b>Offer parameters</b> field that stores that network's click-id convention (for example <code>s1={click_id}</code>). It is documentation you keep next to the network — it is <b>not appended to your offers at runtime</b>. The macro has to live in the offer's own Target URL for the network to receive it.</p>
+</div>
+
+<p>See <a href="/help/offers">Offers and offer URLs</a> and <a href="/help/affiliate-networks">Adding an affiliate network</a> for where each piece is entered.</p>
+
+<h2>The sub-id chain</h2>
+<p><code>sub_id_1</code> through <code>sub_id_10</code> are ten free slots for values your traffic source passes on the campaign link — ad set, creative, keyword, placement, anything. The tracker stores them on the click and exposes them as offer macros, so you can forward the ones the network should see (for example <code>&amp;s2={sub_id_2}</code>), and the network can echo them back on the postback as passthrough fields. That chain is what lets a report split revenue by the source's own granularity, and it is the fallback key when a clickless conversion has no transaction id.</p>
+
+<h2>What the campaign link accepts</h2>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Parameter</th><th>Purpose</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>click_id</code></td><td>The source's own click id; kept instead of generating a new one.</td></tr>
+    <tr><td><code>cost</code></td><td>Per-click cost for this hit.</td></tr>
+    <tr><td><code>sub_id_1</code> … <code>sub_id_10</code></td><td>Your own identifiers, carried end to end.</td></tr>
+    <tr><td><code>utm_source</code>, <code>utm_medium</code>, <code>utm_campaign</code></td><td>Campaign tagging; other <code>utm_*</code> values are collected too.</td></tr>
+    <tr><td><code>external_id</code></td><td>The source's own entity id (ad, ad set).</td></tr>
+    <tr><td><code>country</code>, <code>region</code>, <code>city</code>, <code>gender</code></td><td>Extra attributes some sources append.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Anything the source does not send is simply left empty. If a source uses different names, map its token to the canonical one in that source's <b>paramsIdMapping</b> (for example <code>clickid → click</code>) — see <a href="/help/traffic-sources">Adding a traffic source</a>.</p>
+
+<h2>Offer URL macros</h2>
+<p>Place a macro in single braces anywhere in the offer URL; the tracker replaces it with the value from the current hit. <b>Unknown macros are left exactly as written</b>, so a typo shows up in the URL rather than silently blanking it.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Macro</th><th>Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>{click_id}</code></td><td>The click's unique id</td></tr>
+    <tr><td><code>{sub_id_1}</code> … <code>{sub_id_10}</code></td><td>Sub-ids 1–10</td></tr>
+    <tr><td><code>{external_id}</code></td><td>External (ad) id</td></tr>
+    <tr><td><code>{visitor_id}</code></td><td>First-party visitor id, stable across sessions</td></tr>
+    <tr><td><code>{country}</code> <code>{region}</code> <code>{city}</code></td><td>Geo</td></tr>
+    <tr><td><code>{ip}</code> <code>{isp}</code> <code>{connection_type}</code></td><td>Network and connection</td></tr>
+    <tr><td><code>{os}</code> <code>{os_version}</code></td><td>Operating system</td></tr>
+    <tr><td><code>{browser}</code> <code>{browser_version}</code></td><td>Browser</td></tr>
+    <tr><td><code>{device_type}</code> <code>{device_brand}</code> <code>{device_model}</code></td><td>Device</td></tr>
+    <tr><td><code>{language}</code></td><td>Visitor locale</td></tr>
+    <tr><td><code>{referrer}</code> <code>{keyword}</code></td><td>Referrer and search keyword</td></tr>
+    <tr><td><code>{cost}</code> <code>{currency}</code></td><td>Click cost and its currency</td></tr>
+    <tr><td><code>{utm_source}</code> <code>{utm_medium}</code> <code>{utm_campaign}</code> <code>{utm_creative}</code></td><td>UTM tags carried by the hit</td></tr>
+    <tr><td><code>{offer_id}</code> <code>{campaign_id}</code> <code>{landing_id}</code></td><td>Tracker object ids</td></tr>
+    <tr><td><code>{payout}</code></td><td>The offer's payout</td></tr>
+    <tr><td><code>{_md5}</code></td><td>MD5 hex of the click id</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>{_md5}</h3>
+<p><code>{_md5}</code> is the MD5 hex digest of the click id — a fixed-length, opaque version of the same value. Use it when a network wants a hashed or length-limited identifier, or when you want a deterministic token that cannot be traced back to the raw id. The same click id always produces the same <code>{_md5}</code>, so it works as a stable join key on the network's side too.</p>
+
+<h2>Lander and fallback macros</h2>
+<p>Inside a local lander's HTML, the placeholder <code>{offer}</code> is replaced with the click-out URL <code>/c/{alias}/{offer_id}</code>, so a button like <code>&lt;a href="{offer}"&gt;Continue&lt;/a&gt;</code> always routes back through the tracker.</p>
+<p>A campaign's <b>Fallback URL</b> (and the workspace-wide fallback) accepts the same click macros as an offer URL, plus <code>{campaign_name}</code> and <code>{_md5}</code> — useful when the drop-off page needs to know which campaign sent the visitor.</p>
+
+<h2>Outgoing postback tokens</h2>
+<p>The outbound postback the tracker sends to a traffic source or on a campaign cycle supports everything in the offer macro table, plus the conversion-specific tokens below. These belong in a source's S2S postback URL, not in an offer URL.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Token</th><th>Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>{payout}</code></td><td>The conversion payout being reported</td></tr>
+    <tr><td><code>{revenue}</code> <code>{profit}</code></td><td>Revenue and profit for the row</td></tr>
+    <tr><td><code>{status}</code> <code>{status2}</code></td><td>Primary status, and a secondary status when the row carries one</td></tr>
+    <tr><td><code>{_md5}</code></td><td>MD5 hex of the click id</td></tr>
+    <tr><td><code>{unixconversiontime}</code></td><td>Conversion time as Unix epoch seconds</td></tr>
+    <tr><td><code>event_1</code> … <code>event_30</code></td><td>Custom conversion event parameters</td></tr>
+  </tbody>
+</table>
+</div>
+<p>A literal <code>payout=auto</code> in a postback URL is replaced with the payout actually being fired, so one template can serve offers with different payouts. Unknown tokens in a postback URL stay literal; a known token with no value resolves to empty.</p>
+
+<h2>Geo, device and UTM values</h2>
+<p>Geo and device macros are filled from what the tracking request resolves — the visitor's IP, User-Agent and any proxy/CDN geo header — so they are available even when the source sends nothing. UTM macros come from the UTM parameters on the hit. Where a value could not be resolved, the macro is simply empty rather than guessed; that is the honest result, but it also means a report grouped by <code>{city}</code> will be sparse if your source never passes usable location data.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Keep the id in one place</p>
+  <p>The tracker appends <code>click_id=…</code> to every offer URL on its own, so the network parameter you add (for example <code>&amp;sub1={click_id}</code>) is the only extra one it needs. Give the same parameter name to the network's postback template so what goes out comes back.</p>
+</div>

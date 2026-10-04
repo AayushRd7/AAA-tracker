@@ -1,0 +1,85 @@
+<h2>When a conversion has no click id</h2>
+<p>A <b>clickless conversion</b> is one that arrives without the click id the tracker generated. It happens more often than people expect: a call centre closes a sale hours later, a CRM batches approvals overnight, or a network's postback simply does not echo the value you sent. The tracker's rule is that a conversion is never dropped — it is matched to the best available evidence, and if none of it is decisive the row is still kept.</p>
+
+<h2>The matching ladder</h2>
+<p>Matching runs in order and stops at the first confident hit:</p>
+<ol class="help-steps">
+  <li><b>Transaction id.</b> A repeat <code>transaction_id</code> (or <code>external_id</code>) updates the same row, so a re-delivered sale counts once.</li>
+  <li><b>Unique sub-ids.</b> Sub-ids 1–5 are compared against real clicks inside the workspace attribution window (default <b>7 days</b>). The match must be <b>unique</b> — exactly one click — otherwise the tracker refuses to guess.</li>
+  <li><b>The visitor.</b> The first-party visitor id (<code>aaa_vid</code>) is stitched to that visitor's latest click (last-click) or earliest click (first-click), according to Settings → Attribution, again inside the window.</li>
+  <li><b>Unattributed.</b> If nothing resolves, the row is written with click id <code>none</code>: visible in reports, still editable, and re-attributable later.</li>
+</ol>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">Uniqueness is the safeguard</p>
+  <p>A shared sub-id is not enough. If two clicks match the same sub-ids, the tracker will not merge two customers — the conversion stays unattributed until you attach it by hand. That is deliberate: a wrong match is worse than no match.</p>
+</div>
+
+<h2>Offline / phone ingestion API</h2>
+<p>For CRMs, call centres and other server-side systems, post the conversion to the ingestion endpoint. It takes a workspace API token as a Bearer header (or an admin session) and accepts a JSON object or a form-encoded body:</p>
+<pre><code>POST /backend/api/reports/ingest
+Authorization: Bearer &lt;api-token&gt;
+
+{
+  "click_id": "9f2c1a7e-…",
+  "status": "sale",
+  "payout": 42.5,
+  "transaction_id": "CRM-10432",
+  "currency": "EUR",
+  "occurred_at": "2026-10-05T14:02:00Z",
+  "sub_id_1": "campaign-a"
+}</code></pre>
+<p>The fields it understands:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>click_id</code></td><td>Optional if another key is supplied.</td></tr>
+    <tr><td><code>status</code></td><td>Defaults to <code>sale</code> when omitted; built-in or custom statuses accepted.</td></tr>
+    <tr><td><code>payout</code></td><td>Plain number; a non-numeric value is rejected.</td></tr>
+    <tr><td><code>transaction_id</code> / <code>external_id</code></td><td>The idempotency key — re-sending the same value updates the existing row.</td></tr>
+    <tr><td><code>currency</code></td><td>Accepted here; unlike <code>/pb</code>, which has no currency parameter.</td></tr>
+    <tr><td><code>occurred_at</code></td><td>ISO-8601 timestamp of the real conversion.</td></tr>
+    <tr><td><code>sub_id_1</code> … <code>sub_id_10</code></td><td>Match keys and reporting dimensions.</td></tr>
+    <tr><td><code>phone</code>, <code>note</code></td><td>Stored on the conversion history.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>A valid call answers with a JSON result such as <code>{"result":"created","attributed":true,…}</code> or <code>{"result":"updated",…}</code> for a repeat; a bad payload gets a clear <code>rejected</code> reason rather than an error page. The endpoint matches click id, external id or transaction id first, then falls back to unique sub-ids inside the attribution window, exactly like the postback path.</p>
+
+<h2>Importing a batch from a file</h2>
+<p><b>Reports → Conversions → Import conversions</b> takes a CSV-style list, one conversion per line:</p>
+<pre><code>click_id,payout,transaction_id,status</code></pre>
+<p>An existing click id accumulates onto its row; an unknown id creates an unattributed row rather than being discarded. The importer also accepts optional <code>occurred_at</code> and <code>currency</code> columns, and the status may be any built-in or custom status.</p>
+
+<h2>Which path to use</h2>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Situation</th><th>Use</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Network reports a sale in real time</td><td>Its S2S postback to <code>/pb</code> — see <a href="/help/s2s-postback">the postback reference</a>.</td></tr>
+    <tr><td>Call centre or CRM closes offline orders</td><td><code>POST /backend/api/reports/ingest</code>, from the system that owns the order.</td></tr>
+    <tr><td>A partner emails a spreadsheet</td><td>The <b>Import conversions</b> dialog in Reports → Conversions.</td></tr>
+    <tr><td>A thank-you page with no server callback</td><td>The conversion pixel or JS snippet — see <a href="/help/conversion-pixel-and-js">Conversion pixel and JS tracking</a>.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Why the currency note matters</h2>
+<p>Inbound <code>/pb</code> deliberately has <b>no currency parameter</b> — a conversion's currency comes from the offer or the workspace. The ingestion API and the CSV importer, by contrast, <b>do</b> accept a <code>currency</code>, because an offline order knows the currency it was sold in. If you are moving data from a CRM and the total is coming out in the wrong unit, check that the currency was sent on the ingestion call rather than assumed from the offer.</p>
+
+<h2>Confirming and fixing the result</h2>
+<ul>
+  <li><b>Reports → Conversions</b> lists every row, attributed or not; filter or edit to attach an unattributed conversion to the right click.</li>
+  <li><b>Logs → Conversions</b> shows the history and the source of each event.</li>
+  <li>Health centre and the reports you already watch will show an unattributed spike if a feed starts sending bad keys.</li>
+</ul>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Send the strongest key you have</p>
+  <p>A transaction id resolves instantly and idempotently. Sub-ids and the visitor id are fallbacks, not substitutes — they can match several clicks and then be refused. When a CRM can send both a transaction id and a click id, send both.</p>
+</div>

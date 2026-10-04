@@ -1,0 +1,57 @@
+<h2>Work the checks in order</h2>
+<p>“Meta shows no conversions” almost always means the tracker recorded the conversion, but the outbound send to Meta never ran or was refused. Work the checks in order — each rules out a class of cause before the next. Every send attempt is visible in <b>Logs → Internal postbacks</b>, so several answers are on one screen.</p>
+
+<h2>1. Is dry-run still on?</h2>
+<p>This is the most common cause, and it is easy to forget. On <b>Manage → CAPI integrations</b>, open <b>Meta</b>. The switch <b>Dry-run (build + log the payload, send nothing)</b> is <b>on by default</b> — a fresh setup never sends anything until you turn it off.</p>
+<p>With dry-run on, the event is built and audited but no HTTP request leaves the tracker. In <b>Logs → Internal postbacks</b> the outcome is <code>dry_run</code>. Turn the switch off and save.</p>
+
+<h2>2. Did the click carry an fbclid?</h2>
+<p>Meta matches a server-side event back to the ad click using click identifiers, not the tracker's click id. The tracker captures <b>fbclid</b> from the ad URL automatically and stitches it with the <code>_fbc</code> and <code>_fbp</code> cookies — you do not map it.</p>
+<p>Check the click: open <b>Logs → Clicks</b>, find a recent click from your Meta campaign, and look at its <b>URL</b> — it should contain <code>fbclid=</code>. A redirect, a landing page or a URL-builder that strips query parameters can drop it. In the conversion record, the derived values are <code>fbc</code> (<code>fb.1.&lt;timestamp&gt;.&lt;fbclid&gt;</code>) and <code>fbp</code>. If both are empty, the click arrived without them.</p>
+
+<h2>3. Is the dataset/pixel id and token correct?</h2>
+<p>On the Meta panel in <b>Manage → CAPI integrations</b>, the id and the token must belong together and to the right dataset:</p>
+<ul>
+  <li><b>Fallback Dataset / Pixel ID</b> and <b>Fallback access token</b> apply when no pixel record is bound.</li>
+  <li>If you use pixel records, each has a <b>Pixel / Dataset ID</b> and an <b>API key / Access token</b>, and must be bound to a traffic channel or an offer.</li>
+</ul>
+<p>A wrong pair fails authentication at Meta and lands in <b>Internal postbacks</b> as outcome <code>failed</code>, with a non-2xx HTTP code and Meta's error text in <b>Response</b>. An id with no bound pixel yields <code>not_configured</code>. Use <b>Send test event</b> to validate credentials directly.</p>
+
+<h2>4. Is the conversion's status in the list you send?</h2>
+<p>The panel has a row of checkboxes, <b>Send these conversion statuses</b>. If the conversion's status is not ticked, the send is skipped silently — the event never reaches Meta and <b>no row appears</b> in Internal postbacks. The defaults are <code>lead</code>, <code>sale</code> and <code>upsale</code>.</p>
+<p>Also confirm the status has an event name. The tracker maps statuses to Meta events (for example <code>sale</code> → <code>Purchase</code>). With pixel records, the pixel's <b>Default event name</b> applies unless a <b>Custom conversion matching</b> row overrides it. A status that is sent but maps to no event is skipped before a request is made.</p>
+
+<h2>5. Did a duplicate get suppressed?</h2>
+<p>A send is claimed once per <b>click id + status</b>. If the same conversion is processed again — a repeated postback, a retried delivery — the duplicate is suppressed and nothing is sent. Like the status gate, a suppressed duplicate writes <b>no row</b> to Internal postbacks. That is normal and not a fault: if the first send succeeded, Meta already has the event.</p>
+<p>Do not confuse this with inbound de-duplication at <code>/pb</code>, which suppresses a repeated transaction id or an identical anonymous status + payout within about 60 seconds. Both mean “already handled”, not “lost”.</p>
+
+<h2>6. Is a test event code set?</h2>
+<p>If <b>Test event code</b> is filled in on the Meta panel, every event is routed to the <b>Test Events</b> tab of Meta's Events Manager instead of the normal event stream. Events sent with a test code do not appear as conversions in your ad reporting. If you set one while testing, clear it and save — otherwise sends look successful while Meta's main view stays quiet.</p>
+
+<h2>7. Read Logs → Internal postbacks</h2>
+<p>This is the outbound audit and the final word. Open <b>Logs → Internal postbacks</b> and look at the newest rows. The columns are <b>Time</b>, <b>Click id</b>, <b>Platform</b>, <b>Pixel</b>, <b>Event</b>, <b>Status</b>, <b>HTTP</b>, <b>Outcome</b>, <b>Attempts</b> and <b>Response</b>.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Outcome</th><th>What it means</th><th>Where to look next</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>sent</code></td><td>Meta accepted the event (2xx).</td><td>Matching, not delivery — check the click's <code>fbc</code>/<code>fbp</code>.</td></tr>
+    <tr><td><code>failed</code></td><td>Meta refused it; read <b>Response</b>.</td><td>Usually token, dataset or payload — fix per the error text.</td></tr>
+    <tr><td><code>dry_run</code></td><td>Built and logged, nothing sent.</td><td>Turn off dry-run.</td></tr>
+    <tr><td><code>not_configured</code></td><td>No usable dataset id or token.</td><td>Fill the fallback fields or bind a pixel.</td></tr>
+    <tr><td><code>not_implemented</code></td><td>The pixel belongs to a platform whose sender is not live.</td><td>Only Meta sends events today.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Transient failures — a network error, <code>429</code> or <code>5xx</code> — are retried up to three times; <b>Attempts</b> shows how many tries it took. A <code>4xx</code> is terminal. If you see no row at all, recheck steps 1, 4 and 5 — a skipped send writes none.</p>
+
+<h2>Fire a known conversion to compare</h2>
+<p>To exercise the whole path deliberately, fire a postback for a real click from your Meta campaign. Copy the click id from <b>Logs → Clicks</b>, then:</p>
+<pre><code>curl "https://YOUR-TRACKER-DOMAIN/pb?clickid=YOUR-CLICK-ID&amp;payout=25&amp;status=sale"</code></pre>
+<p>A <code>200</code> with <code>{"status":"ok",…}</code> means the conversion was recorded; the tracker then queues the Meta send in the background. Watch <b>Logs → Internal postbacks</b> a moment later for the outbound result. The <a href="/help/meta-capi">CAPI integration</a> page covers each setting in full.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">“No row” is not “no attempt”</p>
+  <p>A send skipped by dry-run, status filtering or duplicate suppression leaves no Internal postbacks row. Before assuming the sender is broken, confirm dry-run is off and the status is ticked — those two account for most silent cases.</p>
+</div>

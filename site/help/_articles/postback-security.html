@@ -1,0 +1,62 @@
+<h2>Why an open postback URL can be abused</h2>
+<p>Your inbound postback endpoint, <code>https://YOUR-TRACKER-DOMAIN/pb</code>, has to be reachable by every affiliate network you work with. That also means it is reachable by anyone else who learns the URL. An attacker who knows a valid click id — or who can guess one — can post a fabricated conversion and quietly change your numbers:</p>
+<ul>
+  <li><b>Padding revenue.</b> Fake <code>sale</code> postbacks inflate payout and revenue, which flatters ROI, EPC and every report that reads them.</li>
+  <li><b>Hiding bad traffic.</b> A stream of fake <code>lead</code> conversions can mask a source that is really underperforming.</li>
+  <li><b>Polluting attribution.</b> Junk conversions tie themselves to real clicks and distort which campaign, offer or creative looks profitable.</li>
+</ul>
+<p>The endpoint is public by design, so the fix is not to hide it but to require proof that a caller is allowed to use it.</p>
+
+<h2>The two controls</h2>
+<p>Both live in <b>Settings → Postback security</b>. Turn the panel on with the switch <b>Require a secret key or IP allowlist for inbound postbacks</b>, then fill either or both fields. When the panel is enabled, a postback must satisfy <b>every non-empty check</b>. If you enable it and leave both fields empty, postbacks are still allowed — so set at least one.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Control</th><th>Field</th><th>What it enforces</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Secret key</td><td><b>Secret key</b></td><td>Every postback must carry a matching key, or it is refused.</td></tr>
+    <tr><td>IP allowlist</td><td><b>Allowed IPs</b></td><td>Only callers whose source IP is listed may post. Accepts a comma-separated list of IPs and CIDR ranges, for example <code>203.0.113.5, 10.0.0.0/8</code>.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Use the key alone when a network posts from a range that changes; add the allowlist when the network can give you a stable set of sending addresses.</p>
+
+<h2>How the key travels</h2>
+<p>The key is accepted in three places, so you can fit whichever shape a network's postback template supports:</p>
+<ul>
+  <li>a <code>?key=</code> query parameter,</li>
+  <li>a <code>?secret=</code> query parameter,</li>
+  <li>an <code>X-Postback-Key</code> request header.</li>
+</ul>
+<p>For a URL-shaped template, append the key to the postback URL you hand the network:</p>
+<pre><code>https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&amp;payout={payout}&amp;status={status}&amp;key=YOUR-SECRET</code></pre>
+<p>If the network allows custom headers instead, keep the URL clean and pass the same value as <code>X-Postback-Key</code>. Either form works; do not put the key in both.</p>
+
+<h2>The exact 403 a blocked postback gets</h2>
+<p>A postback that fails either check is refused <b>before it is read</b>. It gets HTTP <code>403</code> with a JSON body naming the reason:</p>
+<pre><code>{"detail":"Invalid or missing postback key"}</code></pre>
+<p>An IP failure reads instead:</p>
+<pre><code>{"detail":"Client IP '203.0.113.9' is not in the allowlist"}</code></pre>
+<p>The attempt is also written to <b>Logs → S2S postbacks</b> with the result <code>blocked</code> and the same reason, so you can see which control refused it. Note that the check happens after the click id and payout are parsed but before any conversion is recorded — a blocked postback never becomes a conversion.</p>
+
+<h2>Test it with curl</h2>
+<p>Use a real click id from <b>Logs → Clicks</b>, then call the endpoint with and without the key:</p>
+<pre><code># with the key — accepted
+curl "https://YOUR-TRACKER-DOMAIN/pb?clickid=YOUR-CLICK-ID&amp;payout=25&amp;status=sale&amp;key=YOUR-SECRET"
+
+# without the key — 403
+curl -i "https://YOUR-TRACKER-DOMAIN/pb?clickid=YOUR-CLICK-ID&amp;payout=25&amp;status=sale"</code></pre>
+<p>Or send the header instead of the query parameter:</p>
+<pre><code>curl -H "X-Postback-Key: YOUR-SECRET" "https://YOUR-TRACKER-DOMAIN/pb?clickid=YOUR-CLICK-ID&amp;payout=25&amp;status=sale"</code></pre>
+<p>A correct call answers <code>200</code> with <code>{"status":"ok",…}</code>. A blocked one answers <code>403</code> as above. Testing an IP allowlist from your own machine is less direct: your address must be the one the tracker sees, which may be a proxy in front of the network.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">Enable it before you hand the URL over</p>
+  <p>Turn on the key <i>before</i> you paste the postback URL into a network's settings. The key then travels inside the URL the network stores, so there is nothing to re-edit later. Adding a key after a network is already live means every postback fails with a 403 until you update that network's template too.</p>
+</div>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Keep the key, watch the logs</p>
+  <p>Treat the secret like any credential: give a different value per workspace, rotate it if it leaks, and update the networks in the same sitting. After any change, watch <b>Logs → S2S postbacks</b> for a <code>blocked</code> result — it is the fastest signal that a network is still sending the old value.</p>
+</div>

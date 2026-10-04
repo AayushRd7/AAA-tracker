@@ -1,0 +1,73 @@
+<h2>The inbound URL</h2>
+<p>A server-to-server (S2S) postback is how your affiliate network tells the tracker that a conversion happened. The network calls a URL on your tracker domain; the tracker records the conversion against the click and answers. The endpoint is:</p>
+<pre><code>https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&amp;payout={payout}&amp;status={status}&amp;tid={tid}</code></pre>
+<p>The four parameters above are the ones a network's postback template usually fills. Only the click id is really the point of the call — see the defaults below for what happens when the rest are empty. The endpoint accepts <b>GET</b>, <b>POST</b> and <b>HEAD</b>. If a network is configured with the older path form of the URL, that form redirects to this query form, so existing templates keep working.</p>
+<p>Give each network the URL in the shape it expects to fill. If your tracker is on your own domain, copy the postback URL straight out of the network's conversion-tracking settings after you have saved it.</p>
+
+<h2>Accepted parameters and aliases</h2>
+<p>Parameter names are matched case-insensitively and the first non-empty value wins. That means a network that calls the status <code>type</code> and another that calls it <code>event</code> can both post to the same URL without changes.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Meaning</th><th>Accepted names (first non-empty wins)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Click id</td><td><code>click_id</code>, <code>clickid</code>, <code>click</code>, <code>subid</code>, <code>sub_id</code>, <code>cid</code></td></tr>
+    <tr><td>Status</td><td><code>status</code>, <code>type</code>, <code>event</code>, <code>conversion_type</code></td></tr>
+    <tr><td>Payout</td><td><code>payout</code>, <code>sum</code>, <code>amount</code>, <code>revenue</code>, <code>price</code></td></tr>
+    <tr><td>Transaction</td><td><code>tid</code>, <code>transaction_id</code>, <code>external_id</code>, <code>txn</code>, <code>transactionid</code></td></tr>
+  </tbody>
+</table>
+</div>
+<p>The tracker also accepts pass-through values <code>sub_id_1</code> through <code>sub_id_10</code>, <code>external_id</code> and <code>transaction_id</code> — they are stored on the conversion for reporting and for attribution fallbacks.</p>
+
+<h2>Defaults when a field is missing</h2>
+<ul>
+  <li>A missing <b>status</b> is recorded as <code>lead</code>.</li>
+  <li>A missing <b>payout</b> is recorded as <code>0</code>.</li>
+  <li>There is <b>no currency parameter</b> on <code>/pb</code>. The currency a conversion is recorded in comes from the offer or the workspace, not from the postback.</li>
+</ul>
+<p>Built-in statuses are <code>lead</code>, <code>sale</code>, <code>upsale</code>, <code>rejected</code>, <code>hold</code> and <code>trash</code>. Custom statuses can be defined in Settings, and an unknown status is rejected rather than stored.</p>
+
+<h2>What happens to revenue and status</h2>
+<p>Repeat postbacks for the same click <b>accumulate</b> payout and revenue — this is how lifetime value builds up over several conversions — while the recorded <b>status reflects the latest</b> call. So a click that first reports <code>lead</code> and later reports <code>sale</code> ends up as a sale, with both amounts added together.</p>
+<p>Duplicates are guarded. A repeat carrying the same <b>transaction id</b>, or an identical anonymous <b>status + payout</b> inside roughly a <b>60-second</b> window, only bumps the postback counter; revenue is not added a second time. A duplicate call is still a success from the network's point of view.</p>
+
+<h2>Attribution and the clickless path</h2>
+<p>The ideal postback carries the click id the tracker generated. When it cannot be matched, the tracker falls back in order:</p>
+<ol class="help-steps">
+  <li>match on the <b>transaction id</b>, then</li>
+  <li>match on <b>unique sub-ids</b> inside an attribution window, then</li>
+  <li>record an <b>unattributed</b> row so the conversion is not lost.</li>
+</ol>
+<p>An unattributed row still appears in reports and can be re-attributed later from the conversion log. The <a href="/help/clickless-conversions">clickless conversions</a> page covers the import path and the window in more detail.</p>
+
+<h2>Responses</h2>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Response</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>200</code> <code>{"status":"ok",…}</code></td><td>The conversion was accepted and recorded.</td></tr>
+    <tr><td><code>200</code> <code>{"status":"rejected",…}</code></td><td>A rule blocked the conversion, but the call was understood.</td></tr>
+    <tr><td><code>400</code></td><td>Invalid status, or a non-numeric payout.</td></tr>
+    <tr><td><code>403</code></td><td>Postback security denied the call — bad or missing key, or an IP outside the allowlist.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Securing the endpoint</h2>
+<p><code>/pb</code> is public by design — any network you work with has to reach it. You can require proof with a secret key, passed as <code>?key=</code>, <code>?secret=</code>, or the <code>X-Postback-Key</code> header, and optionally restrict callers to an IP allowlist (comma-separated IPs or CIDR ranges). Both are configured in <b>Settings → Postback security</b>. A call that fails either check gets the 403 above. See <a href="/help/postback-security">Securing your postback URL</a>.</p>
+
+<h2>Confirming what arrived</h2>
+<ul>
+  <li><b>Logs → S2S postbacks</b> shows inbound calls as they land, including rejections and their reason.</li>
+  <li><b>Reports → Conversions</b> is where the recorded conversion can be edited or deleted.</li>
+  <li><b>Health centre</b> shows the last successful postback per source, which tells you quickly whether a network has gone quiet.</li>
+</ul>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">If nothing lands</p>
+  <p>Work through <a href="/help/troubleshooting-postbacks">Postback not recorded</a>: it splits the problem into the 400 and 403 cases and the case where the click id simply does not match.</p>
+</div>

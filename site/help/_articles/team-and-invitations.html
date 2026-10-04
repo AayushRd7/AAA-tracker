@@ -1,0 +1,53 @@
+<h2>Where team management lives</h2>
+<p>Open <b>Account → Users</b>. The page has three parts: <b>Workspace members</b>, <b>Pending invitations</b> (sent but not yet accepted), and — for platform operators only — a <b>Platform users</b> card for install-wide accounts. The workspace card shows your plan and seats used, for example <code>Seats used: 4 / 10</code> or <code>(unlimited)</code> when no limit is set.</p>
+<p>Managing members is an owners-and-admins job. An editor or viewer sees the member list read-only: the <b>Invite member</b> and <b>Add existing user</b> buttons are disabled, and role selectors are not shown.</p>
+
+<h2>The four roles</h2>
+<p>A membership carries exactly one role. The role decides what the person can reach inside this workspace:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Role</th><th>What it can reach</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>owner</b></td><td>Everything in the workspace, including ownership. The owner can transfer ownership and is the only role that can promote another member to owner. A workspace has one owner.</td></tr>
+    <tr><td><b>admin</b></td><td>Everything in the workspace except changing the owner. Admins manage members, invitations and settings. This is the role that sees the full management area.</td></tr>
+    <tr><td><b>editor</b></td><td>Read and write on the content sections — campaigns, offers, landings, sources and the like. No management plane: Users and the workspace settings are out of reach by default.</td></tr>
+    <tr><td><b>viewer</b></td><td>Read-only across the content sections. Can look, cannot change.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Ownership is never assigned through the ordinary role picker. To move it, use the crown action on a member row — <b>Make owner</b> via <b>Transfer ownership</b>. The target is promoted and you step down to admin. The last owner of a workspace can never be demoted or removed.</p>
+
+<h2>Invite a member</h2>
+<p><b>Invite member</b> is how a new person joins. The dialog takes an email, a username, or both — provide at least one — and a role. When you send it, the invitee is emailed a link that opens the sign-in page in an <b>invite</b> state, where they choose a username and a password (at least 8 characters) and create their own account. They are then signed in and added to the workspace with the role you chose.</p>
+<ol class="help-steps">
+  <li>Press <b>Invite member</b> on the Workspace members card.</li>
+  <li>Enter the invitee's <b>Email</b> and/or <b>Username</b>, and pick a <b>Role</b>.</li>
+  <li>Press <b>Send invitation</b>. If the email goes out, the result dialog confirms it; if it does not, copy the link and pass it on by hand.</li>
+  <li>Copy the <b>Invitation link</b> (or the raw <b>Token</b>) while the dialog is open — it is shown only once.</li>
+</ol>
+<p>Two limits apply. Each invitation is <b>single-use</b> and expires after <b>7 days</b>, and a role ceiling stops you inviting above your own role: an owner can invite any role including owner, while an admin tops out at admin.</p>
+
+<h2>Add an existing user</h2>
+<p><b>Add existing user</b> attaches an account that already exists to this workspace. It takes a <b>Username</b> and a <b>Role</b> and does not email anyone.</p>
+<p>Because it grants workspace access without the person's consent, it is deliberately narrow: an existing account can only be attached when it already belongs to this workspace's own hierarchy. An unrelated account is refused and must be brought in through the invitation flow instead, and a platform operator's account can never be added to a workspace this way. Use <b>Invite member</b> when the person is new or lives in a different workspace.</p>
+
+<h2>Pending invitations and revoking them</h2>
+<p>The <b>Pending invitations</b> card lists every invitation that has been sent and neither accepted nor expired, with its invitee, role, inviter and expiry date. Press the red <b>Revoke</b> action on a row to cancel it — the link stops working immediately. Revoking an invitation does not affect an account that has already accepted one; remove that member instead.</p>
+
+<h2>Seat limits</h2>
+<p>The workspace's plan sets a <b>seat</b> count. The member card shows seats used against the limit, and when every seat is taken the add and invite actions are refused with a clear message — for example <code>Workspace seat limit reached (10 of 10 seats used)</code>. A plan with no seat count is unlimited. Seats are counted from the current members, not from outstanding invitations.</p>
+
+<h2>Per-section permissions</h2>
+<p>Behind the role is a permission map. Its defaults are exactly the role table above: owners and admins get every section and write access; editors get the content sections with write access; viewers get the content sections read-only. The management sections — <b>Users</b> and <b>Settings</b> among them — are off for editors and viewers unless explicitly granted.</p>
+<p>A membership can override the defaults section by section, switch the global <b>write</b> flag, and apply two further restrictions:</p>
+<ul>
+  <li><b>Owner scope</b> — for campaigns, offers, sources, affiliates and domains, a section can be set to <b>Own only</b>, so the person sees and edits just the rows they own. Everything else is hidden from their pickers and refused if requested directly. <b>All</b> keeps full access.</li>
+  <li><b>Hidden metrics</b> — cost, revenue, profit, ROI and other chosen metrics can be removed from a user's view. The restriction is enforced server-side: the values are stripped from responses, breakdowns, logs and CSV exports alike, not merely hidden in the interface.</li>
+</ul>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Workspace admin vs platform operator</p>
+  <p>A <b>workspace admin</b> manages this workspace — its members, invitations and settings — and sees the management area inside it. That is separate from <b>platform account management</b>, which lives on the install-wide <b>Platform users</b> card and is shown only to platform operators. Platform operators create, activate, disable and delete the global accounts, reset another user's two-factor authentication and inspect any user's devices; workspace managers do not touch that plane.</p>
+</div>

@@ -1,0 +1,48 @@
+<h2>What “rev-share with Meta” changes</h2>
+<p>Two things make this setup different from a fixed-payout offer. A rev-share offer pays you a share of the sale value, and that share is almost never known when you paste the offer URL — it arrives with each conversion, on the postback. And with Meta you are buying the clicks yourself, so the click id has to survive from the ad click, through the network, and back to the tracker. This page wires both ends together.</p>
+<p>The rev-share consequence is simple: <b>set the offer payout to 0</b>. The real amount comes back in the postback’s payout (or <code>amount</code>/<code>sum</code>) field and accumulates on the conversion. If you leave a fixed payout on the offer you will over-report revenue before the network’s number lands.</p>
+
+<h2>Step 1 — Add the affiliate network</h2>
+<p>Open <b>Manage → Networks → Add network</b>, or start from the preset catalog (125 networks) so the record is pre-filled. A network stores the two things this walkthrough depends on: its own click-id convention (the parameter it will echo back, for example <code>s1={click_id}</code> or <code>aff_sub={click_id}</code>) and its S2S postback template. If you add it by hand, type both in exactly as the network documents them.</p>
+
+<h2>Step 2 — Hand the network the postback URL</h2>
+<p>Open the network record’s <b>S2S postback template</b> and copy the URL into the network’s own conversion-tracking panel. The endpoint is:</p>
+<pre><code>https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&amp;payout={payout}&amp;status={status}&amp;tid={tid}</code></pre>
+<p>The preset template uses generic placeholders. The network’s panel fills macros of <i>its own</i> naming, so swap any placeholder the network names differently for that network’s token before you save. A payout macro called <code>{sum}</code> and a transaction macro called <code>{txn}</code> give a URL like:</p>
+<pre><code>https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&amp;payout={sum}&amp;status={status}&amp;tid={txn}</code></pre>
+<p>The parameter names on the left stay the tracker’s — or an accepted alias, since <code>sum</code> on its own is read as the payout name. Only the value macro changes to match what the network can fill. The full list of accepted names and what a good response looks like is on the <a href="/help/s2s-postback">postback reference</a>; to lock the endpoint down with a secret key and an IP allowlist, see <a href="/help/postback-security">Securing your postback URL</a>.</p>
+
+<h2>Step 3 — Add the offer with the network’s click-id parameter</h2>
+<p>Open <b>Manage → Offers → Add offer</b>. Set the <b>Target URL</b> to the network’s offer URL and insert the network’s own click-id parameter with the <code>{click_id}</code> macro. If the network expects <code>sub1</code>, that is:</p>
+<pre><code>https://network.example.com/click?offer=123&amp;sub1={click_id}</code></pre>
+<p>The tracker already appends <code>click_id=…</code> to the offer URL automatically, but a network reads <i>its own</i> parameter, so you add that parameter yourself. The network record’s “Offer parameters” field is only a stored reference — it is <b>not</b> appended at runtime — so never rely on it to get the id onto the URL. Set <b>Payout</b> to <code>0</code>, pick the currency the network pays in, and leave the offer <b>Active</b>. The <a href="/help/offers">offers page</a> details every field.</p>
+
+<h2>Step 4 — Add the Meta traffic source</h2>
+<p>Open <b>Manage → Traffic sources → New from template</b> and pick Meta. The preset captures <code>fbclid</code> from the ad URL automatically and stitches it with the <code>_fbc</code> and <code>_fbp</code> cookies — you do not map it. See <a href="/help/traffic-sources">Adding a traffic source</a> if you would rather build it by hand.</p>
+
+<h2>Step 5 — Create the campaign and copy the link</h2>
+<p>Open <b>Manage → Campaigns → Create campaign</b>. Give it the Meta source and the offer, and run through the wizard. On the Settings step, set <b>Ad-platform campaign ID</b> to the Meta campaign’s id so spend can be matched later. Save, then copy the <b>Campaign URL</b>:</p>
+<pre><code>https://&lt;your-domain&gt;/&lt;alias&gt;</code></pre>
+<p>The link accepts <code>click_id</code>, <code>cost</code>, <code>sub_id_1</code>…<code>sub_id_10</code>, <code>utm_*</code> and <code>external_id</code>, so your Meta ad URL can carry the cost and any labels you want back. The wizard itself is covered in <a href="/help/campaigns-and-flows">Campaigns and flows</a>.</p>
+
+<h2>Step 6 — Connect Meta CAPI and cost sync</h2>
+<p>Two separate connections, both under Manage:</p>
+<ul>
+  <li><b>CAPI</b> — <b>Manage → CAPI integrations</b>, switch on <b>Send conversions to Meta</b>, then set the Dataset/Pixel ID and access token, a default currency and the <b>statuses to send</b>. Leave <b>dry-run</b> on to build and log the payload without sending, use <b>Send test event</b> to confirm the wiring, then turn dry-run off. Full detail: <a href="/help/meta-capi">Sending conversions to Meta (CAPI)</a>.</li>
+  <li><b>Cost sync</b> — <b>Manage → Integrations</b>, connect Meta. Spend is matched to a campaign by its <b>Ad-platform campaign ID</b> from Step 5. See <a href="/help/meta-cost-sync">Syncing Meta ad spend</a>.</li>
+</ul>
+
+<h2>Step 7 — Test it end to end</h2>
+<p>There is no test-click or test-postback button. The honest test is the real path:</p>
+<ol class="help-steps">
+  <li>Open the campaign link in a browser, optionally with <code>?cost=1.25</code>.</li>
+  <li>Open <b>Logs → Clicks</b>, find the newest row and copy its <b>click id</b>.</li>
+  <li>Send the postback by hand, exactly as the network will:</li>
+</ol>
+<pre><code>curl "https://YOUR-TRACKER-DOMAIN/pb?clickid=YOUR-CLICK-ID&amp;payout=12.50&amp;status=sale"</code></pre>
+<p>A <code>{"status":"ok",…}</code> body confirms the endpoint. Then open <b>Logs → S2S postbacks</b> for the inbound call, <b>Reports → Conversions</b> for the recorded sale, and <b>Health centre</b> to see the last successful postback. If nothing lands, <a href="/help/troubleshooting-postbacks">Postback not recorded</a> splits the 400, 403 and no-match cases.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">The two mistakes that cost the most</p>
+  <p>First, leaving a fixed payout on the offer: with rev-share the payout must be <code>0</code>, because the money is whatever the postback says. Second, forgetting the network’s own click-id parameter on the Target URL — the auto-appended <code>click_id=…</code> is not the name the network reads, so the postback comes back with nothing to match.</p>
+</div>

@@ -1,0 +1,81 @@
+<h2>Cost, revenue and profit</h2>
+<p>A tracker holds two sides of a ledger. <b>Revenue</b> is what a conversion is worth — it arrives on an inbound postback and accumulates over the life of a click. <b>Cost</b> is what you paid to get that visitor — it is recorded once, at click time, from the traffic source or from an ad platform. Everything else in reporting is derived from those two numbers:</p>
+<pre><code>profit = revenue − cost
+ROI %  = (revenue − cost) / cost × 100
+EPC    = revenue / clicks</code></pre>
+<p>Get cost wrong and every ROI figure is wrong with it, which is why the cost model and the cost parameter matter as much as the offer payout does.</p>
+
+<h2>The cost models</h2>
+<p>A campaign carries a <b>Cost model</b> — the billing basis it is bought on. Choose it under <b>Manage → Campaigns → Add/Edit campaign</b>, in the <b>Costs</b> section.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Model</th><th>The campaign is billed per</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>CPC</code></td><td>Click (cost per click).</td></tr>
+    <tr><td><code>CPUC</code></td><td>Unique click (cost per unique click).</td></tr>
+    <tr><td><code>CPM</code></td><td>Thousand impressions (cost per mille).</td></tr>
+    <tr><td><code>CPA</code></td><td>Acquisition — a fixed amount per conversion.</td></tr>
+    <tr><td><code>CPS</code></td><td>Sale — a fixed amount per sale.</td></tr>
+    <tr><td><code>RevShare</code></td><td>Share of the revenue the traffic produced.</td></tr>
+    <tr><td><code>Auto</code></td><td>No fixed basis; let cost arrive from the parameter or the sync.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>The model records how the campaign is bought so reports and teammates can read it. Whatever model you pick, the spend that actually lands on a click arrives through one of the three paths below.</p>
+
+<h2>Entering cost on a campaign</h2>
+<p>The <b>Costs</b> section of the campaign editor holds all of the cost settings together:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Cost model</b></td><td>The billing basis, from the table above.</td></tr>
+    <tr><td><b>Traffic loss (%)</b></td><td>The expected gap between the clicks the source reports and the visits the tracker records, kept for reconciliation.</td></tr>
+    <tr><td><b>Cost</b></td><td>A campaign-level cost value. Used for the whole period when no per-click cost arrives.</td></tr>
+    <tr><td><b>Cost currency</b></td><td>The currency that Cost value is expressed in.</td></tr>
+    <tr><td><b>Cost from cost parameter</b></td><td>When on, the <code>cost</code> value passed on each click is used instead of the flat campaign Cost.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>The cost query parameter</h2>
+<p>Most traffic sources can pass the price of a click straight through. The campaign link accepts a <code>cost</code> parameter alongside the usual identifiers:</p>
+<pre><code>https://&lt;your-domain&gt;/&lt;alias&gt;?cost=0.45&amp;sub_id_1=adset-42</code></pre>
+<p>The value is stored on the click itself, so per-click cost can vary by placement, keyword or time of day. For the tracker to read it, map the source's own token to the <code>cost</code> parameter in the source's <b>Settings mapping</b> — for example a token of <code>{cost}</code> on the row whose Parameter is <code>cost</code>. If nothing maps, the parameter is ignored.</p>
+
+<h2>Traffic loss</h2>
+<p>Traffic loss is a percentage, not a deduction. It records the expected difference between the clicks a source bills you for and the visits that reach the tracker — redirects that fail, ad blockers, dropped requests. It is stored per campaign and per source so a reconciliation discrepancy can be explained rather than merely seen. It does not change the recorded cost; it is context for reading it.</p>
+
+<h2>Ad-platform cost sync</h2>
+<p>If you advertise on an ad platform, you can let the platform's reported spend become your cost automatically. The campaign's <b>Ad-platform campaign ID</b> field (in the campaign editor) is what ties the two records together.</p>
+<ol class="help-steps">
+  <li>Connect the platform under <b>Manage → Integrations</b> and pick the ad accounts to read.</li>
+  <li>On each campaign, set <b>Ad-platform campaign ID</b> so spend can be matched to it.</li>
+  <li>The sync pulls each day's spend and impressions, then writes cost onto that day's clicks — the per-click cost is the day's spend divided by that day's clicks.</li>
+</ol>
+<p>It is idempotent: re-running a sync replaces the day's allocation rather than adding to it, so running it twice never doubles your spend. Spend for a campaign with no clicks that day is stored but allocates nothing. Use <b>Test mode</b> (dry-run) to compute and log the numbers without changing any costs. The full walkthrough is in <a href="/help/meta-cost-sync">Syncing Meta ad spend</a>.</p>
+
+<h2>Retroactive cost update</h2>
+<p>Sometimes the number is simply wrong and you want to overwrite it. In <b>Reports</b>, the <b>Cost update</b> action opens a <b>Retroactive cost update</b> dialog:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Campaign</b></td><td>Optional. Leave empty to apply to all campaigns.</td></tr>
+    <tr><td><b>From</b> / <b>To</b></td><td>The date range to overwrite.</td></tr>
+    <tr><td><b>Cost per click</b></td><td>The value written onto every matching row. Total spend becomes cost × matched rows.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Every applied change is recorded in <b>Logs → Cost updates</b>, so you can see what was overwritten and when.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">The usual mistake</p>
+  <p>Cost defaults to <b>0</b> until one of the three paths supplies it. A campaign with a cost model but no per-click <code>cost</code>, no campaign Cost value and no sync reports 100% ROI on every conversion. If profit looks impossibly good, check cost first — see <a href="/help/troubleshooting-cost">Cost is missing or wrong</a>.</p>
+</div>

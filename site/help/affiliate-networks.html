@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.className+=' js'</script>
+<title>Adding an affiliate network | AAA Tracker Help</title>
+<meta name="description" content="Add an affiliate network, store its click-id parameter and postback template, and give it the URL it needs to call back.">
+<link rel="canonical" href="https://aaatracker.website/help/affiliate-networks">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#ffffff">
+<meta name="author" content="AAA Tracker">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="AAA Tracker">
+<meta property="og:title" content="Adding an affiliate network | AAA Tracker Help">
+<meta property="og:description" content="Add an affiliate network, store its click-id parameter and postback template, and give it the URL it needs to call back.">
+<meta property="og:url" content="https://aaatracker.website/help/affiliate-networks">
+<meta property="og:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AAA Tracker">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Adding an affiliate network | AAA Tracker Help">
+<meta name="twitter:description" content="Add an affiliate network, store its click-id parameter and postback template, and give it the URL it needs to call back.">
+<meta name="twitter:image" content="https://aaatracker.website/assets/img/og/og-home.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Adding an affiliate network",
+      "description": "Add an affiliate network, store its click-id parameter and postback template, and give it the URL it needs to call back.",
+      "dateModified": "2026-10-05",
+      "datePublished": "2026-10-05",
+      "inLanguage": "en",
+      "url": "https://aaatracker.website/help/affiliate-networks",
+      "mainEntityOfPage": "https://aaatracker.website/help/affiliate-networks",
+      "keywords": "affiliate network, postback template, click id, setup",
+      "articleSection": "Traffic sources & networks",
+      "publisher": {
+        "@type": "Organization",
+        "name": "AAA Tracker",
+        "url": "https://aaatracker.website/"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://aaatracker.website/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Help",
+          "item": "https://aaatracker.website/help/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Adding an affiliate network",
+          "item": "https://aaatracker.website/help/affiliate-networks"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/fonts/fonts.css?v=2">
+<link rel="stylesheet" href="/assets/css/site.css?v=7">
+<link rel="stylesheet" href="/help/assets/help.css?v=1">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <div class="nav-shell">
+      <a class="brand" href="/" aria-label="AAA Tracker home">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aat" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aat)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+        <span class="word">AAA<i>Tracker</i></span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M3.4 6h17.2M3.4 12h17.2M3.4 18h17.2"/></svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/features">Features</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/security">Security</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/help/" aria-current="page">Docs</a>
+        <a href="/about">About</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn--ghost btn--sm" href="/backend/">Log in</a>
+        <a class="btn btn--primary btn--sm btn--cta" href="/start">Start free trial</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <div class="wrap">
+    <nav class="help-breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        <li><a href="/help/">Help</a></li>
+        <li aria-current="page">Adding an affiliate network</li>
+      </ol>
+    </nav>
+  </div>
+
+  <article class="help-article section section--sm">
+    <div class="wrap">
+      <div class="help-layout">
+        <div class="help-main">
+          <header class="help-article__head">
+            <span class="eyebrow">Traffic sources &amp; networks</span>
+            <h1 class="h1 mt-4">Adding an affiliate network</h1>
+            <p class="lead mt-5">Add an affiliate network, store its click-id parameter and postback template, and give it the URL it needs to call back.</p>
+            <p class="help-meta mono mt-6">Updated <time datetime="2026-10-05">5 October 2026</time></p>
+          </header>
+
+          <div class="prose help-prose mt-8">
+<h2 id="what-an-affiliate-network-is">What an affiliate network is</h2>
+<p>An affiliate network is the party that pays you for a conversion. It groups your offers, stores the click-id convention the network expects, and holds the postback template the network will call. An offer points at a network; a campaign does not, so the same network record can sit behind many offers.</p>
+
+<h2 id="the-catalog-and-from-catalog">The catalog and "From catalog"</h2>
+<p>Open <b>Manage → Networks</b>. The catalog ships around <b>125 presets</b>, each with the network's click-id parameter and its standard postback template pre-filled. <b>From catalog</b> opens it; <b>Add affiliate network</b> opens a blank form.</p>
+<p>In the catalog you can search by network name or vertical, and narrow by <b>vertical</b> chips (Dating, Gambling, Nutra, Sweepstakes, and others). Once added, a preset network is marked as a <b>Preset</b> and can still be edited like any other. The catalog can also be opened from the offer editor: the <b>Affiliate network</b> picker has a <b>+</b> button that creates a network without leaving the offer form.</p>
+
+<h2 id="the-fields">The fields</h2>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Field</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Network name</b></td><td>The label used in the offer's network picker and in filtering.</td></tr>
+    <tr><td><b>Offer parameters</b></td><td>A stored reference recording the network's click-id convention, e.g. <code>s1={click_id}</code> or <code>subid={click_id}</code>. Comma or JSON format.</td></tr>
+    <tr><td><b>S2S postback URL</b></td><td>The inbound template you hand to the network, so its conversions land in your tracker.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="offer-parameters-is-a-stored-reference">Offer parameters is a stored reference</h2>
+<p>This is the field readers get wrong. <b>Offer parameters is not appended to your offer URL at runtime.</b> It is a note-to-self: it records what the network calls your click-id parameter, so you know what to write when you build the offer's Target URL.</p>
+<p>The tracker already appends <code>click_id=…</code> to every offer URL automatically, but a network almost always reads the id under its own name. You add that yourself in the offer's <b>Target URL</b>. If the network's Offer parameters say <code>s1={click_id}</code>, then the offer URL gets:</p>
+<pre><code>https://network.example.com/offer?aff=12345&amp;s1={click_id}</code></pre>
+<p>At click-out, <code>{click_id}</code> is replaced with the tracker-generated id, and the network echoes it back on the postback. Repeat that for any extra fields the network wants, such as <code>&amp;s2={sub_id_1}</code>. The full macro list and the click-id round trip are covered in <a href="/help/offers">Offers and offer URLs</a> and <a href="/help/click-ids-and-macros">Click IDs and URL macros</a>.</p>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">The click id must be in the offer's Target URL</p>
+  <p>Writing <code>s1={click_id}</code> into Offer parameters does nothing by itself. If you never place <code>&amp;s1={click_id}</code> in the offer's Target URL, the network never receives your click id — the click still records, but the conversion comes back with nothing to match it to. See <a href="/help/troubleshooting-postbacks">Postback not recorded</a>.</p>
+</div>
+
+<h2 id="the-s2s-postback-url-is-the-template-you-hand-over">The S2S postback URL is the template you hand over</h2>
+<p>On a network, the S2S postback URL is <b>inbound</b>: it is a URL on your tracker that the network calls when a conversion happens. The preset fills it with the standard template:</p>
+<pre><code>https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&amp;payout={payout}&amp;status={status}&amp;tid={tid}</code></pre>
+<p>Replace <code>YOUR-TRACKER-DOMAIN</code> with your tracker domain and paste the result into the network's own conversion-tracking settings. The braces are the network's macros — it substitutes its real click id and payout when it calls you. This is the opposite direction from a <a href="/help/traffic-sources">traffic source</a>'s postback URL, which is outbound. The accepted parameters, aliases, defaults and responses are all in <a href="/help/s2s-postback">the postback reference</a>.</p>
+
+<div class="help-callout help-callout--tip">
+  <p class="help-callout__title">Same URL, network's own macro names</p>
+  <p>The template above uses <code>{clickid}</code>, <code>{payout}</code>, <code>{status}</code> and <code>{tid}</code> because those are common network macro names. The tracker accepts those aliases case-insensitively, so you rarely need to change the template — just paste it where the network asks for its postback URL.</p>
+</div>
+
+<h2 id="confirming-it-works">Confirming it works</h2>
+<ul>
+  <li><b>Logs → S2S postbacks</b> shows inbound calls from the network as they arrive, including any rejection and its reason.</li>
+  <li><b>Reports → Conversions</b> is where a recorded conversion can be inspected, edited or deleted.</li>
+  <li><b>Health centre</b> shows whether postbacks are landing, which is the quickest signal that the network has gone quiet.</li>
+</ul>
+
+          </div>
+
+          <nav class="help-pager" aria-label="More in this category">
+        <a class="help-pager__link help-pager__link--prev" href="/help/traffic-sources"><span class="help-pager__dir">Previous</span><span class="help-pager__title">Adding a traffic source</span></a>
+        <a class="help-pager__link help-pager__link--next" href="/help/offers"><span class="help-pager__dir">Next</span><span class="help-pager__title">Offers and offer URLs</span></a>
+      </nav>
+        </div>
+
+        <aside class="help-aside">
+        <nav class="help-toc" aria-label="On this page">
+          <p class="help-toc__title">On this page</p>
+          <ul class="help-toc__list">
+<li class="help-toc__item help-toc__item--h2"><a href="#what-an-affiliate-network-is">What an affiliate network is</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-catalog-and-from-catalog">The catalog and &quot;From catalog&quot;</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-fields">The fields</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#offer-parameters-is-a-stored-reference">Offer parameters is a stored reference</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#the-s2s-postback-url-is-the-template-you-hand-over">The S2S postback URL is the template you hand over</a>
+</li>
+<li class="help-toc__item help-toc__item--h2"><a href="#confirming-it-works">Confirming it works</a>
+</li>
+</ul>
+        </nav>
+      </aside>
+      </div>
+    </div>
+  </article>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/" aria-label="AAA Tracker home">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs><linearGradient id="aaf" x1="2" y1="0" x2="30" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#3D6DFF"/><stop offset="1" stop-color="#1230C2"/></linearGradient></defs>
+          <rect width="32" height="32" rx="8.6" fill="url(#aaf)"/>
+          <path d="M16 9 L8.2 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M16 9 L23.8 24.6" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M11.3 18.6 H20.7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity=".5"/>
+          <circle cx="16" cy="9" r="2.7" fill="#fff"/><circle cx="16" cy="9" r="1.3" fill="#1230C2"/>
+          <circle cx="8.2" cy="24.6" r="2" fill="#5BF08D"/><circle cx="23.8" cy="24.6" r="2" fill="#5BF08D"/>
+        </svg>
+          <span class="word">AAA<i>Tracker</i></span>
+        </a>
+        <p class="footer-note">Every click, accounted for. Traffic routing, server-side conversion tracking, cost sync and anti-fraud — with the numbers your ad platforms agree with.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul class="footer-links">
+          <li><a href="/features">Features</a></li>
+          <li><a href="/integrations">Integrations</a></li>
+          <li><a href="/security">Security &amp; anti-fraud</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/start">Start free trial</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul class="footer-links">
+          <li><a href="/help/">Help centre</a></li>
+          <li><a href="/help/getting-started">Getting started</a></li>
+          <li><a href="/help/s2s-postback">Postbacks</a></li>
+          <li><a href="/help/troubleshooting-postbacks">Troubleshooting</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul class="footer-links">
+          <li><a href="/about">About</a></li>
+          <li><a href="/contact">Contact</a></li>
+          <li><a href="/backend/">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul class="footer-links">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> AAA Tracker</span>
+      <span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · hello@aaatracker.website</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/js/site.js?v=1" defer></script>
+<script src="/help/assets/help.js?v=1" defer></script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<h2>What the Health centre is</h2>
+<p>Open <b>Tools → Health centre</b> for a single read of everything the tracker can honestly say about itself: whether its stores answer, how its background loops are keeping time, what failed to send out in the last day, and which traffic sources have gone quiet. For clicks, conversions and profit, use <a href="/help/reports-and-saved-views">Reports</a> and the <a href="/help/logs-reference">logs</a>.</p>
+<p>It reads live state on load and again whenever you press <b>Re-check</b>. It is part of the workspace management plane, visible to owners and admins by default and grantable per section.</p>
+
+<h2>The verdict banner</h2>
+<p>At the top sits one verdict: <b>All clear</b> when nothing is wrong, or <b>Attention needed</b> when anything below is flagged. The banner agrees with the incident console underneath — if the console has any row at all, the verdict will not claim all clear. Under the headline, a short list spells out the summary reasons (a store not answering, a stale loop, a run of failed sends).</p>
+
+<h2>Incident console</h2>
+<p>The console groups every finding the page can derive into three severities. Each row names the subject and its area, gives the reason, and offers a <b>fix</b> link that jumps to the page where it is resolved.</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Severity</th><th>Typical examples</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><b>Critical</b></td><td>The main database is not answering; the analytics store is not answering; a domain's TLS certificate has expired or expires within 7 days; an integration token already expired.</td></tr>
+    <tr><td><b>Warning</b></td><td>A background loop is stale; more than a handful of outbound sends failed in 24 hours; a source has not delivered an accepted postback in more than 7 days; a domain does not resolve; a stored integration token expires within 7 days.</td></tr>
+    <tr><td><b>Info</b></td><td>A domain resolves but not to this server's address (a proxy or CDN in front is legitimate); a certificate could not be read.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>When the console is empty it shows a green <b>No incidents</b> state — every check this backend can make came back clean.</p>
+
+<h2>Databases</h2>
+<p>Two rows report reachability and a small round-trip latency:</p>
+<ul>
+  <li><b>Database</b> — the primary store; the row reads <i>reachable</i> with a millisecond round-trip, or <i>unreachable</i>.</li>
+  <li><b>Analytics</b> — the store that serves the click stream; shown the same way.</li>
+</ul>
+<p>A store that does not answer becomes a critical incident, since the numbers elsewhere depend on it.</p>
+
+<h2>Background loops</h2>
+<p>The tracker runs several loops on its own schedule. The Health centre lists each one with its cadence, its last run, and a state chip:</p>
+<div class="help-table-wrap">
+<table class="help-table">
+  <thead>
+    <tr><th>Loop</th><th>Cadence</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Monitor</td><td>15 min</td><td>Probes active campaigns' flow URLs and can auto-disable a flow after repeated failures.</td></tr>
+    <tr><td>Auto rules</td><td>15 min</td><td>Evaluates your automation rules and fires their actions (pause, alert).</td></tr>
+    <tr><td>Optimizer</td><td>15 min</td><td>Re-weights flows for campaigns with the optimizer enabled.</td></tr>
+    <tr><td>Insights</td><td>15 min</td><td>Runs the anomaly detectors and alerts on new critical findings.</td></tr>
+    <tr><td>Meta cost sync</td><td>periodic</td><td>Pulls ad spend from the connected ad platform.</td></tr>
+  </tbody>
+</table>
+</div>
+<p>The state chip is <b>ok</b>, <b>stale</b>, or <b>not yet run</b>. A loop that has not had its first pass since the process started is <b>not yet run</b>, not stale — normal after a restart and not an incident. A loop whose heartbeat is far older than its cadence is <b>stale</b> and appears in the incident console with its age in minutes.</p>
+
+<h2>Failed outbound sends (24h)</h2>
+<p>The <b>Process</b> card shows the app version, its uptime, and a count of <b>Failed outbound sends (24h)</b> — conversions the tracker tried to deliver onward to an ad platform and could not. A few are noise; a burst is worth acting on and will surface both in the attention list and as a warning incident linking to <b>Manage → CAPI integrations</b>.</p>
+
+<h2>Last successful postback per source</h2>
+<p>The last card is the quickest way to tell whether an affiliate network has gone quiet. It lists one row per traffic source with the timestamp of that source's most recent <i>accepted</i> inbound postback, newest first.</p>
+<ul>
+  <li>The source name is a link that opens <b>Logs → S2S postbacks</b> already filtered to that postback's click id, so you can see the exact call.</li>
+  <li>Only accepted postbacks from the last <b>30 days</b> are considered; a source with none shows an empty state instead of a row.</li>
+  <li>A source with no accepted postback for more than <b>7 days</b> is called out as a warning incident.</li>
+</ul>
+
+<h2>Counts and totals</h2>
+<p>A row of tiles summarizes the workspace: clicks, conversions, campaigns, users, postbacks and CAPI attempts. They are scope indicators, not a report — for a date range or a breakdown, go to Reports.</p>
+
+<h2>The System status card</h2>
+<p>The Documentation page has a second tab, <b>System status</b>, shown to workspace managers. It is a lighter version of the same idea and it refreshes itself every 15 seconds:</p>
+<ul>
+  <li>a <b>Version</b> tile, plus <b>Database</b> and <b>Analytics</b> tiles that read <i>Up</i> with a latency in milliseconds or <i>Down</i>;</li>
+  <li><b>Clicks (24h)</b> and <b>Conversions (24h)</b> tiles, so you can see at a glance whether events are still flowing;</li>
+  <li>a <b>Background loops</b> table with each loop's last run, marked <i>not yet</i> when it has not run since boot;</li>
+  <li>a footer line with the app version and the polling interval, and the landings disk's used and free space where that is reported.</li>
+</ul>
+
+<div class="help-callout help-callout--warn">
+  <p class="help-callout__title">What this page cannot see</p>
+  <p>The Health centre reports only from inside the application — the reachability of its own stores, its own loops, its own outbound sends. It does not inspect the host or its containers, so "All clear" means every check the app can make passed, not that the whole server is healthy.</p>
+</div>
