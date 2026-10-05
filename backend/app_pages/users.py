@@ -22,7 +22,7 @@ from auth import (hash_password, get_caller, verify_password, _hash_backup_code,
                   is_platform_operator, session_token, list_sessions,
                   revoke_session_prefix, revoke_other_sessions,
                   normalize_hidden_metrics, caller_role_in_tenant,
-                  validate_permission_scopes)
+                  validate_permission_scopes, validate_password)
 
 router = APIRouter()
 
@@ -254,7 +254,7 @@ class PasswordChange(BaseModel):
 @router.patch("/me/password")
 def change_my_password(data: PasswordChange, request: Request, db: Session = Depends(get_db)):
     from fastapi import Request as FastAPIRequest  # noqa: F401 (kept for clarity)
-    from auth import get_session_username, verify_password, hash_password
+    from auth import get_session_username, verify_password, hash_password, validate_password
 
     username = get_session_username(request)
     if not username:
@@ -267,8 +267,7 @@ def change_my_password(data: PasswordChange, request: Request, db: Session = Dep
     if not verify_password(data.current_password, user_obj.password_hash):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-    if len(data.new_password) < 6:
-        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    validate_password(data.new_password)
 
     user_obj.password_hash = hash_password(data.new_password)
     db.commit()
@@ -338,8 +337,7 @@ def get_users(request: Request, db: Session = Depends(get_db)):
 @router.post("/")
 def create_user(user: UserCreateUpdate, request: Request, db: Session = Depends(get_db)):
     _require_platform_admin(request)
-    if not user.password:
-        raise HTTPException(status_code=400, detail="Password is required")
+    validate_password(user.password or "")
 
     if is_reserved_username(user.username):
         raise HTTPException(status_code=403,
@@ -436,7 +434,7 @@ def update_user(user_id: int, user: UserCreateUpdate, request: Request, db: Sess
             changes["active"] = user.active
         user_obj.active = user.active
     if user.password:
-        user_obj.password_hash = hash_password(user.password)
+        user_obj.password_hash = hash_password(validate_password(user.password))
         changes["password"] = True
     if user.clear_permissions:
         user_obj.permissions = None

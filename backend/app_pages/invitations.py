@@ -54,7 +54,7 @@ from sqlalchemy.orm import Session
 
 from app_pages.reserved import is_reserved_username
 from auth import (TENANT_ROLES, effective_tenant_role, get_session_username,
-                  hash_password, require_api_auth)
+                  hash_password, require_api_auth, validate_password)
 from db import get_db
 from tenant_context import (api_token_tenant, current_tenant, reset_current_tenant,
                             set_current_tenant)
@@ -365,8 +365,7 @@ def accept_invitation(data: InvitationAccept, request: Request, db: Session = De
     if is_reserved_username(username):
         raise HTTPException(status_code=403,
                             detail="That username is reserved for the platform operator")
-    if not password:
-        raise HTTPException(status_code=400, detail="password is required")
+    validate_password(password)
     invited_role = (inv["role"] or "viewer").lower()
     if invited_role not in VALID_ROLES:
         db.execute(text("UPDATE tenant_invitations SET revoked_at = now() WHERE id = :i"),

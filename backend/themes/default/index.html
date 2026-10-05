@@ -592,7 +592,7 @@
                             dense
                     ></v-text-field>
                     <v-text-field
-                            label="New password (min 6 chars)"
+                            label="New password (min 8 chars)"
                             v-model="pwForm.new1"
                             type="password"
                             outlined
@@ -1223,8 +1223,8 @@
                 } catch (e) { /* private mode — the default (active group) still applies */ }
             },
             async changeMyPassword() {
-                if (!this.pwForm.current || this.pwForm.new1.length < 6 || this.pwForm.new1 !== this.pwForm.new2) {
-                    this.$root.$emit('show-message', {type: 'error', text: 'Check the fields — new passwords must match and be at least 6 characters.'});
+                if (!this.pwForm.current || this.pwForm.new1.length < 8 || this.pwForm.new1 !== this.pwForm.new2) {
+                    this.$root.$emit('show-message', {type: 'error', text: 'Check the fields — new passwords must match and be at least 8 characters.'});
                     return;
                 }
                 this.pwSaving = true;

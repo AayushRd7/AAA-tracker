@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 
 from app_pages.reserved import is_reserved_username
 from auth import (TENANT_ROLES, effective_permissions, get_caller, hash_password,
-                  membership_for, validate_permission_scopes)
+                  membership_for, validate_permission_scopes, validate_password)
 from db import get_db
 from tenant_context import api_token_tenant, current_tenant
 
@@ -282,6 +282,7 @@ def add_member(data: MemberAdd, request: Request, tenant_id: Optional[int] = Non
             if not data.password:
                 raise HTTPException(status_code=400,
                                     detail="password is required for a new user")
+            validate_password(data.password)
             user_id = db.execute(text(
                 "INSERT INTO users (username, email, password_hash, is_admin, active) "
                 "VALUES (:u, :e, :p, false, true) RETURNING id"),

@@ -173,6 +173,22 @@ def verify_password(plain: str, stored: str) -> bool:
     return md5((pass_salt + plain).encode()).hexdigest() == stored
 
 
+# Every place a password is set — platform create, admin set, self-service
+# change, invitation accept, reset — goes through this one rule, so the minimum
+# cannot drift between endpoints. The UI labels quote MIN_PASSWORD_LENGTH.
+MIN_PASSWORD_LENGTH = 8
+
+
+def validate_password(password: str) -> str:
+    """Reject an empty or too-short password with a 400. Returns the password so
+    callers can write `hash_password(validate_password(pw))`."""
+    if not password or len(password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+    return password
+
+
 # ====== DB-backed sessions (revocable, survive restarts) ======
 _sessions_table_ready = False
 
@@ -1699,9 +1715,7 @@ def reset_password(data: ResetPasswordRequest):
     password = data.password or ""
     if not token:
         raise HTTPException(status_code=400, detail="token is required")
-    if len(password) < 8:
-        raise HTTPException(status_code=400,
-                            detail="Password must be at least 8 characters")
+    validate_password(password)
     db = SessionLocal()
     try:
         row = db.execute(text(

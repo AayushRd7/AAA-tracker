@@ -11620,11 +11620,33 @@ print("ESCAPED-OK")
                           json={"token": "nope", "password": "short"}, verify=not INSECURE)
         check("reset: a too-short password is refused (400)", r.status_code == 400,
               str(r.status_code))
-        _, rr = _ta_login(f"ta-admin-{_ta}", "brandnewpw9")
+        fresh_s, rr = _ta_login(f"ta-admin-{_ta}", "brandnewpw9")
         check("reset: the new password signs in", rr.status_code == 200, rr.text[:120])
         _, rr2 = _ta_login(f"ta-admin-{_ta}", "smokepass1")
         check("reset: the old password no longer works", rr2.status_code != 200,
               str(rr2.status_code))
+
+        # One password rule everywhere: a too-short password is refused by the
+        # platform-create, self-change and invitation-accept paths alike.
+        r = s.post(f"{api}/users/", json={
+            "username": f"ta-short-{_ta}", "password": "short6", "active": True})
+        check("password: platform create refuses a 6-character password",
+              r.status_code == 400, r.text[:120])
+        r = fresh_s.patch(f"{api}/users/me/password",
+                          json={"current_password": "brandnewpw9", "new_password": "short6"})
+        check("password: self-change refuses a 6-character password",
+              r.status_code == 400, r.text[:120])
+        r = owner_s.post(f"{api}/invitations/",
+                         json={"email": f"ta-shortinv-{_ta}@example.com", "role": "viewer"})
+        _short_inv = r.json() if r.status_code == 200 else {}
+        rr = requests.post(f"{api}/invitations/accept",
+                           json={"token": _short_inv.get("token"),
+                                 "username": f"ta-shortinv-{_ta}", "password": "short6"},
+                           verify=not INSECURE)
+        check("password: invitation accept refuses a 6-character password",
+              rr.status_code == 400, rr.text[:120])
+        if _short_inv.get("id"):
+            owner_s.delete(f"{api}/invitations/{_short_inv['id']}")
     finally:
         for _u in _ta_users + [f"ta-owner-{_ta}"]:
             try:

@@ -605,13 +605,25 @@
 
                             <h3 class="doc-h3">Cost handling</h3>
                             <p>
-                                Campaigns use a cost model: <code>CPC</code>, <code>CPUC</code> (unique click),
-                                <code>CPM</code>, <code>CPA</code>, <code>CPS</code>, <code>RevShare</code> or
-                                <code>Auto</code>. Per-click cost arrives as the <code>cost</code> parameter (map
-                                the source's token to <code>cost</code> in paramsIdMapping, e.g.
-                                <code>cost → cost</code>) and is stored on the click itself; otherwise the
-                                campaign's cost value is used for the whole period.
+                                A campaign's <b>cost model</b> — <code>CPC</code>, <code>CPUC</code> (unique
+                                click), <code>CPM</code>, <code>CPA</code>, <code>CPS</code>,
+                                <code>RevShare</code> or <code>Auto</code> — records the billing basis you buy
+                                on. It is a label on the campaign: it documents how you pay, and does not by
+                                itself derive spend.
                             </p>
+                            <p>
+                                Cost is recorded from one of three places, and whichever applies is what the
+                                reports use:
+                            </p>
+                            <ul class="doc-list">
+                                <li>the per-click <code>cost</code> parameter, stored on the click itself —
+                                    map the source's token to <code>cost</code> in paramsIdMapping, e.g.
+                                    <code>cost → cost</code>;</li>
+                                <li>the campaign's <b>Cost</b> value, applied to the whole period; or</li>
+                                <li>an ad-platform cost sync, which writes each day's spend onto the matching
+                                    campaign.</li>
+                            </ul>
+                            <p>Profit is revenue minus cost.</p>
                         </section>
 
                         <!-- 4 ── REPORTING ───────────────────────────────── -->
@@ -925,7 +937,7 @@
                                 Sweepstakes, …).
                             </p>
                             <ul class="doc-list">
-                                <li><b>Offer parameters</b> — the network's subid macro appended to every offer URL, e.g. <code>s1={click_id}</code> or <code>subid={click_id}</code>, so the network echoes your click id back in postbacks.</li>
+                                <li><b>Offer parameters</b> — a note of the network's own click-id convention, e.g. <code>s1={click_id}</code> or <code>subid={click_id}</code>. It is stored for reference and is <b>not</b> appended automatically: add the same parameter to the offer's <b>Target URL</b> (for example a trailing <code>&amp;s1={click_id}</code>) so the network receives your click id and can echo it back in postbacks.</li>
                                 <li><b>S2S postback template</b> — pre-filled per network with the placeholders <code>https://YOUR-TRACKER-DOMAIN/pb?clickid={clickid}&amp;payout={payout}&amp;status={status}&amp;tid={tid}</code>; paste it into the network's panel so conversions land in AAA Tracker.</li>
                             </ul>
                         </section>
